@@ -7,7 +7,9 @@ import { makeEnemyMesh } from './models.js';
 import { audio } from './audio.js';
 
 let nextEnemyId = 1;
-const MAX_ALIVE_HARD = 28; // absolute cap, reinforcements included
+const SPAWN_DENSITY = 1.25;
+const SPAWN_INTERVAL_MULT = 0.8;
+const MAX_ALIVE_HARD = 35; // absolute cap, reinforcements included
 
 class Enemy {
   constructor(type, x, z, difficulty, bossRank = 0) {
@@ -114,26 +116,42 @@ export class EnemyManager {
   _anchor(targets) {
     const living = targets.filter(t => !t.dead);
     if (!living.length) return targets[0];
+    const vulnerable = living.filter(t => !this.world.isTargetSafe?.(t.pos));
+    if (vulnerable.length) return vulnerable[Math.floor(Math.random() * vulnerable.length)];
     return living[Math.floor(Math.random() * living.length)];
   }
 
-  _trySpawn(targets) {
-    const anchor = this._anchor(targets);
+  _spawnAnchors(targets) {
+    return targets.filter(t => !t.dead && !this.world.isTargetSafe?.(t.pos));
+  }
+
+  _nearbyAlive(pos, radius) {
+    return this.alive().filter(e =>
+      Math.hypot(e.pos.x - pos.x, e.pos.z - pos.z) < radius).length;
+  }
+
+  _trySpawnAt(anchor) {
     const progress = progressAt(anchor.pos.x, anchor.pos.z);
-    const maxActive = 8 + Math.floor(progress * 12);
-    if (this.alive().length >= maxActive) return;
+    const maxActive = Math.round((8 + Math.floor(progress * 12)) * SPAWN_DENSITY);
+    if (this._nearbyAlive(anchor.pos, 95) >= maxActive) return;
     const { x, z } = this._spawnPoint(anchor);
     // creature type is chosen from the ring the ANCHOR is standing in, so a
     // next-ring creature (e.g. bats) can never appear before you reach its
     // biome — even if the spawn point lands just across a ring border
     const biome = biomeAt(anchor.pos.x, anchor.pos.z);
     const type = biome.enemies[Math.floor(Math.random() * biome.enemies.length)];
-    this._spawn(type, x, z, progress);
+    const e = this._spawn(type, x, z, progress);
+    if (!e.cfg.passive) e.aggroed = true;
+  }
+
+  _trySpawn(targets) {
+    for (const anchor of this._spawnAnchors(targets)) this._trySpawnAt(anchor);
   }
 
   // A pack ("smečka"): a burst of one type, often led by a boss mother.
   _trySpawnPack(targets) {
     const anchor = this._anchor(targets);
+    if (!anchor || this.world.isTargetSafe?.(anchor.pos)) return;
     const biome = BIOMES[biomeIndexAt(anchor.pos.x, anchor.pos.z)];
     if (!biome.packs) return; // no packs in the Verdant Forest
 
@@ -156,7 +174,8 @@ export class EnemyManager {
     for (let i = 0; i < count; i++) {
       const a = (i / count) * Math.PI * 2;
       const r = 2 + Math.random() * 4;
-      this._spawn(type, center.x + Math.cos(a) * r, center.z + Math.sin(a) * r, progress);
+      const e = this._spawn(type, center.x + Math.cos(a) * r, center.z + Math.sin(a) * r, progress);
+      if (!e.cfg.passive) e.aggroed = true;
     }
     if (rank > 0) {
       this._spawn(type, center.x, center.z, progress, rank);
@@ -167,6 +186,7 @@ export class EnemyManager {
   // While a boss lives, her children keep arriving from ALL directions.
   _bossReinforcements(dt, targets) {
     const anchor = this._anchor(targets);
+    if (!anchor || this.world.isTargetSafe?.(anchor.pos)) return;
     const progress = progressAt(anchor.pos.x, anchor.pos.z);
     for (const boss of this.list) {
       if (boss.bossRank === 0 || boss.dying) continue;
@@ -177,7 +197,8 @@ export class EnemyManager {
       if (this.alive().length >= MAX_ALIVE_HARD) continue;
       for (let i = 0; i < rank.reinforceCount; i++) {
         const { x, z } = this._spawnPoint(anchor, { allSides: true });
-        this._spawn(boss.type, x, z, progress);
+        const e = this._spawn(boss.type, x, z, progress);
+        if (!e.cfg.passive) e.aggroed = true;
       }
     }
   }
@@ -218,13 +239,13 @@ export class EnemyManager {
 
     this.spawnTimer -= dt;
     if (this.spawnTimer <= 0) {
-      this.spawnTimer = 2.2 - 1.2 * progress;
+      this.spawnTimer = (2.2 - 1.2 * progress) * SPAWN_INTERVAL_MULT;
       this._trySpawn(targets);
     }
 
     this.packTimer -= dt;
     if (this.packTimer <= 0) {
-      this.packTimer = 26 + Math.random() * 18 - progress * 8;
+      this.packTimer = (26 + Math.random() * 18 - progress * 8) * SPAWN_INTERVAL_MULT;
       this._trySpawnPack(targets);
     }
 
@@ -245,13 +266,17 @@ export class EnemyManager {
         continue;
       }
 
+      if (!e.cfg.flying) this.world.pushOutOfSafeZones?.(e.pos, e.hitR ?? 0.5);
+
       // chase the nearest living target
       let target = null, dist = Infinity;
       for (const t of targets) {
         if (t.dead) continue;
+        if (this.world.isTargetSafe?.(t.pos)) continue;
         const d = Math.hypot(t.pos.x - e.pos.x, t.pos.z - e.pos.z);
         if (d < dist) { dist = d; target = t; }
       }
+      if (!target) e.aggroed = false;
       const toPlayer = target
         ? new THREE.Vector3().subVectors(target.pos, e.pos)
         : new THREE.Vector3();
@@ -326,6 +351,7 @@ export class EnemyManager {
       e.pos.x += vx * dt;
       e.pos.z += vz * dt;
       if (!e.cfg.flying) this.world.collide(e.pos, 0.4 * e.sizeMult);
+      if (!e.cfg.flying) this.world.pushOutOfSafeZones?.(e.pos, e.hitR ?? 0.5);
 
       // ranged spell: charged + target in shoot range → stop, fire, resume after 0.5 s
       if (target && e.cfg.ranged && e.aggroed && e.spellTimer <= 0

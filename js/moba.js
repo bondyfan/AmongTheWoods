@@ -56,10 +56,11 @@ export class Moba {
       const mesh = makeMobaBase(TEAM_COLORS[team]);
       const u = this._makeUnit({
         kind: 'base', team, type: 'base', mesh,
-        x: bp.x, z: bp.z, hp: MOBA.baseHp, dmg: 0, speed: 0, range: 0, hitR: BASE_BLOCK_R,
+        x: bp.x, z: bp.z, hp: MOBA.baseHp, dmg: 0, speed: 0, range: 0, hitR: MOBA.baseR,
       });
       this.bases[team] = u;
       world.obstacles.push({ x: bp.x, z: bp.z, r: BASE_BLOCK_R });
+      world.safeZones.push({ x: bp.x, z: bp.z, r: MOBA.baseR, team });
     }
 
     // jungle camps
@@ -287,7 +288,9 @@ export class Moba {
   }
 
   _heroTargets(vsTeam) {
-    return this.heroes.filter(h => h.team !== vsTeam && !h.obj.dead).map(h => h.obj);
+    return this.heroes
+      .filter(h => h.team !== vsTeam && !h.obj.dead && !this.world.isTargetSafe?.(h.obj.pos, h.team))
+      .map(h => h.obj);
   }
 
   _updateUnits(dt) {
@@ -346,6 +349,7 @@ export class Moba {
     u.pos.x += (dx / d) * u.speed * speedMult * dt;
     u.pos.z += (dz / d) * u.speed * speedMult * dt;
     this.world.collide(u.pos, 0.4);
+    this.world.pushOutOfSafeZones?.(u.pos, 0.4);
     u.walkT += dt * u.speed * speedMult;
     u.mesh.rotation.y = Math.atan2(dx, dz) + Math.PI;
   }

@@ -93,7 +93,7 @@ export const VERDANT_HIDE_DROP = 0.1;
 export const ENEMY_TYPES = {
   // -- Verdant Forest --
   rabbit: { name: 'Rabbit', icon: '🐇',
-             hp: 1,   dmg: 0,  speed: 8.8, range: 0,   attackCd: 1.0, xp: 1,  meat: 1, hitR: 0.35, aggro: 0, passive: true },
+             hp: 1,   dmg: 0,  speed: 7.8, range: 0,   attackCd: 1.0, xp: 1,  meat: 1, hitR: 0.35, aggro: 0, passive: true },
   rat:     { name: 'Giant Rat', icon: '🐀',
              hp: 12,  dmg: 4,  speed: 7.2, range: 1.2, attackCd: 0.9, xp: 5,  meat: 1, hitR: 0.5,  aggro: 22 },
   spider:  { name: 'Forest Spider', icon: '🕷️',

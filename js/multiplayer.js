@@ -811,26 +811,30 @@ export class Multiplayer {
   }
 
   _acceptPartnerDamage(ev, player) {
+    const hostDistanceOk = (extra = 0.95) => {
+      if (ev.ax === undefined) return false;
+      const d = Math.hypot(player.pos.x - ev.ax, player.pos.z - ev.az);
+      return d <= (ev.ar ?? 2) + extra;
+    };
+
     if (ev.sh) {
       if (ev.ax === undefined) return true;
-      const d = Math.hypot(player.pos.x - ev.ax, player.pos.z - ev.az);
-      return d <= (ev.ar ?? 1.4) + 0.8;
+      return hostDistanceOk(0.8);
     }
 
     if (ev.ai !== undefined && this.shadow?.enemies) {
       const attacker = this.shadow.enemies.get(ev.ai);
-      if (!attacker || attacker.dying || !attacker.mesh.parent) return false;
-      const x = attacker.mesh.position.x;
-      const z = attacker.mesh.position.z;
-      const range = ev.ar ?? attacker.cfg?.range ?? 1.4;
-      const d = Math.hypot(player.pos.x - x, player.pos.z - z);
-      return d <= range + 0.65;
+      if (attacker && !attacker.dying && attacker.mesh.parent) {
+        const x = attacker.mesh.position.x;
+        const z = attacker.mesh.position.z;
+        const range = ev.ar ?? attacker.cfg?.range ?? 1.4;
+        const d = Math.hypot(player.pos.x - x, player.pos.z - z);
+        if (d <= range + 0.85) return true;
+      }
+      return hostDistanceOk(1.0);
     }
 
-    if (ev.ax !== undefined) {
-      const d = Math.hypot(player.pos.x - ev.ax, player.pos.z - ev.az);
-      return d <= (ev.ar ?? 2) + 0.8;
-    }
+    if (ev.ax !== undefined) return hostDistanceOk(1.0);
     return true;
   }
 

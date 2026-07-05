@@ -34,6 +34,8 @@ export class Camp {
     this.smeltT = 20;
     this.towerCd = 0;
     this.healPopupT = 0;
+    this.safeZone = { x: SPOTS.home.x, z: SPOTS.home.z, r: HOME_HEAL_RADIUS };
+    this.world.safeZones.push(this.safeZone);
   }
 
   has(need) {
@@ -193,6 +195,7 @@ export class Camp {
   }
 
   dispose() {
+    this.world.safeZones = this.world.safeZones.filter(z => z !== this.safeZone);
     for (const m of Object.values(this.meshes)) this.scene.remove(m);
     this.meshes = {};
   }

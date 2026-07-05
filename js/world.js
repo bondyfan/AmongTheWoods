@@ -63,6 +63,7 @@ export class World {
     this._statics = [];          // underlay/river/cave meshes (for reset)
     this._arena = null;
     this.obstacles = [];
+    this.safeZones = [];
     this.rings = [];
     this.lakes = [];             // kept for API compat (MOBA overrides); unused here
     this._lakeRegions = new Map();
@@ -93,6 +94,7 @@ export class World {
     this.fallingTrees = [];
     this.removeArena();
     this.obstacles = [];
+    this.safeZones = [];
     this.nextTreeId = 1;
   }
 
@@ -450,7 +452,7 @@ export class World {
     scatter(1 + Math.floor(rng() * 2), () => makeRock(rng));
     if (biome.flowers) scatter(2 + Math.floor(rng() * 5), () => makeFlower(rng));
     if (biome.mushrooms) scatter(1 + Math.floor(rng() * 3), () => makeMushroom(rng));
-    if (rng() < 0.35) {
+    if (rng() < 0.175) {
       const x = cxw + rng() * CHUNK, z = czw + rng() * CHUNK;
       if (inBounds(x, z)) {
         const id = `${key}:woodlog`;
@@ -600,6 +602,28 @@ export class World {
         if (lake.island && d < lake.island.r + r * 0.5) continue; // on the island
         if (d < lake.r + r) pushOut(lake.x, lake.z, r + lake.r);
       }
+    }
+    return pos;
+  }
+
+  isTargetSafe(pos, team = null) {
+    return this.safeZones.some(z => {
+      if (z.team != null && z.team !== team) return false;
+      return Math.hypot(pos.x - z.x, pos.z - z.z) < z.r;
+    });
+  }
+
+  pushOutOfSafeZones(pos, r = 0) {
+    for (const z of this.safeZones) {
+      const dx = pos.x - z.x, dz = pos.z - z.z;
+      const minDist = z.r + r;
+      const distSq = dx * dx + dz * dz;
+      if (distSq >= minDist * minDist) continue;
+      const dist = Math.sqrt(distSq) || 1;
+      const nx = distSq > 1e-6 ? dx / dist : 1;
+      const nz = distSq > 1e-6 ? dz / dist : 0;
+      pos.x = z.x + nx * minDist;
+      pos.z = z.z + nz * minDist;
     }
     return pos;
   }
