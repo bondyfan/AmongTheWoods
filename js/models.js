@@ -33,29 +33,42 @@ function sphere(r, color, seg = 8) {
 }
 
 // ---------- Player ----------
+// Starts NAKED except for a leaf; clothing recolors the torso/arms and hides
+// the leaf (player._refreshOutfit drives this via userData refs).
 export function makeMan() {
   const g = new THREE.Group();
-  const skin = 0xd9a066, shirt = 0x7a5230, pants = 0x4a4237;
+  const skin = 0xd9a066;
 
-  const leftLeg = box(0.2, 0.5, 0.2, pants); leftLeg.position.set(-0.13, 0.25, 0);
-  const rightLeg = box(0.2, 0.5, 0.2, pants); rightLeg.position.set(0.13, 0.25, 0);
-  const torso = box(0.5, 0.62, 0.3, shirt); torso.position.y = 0.81;
+  const leftLeg = box(0.2, 0.5, 0.2, skin); leftLeg.position.set(-0.13, 0.25, 0);
+  const rightLeg = box(0.2, 0.5, 0.2, skin); rightLeg.position.set(0.13, 0.25, 0);
+  const torso = box(0.5, 0.62, 0.3, skin); torso.position.y = 0.81;
   const head = box(0.32, 0.32, 0.32, skin); head.position.y = 1.32;
   const hair = box(0.34, 0.1, 0.34, 0x3a2a1a); hair.position.y = 1.5;
 
+  // the famous leaf (front and back, at the hips)
+  const leaf = new THREE.Group();
+  const leafF = box(0.26, 0.22, 0.04, 0x3c7f37); leafF.position.set(0, 0.52, -0.18);
+  const leafB = box(0.26, 0.22, 0.04, 0x2d6a2d); leafB.position.set(0, 0.52, 0.18);
+  leaf.add(leafF, leafB);
+  g.add(leaf);
+
   // Arms pivot at the shoulder so they can swing/punch.
   const leftArm = new THREE.Group(); leftArm.position.set(-0.33, 1.06, 0);
-  const la = box(0.15, 0.52, 0.15, shirt); la.position.y = -0.26; leftArm.add(la);
+  const la = box(0.15, 0.52, 0.15, skin); la.position.y = -0.26; leftArm.add(la);
   const rightArm = new THREE.Group(); rightArm.position.set(0.33, 1.06, 0);
-  const ra = box(0.15, 0.52, 0.15, shirt); ra.position.y = -0.26; rightArm.add(ra);
+  const ra = box(0.15, 0.52, 0.15, skin); ra.position.y = -0.26; rightArm.add(ra);
   const fist = box(0.16, 0.14, 0.16, skin); fist.position.y = -0.56; rightArm.add(fist);
 
   // Weapon sockets (axe in right hand, bow in left hand)
   const rightSocket = new THREE.Group(); rightSocket.position.set(0, -0.56, 0); rightArm.add(rightSocket);
   const leftSocket = new THREE.Group(); leftSocket.position.set(0, -0.5, 0); leftArm.add(leftSocket);
 
+  // cap slot (filled when head gear is equipped)
+  const capSlot = new THREE.Group(); capSlot.position.y = 1.52; g.add(capSlot);
+
   g.add(leftLeg, rightLeg, torso, head, hair, leftArm, rightArm);
-  g.userData = { leftLeg, rightLeg, leftArm, rightArm, rightSocket, leftSocket };
+  g.userData = { leftLeg, rightLeg, leftArm, rightArm, rightSocket, leftSocket,
+                 torso, armL: la, armR: ra, leaf, capSlot, hair };
   return g;
 }
 
@@ -442,6 +455,101 @@ export function updateAimArc(mesh, cx, cz, faceAngle, radius, halfAngle, thickne
   g.setIndex(idx);
 }
 
+// ---------- cave & camp props ----------
+export function makeStalagmite(rng) {
+  const g = new THREE.Group();
+  for (let i = 0; i < 2; i++) {
+    const h = 0.8 + rng() * 1.4;
+    const c = cone(0.2 + rng() * 0.2, h, 0x4c4840, 6);
+    c.position.set((rng() - 0.5) * 0.6, h / 2, (rng() - 0.5) * 0.6);
+    g.add(c);
+  }
+  return g;
+}
+
+export function makeCampfire() {
+  const g = new THREE.Group();
+  for (let i = 0; i < 4; i++) {
+    const log = cyl(0.08, 0.08, 0.7, 0x5c4326, 5);
+    log.rotation.z = Math.PI / 2;
+    log.rotation.y = (i / 4) * Math.PI;
+    log.position.y = 0.1;
+    g.add(log);
+  }
+  const flame = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.55, 6),
+    new THREE.MeshLambertMaterial({ color: 0xff8c2a, emissive: 0xff5a00, emissiveIntensity: 0.9 }));
+  flame.position.y = 0.42;
+  g.add(flame);
+  g.userData = { flame };
+  return g;
+}
+
+export function makeTent() {
+  const g = new THREE.Group();
+  const canvas = cone(1.9, 2.0, 0x8a6b4e, 6); // hide-colored teepee
+  canvas.position.y = 1.0;
+  const door = box(0.6, 0.9, 0.1, 0x3a2c1e);
+  door.position.set(0, 0.45, -1.35);
+  for (let i = 0; i < 3; i++) {
+    const pole = cyl(0.04, 0.04, 2.6, 0x5c4326, 4);
+    pole.rotation.z = (i - 1) * 0.35;
+    pole.position.y = 1.3;
+    g.add(pole);
+  }
+  g.add(canvas, door);
+  return g;
+}
+
+export function makeFurnace() {
+  const g = new THREE.Group();
+  const body = box(1.4, 1.5, 1.4, 0x6e6a60);
+  body.position.y = 0.75;
+  const chimney = box(0.4, 1.0, 0.4, 0x5c584e);
+  chimney.position.set(0.3, 1.9, 0.3);
+  const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.5, 0.1),
+    new THREE.MeshLambertMaterial({ color: 0xff7722, emissive: 0xff4400, emissiveIntensity: 0.8 }));
+  mouth.position.set(0, 0.5, -0.71);
+  g.add(body, chimney, mouth);
+  return g;
+}
+
+export function makeChest() {
+  const g = new THREE.Group();
+  const body = box(1.1, 0.6, 0.7, 0x8a6238);
+  body.position.y = 0.3;
+  const lid = box(1.14, 0.22, 0.74, 0x6e4d2a);
+  lid.position.y = 0.7;
+  const clasp = box(0.14, 0.2, 0.06, 0xd4af37);
+  clasp.position.set(0, 0.56, -0.37);
+  g.add(body, lid, clasp);
+  return g;
+}
+
+export function makeBoatRack() {
+  const g = new THREE.Group();
+  const hull = box(0.7, 0.25, 2.0, 0x8a6238);
+  hull.position.y = 0.5;
+  hull.rotation.z = 0.5;
+  for (const z of [-0.7, 0.7]) {
+    const leg = box(0.1, 0.6, 0.1, 0x5c4326);
+    leg.position.set(0, 0.3, z);
+    g.add(leg);
+  }
+  g.add(hull);
+  return g;
+}
+
+export function makeRaft() {
+  const g = new THREE.Group();
+  for (let i = -2; i <= 2; i++) {
+    const log = cyl(0.14, 0.14, 1.7, 0x8a6238, 6);
+    log.rotation.x = Math.PI / 2;
+    log.position.set(i * 0.29, 0, 0);
+    g.add(log);
+  }
+  return g;
+}
+
 // ---------- survival spawn cottage ----------
 export function makeCottage() {
   const g = new THREE.Group();
@@ -597,6 +705,37 @@ export function makeWoodDrop() {
   log2.rotation.y = 0.5;
   log2.position.y = 0.13;
   g.add(log, log2);
+  return g;
+}
+
+export function makeStoneDrop() {
+  const g = new THREE.Group();
+  const rockA = new THREE.Mesh(new THREE.DodecahedronGeometry(0.22, 0), mat(0x8a8a84));
+  rockA.castShadow = true;
+  const rockB = new THREE.Mesh(new THREE.DodecahedronGeometry(0.15, 0), mat(0x9a9a94));
+  rockB.position.set(0.2, -0.05, 0.1);
+  g.add(rockA, rockB);
+  return g;
+}
+
+export function makeHideDrop() {
+  const g = new THREE.Group();
+  const pelt = box(0.5, 0.06, 0.42, 0x8a6b4e);
+  pelt.rotation.y = 0.4;
+  const patch = box(0.24, 0.07, 0.2, 0x6e5238);
+  patch.position.set(0.08, 0.02, 0.05);
+  g.add(pelt, patch);
+  return g;
+}
+
+export function makeIronDrop() {
+  const bar = box(0.4, 0.14, 0.18, 0xb8bec6);
+  bar.rotation.y = 0.5;
+  const g = new THREE.Group();
+  const bar2 = box(0.4, 0.14, 0.18, 0xa8aeb6);
+  bar2.position.set(0.05, 0.14, 0.02);
+  bar2.rotation.y = 0.3;
+  g.add(bar, bar2);
   return g;
 }
 

@@ -1,6 +1,6 @@
 // ---- Minimap with fog of war (bottom-left corner) ----
 
-import { WORLD, BIOMES, MOBA, biomeAt } from './config.js';
+import { WORLD, BIOMES, MOBA, biomeAt, radiusOf } from './config.js';
 import { lanePoint } from './mobaworld.js';
 
 const CELL = 25;                       // world units per discovery cell
@@ -72,18 +72,18 @@ export class Minimap {
   constructor(canvas, world) {
     this.canvas = canvas;
     this.world = world;
+    canvas.width = 170; canvas.height = 170; // radial world → square map
     this.ctx = canvas.getContext('2d');
-    this.worldW = WORLD.halfWidth * 2;                    // 300
-    this.worldL = WORLD.southEdge - WORLD.goalZ + 40;     // ~1580
-    this.cols = Math.ceil(this.worldW / CELL);
-    this.rows = Math.ceil(this.worldL / CELL);
+    this.span = WORLD.radius * 2;             // world square that holds the circle
+    this.cols = Math.ceil(this.span / CELL);
+    this.rows = this.cols;
     this.discovered = new Uint8Array(this.cols * this.rows);
     this.redrawT = 0;
   }
 
   _cellAt(x, z) {
-    const cx = Math.floor((x + WORLD.halfWidth) / CELL);
-    const cz = Math.floor((WORLD.southEdge - z) / CELL); // row 0 = south edge
+    const cx = Math.floor((x + WORLD.radius) / CELL);
+    const cz = Math.floor((z + WORLD.radius) / CELL);
     return { cx, cz };
   }
 
@@ -112,8 +112,8 @@ export class Minimap {
 
   _toCanvas(x, z) {
     return {
-      x: ((x + WORLD.halfWidth) / this.worldW) * this.canvas.width,
-      y: this.canvas.height - ((WORLD.southEdge - z) / this.worldL) * this.canvas.height,
+      x: ((x + WORLD.radius) / this.span) * this.canvas.width,
+      y: ((z + WORLD.radius) / this.span) * this.canvas.height,
     };
   }
 
@@ -125,37 +125,40 @@ export class Minimap {
     ctx.fillStyle = '#0a0f08';
     ctx.fillRect(0, 0, W, H);
 
+    // discovered cells colored by their biome ring
     for (let rz = 0; rz < this.rows; rz++) {
-      const worldZ = WORLD.southEdge - (rz + 0.5) * CELL;
-      const biome = biomeAt(worldZ);
-      const color = '#' + biome.ground.toString(16).padStart(6, '0');
       for (let cx = 0; cx < this.cols; cx++) {
         if (!this.discovered[rz * this.cols + cx]) continue;
-        ctx.fillStyle = color;
-        // map: north (goal) at top → row 0 (south) at bottom
-        ctx.fillRect(cx * sx, H - (rz + 1) * sz, Math.ceil(sx), Math.ceil(sz));
+        const wx = (cx + 0.5) * CELL - WORLD.radius;
+        const wz = (rz + 0.5) * CELL - WORLD.radius;
+        if (radiusOf(wx, wz) > WORLD.radius) continue;
+        const biome = biomeAt(wx, wz);
+        ctx.fillStyle = '#' + biome.ground.toString(16).padStart(6, '0');
+        ctx.fillRect(cx * sx, rz * sz, Math.ceil(sx), Math.ceil(sz));
       }
     }
 
-    // barriers (ridges dark, rivers blue) with their openings — only where discovered
-    for (const wall of this.world.walls) {
-      const rz = Math.floor((WORLD.southEdge - wall.z) / CELL);
-      if (rz < 0 || rz >= this.rows) continue;
-      ctx.fillStyle = wall.type === 'river' ? '#3f6f9e' : '#26261f';
-      const y = H - (rz + 1) * sz;
-      for (let cx = 0; cx < this.cols; cx++) {
-        if (!this.discovered[rz * this.cols + cx]) continue;
-        const x0 = cx * CELL - WORLD.halfWidth, x1 = x0 + CELL;
-        const inGap = wall.gaps.some(g => x1 > g.x - g.w / 2 && x0 < g.x + g.w / 2);
-        if (!inGap) ctx.fillRect(cx * sx, y + sz * 0.3, Math.ceil(sx), Math.max(2, sz * 0.4));
-      }
+    // ring barriers as circles (ridges dark, rivers blue)
+    const c = this._toCanvas(0, 0);
+    for (const ring of this.world.rings || []) {
+      ctx.strokeStyle = ring.type === 'river' ? 'rgba(63,111,158,0.8)' : 'rgba(38,38,31,0.8)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, (ring.r / this.span) * W * 2 / 2, 0, Math.PI * 2);
+      ctx.stroke();
     }
+    // world edge
+    ctx.strokeStyle = 'rgba(255,233,168,0.5)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, (WORLD.radius / this.span) * W, 0, Math.PI * 2);
+    ctx.stroke();
 
-    // goal marker
+    // home marker
     ctx.fillStyle = '#ffe9a8';
-    ctx.font = '10px sans-serif';
+    ctx.font = '9px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('▲ PEAK', W / 2, 10);
+    ctx.fillText('🏠', c.x, c.y + 3);
 
     // enemies: red dots, pack mothers: skulls
     if (enemyMgr) {

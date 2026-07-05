@@ -2,7 +2,18 @@
 
 Top-down 3D game built with Three.js, with two modes:
 
-- **Survival** — fight your way north through five biomes to the Frozen Peak.
+- **Survival** — you wake NAKED (well, with a leaf) in a dark cave at the
+  center of a huge RADIAL world: five biome rings expand outward in every
+  direction, separated by ring barriers (boulder ridges & ring rivers with
+  gate/bridge chokepoints). Punch trees for wood, mine rocks for stone, skin
+  big animals for hides, and build up the camp at the cave mouth: **Hide Tent
+  → Wooden Cabin → Stone House** advance you through the ages (Stone Age →
+  Settlement → Timber Age → Iron Age) and unlock gear tiers (club → stone axe
+  → iron axe; bows need the cabin, iron needs the **Stone Furnace** which
+  smelts 4 stone → 1 iron every 20 s). A **Storage Chest** keeps resources
+  safe through death (dying spills half of everything you carry where you
+  fell), the **Log Boat** lets you paddle to treasure islands in the lakes,
+  and the **Guard Tower** defends home. Reach 520 m from home to win.
 - **MOBA** — a three-lane Dota-style map. Farm jungle camps, buy the same
   gear/spells as survival, then build **Creep Dens** (a wave marches down the
   lane every 60 s, 5 levels of bigger/stronger waves), **Watchtowers** (bolt

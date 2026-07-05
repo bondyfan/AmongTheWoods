@@ -2,7 +2,10 @@
 // equipment slots, bestiary of discovered creatures ----
 
 import { SHOP_GROUPS, SLOTS, SLOT_LABELS, ENEMY_TYPES, ITEMS, SPELLS,
-         STAT_TRACKS, MOBA_BUILDINGS, MAX_SPELL_SLOTS, itemById, spellById } from './config.js';
+         STAT_TRACKS, MOBA_BUILDINGS, CAMP_BUILDINGS, RES_ICONS,
+         MAX_SPELL_SLOTS, itemById, spellById, costFor } from './config.js';
+
+const NEED_NAMES = { tent: 'Hide Tent', cabin: 'Wooden Cabin', furnace: 'Stone Furnace' };
 import { audio } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
@@ -16,6 +19,7 @@ export class Panels {
     this.shopTab = SHOP_GROUPS[0].key;
     this.player = null;
     this.moba = null; // set in MOBA mode → adds the Base tab
+    this.camp = null; // set in survival → adds the Camp tab + era gating
     this.discovered = new Set();
 
     $('shop-btn').addEventListener('click', () => this.toggle('shop'));
@@ -49,7 +53,7 @@ export class Panels {
 
   _costStr(cost) {
     if (!cost) return 'free';
-    return Object.entries(cost).map(([k, v]) => `${v} ${k === 'meat' ? '🍖' : '🪵'}`).join(' + ');
+    return Object.entries(cost).map(([k, v]) => `${v} ${RES_ICONS[k] ?? k}`).join(' + ');
   }
 
   _affordable(cost) {
@@ -59,12 +63,15 @@ export class Panels {
   // ---------- shop ----------
   renderShop() {
     const p = this.player;
-    $('shop-res').textContent = `🍖 ${p.meat}   🪵 ${p.wood}`;
+    $('shop-res').textContent =
+      `🍖 ${p.meat}  🪵 ${p.wood}  🪨 ${p.stone}  🟫 ${p.hide}  🔩 ${p.iron}`;
 
-    // tabs (+ Base tab in MOBA mode)
+    // tabs (+ Base tab in MOBA, + Camp tab in survival)
     const groups = this.moba
       ? [...SHOP_GROUPS, { key: 'base', label: '🏰 Base' }]
-      : SHOP_GROUPS;
+      : this.camp
+        ? [{ key: 'camp', label: '🏕️ Camp' }, ...SHOP_GROUPS]
+        : SHOP_GROUPS;
     const tabs = $('shop-tabs');
     tabs.innerHTML = '';
     for (const group of groups) {
@@ -88,19 +95,27 @@ export class Panels {
       this._renderBase(wrap);
       return;
     }
+    if (this.shopTab === 'camp') {
+      this._renderCamp(wrap);
+      return;
+    }
 
     for (const entry of group.items()) {
       const owned = isSpells ? p.spellsOwned.has(entry.id) : p.hasItem(entry.id);
       const levelLocked = p.level < entry.level;
-      const affordable = entry.cost && this._affordable(entry.cost);
+      // era gating: some gear needs a camp building (survival only)
+      const needMissing = entry.needs && this.camp && !this.camp.has(entry.needs);
+      const cost = costFor(entry.cost, !!this.moba);
+      const affordable = cost && this._affordable(cost);
 
       const card = document.createElement('div');
-      card.className = 'card' + (owned ? ' owned' : levelLocked ? ' locked' : affordable ? ' buyable' : ' expensive');
+      card.className = 'card' + (owned ? ' owned' : (levelLocked || needMissing) ? ' locked' : affordable ? ' buyable' : ' expensive');
 
       let status;
       if (owned) status = '<span class="tag ok">Owned</span>';
       else if (levelLocked) status = `<span class="tag">Unlocks at Lv ${entry.level}</span>`;
-      else status = `<button class="buy-btn" data-id="${entry.id}">Buy — ${this._costStr(entry.cost)}</button>`;
+      else if (needMissing) status = `<span class="tag">Requires ${NEED_NAMES[entry.needs] ?? entry.needs} (Camp)</span>`;
+      else status = `<button class="buy-btn" data-id="${entry.id}">Buy — ${this._costStr(cost)}</button>`;
 
       const slotTag = isSpells ? '📖 spell' : SLOT_LABELS[entry.slot].toLowerCase();
       card.innerHTML = `
@@ -235,6 +250,68 @@ export class Panels {
     wrap.querySelectorAll('.buy-btn').forEach(btn => {
       btn.addEventListener('click', () =>
         this.hooks.onBuild(btn.dataset.id, btn.dataset.lane || null));
+    });
+  }
+
+  // Survival camp: home upgrades through the ages + utility buildings + chest.
+  _renderCamp(wrap) {
+    const p = this.player;
+    const camp = this.camp;
+
+    // era banner
+    const era = document.createElement('div');
+    era.className = 'card owned';
+    era.style.gridColumn = '1 / -1';
+    era.innerHTML = `<div class="card-head"><span class="icon">🕰️</span>
+      <span class="name">Current era: ${camp.era()}</span></div>
+      <div class="desc">Upgrade your home to advance through the ages and unlock new gear.</div>`;
+    wrap.appendChild(era);
+
+    for (const def of CAMP_BUILDINGS) {
+      const info = camp.buildingInfo(def.id);
+      const levelLocked = !info.maxed && p.level < info.reqLevel;
+      const affordable = info.cost && this._affordable(info.cost);
+      const card = document.createElement('div');
+      card.className = 'card' + (info.maxed ? ' owned' : levelLocked ? ' locked' : affordable ? ' buyable' : ' expensive');
+      let status;
+      if (info.maxed) status = '<span class="tag ok">Built</span>';
+      else if (levelLocked) status = `<span class="tag">Unlocks at Lv ${info.reqLevel}</span>`;
+      else status = `<button class="camp-btn" data-id="${def.id}">` +
+        `${info.level === 0 ? 'Build' : 'Upgrade to'} ${info.nextName} — ${this._costStr(info.cost)}</button>`;
+      card.innerHTML = `
+        <div class="card-head"><span class="icon">${def.icon}</span>
+          <span class="name">${info.level > 0 ? info.name : (info.nextName ?? info.name)}</span>
+          <span class="lv">${info.level}/${def.max}</span></div>
+        <div class="desc">${info.desc}</div>
+        <div class="card-foot">${status}</div>`;
+      wrap.appendChild(card);
+    }
+
+    // chest storage controls
+    if (camp.has('chest')) {
+      const chest = document.createElement('div');
+      chest.className = 'card owned';
+      chest.style.gridColumn = '1 / -1';
+      chest.innerHTML = `<div class="card-head"><span class="icon">📦</span>
+        <span class="name">Chest storage</span>
+        <span class="lv">🍖 ${camp.storage.meat} · 🪵 ${camp.storage.wood} · 🪨 ${camp.storage.stone} · 🟫 ${camp.storage.hide} · 🔩 ${camp.storage.iron}</span></div>
+        <div class="desc">Whatever is stored here survives your death.</div>
+        <div class="card-foot">
+          <button class="buy-btn" data-chest="deposit">Deposit all</button>
+          <button class="buy-btn" data-chest="withdraw" style="margin-top:6px">Withdraw all</button>
+        </div>`;
+      wrap.appendChild(chest);
+    }
+
+    wrap.querySelectorAll('.camp-btn').forEach(btn => {
+      btn.addEventListener('click', () => this.hooks.onCampBuild(btn.dataset.id));
+    });
+    wrap.querySelectorAll('[data-chest]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (btn.dataset.chest === 'deposit') camp.depositAll();
+        else camp.withdrawAll();
+        this.renderShop();
+      });
     });
   }
 

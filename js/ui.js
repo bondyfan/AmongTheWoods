@@ -1,7 +1,7 @@
 // ---- HUD, spellbar, floating popups, boss labels, toasts, menus ----
 
 import * as THREE from 'three';
-import { XP_LEVELS, MAX_LEVEL, MAX_SPELL_SLOTS, itemById, spellById } from './config.js';
+import { WORLD, XP_LEVELS, MAX_LEVEL, MAX_SPELL_SLOTS, itemById, spellById } from './config.js';
 import { audio } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
@@ -46,8 +46,11 @@ export class UI {
       : `Lv ${player.level} — ${player.xp}/${XP_LEVELS[player.level + 1]} XP`;
     $('meat').textContent = `🍖 ${player.meat}`;
     $('wood').textContent = `🪵 ${player.wood}`;
+    $('stone').textContent = `🪨 ${player.stone}`;
+    $('hide').textContent = `🟫 ${player.hide}`;
+    $('iron').textContent = `🔩 ${player.iron}`;
     $('progress-bar').style.width = (progressPct * 100) + '%';
-    $('progress-text').textContent = `${Math.round(progressPct * 1500)} m / 1500 m north`;
+    $('progress-text').textContent = `${Math.round(progressPct * WORLD.goalR)} m / ${WORLD.goalR} m from home`;
     $('biome-name').textContent = biomeName;
 
     const weapon = itemById(player.equipment.weapon);

@@ -66,7 +66,10 @@ export class EnemyManager {
   alive() { return this.list.filter(e => !e.dying); }
 
   spawnInitialWave() {
-    for (let i = 0; i < 3; i++) this._spawn('spider', (i - 1) * 6, -20 - i * 4, 0);
+    // first prey waits south of the camp, outside the cave clearing
+    this._spawn('rat', -8, 42, 0);
+    this._spawn('spider', 0, 46, 0);
+    this._spawn('rat', 8, 42, 0);
   }
 
   _spawn(type, x, z, difficulty, bossRank = 0) {
@@ -89,15 +92,20 @@ export class EnemyManager {
   }
 
   _spawnPoint(anchor, { allSides = false, spread = 0 } = {}) {
-    const theta = Math.random() * Math.PI * 2;
+    const ar = Math.hypot(anchor.pos.x, anchor.pos.z);
+    // bias spawns AWAY from home (outward) most of the time
+    const outAngle = Math.atan2(anchor.pos.x, anchor.pos.z);
+    const theta = (!allSides && ar > 5 && Math.random() < 0.65)
+      ? outAngle + (Math.random() - 0.5) * 1.8
+      : Math.random() * Math.PI * 2;
     const dist = 30 + Math.random() * 14;
-    let dx = Math.cos(theta) * dist, dz = Math.sin(theta) * dist;
-    if (!allSides && Math.random() < 0.65) dz = -Math.abs(dz); // bias north
-    const x = Math.max(-WORLD.halfWidth + 2, Math.min(WORLD.halfWidth - 2,
-      anchor.pos.x + dx + (Math.random() - 0.5) * spread));
-    let z = Math.min(WORLD.southEdge - 2, anchor.pos.z + dz + (Math.random() - 0.5) * spread);
-    // stay in the anchor's walled "room" so they actually have to fight
-    z = this.world.clampToSection(z, anchor.pos.z);
+    let x = anchor.pos.x + Math.sin(theta) * dist + (Math.random() - 0.5) * spread;
+    let z = anchor.pos.z + Math.cos(theta) * dist + (Math.random() - 0.5) * spread;
+    // stay in the anchor's ring band so they actually have to fight
+    ({ x, z } = this.world.clampToBand(x, z, anchor.pos.x, anchor.pos.z));
+    const r = Math.hypot(x, z);
+    if (r < 28) { const k = 28 / (r || 1); x *= k; z *= k; } // never at the camp
+    if (r > WORLD.radius - 6) { const k = (WORLD.radius - 6) / r; x *= k; z *= k; }
     return { x, z };
   }
 
@@ -111,14 +119,14 @@ export class EnemyManager {
 
   _trySpawn(targets) {
     const anchor = this._anchor(targets);
-    const progress = progressAt(anchor.pos.z);
+    const progress = progressAt(anchor.pos.x, anchor.pos.z);
     const maxActive = 8 + Math.floor(progress * 12);
     if (this.alive().length >= maxActive) return;
     const { x, z } = this._spawnPoint(anchor);
-    // creature type is chosen from the biome the ANCHOR is standing in, so a
-    // next-stage creature (e.g. bats) can never appear before you reach its
-    // biome — even if the spawn point lands just across a biome border
-    const biome = biomeAt(anchor.pos.z);
+    // creature type is chosen from the ring the ANCHOR is standing in, so a
+    // next-ring creature (e.g. bats) can never appear before you reach its
+    // biome — even if the spawn point lands just across a ring border
+    const biome = biomeAt(anchor.pos.x, anchor.pos.z);
     const type = biome.enemies[Math.floor(Math.random() * biome.enemies.length)];
     this._spawn(type, x, z, progress);
   }
@@ -126,10 +134,10 @@ export class EnemyManager {
   // A pack ("smečka"): a burst of one type, often led by a boss mother.
   _trySpawnPack(targets) {
     const anchor = this._anchor(targets);
-    const biome = BIOMES[biomeIndexAt(anchor.pos.z)];
+    const biome = BIOMES[biomeIndexAt(anchor.pos.x, anchor.pos.z)];
     if (!biome.packs) return; // no packs in the Verdant Forest
 
-    const progress = progressAt(anchor.pos.z);
+    const progress = progressAt(anchor.pos.x, anchor.pos.z);
     const type = biome.enemies[Math.floor(Math.random() * biome.enemies.length)];
     const center = this._spawnPoint(anchor);
 
@@ -148,10 +156,7 @@ export class EnemyManager {
     for (let i = 0; i < count; i++) {
       const a = (i / count) * Math.PI * 2;
       const r = 2 + Math.random() * 4;
-      this._spawn(type,
-        Math.max(-WORLD.halfWidth + 2, Math.min(WORLD.halfWidth - 2, center.x + Math.cos(a) * r)),
-        Math.min(WORLD.southEdge - 2, center.z + Math.sin(a) * r),
-        progress);
+      this._spawn(type, center.x + Math.cos(a) * r, center.z + Math.sin(a) * r, progress);
     }
     if (rank > 0) {
       this._spawn(type, center.x, center.z, progress, rank);
@@ -162,7 +167,7 @@ export class EnemyManager {
   // While a boss lives, her children keep arriving from ALL directions.
   _bossReinforcements(dt, targets) {
     const anchor = this._anchor(targets);
-    const progress = progressAt(anchor.pos.z);
+    const progress = progressAt(anchor.pos.x, anchor.pos.z);
     for (const boss of this.list) {
       if (boss.bossRank === 0 || boss.dying) continue;
       boss.reinforceT -= dt;
@@ -209,7 +214,7 @@ export class EnemyManager {
   // player solo, or both players in co-op (the remote one via a network proxy).
   update(dt, targets, projectiles) {
     const anchor = this._anchor(targets);
-    const progress = progressAt(anchor.pos.z);
+    const progress = progressAt(anchor.pos.x, anchor.pos.z);
 
     this.spawnTimer -= dt;
     if (this.spawnTimer <= 0) {

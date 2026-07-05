@@ -24,7 +24,11 @@ export class Player {
     this.level = 1;
     this.meat = 0;
     this.wood = 0;
+    this.stone = 0;
+    this.hide = 0;
+    this.iron = 0;
     this.kills = 0;
+    this.campBonus = 0; // extra max hp from the camp home building
 
     // -- items & equipment --
     this.itemsOwned = new Set(['fists']);
@@ -162,7 +166,7 @@ export class Player {
       if (it?.stats?.hp) hp += it.stats.hp;
       if (it?.stats?.speed) speedMult += it.stats.speed;
     }
-    this.maxHp = hp;
+    this.maxHp = hp + (this.campBonus || 0);
     if (this.maxHp > oldMax) this.hp += this.maxHp - oldMax;
     this.hp = Math.min(this.hp, this.maxHp);
     this.speed = 8.5 * speedMult;
@@ -181,6 +185,31 @@ export class Player {
     this.orb = equipped('orb')?.orb || null;
 
     this._refreshWeaponMeshes();
+    this._refreshOutfit();
+  }
+
+  // Naked-with-a-leaf until clothes are crafted: chest gear recolors the torso
+  // & arms and hides the leaf; head gear adds a cap.
+  _refreshOutfit() {
+    const ud = this.mesh.userData;
+    if (!ud.torso) return;
+    const chestColors = { leatherArmor: 0x8a5a2b, furCoat: 0x6e5a40, bearHide: 0x4a3a2a };
+    const headColors = { leatherCap: 0x8a5a2b, furHood: 0x6e5a40, bearHelm: 0xb8bec6 };
+    const skin = 0xd9a066;
+    const chestId = this.equipment.chest;
+    const color = chestId ? (chestColors[chestId] ?? 0x7a5230) : skin;
+    for (const part of [ud.torso, ud.armL, ud.armR]) {
+      part.material = new THREE.MeshLambertMaterial({ color });
+    }
+    ud.leaf.visible = !chestId;
+    ud.capSlot.clear();
+    const headId = this.equipment.head;
+    if (headId) {
+      const cap = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.14, 0.38),
+        new THREE.MeshLambertMaterial({ color: headColors[headId] ?? 0x8a5a2b }));
+      ud.capSlot.add(cap);
+      ud.hair.visible = false;
+    } else ud.hair.visible = true;
   }
 
   applyStun(sec) {
@@ -257,7 +286,7 @@ export class Player {
     if (this.dashT > 0) {
       this.dashT -= dt;
       this.pos.addScaledVector(this.dashDir, 34 * dt);
-      world.collide(this.pos, 0.45);
+      world.collide(this.pos, 0.45, { boat: ctx.boat });
       this._applyBounds(ctx);
       for (const e of enemyMgr.alive()) {
         if (this.dashHit.has(e.id)) continue;
@@ -287,11 +316,14 @@ export class Player {
       if (moving) {
         const len = Math.hypot(mx, mz);
         mx /= len; mz /= len;
-        this.pos.x += mx * this.speed * dt;
-        this.pos.z += mz * this.speed * dt;
-        world.collide(this.pos, 0.45);
+        // paddling is a touch slower than running
+        const onWater = ctx.boat && world.isWater?.(this.pos.x, this.pos.z);
+        const speed = this.speed * (onWater ? 0.85 : 1);
+        this.pos.x += mx * speed * dt;
+        this.pos.z += mz * speed * dt;
+        world.collide(this.pos, 0.45, { boat: ctx.boat });
         this._applyBounds(ctx);
-        this.walkT += dt * this.speed;
+        this.walkT += dt * speed;
       }
     }
 
@@ -315,8 +347,12 @@ export class Player {
   }
 
   _clampToWorld() {
-    this.pos.x = Math.max(-WORLD.halfWidth, Math.min(WORLD.halfWidth, this.pos.x));
-    this.pos.z = Math.min(WORLD.southEdge, this.pos.z);
+    const r = Math.hypot(this.pos.x, this.pos.z);
+    const max = WORLD.radius - 2;
+    if (r > max) {
+      const k = max / r;
+      this.pos.x *= k; this.pos.z *= k;
+    }
   }
 
   // Bounds depend on the mode: arena circle (PvP duel), square map (MOBA),
@@ -502,26 +538,38 @@ export class Player {
       .filter(t => this._inArc(t.x, t.z, w.range, t.radius))
       .sort((a, b) => (a.x - this.pos.x) ** 2 + (a.z - this.pos.z) ** 2
                     - ((b.x - this.pos.x) ** 2 + (b.z - this.pos.z) ** 2));
-    if (trees.length) {
-      if (w.chop > 0) {
-        const tree = trees[0];
-        const wood = world.chop(tree, w.chop, this.pos);
-        this.hooks.onChop?.(tree, w.chop); // co-op keeps the partner's forest in sync
-        if (wood > 0) {
-          // wood falls out of the tree as collectible drops
-          const dropPos = new THREE.Vector3(tree.x, 0, tree.z);
-          const piles = Math.min(3, Math.max(1, Math.round(wood / 3)));
-          let left = wood;
-          for (let i = 0; i < piles; i++) {
-            const amount = i === piles - 1 ? left : Math.ceil(wood / piles);
-            left -= amount;
-            pickups.spawn('wood', amount, dropPos, 1.2);
-          }
+    if (trees.length && w.chop > 0) {
+      const tree = trees[0];
+      const wood = world.chop(tree, w.chop, this.pos);
+      this.hooks.onChop?.(tree, w.chop); // co-op keeps the partner's forest in sync
+      if (wood > 0) {
+        const dropPos = new THREE.Vector3(tree.x, 0, tree.z);
+        const piles = Math.min(3, Math.max(1, Math.round(wood / 3)));
+        let left = wood;
+        for (let i = 0; i < piles; i++) {
+          const amount = i === piles - 1 ? left : Math.ceil(wood / piles);
+          left -= amount;
+          pickups.spawn('wood', amount, dropPos, 1.2);
         }
-      } else if (!this.hintedAxe) {
-        this.hintedAxe = true;
-        this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2), 'You need an axe to chop trees!', '#ffcc66');
       }
+    } else if (w.chop >= 1) {
+      // no tree in reach — try mining a rock (needs a real tool, not bare hands)
+      const rocks = (world.rocksNear?.(this.pos, w.range + 0.6) ?? [])
+        .filter(t => this._inArc(t.x, t.z, w.range, t.radius))
+        .sort((a, b) => (a.x - this.pos.x) ** 2 + (a.z - this.pos.z) ** 2
+                      - ((b.x - this.pos.x) ** 2 + (b.z - this.pos.z) ** 2));
+      if (rocks.length) {
+        const stone = world.mineRock(rocks[0], w.chop, this.pos);
+        if (stone > 0) {
+          const dropPos = new THREE.Vector3(rocks[0].x, 0, rocks[0].z);
+          pickups.spawn('stone', Math.ceil(stone / 2), dropPos, 1.0);
+          pickups.spawn('stone', Math.floor(stone / 2) || 1, dropPos, 1.0);
+        }
+      }
+    } else if (w.chop < 1 && !this.hintedRock
+               && (world.rocksNear?.(this.pos, w.range + 0.6) ?? []).some(t => this._inArc(t.x, t.z, w.range, t.radius))) {
+      this.hintedRock = true;
+      this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2), 'Bare hands can\'t mine rock — craft a club!', '#ffcc66');
     }
   }
 

@@ -1,41 +1,45 @@
 // ---- World & progression configuration ----
 
+// The survival world is RADIAL: you start in a cave at the center and the
+// biomes are concentric rings expanding outward in every direction.
 export const WORLD = {
-  halfWidth: 150,   // playable x: -150 .. 150
-  southEdge: 40,    // playable z max (south)
-  goalZ: -1500,     // reach this z to win
+  radius: 545,      // playable circle
+  goalR: 520,       // reach this distance from home to win
+  caveR: 13,        // the starting cave at the center
 };
 
-// Biomes from south (start) to north (goal). zMin = northern edge of the band.
+export const radiusOf = (x, z) => Math.hypot(x, z);
+
+// Biome rings from the center outward. rMax = outer edge of the ring.
 // ground/ground2 = two grass tones blended by noise, dirt = patch color.
 // trees = weights for tree variants, snowy adds snow caps to pines.
-// packs: null = no packs in this biome, otherwise spawn config.
+// packs: null = no packs in this ring, otherwise spawn config.
 export const BIOMES = [
-  { name: 'Verdant Forest', zMin: -300,  ground: 0x55803c, ground2: 0x669147, dirt: 0x8a6b42,
+  { name: 'Verdant Forest', rMax: 120,  ground: 0x55803c, ground2: 0x669147, dirt: 0x8a6b42,
     fog: 0xc8dcae, sky: 0xaecfe8,
     foliage: [0x2d6a2d, 0x3c7f37, 0x4c8f3f], trunk: 0x6b4a2d,
     trees: { pine: 0.4, leafy: 0.4, birch: 0.2, dead: 0 }, snowy: false,
     grass: 0x6fa04c, flowers: true, mushrooms: false,
     enemies: ['rat', 'spider', 'snake'], packs: null, treeDensity: 1.0 },
-  { name: 'Dark Forest',    zMin: -600,  ground: 0x3d5c2f, ground2: 0x33502a, dirt: 0x5c4a30,
+  { name: 'Dark Forest',    rMax: 240,  ground: 0x3d5c2f, ground2: 0x33502a, dirt: 0x5c4a30,
     fog: 0x93a986, sky: 0x8fa8b8,
     foliage: [0x1e4a22, 0x27552a, 0x1a3f2e], trunk: 0x4c3520,
     trees: { pine: 0.55, leafy: 0.25, birch: 0, dead: 0.2 }, snowy: false,
     grass: 0x44663a, flowers: false, mushrooms: true,
     enemies: ['spider', 'snake', 'wolf', 'venomspider', 'bat'], packs: { skulls: [0.8, 0.2, 0] }, treeDensity: 1.3 },
-  { name: 'Highlands',      zMin: -900,  ground: 0x7a7a55, ground2: 0x8b845e, dirt: 0x97815a,
+  { name: 'Highlands',      rMax: 360,  ground: 0x7a7a55, ground2: 0x8b845e, dirt: 0x97815a,
     fog: 0xb9b9a2, sky: 0x9db4c4,
     foliage: [0x5c6e33, 0x6d7d3a, 0x4e5e2c], trunk: 0x5c4a33,
     trees: { pine: 0.5, leafy: 0.1, birch: 0.1, dead: 0.3 }, snowy: false,
     grass: 0x8f9060, flowers: false, mushrooms: false,
     enemies: ['wolf', 'boar', 'elk', 'venomspider', 'stormsnake'], packs: { skulls: [0.5, 0.4, 0.1] }, treeDensity: 0.7 },
-  { name: 'Snowfall Woods', zMin: -1200, ground: 0xdfe7ec, ground2: 0xd0dce4, dirt: 0xb4c4d1,
+  { name: 'Snowfall Woods', rMax: 460, ground: 0xdfe7ec, ground2: 0xd0dce4, dirt: 0xb4c4d1,
     fog: 0xe6edf2, sky: 0xc9d9e4,
     foliage: [0x3d6155, 0x4a6e60, 0x35564b], trunk: 0x4a3a30,
     trees: { pine: 0.8, leafy: 0, birch: 0, dead: 0.2 }, snowy: true,
     grass: 0xc2d2dc, flowers: false, mushrooms: false,
     enemies: ['icewolf', 'icespider', 'bear', 'stormsnake'], packs: { skulls: [0.3, 0.5, 0.2] }, treeDensity: 0.85 },
-  { name: 'Frozen Peak',    zMin: -1520, ground: 0xf2f6fa, ground2: 0xe4ecf3, dirt: 0xc9d6e1,
+  { name: 'Frozen Peak',    rMax: 9999, ground: 0xf2f6fa, ground2: 0xe4ecf3, dirt: 0xc9d6e1,
     fog: 0xf4f8fc, sky: 0xdfe9f2,
     foliage: [0x8fb0c0, 0x3d6155, 0xcfdfe8], trunk: 0x3d3229,
     trees: { pine: 0.7, leafy: 0, birch: 0, dead: 0.3 }, snowy: true,
@@ -43,16 +47,25 @@ export const BIOMES = [
     enemies: ['icewolf', 'wendigo', 'yeti', 'icegolem'], packs: { skulls: [0, 0.5, 0.5] }, treeDensity: 0.5 },
 ];
 
-export function biomeIndexAt(z) {
-  for (let i = 0; i < BIOMES.length; i++) if (z >= BIOMES[i].zMin) return i;
+export function biomeIndexAt(x, z) {
+  const r = radiusOf(x, z);
+  for (let i = 0; i < BIOMES.length; i++) if (r <= BIOMES[i].rMax) return i;
   return BIOMES.length - 1;
 }
-export function biomeAt(z) { return BIOMES[biomeIndexAt(z)]; }
+export function biomeAt(x, z) { return BIOMES[biomeIndexAt(x, z)]; }
 
 // 0..1 journey progress used for difficulty scaling
-export function progressAt(z) {
-  return Math.min(1, Math.max(0, z / WORLD.goalZ));
+export function progressAt(x, z) {
+  return Math.min(1, radiusOf(x, z) / WORLD.goalR);
 }
+
+// ---- resources ----
+export const RESOURCES = ['meat', 'wood', 'stone', 'hide', 'iron'];
+export const RES_ICONS = { meat: '🍖', wood: '🪵', stone: '🪨', hide: '🟫', iron: '🔩' };
+
+// hide drops only from animals that realistically have one
+export const HIDE_BEARING = new Set(['wolf', 'boar', 'elk', 'bear', 'icewolf', 'wendigo', 'yeti']);
+export const hideForHp = (hp) => Math.max(1, Math.round(hp / 80));
 
 // ---- Enemies. Spiders are the weak starter enemy; the animals get bigger
 // and meaner the further north you go. ----
@@ -127,69 +140,86 @@ export const MAX_LEVEL = 10;
 export const SLOTS = ['weapon', 'head', 'chest', 'boots', 'pet', 'orb'];
 export const SLOT_LABELS = { weapon: 'Weapon', head: 'Head', chest: 'Chest', boots: 'Boots', pet: 'Pet', orb: 'Orb' };
 
+// Gear progresses through the ages. `needs` gates an item behind a camp
+// building (survival): 'tent' → Hide Tent, 'cabin' → Wooden Cabin,
+// 'furnace' → Stone Furnace (iron age).
 export const ITEMS = [
-  // -- weapons: melee (axes chop trees; heavy damage so getting close pays off) --
-  { id: 'fists',      slot: 'weapon', level: 1, icon: '👊', name: 'Bare Fists',    cost: null, free: true,
-    weapon: { kind: 'melee', dmg: 12, cd: 0.45, range: 1.5, chop: 0, tier: 0 },
-    desc: 'Your own two hands. Better than nothing.' },
-  { id: 'stoneAxe',   slot: 'weapon', level: 2, icon: '🪓', name: 'Stone Axe',     cost: { meat: 20 },
-    weapon: { kind: 'melee', dmg: 35, cd: 0.5, range: 1.8, chop: 1, tier: 1 },
-    desc: 'Melee damage 35. Chops trees for wood.' },
-  { id: 'steelAxe',   slot: 'weapon', level: 4, icon: '⚒️', name: 'Steel Axe',     cost: { meat: 45, wood: 40 },
-    weapon: { kind: 'melee', dmg: 65, cd: 0.48, range: 1.9, chop: 2, tier: 2 },
-    desc: 'Melee damage 65. Chops twice as fast.' },
-  { id: 'warAxe',     slot: 'weapon', level: 7, icon: '🔥', name: 'War Axe',       cost: { meat: 110, wood: 130 },
-    weapon: { kind: 'melee', dmg: 120, cd: 0.48, range: 2.0, chop: 3, tier: 3 },
-    desc: 'Melee damage 120. Fells trees in moments.' },
-  // -- weapons: ranged (very short at first — train Range to reach the whole screen) --
-  { id: 'huntingBow', slot: 'weapon', level: 2, icon: '🏹', name: 'Hunting Bow',   cost: { meat: 20 },
+  // -- weapons: melee (chop = tree felling & rock mining power) --
+  { id: 'fists',      slot: 'weapon', level: 1, icon: '🖐️', name: 'Bare Hands',   cost: null, free: true,
+    weapon: { kind: 'melee', dmg: 12, cd: 0.45, range: 1.5, chop: 0.5, tier: 0 },
+    desc: 'Punch things. Can slowly break small trees for wood (rocks need a real tool).' },
+  { id: 'club',       slot: 'weapon', level: 2, icon: '🏏', name: 'Wooden Club',   cost: { wood: 8 },
+    weapon: { kind: 'melee', dmg: 22, cd: 0.5, range: 1.7, chop: 1, tier: 1 },
+    desc: 'A crude stone-age club. Damage 22, chops trees and mines rocks.' },
+  { id: 'stoneAxe',   slot: 'weapon', level: 3, icon: '🪓', name: 'Stone Axe',     cost: { wood: 12, stone: 10 },
+    weapon: { kind: 'melee', dmg: 38, cd: 0.5, range: 1.8, chop: 2, tier: 1 },
+    desc: 'Knapped stone on a haft. Damage 38, fast chopping & mining.' },
+  { id: 'steelAxe',   slot: 'weapon', level: 6, icon: '⚒️', name: 'Iron Axe',      cost: { wood: 18, iron: 6 }, needs: 'furnace',
+    weapon: { kind: 'melee', dmg: 68, cd: 0.48, range: 1.9, chop: 3, tier: 2 },
+    desc: 'Smelted iron head. Damage 68, tears through wood and rock.' },
+  { id: 'warAxe',     slot: 'weapon', level: 8, icon: '🔥', name: 'War Axe',       cost: { wood: 25, iron: 16, hide: 6 }, needs: 'furnace',
+    weapon: { kind: 'melee', dmg: 120, cd: 0.48, range: 2.0, chop: 4, tier: 3 },
+    desc: 'Iron-age battle axe. Damage 120.' },
+  // -- weapons: ranged (invented with the Wooden Cabin era; train Range to extend) --
+  { id: 'huntingBow', slot: 'weapon', level: 4, icon: '🏹', name: 'Hunting Bow',   cost: { wood: 25, hide: 4 }, needs: 'cabin',
     weapon: { kind: 'bow', dmg: 16, cd: 0.75, range: 3.5, pierce: false, tier: 1 },
-    desc: 'Arrows for 16 dmg, but barely 3.5 m of reach.' },
-  { id: 'longbow',    slot: 'weapon', level: 5, icon: '🎯', name: 'Longbow',       cost: { meat: 55, wood: 30 },
+    desc: 'Wood + hide string. Arrows for 16 dmg, barely 3.5 m of reach.' },
+  { id: 'longbow',    slot: 'weapon', level: 6, icon: '🎯', name: 'Longbow',       cost: { wood: 40, hide: 8, iron: 4 }, needs: 'furnace',
     weapon: { kind: 'bow', dmg: 32, cd: 0.62, range: 7, pierce: false, tier: 2 },
-    desc: 'Arrow damage 32, reach 7 m.' },
-  { id: 'rapidBow',   slot: 'weapon', level: 8, icon: '🌀', name: 'Windstorm Bow', cost: { meat: 100, wood: 100 },
+    desc: 'Iron-tipped arrows, damage 32, reach 7 m.' },
+  { id: 'rapidBow',   slot: 'weapon', level: 8, icon: '🌀', name: 'Windstorm Bow', cost: { wood: 45, iron: 14, hide: 10 }, needs: 'furnace',
     weapon: { kind: 'bow', dmg: 30, cd: 0.35, range: 10, pierce: true, tier: 3 },
     desc: 'Very fast piercing arrows, reach 10 m.' },
-  // -- head --
-  { id: 'leatherCap', slot: 'head', level: 3, icon: '🧢', name: 'Leather Cap',   cost: { meat: 25 }, stats: { hp: 25 },
+  // -- head (crafted from hides at the tent) --
+  { id: 'leatherCap', slot: 'head', level: 3, icon: '🧢', name: 'Hide Cap',      cost: { hide: 4, meat: 10 }, needs: 'tent', stats: { hp: 25 },
     desc: '+25 max health.' },
-  { id: 'furHood',    slot: 'head', level: 6, icon: '🎩', name: 'Fur Hood',      cost: { meat: 55 }, stats: { hp: 60 },
+  { id: 'furHood',    slot: 'head', level: 6, icon: '🎩', name: 'Fur Hood',      cost: { hide: 10, meat: 25 }, needs: 'tent', stats: { hp: 60 },
     desc: '+60 max health.' },
-  { id: 'bearHelm',   slot: 'head', level: 9, icon: '⛑️', name: 'Bearskull Helm', cost: { meat: 120 }, stats: { hp: 110 },
+  { id: 'bearHelm',   slot: 'head', level: 9, icon: '⛑️', name: 'Bearskull Helm', cost: { hide: 18, iron: 8, meat: 40 }, needs: 'furnace', stats: { hp: 110 },
     desc: '+110 max health.' },
-  // -- chest --
-  { id: 'leatherArmor', slot: 'chest', level: 3, icon: '🦺', name: 'Leather Armor', cost: { meat: 35 }, stats: { hp: 50 },
-    desc: '+50 max health.' },
-  { id: 'furCoat',      slot: 'chest', level: 6, icon: '🧥', name: 'Fur Coat',      cost: { meat: 70 }, stats: { hp: 100 },
+  // -- chest (you start NAKED with a leaf — clothing is crafted from hides) --
+  { id: 'leatherArmor', slot: 'chest', level: 3, icon: '🦺', name: 'Hide Tunic',     cost: { hide: 7, meat: 15 }, needs: 'tent', stats: { hp: 50 },
+    desc: '+50 max health. Finally, actual clothes.' },
+  { id: 'furCoat',      slot: 'chest', level: 6, icon: '🧥', name: 'Fur Coat',       cost: { hide: 14, meat: 30 }, needs: 'tent', stats: { hp: 100 },
     desc: '+100 max health.' },
-  { id: 'bearHide',     slot: 'chest', level: 9, icon: '🛡️', name: 'Bearhide Plate', cost: { meat: 130, wood: 90 }, stats: { hp: 170 },
+  { id: 'bearHide',     slot: 'chest', level: 9, icon: '🛡️', name: 'Bearhide Plate', cost: { hide: 24, iron: 12, meat: 45 }, needs: 'furnace', stats: { hp: 170 },
     desc: '+170 max health.' },
   // -- boots --
-  { id: 'swiftBoots',   slot: 'boots', level: 3, icon: '👢', name: 'Swift Boots',    cost: { meat: 30 }, stats: { speed: 0.20 },
+  { id: 'swiftBoots',   slot: 'boots', level: 3, icon: '👢', name: 'Hide Wraps',     cost: { hide: 5, meat: 10 }, needs: 'tent', stats: { speed: 0.20 },
     desc: '+20% movement speed.' },
-  { id: 'huntersBoots', slot: 'boots', level: 6, icon: '🥾', name: "Hunter's Boots", cost: { meat: 60 }, stats: { speed: 0.35 },
+  { id: 'huntersBoots', slot: 'boots', level: 6, icon: '🥾', name: "Hunter's Boots", cost: { hide: 10, meat: 25 }, needs: 'tent', stats: { speed: 0.35 },
     desc: '+35% movement speed.' },
-  { id: 'windBoots',    slot: 'boots', level: 9, icon: '💨', name: 'Windwalkers',    cost: { meat: 110 }, stats: { speed: 0.50 },
+  { id: 'windBoots',    slot: 'boots', level: 9, icon: '💨', name: 'Windwalkers',    cost: { hide: 14, iron: 8, meat: 40 }, needs: 'furnace', stats: { speed: 0.50 },
     desc: '+50% movement speed.' },
   // -- pet (companion) --
   { id: 'tamedWolf', slot: 'pet', level: 4, icon: '🐺', name: 'Tamed Wolf', cost: { meat: 55 }, pet: { dmg: 14 },
     desc: 'A loyal, invincible wolf fights by your side.' },
   { id: 'alphaWolf', slot: 'pet', level: 8, icon: '👑', name: 'Alpha Wolf', cost: { meat: 120 }, pet: { dmg: 32 },
     desc: 'A huge alpha. Bites for 32.' },
-  // -- orb (guardian sphere) --
-  { id: 'guardianSphere', slot: 'orb', level: 5,  icon: '🔮', name: 'Guardian Sphere', cost: { meat: 65, wood: 70 },
+  // -- orb (guardian sphere — iron-age wonder) --
+  { id: 'guardianSphere', slot: 'orb', level: 5,  icon: '🔮', name: 'Guardian Sphere', cost: { meat: 50, stone: 30, iron: 6 }, needs: 'furnace',
     orb: { count: 1, targets: 1, dmg: 12 },
     desc: 'Orbits you and fires bolts at enemies.' },
-  { id: 'twinSphere',     slot: 'orb', level: 8,  icon: '✨', name: 'Twin-bolt Sphere', cost: { meat: 120, wood: 120 },
+  { id: 'twinSphere',     slot: 'orb', level: 8,  icon: '✨', name: 'Twin-bolt Sphere', cost: { meat: 90, iron: 14, stone: 40 }, needs: 'furnace',
     orb: { count: 1, targets: 2, dmg: 14 },
     desc: 'Fires two bolts at once (14 dmg each).' },
-  { id: 'duoSphere',      slot: 'orb', level: 10, icon: '🌐', name: 'Gemini Spheres',  cost: { meat: 170, wood: 180 },
+  { id: 'duoSphere',      slot: 'orb', level: 10, icon: '🌐', name: 'Gemini Spheres',  cost: { meat: 130, iron: 24, stone: 60 }, needs: 'furnace',
     orb: { count: 2, targets: 2, dmg: 14 },
     desc: 'TWO spheres, each firing twin bolts.' },
 ];
 
 export const itemById = (id) => ITEMS.find(i => i.id === id);
+
+// MOBA has no mining/hides/smelting — special resources are paid in meat
+// there (3 meat per unit) so every item stays purchasable.
+export function costFor(cost, mobaMode) {
+  if (!mobaMode || !cost) return cost;
+  const out = { meat: cost.meat || 0 };
+  if (cost.wood) out.wood = cost.wood;
+  for (const k of ['stone', 'hide', 'iron']) if (cost[k]) out.meat += cost[k] * 3;
+  if (!out.meat) delete out.meat;
+  return out;
+}
 
 // ---- Spells / skills. Bought in the shop, equipped into max 6 spell slots,
 // cast with keys 1-6. cd in seconds. ----
@@ -228,9 +258,54 @@ export const STAT_TRACKS = [
     cost: (t) => ({ meat: 26 * t * t, ...(t >= 3 ? { wood: 11 * (t - 2) } : {}) }) },
 ];
 
+// ==========================================================================
+// Survival camp — buildings around the cave mouth. Your "home" upgrades
+// through the ages (Hide Tent → Wooden Cabin → Stone House) and gates gear;
+// the other buildings add utility. Stored chest resources survive death.
+// ==========================================================================
+export const CAMP_BUILDINGS = [
+  { id: 'home', icon: '⛺', max: 3,
+    names: ['Hide Tent', 'Wooden Cabin', 'Stone House'],
+    levels: [
+      { level: 2, cost: { hide: 6, wood: 10 },
+        desc: 'Stone-age home stitched from hides. Unlocks hide clothing.' },
+      { level: 4, cost: { wood: 60, stone: 10 },
+        desc: 'Timber-age cabin. Unlocks bows. +15 max health.' },
+      { level: 7, cost: { stone: 80, wood: 30, iron: 6 },
+        desc: 'Iron-age stone house. +40 max health.' },
+    ] },
+  { id: 'chest', icon: '📦', max: 1,
+    names: ['Storage Chest'],
+    levels: [
+      { level: 3, cost: { wood: 25 },
+        desc: 'Store resources safely — whatever is in the chest survives your death.' },
+    ] },
+  { id: 'furnace', icon: '🔥', max: 1,
+    names: ['Stone Furnace'],
+    levels: [
+      { level: 5, cost: { stone: 40, wood: 15 },
+        desc: 'Smelts iron: automatically turns 4 🪨 into 1 🔩 every 20 s. Unlocks the iron age.' },
+    ] },
+  { id: 'boat', icon: '🛶', max: 1,
+    names: ['Log Boat'],
+    levels: [
+      { level: 4, cost: { wood: 30, hide: 4 },
+        desc: 'Lets you paddle across lakes — treasure islands await.' },
+    ] },
+  { id: 'tower', icon: '🗼', max: 1,
+    names: ['Guard Tower'],
+    levels: [
+      { level: 8, cost: { wood: 60, stone: 40, iron: 10 },
+        desc: 'Watches over your camp: automatically shoots enemies that come near home.' },
+    ] },
+];
+
+// era = how far your home has advanced (display + flavor)
+export const ERAS = ['Stone Age', 'Settlement', 'Timber Age', 'Iron Age'];
+
 // ---- Multiplayer ----
-// PvP duels happen in an arena parked south of the playable map.
-export const ARENA = { x: 0, z: 260, r: 17 };
+// PvP duels happen in an arena parked outside the world circle.
+export const ARENA = { x: 0, z: 700, r: 17 };
 export const PVP_INTERVALS = [1, 2, 3, 4, 5, 10]; // minutes between duels
 export const ARENA_RETURN_DELAY = 5;              // seconds after the kill
 export const arenaReward = (loserLevel) => ({

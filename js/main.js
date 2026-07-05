@@ -2,8 +2,10 @@
 
 import * as THREE from 'three';
 import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOBA,
+         RESOURCES, HIDE_BEARING, hideForHp, radiusOf, costFor,
          biomeIndexAt, progressAt, itemById, spellById } from './config.js';
-import { makeAimArc, updateAimArc } from './models.js';
+import { makeAimArc, updateAimArc, makeRaft } from './models.js';
+import { Camp } from './camp.js';
 import { audio } from './audio.js';
 import { input } from './input.js';
 import { World } from './world.js';
@@ -73,6 +75,8 @@ let mp = null;
 let moba = null;
 let mobaMini = null;
 let mobaSide = 'player';
+// survival camp (created when a survival run starts)
+let camp = null;
 const combatMgr = () => {
   if (mp?.active) return mp.combatMgr();
   if (game.kind === 'moba') return moba.hostileMgr('player');
@@ -95,6 +99,7 @@ const panels = new Panels({
   onUnequip: (slot) => { player.unequip(slot); panels.refresh(); },
   onToggleSpell: (id) => { player.toggleSpellSlot(id); panels.refresh(); },
   onBuild: (id, lane) => buildBase(id, lane),
+  onCampBuild: (id) => campBuild(id),
   mobaTeam: () => mobaSide,
 });
 
@@ -125,20 +130,20 @@ panels.player = player;
 
 // Apply a pickup's contents to the LOCAL player (used by direct collection
 // and by the co-op 'grant' event from the host).
+const RES_POPUP = { meat: ['🍖', '#ff9d76'], wood: ['🪵', '#d8a468'],
+                    stone: ['🪨', '#c8c8c0'], hide: ['🟫', '#c9986a'], iron: ['🔩', '#c8d0d8'] };
 function grantPickup(kind, payload) {
-  if (kind === 'meat') {
-    player.meat += payload;
-    ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2), `+${payload} 🍖`, '#ff9d76');
-  } else if (kind === 'wood') {
-    player.wood += payload;
-    ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2), `+${payload} 🪵`, '#d8a468');
-  } else if (kind === 'item') {
+  if (kind === 'item') {
     const item = itemById(payload);
     player.ownItem(payload);
     ui.toast(`🎁 Loot: ${item.icon} ${item.name}!`, 'level');
     panels.refresh();
+  } else {
+    player[kind] += payload;
+    const [icon, color] = RES_POPUP[kind];
+    ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2), `+${payload} ${icon}`, color);
   }
-  pickupSfx[kind]();
+  pickupSfx[kind]?.();
 }
 
 const pickups = new Pickups(scene, world, {
@@ -172,6 +177,10 @@ const enemyMgr = new EnemyManager(scene, world, {
       const amount = i === piles - 1 ? left : Math.ceil(enemy.meat / piles);
       left -= amount;
       pickups.spawn('meat', amount, enemy.pos, 0.9 * enemy.sizeMult);
+    }
+    // bigger animals also drop their hide
+    if (HIDE_BEARING.has(enemy.type)) {
+      pickups.spawn('hide', hideForHp(enemy.maxHp), enemy.pos, 1.1 * enemy.sizeMult);
     }
     if (enemy.bossRank > 0) rollBossDrop(enemy);
   },
@@ -226,7 +235,7 @@ function endStats() {
   return {
     level: player.level,
     kills: player.kills,
-    distance: Math.max(0, Math.round(-player.pos.z)),
+    distance: Math.max(0, Math.round(radiusOf(player.pos.x, player.pos.z))),
     wood: player.wood,
     time: `${m}:${String(s).padStart(2, '0')}`,
   };
@@ -237,15 +246,48 @@ function startPlaying() {
   ui.hideMenu();
   game.mode = 'play';
   audio.playMusic('level1');
-  // survival only — and the co-op guest renders the HOST's enemies
-  if (game.kind === 'survival' && !(mp?.active && mp.mode === 'coop' && !mp.isHost)) {
-    enemyMgr.spawnInitialWave();
+  if (game.kind === 'survival') {
+    // everyone gets their own camp at the cave mouth
+    camp = new Camp(scene, world, player, {
+      popup: (pos, text, color) => ui.popup(pos, text, color),
+      toast: (text, cls) => ui.toast(text, cls),
+    });
+    panels.camp = camp;
+    player.pos.set(0, 0, -2); // wake up inside the cave
+    // treasure islands (solo & MP host — the co-op guest sees the host's loot)
+    if (!mp?.active || mp.isHost) {
+      for (const lake of world.islands) {
+        const at = { x: lake.x, z: lake.z };
+        pickups.spawn('meat', 8, at, 1.2);
+        pickups.spawn('stone', 6, at, 1.2);
+        pickups.spawn('hide', 3, at, 1.2);
+        if (Math.random() < 0.4) {
+          const candidates = ITEMS.filter(i => !i.free);
+          pickups.spawn('item', candidates[Math.floor(Math.random() * candidates.length)].id, at, 0.6);
+        }
+      }
+    }
+    // the co-op guest renders the HOST's enemies
+    if (!(mp?.active && mp.mode === 'coop' && !mp.isHost)) enemyMgr.spawnInitialWave();
   }
 }
 
 function startGame() {
   startPlaying();
-  ui.toast('Head north! Move the mouse to aim. Space / Left click to attack.', 'info');
+  ui.toast('You wake in a cave… follow the light. Punch small trees for wood, craft at the camp (U).', 'info');
+}
+
+// Camp buildings: pay, build, apply effects (home hp bonus, era unlocks).
+function campBuild(id) {
+  if (!camp) return;
+  const info = camp.buildingInfo(id);
+  if (info.maxed || player.level < info.reqLevel) return;
+  if (!Object.entries(info.cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
+  for (const [k, v] of Object.entries(info.cost)) player[k] -= v;
+  camp.build(id);
+  player.campBonus = camp.homeHpBonus();
+  player.recompute();
+  panels.refresh();
 }
 
 // ---------- MOBA mode ----------
@@ -253,6 +295,7 @@ function startGame() {
 function setupMobaWorld(seed, side) {
   game.kind = 'moba';
   mobaSide = side;
+  camp?.dispose(); camp = null; panels.camp = null; // no survival camp in MOBA
   world.dispose();
   world = new MobaWorld(scene, seed);
   pickups.world = world;
@@ -263,7 +306,6 @@ function setupMobaWorld(seed, side) {
   player.pos.set(bp.x + 9 * inward, 0, bp.z - 9 * inward);
   player.meat = 15;
   $id('base-btn').classList.remove('hidden');
-  window.__game.world = world;
 }
 
 function mobaHooks() {
@@ -307,20 +349,25 @@ function startMobaSolo() {
   ui.toast('🏰 MOBA! Farm the jungle camps, then build Creep Dens & Towers (shop → Base tab).', 'level');
 }
 
-// On death, HALF the carried meat spills onto the ground where you fell —
-// recoverable if you fight your way back; the other half is lost. Zeroes meat.
+// On death, HALF of every CARRIED resource spills onto the ground where you
+// fell — recoverable if you fight your way back; the rest is lost. Resources
+// stored in the camp chest are untouched (that's what it's for).
 function dropHalfMeat(pos) {
-  const dropped = Math.floor(player.meat / 2);
-  player.meat = 0;
-  if (dropped <= 0) return 0;
-  const piles = Math.min(5, Math.max(1, Math.round(dropped / 4)));
-  let left = dropped;
-  for (let i = 0; i < piles; i++) {
-    const amount = i === piles - 1 ? left : Math.ceil(dropped / piles);
-    left -= amount;
-    pickups.spawn('meat', amount, pos, 1.6);
+  let totalDropped = 0;
+  for (const res of RESOURCES) {
+    const dropped = Math.floor(player[res] / 2);
+    player[res] = 0;
+    if (dropped <= 0) continue;
+    totalDropped += dropped;
+    const piles = Math.min(3, Math.max(1, Math.round(dropped / 5)));
+    let left = dropped;
+    for (let i = 0; i < piles; i++) {
+      const amount = i === piles - 1 ? left : Math.ceil(dropped / piles);
+      left -= amount;
+      pickups.spawn(res, amount, pos, 1.6);
+    }
   }
-  return dropped;
+  return totalDropped;
 }
 
 // Survival death is soft: you wake up at the spawn cottage, but you lose a
@@ -331,11 +378,11 @@ function survivalRespawn() {
   player.loseLevel();
   player.mesh.rotation.z = Math.PI / 2; // lie down while "out"
   audio.sfx('defeat', 0.5);
-  ui.toast(`☠️ You fell… you wake at the cabin. Level lost (now ${player.level}); ${dropped} 🍖 spilled where you died.`, 'boss');
+  ui.toast(`☠️ You fell… you wake in the cave. Level lost (now ${player.level}); half your carried loot (${dropped}) spilled where you died. Chest storage is safe.`, 'boss');
   setTimeout(() => {
     if (game.mode !== 'play') return;
     player.revive(1);
-    player.pos.set(0, 0, 3);
+    player.pos.set(0, 0, -2);
   }, 3500);
 }
 
@@ -479,8 +526,10 @@ $id('mp-join-btn').addEventListener('click', async () => {
 function buyItem(id) {
   const item = itemById(id);
   if (!item || player.hasItem(id) || player.level < item.level) return;
-  if (!Object.entries(item.cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
-  for (const [k, v] of Object.entries(item.cost)) player[k] -= v;
+  if (item.needs && camp && !camp.has(item.needs)) return; // era gate (survival)
+  const cost = costFor(item.cost, game.kind === 'moba');
+  if (!Object.entries(cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
+  for (const [k, v] of Object.entries(cost)) player[k] -= v;
   player.ownItem(id);
   audio.sfx('purchase', 0.5);
   panels.refresh();
@@ -545,6 +594,11 @@ const aimArc = makeAimArc();
 aimArc.visible = false;
 scene.add(aimArc);
 
+// the boat raft shown under the hero while crossing water
+const raft = makeRaft();
+raft.visible = false;
+scene.add(raft);
+
 function updateAim() {
   // normal free cursor: the aim point is exactly where the mouse hits the
   // ground, and the player simply faces it (no clamping — cursor goes anywhere)
@@ -568,8 +622,10 @@ function updateAim() {
 const fogColor = new THREE.Color(BIOMES[0].fog);
 const skyColor = new THREE.Color(BIOMES[0].sky);
 
+const caveFog = new THREE.Color(0x0c0f0a);
+
 function updateAtmosphere(dt) {
-  const idx = biomeIndexAt(player.pos.z);
+  const idx = biomeIndexAt(player.pos.x, player.pos.z);
   if (idx !== game.biomeIndex) {
     game.biomeIndex = idx;
     const biome = BIOMES[idx];
@@ -578,8 +634,28 @@ function updateAtmosphere(dt) {
     audio.playMusic(idx >= 3 ? 'level3' : 'level1');
   }
   const biome = BIOMES[game.biomeIndex];
-  fogColor.lerp(new THREE.Color(biome.fog), Math.min(1, dt * 1.5));
-  skyColor.lerp(new THREE.Color(biome.sky), Math.min(1, dt * 1.5));
+
+  // the cave is dark; light floods in as you walk toward the mouth
+  const r = radiusOf(player.pos.x, player.pos.z);
+  const caveK = Math.max(0, Math.min(1, (WORLD.caveR + 6 - r) / (WORLD.caveR + 3)));
+  hemi.intensity = 0.9 - 0.62 * caveK;
+  sun.intensity = 1.4 * (1 - 0.8 * caveK);
+  // the camera sits ~30 m away — keep the fog behind the hero so the cave
+  // interior stays dimly visible while the outside world is swallowed
+  scene.fog.near = 35 - 14 * caveK;
+  scene.fog.far = 110 - 60 * caveK;
+
+  // caveK already fades smoothly with distance, so apply it directly; the
+  // slow time-lerp is only for biome-to-biome transitions out in the open
+  const fogTarget = new THREE.Color(biome.fog).lerp(caveFog, caveK);
+  const skyTarget = new THREE.Color(biome.sky).lerp(caveFog, caveK);
+  if (caveK > 0.01) {
+    fogColor.copy(fogTarget);
+    skyColor.copy(skyTarget);
+  } else {
+    fogColor.lerp(fogTarget, Math.min(1, dt * 1.5));
+    skyColor.lerp(skyTarget, Math.min(1, dt * 1.5));
+  }
   scene.fog.color.copy(fogColor);
   scene.background.copy(skyColor);
 }
@@ -609,6 +685,7 @@ function tick() {
       arenaZone: mp?.active ? mp.arenaZone() : null,
       mobaBounds: game.kind === 'moba' ? MOBA.half : null,
       mouseMove: settings.mouseMove,
+      boat: game.kind === 'survival' && camp?.has('boat'),
     });
 
     if (game.kind === 'moba') {
@@ -637,22 +714,33 @@ function tick() {
         pickups.update(dt, [player]);
       }
       companions.update(dt, player, em, projectiles, world);
+      camp?.update(dt, em, projectiles);
       world.update(dt, player.pos);
       // co-op: show the partner on the minimap too
       minimap.update(dt, player, em,
         mp?.active && mp.mode === 'coop' ? mp.remote : null);
       updateAtmosphere(dt);
 
-      const progress = progressAt(player.pos.z);
-      ui.updateHUD(player, progress, BIOMES[game.biomeIndex].name);
+      // raft under the hero while paddling
+      const onWater = camp?.has('boat') && world.isWater(player.pos.x, player.pos.z);
+      raft.visible = !!onWater;
+      if (onWater) {
+        raft.position.set(player.pos.x, player.mesh.position.y + 0.12, player.pos.z);
+        raft.rotation.y = player.mesh.rotation.y;
+      }
 
-      if (player.pos.z <= WORLD.goalZ) {
+      const progress = progressAt(player.pos.x, player.pos.z);
+      ui.updateHUD(player, progress,
+        `${BIOMES[game.biomeIndex].name} · ${camp?.era() ?? ''}`);
+
+      if (radiusOf(player.pos.x, player.pos.z) >= WORLD.goalR) {
         game.mode = 'won';
         aimArc.visible = false;
         audio.stopMusic();
         audio.sfx('victory', 0.6);
         mp?.broadcastWin();
         ui.showEnd(true, endStats());
+        document.getElementById('end-title').textContent = 'You crossed the whole wilds!';
       }
     }
   }
@@ -667,4 +755,5 @@ updateCamera();
 tick();
 
 // debug handle (also handy for the future multiplayer host loop)
-window.__game = { game, scene, world, player, enemyMgr, companions, pickups, panels, input, updateAim };
+window.__game = { game, scene, player, enemyMgr, companions, pickups, panels, input, updateAim,
+  get world() { return world; }, get camp() { return camp; } };

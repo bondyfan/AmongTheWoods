@@ -67,9 +67,10 @@ export class MobaWorld extends World {
     return h * Math.max(0.1, Math.min(1, flat));
   }
 
-  _genWalls() { this.walls = []; }   // no ridge barriers
-  _genLakes() { this.lakes = []; }   // no lakes (keeps lanes reliable)
-  _buildRivers() {}
+  _genRings() { this.rings = []; }   // no ring barriers on the MOBA map
+  _genLakes() { this.lakes = []; this.islands = []; } // no lakes (keeps lanes reliable)
+  _buildRingRivers() {}
+  _buildCave() {}                    // no starting cave either
 
   _buildGround() {
     const size = MOBA.half * 2 + 40;
@@ -160,7 +161,7 @@ export class MobaWorld extends World {
     }
 
     this.scene.add(group);
-    this.chunks.set(key, { group, trees });
+    this.chunks.set(key, { group, trees, rocks: [] });
   }
 
   clampToSection(z) { return z; } // no walled sections here

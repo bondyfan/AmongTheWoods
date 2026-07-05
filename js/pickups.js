@@ -2,7 +2,7 @@
 // the player when they come close. ----
 
 import * as THREE from 'three';
-import { makeMeatDrop, makeWoodDrop, makeItemDrop } from './models.js';
+import { makeMeatDrop, makeWoodDrop, makeItemDrop, makeStoneDrop, makeHideDrop, makeIronDrop } from './models.js';
 import { audio } from './audio.js';
 
 const MAGNET_RADIUS = 3.2;
@@ -18,9 +18,11 @@ export class Pickups {
     this.list = [];
   }
 
-  // kind: 'meat' | 'wood' | 'item'; payload: amount for meat/wood, itemId for item
+  // kind: 'meat'|'wood'|'stone'|'hide'|'iron'|'item'; payload: amount (or itemId)
   spawn(kind, payload, pos, scatter = 0.8) {
-    const mesh = kind === 'meat' ? makeMeatDrop() : kind === 'wood' ? makeWoodDrop() : makeItemDrop();
+    const makers = { meat: makeMeatDrop, wood: makeWoodDrop, stone: makeStoneDrop,
+                     hide: makeHideDrop, iron: makeIronDrop, item: makeItemDrop };
+    const mesh = (makers[kind] || makeItemDrop)();
     const x = pos.x + (Math.random() - 0.5) * scatter * 2;
     const z = pos.z + (Math.random() - 0.5) * scatter * 2;
     mesh.position.set(x, this.world.heightAt(x, z) + 0.45, z);
@@ -90,5 +92,8 @@ export class Pickups {
 export const pickupSfx = {
   meat: () => audio.sfx('kill_gold', 0.35, 80),
   wood: () => audio.sfx('click', 0.45, 80),
+  stone: () => audio.sfx('click', 0.4, 80),
+  hide: () => audio.sfx('kill_gold', 0.3, 80),
+  iron: () => audio.sfx('upgrade', 0.35, 120),
   item: () => audio.sfx('special', 0.55),
 };
