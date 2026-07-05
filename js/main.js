@@ -307,14 +307,31 @@ function startMobaSolo() {
   ui.toast('🏰 MOBA! Farm the jungle camps, then build Creep Dens & Towers (shop → Base tab).', 'level');
 }
 
-// Survival death is soft: you wake up at the spawn cottage, but you lose a
-// full level (XP resets to that level's start) and all your meat.
-function survivalRespawn() {
-  player.loseLevel();
+// On death, HALF the carried meat spills onto the ground where you fell —
+// recoverable if you fight your way back; the other half is lost. Zeroes meat.
+function dropHalfMeat(pos) {
+  const dropped = Math.floor(player.meat / 2);
   player.meat = 0;
+  if (dropped <= 0) return 0;
+  const piles = Math.min(5, Math.max(1, Math.round(dropped / 4)));
+  let left = dropped;
+  for (let i = 0; i < piles; i++) {
+    const amount = i === piles - 1 ? left : Math.ceil(dropped / piles);
+    left -= amount;
+    pickups.spawn('meat', amount, pos, 1.6);
+  }
+  return dropped;
+}
+
+// Survival death is soft: you wake up at the spawn cottage, but you lose a
+// full level (XP resets to that level's start) and half your meat spills where
+// you fell.
+function survivalRespawn() {
+  const dropped = dropHalfMeat(player.pos.clone());
+  player.loseLevel();
   player.mesh.rotation.z = Math.PI / 2; // lie down while "out"
   audio.sfx('defeat', 0.5);
-  ui.toast(`☠️ You fell… you wake at the cabin. Level lost (now ${player.level}), meat gone.`, 'boss');
+  ui.toast(`☠️ You fell… you wake at the cabin. Level lost (now ${player.level}); ${dropped} 🍖 spilled where you died.`, 'boss');
   setTimeout(() => {
     if (game.mode !== 'play') return;
     player.revive(1);
@@ -374,6 +391,7 @@ async function ensureMp() {
       popup: (pos, text, color) => ui.popup(pos, text, color),
       onDiscover: discoverType,
       grantPickup,
+      dropHalfMeat,
       startPlaying,
       onCoopWin: () => {
         if (game.mode !== 'play') return;

@@ -750,13 +750,14 @@ export class Multiplayer {
   handleLocalDeath() {
     if (!this.active) return false;
     if (this.arena.active) { this._onArenaDeath(); return true; }
-    // out in the world: respawn at the spawn cottage — a level and ALL meat are lost
+    // out in the world: respawn at the spawn cottage — lose a level and HALF
+    // the carried meat spills onto the ground where you fell
     const { ctx } = this;
     const p = ctx.player;
+    const dropped = ctx.dropHalfMeat(p.pos.clone());
     p.loseLevel();
-    p.meat = 0;
     p.mesh.rotation.z = Math.PI / 2; // lie down while "out"
-    ctx.ui.toast(`☠️ You fell… you wake at the cabin. Level lost (now ${p.level}), meat gone.`, 'boss');
+    ctx.ui.toast(`☠️ You fell… you wake at the cabin. Level lost (now ${p.level}); ${dropped} 🍖 spilled where you died.`, 'boss');
     setTimeout(() => {
       if (!this.active) return;
       p.revive(1);
