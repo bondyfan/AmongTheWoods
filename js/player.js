@@ -1,0 +1,562 @@
+// ---- Player: movement, aiming, equipment (WoW-style slots), weapons,
+// spells, XP & resources ----
+// All gameplay state lives in plain fields (serializable for future
+// multiplayer snapshots); the THREE mesh is pure presentation.
+
+import * as THREE from 'three';
+import { WORLD, XP_LEVELS, MAX_LEVEL, itemById, spellById, MAX_SPELL_SLOTS } from './config.js';
+import { makeMan, makeAxe, makeBow } from './models.js';
+import { audio } from './audio.js';
+
+export class Player {
+  constructor(scene, hooks) {
+    this.hooks = hooks; // { popup, onLevelUp, onDeath, onHurt, onEquipChange }
+    this.scene = scene;
+    this.mesh = makeMan();
+    scene.add(this.mesh);
+    this.slashes = []; // short-lived melee swing arcs
+    this.levelFx = []; // short-lived level-up burst pieces
+
+    this.pos = new THREE.Vector3(0, 0, 0);
+    this.facing = new THREE.Vector3(0, 0, -1);
+    this.hp = 100;
+    this.xp = 0;
+    this.level = 1;
+    this.meat = 0;
+    this.wood = 0;
+    this.kills = 0;
+
+    // -- items & equipment --
+    this.itemsOwned = new Set(['fists']);
+    this.equipment = { weapon: 'fists', head: null, chest: null, boots: null, pet: null, orb: null };
+
+    // -- trainable stat tracks (0..10 each) --
+    this.stats = { range: 0, power: 0, swift: 0 };
+
+    // -- spells --
+    this.spellsOwned = new Set();
+    this.spellSlots = [];           // up to MAX_SPELL_SLOTS spell ids
+    this.spellCds = {};             // id -> seconds remaining
+
+    // -- timed effects --
+    this.hasteT = 0;
+    this.rageT = 0;
+    this.dashT = 0;
+    this.dashDir = new THREE.Vector3();
+    this.dashHit = new Set();
+    this.dashSpec = null;
+
+    this.attackCd = 0;
+    this.attackT = 0;
+    this.attackDur = 0.3;
+    this.stunT = 0;
+    this.walkT = 0;
+    this.dead = false;
+    this.hintedAxe = false;
+
+    this.recompute();
+  }
+
+  // ---------- items ----------
+  hasItem(id) { return this.itemsOwned.has(id); }
+
+  ownItem(id, autoEquip = true) {
+    if (this.itemsOwned.has(id)) return false;
+    this.itemsOwned.add(id);
+    const item = itemById(id);
+    if (autoEquip && (!this.equipment[item.slot] || this.equipment[item.slot] === 'fists')) {
+      this.equip(id);
+    }
+    return true;
+  }
+
+  equip(id) {
+    const item = itemById(id);
+    if (!item || !this.itemsOwned.has(id)) return;
+    this.equipment[item.slot] = id;
+    this.recompute();
+    this.hooks.onEquipChange?.(item.slot);
+  }
+
+  unequip(slot) {
+    if (slot === 'weapon') { this.equipment.weapon = 'fists'; }
+    else this.equipment[slot] = null;
+    this.recompute();
+    this.hooks.onEquipChange?.(slot);
+  }
+
+  // Q — cycle through owned weapons.
+  cycleWeapon() {
+    const weapons = ['fists', ...[...this.itemsOwned].filter(id => id !== 'fists' && itemById(id)?.slot === 'weapon')];
+    if (weapons.length < 2) return;
+    const idx = weapons.indexOf(this.equipment.weapon);
+    const next = weapons[(idx + 1) % weapons.length];
+    this.equip(next);
+    audio.sfx('click', 0.4);
+    this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.4),
+      `${itemById(next).icon} ${itemById(next).name}`, '#ffe9a8');
+  }
+
+  // ---------- spells ----------
+  ownSpell(id) {
+    if (this.spellsOwned.has(id)) return false;
+    this.spellsOwned.add(id);
+    if (this.spellSlots.length < MAX_SPELL_SLOTS) this.spellSlots.push(id);
+    return true;
+  }
+
+  toggleSpellSlot(id) {
+    const i = this.spellSlots.indexOf(id);
+    if (i >= 0) this.spellSlots.splice(i, 1);
+    else if (this.spellsOwned.has(id) && this.spellSlots.length < MAX_SPELL_SLOTS) this.spellSlots.push(id);
+  }
+
+  castSpell(slotIndex, ctx) {
+    const id = this.spellSlots[slotIndex];
+    if (!id || this.dead || this.stunT > 0) return;
+    if ((this.spellCds[id] || 0) > 0) { audio.sfx('error', 0.35, 300); return; }
+    const spell = spellById(id);
+    this.spellCds[id] = spell.cd;
+    audio.sfx('special', 0.45);
+
+    const { enemyMgr } = ctx;
+    switch (id) {
+      case 'haste': this.hasteT = 10; break;
+      case 'rage': this.rageT = 12; break;
+      case 'heal':
+        this.hp = Math.min(this.maxHp, this.hp + 50);
+        this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2), '+50 ❤️', '#7fe07f');
+        break;
+      case 'powerDash':
+      case 'stunDash':
+        this.dashT = 0.28;
+        this.dashDir.copy(this.facing);
+        this.dashHit.clear();
+        this.dashSpec = id === 'stunDash' ? { dmg: 30, stun: 3 } : { dmg: 40, stun: 0 };
+        break;
+      case 'shockwave':
+        for (const e of enemyMgr.alive()) {
+          const d = e.pos.distanceTo(this.pos);
+          if (d < 6.5) {
+            const dir = new THREE.Vector3().subVectors(e.pos, this.pos).normalize();
+            e.pos.addScaledVector(dir, 4);
+            enemyMgr.damage(e, this.dmgMult * 25, null);
+          }
+        }
+        break;
+      case 'frostNova':
+        for (const e of enemyMgr.alive()) {
+          if (e.pos.distanceTo(this.pos) < 7) enemyMgr.stun(e, 4);
+        }
+        break;
+    }
+  }
+
+  // ---------- derived stats ----------
+  recompute() {
+    const equipped = (slot) => itemById(this.equipment[slot]);
+    const oldMax = this.maxHp || 100;
+    let hp = 100, speedMult = 1;
+    for (const slot of ['head', 'chest', 'boots']) {
+      const it = equipped(slot);
+      if (it?.stats?.hp) hp += it.stats.hp;
+      if (it?.stats?.speed) speedMult += it.stats.speed;
+    }
+    this.maxHp = hp;
+    if (this.maxHp > oldMax) this.hp += this.maxHp - oldMax;
+    this.hp = Math.min(this.hp, this.maxHp);
+    this.speed = 8.5 * speedMult;
+
+    // effective weapon = base weapon + training (range/power/swift tracks)
+    const base = equipped('weapon')?.weapon || itemById('fists').weapon;
+    const s = this.stats;
+    this.weapon = {
+      ...base,
+      dmg: base.dmg * (1 + 0.05 * s.power),
+      cd: base.cd * (1 - 0.04 * s.swift),
+      range: base.range + (base.kind === 'bow' ? 2.0 : 0.1) * s.range,
+    };
+    this.attackRange = this.weapon.range; // aim marker clamps to this
+    this.pet = equipped('pet')?.pet || null;
+    this.orb = equipped('orb')?.orb || null;
+
+    this._refreshWeaponMeshes();
+  }
+
+  applyStun(sec) {
+    if (this.dead) return;
+    this.stunT = Math.max(this.stunT, sec);
+    this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.3), '⚡ Stunned!', '#ffe94a');
+    this.hooks.onHurt?.();
+  }
+
+  get dmgMult() { return this.rageT > 0 ? 1.5 : 1; }
+  get cdMult() { return this.hasteT > 0 ? 0.5 : 1; }
+
+  _refreshWeaponMeshes() {
+    const { rightSocket, leftSocket } = this.mesh.userData;
+    rightSocket.clear();
+    leftSocket.clear();
+    if (this.weapon.kind === 'melee' && this.weapon.tier > 0) {
+      const axe = makeAxe(this.weapon.tier);
+      axe.rotation.x = -0.2;
+      rightSocket.add(axe);
+    }
+    if (this.weapon.kind === 'bow') leftSocket.add(makeBow(this.weapon.tier));
+  }
+
+  // ---------- progression ----------
+  addXp(n) {
+    this.xp += n;
+    while (this.level < MAX_LEVEL && this.xp >= XP_LEVELS[this.level + 1]) {
+      this.level++;
+      this.hooks.onLevelUp(this.level);
+    }
+  }
+
+  xpProgress() {
+    if (this.level >= MAX_LEVEL) return 1;
+    const cur = XP_LEVELS[this.level], next = XP_LEVELS[this.level + 1];
+    return (this.xp - cur) / (next - cur);
+  }
+
+  takeDamage(dmg) {
+    if (this.dead) return;
+    this.hp -= dmg;
+    audio.sfx('hit', 0.45, 120);
+    this.hooks.onHurt?.();
+    if (this.hp <= 0) {
+      this.hp = 0;
+      this.dead = true;
+      this.hooks.onDeath();
+    }
+  }
+
+  // ---------- per-frame ----------
+  update(dt, ctx) {
+    const { input, world, enemyMgr, projectiles, aimPoint } = ctx;
+    this._updateLevelFx(dt); // cosmetic — keeps animating regardless of state
+    if (this.dead) return;
+
+    // timed effects
+    this.hasteT = Math.max(0, this.hasteT - dt);
+    this.rageT = Math.max(0, this.rageT - dt);
+    for (const id in this.spellCds) this.spellCds[id] = Math.max(0, this.spellCds[id] - dt);
+
+    // stunned: frozen in place, can't move or attack
+    if (this.stunT > 0) {
+      this.stunT -= dt;
+      this.mesh.position.set(this.pos.x, world.heightAt(this.pos.x, this.pos.z), this.pos.z);
+      this.attackCd -= dt;
+      this._updateSlashes(dt);
+      return;
+    }
+
+    // -- dash overrides normal movement --
+    let moving = false;
+    if (this.dashT > 0) {
+      this.dashT -= dt;
+      this.pos.addScaledVector(this.dashDir, 34 * dt);
+      world.collide(this.pos, 0.45);
+      this._applyBounds(ctx);
+      for (const e of enemyMgr.alive()) {
+        if (this.dashHit.has(e.id)) continue;
+        if (e.pos.distanceTo(this.pos) < 1.7 + e.hitR) {
+          this.dashHit.add(e.id);
+          if (this.dashSpec.stun) enemyMgr.stun(e, this.dashSpec.stun);
+          enemyMgr.damage(e, this.dmgMult * this.dashSpec.dmg, this.dashDir);
+        }
+      }
+      moving = true;
+      this.walkT += dt * 20;
+    } else {
+      let mx = input.moveX, mz = input.moveZ;
+      moving = mx !== 0 || mz !== 0;
+      if (moving) {
+        const len = Math.hypot(mx, mz);
+        mx /= len; mz /= len;
+        this.pos.x += mx * this.speed * dt;
+        this.pos.z += mz * this.speed * dt;
+        world.collide(this.pos, 0.45);
+        this._applyBounds(ctx);
+        this.walkT += dt * this.speed;
+      }
+    }
+
+    // -- aim: face the mouse point --
+    this.facing.set(aimPoint.x - this.pos.x, 0, aimPoint.z - this.pos.z);
+    if (this.facing.lengthSq() < 0.01) this.facing.set(0, 0, -1);
+    this.facing.normalize();
+    this.mesh.position.set(this.pos.x, world.heightAt(this.pos.x, this.pos.z), this.pos.z);
+    // local +z toward the aim point, so arm swings (toward +z) punch forward
+    this.mesh.rotation.y = Math.atan2(this.facing.x, this.facing.z);
+
+    // -- attack with the equipped weapon --
+    this.attackCd -= dt;
+    if (input.attack && this.attackCd <= 0 && this.dashT <= 0) {
+      if (this.weapon.kind === 'bow') this._doShoot(projectiles);
+      else this._doMelee(world, enemyMgr, ctx.pickups);
+    }
+
+    this._animate(dt, moving);
+    this._updateSlashes(dt);
+  }
+
+  _clampToWorld() {
+    this.pos.x = Math.max(-WORLD.halfWidth, Math.min(WORLD.halfWidth, this.pos.x));
+    this.pos.z = Math.min(WORLD.southEdge, this.pos.z);
+  }
+
+  // Bounds depend on the mode: arena circle (PvP duel), square map (MOBA),
+  // or the survival world strip.
+  _applyBounds(ctx) {
+    const zone = ctx.arenaZone;
+    if (zone) {
+      const dx = this.pos.x - zone.x, dz = this.pos.z - zone.z;
+      const d = Math.hypot(dx, dz);
+      const maxR = zone.r - 0.6;
+      if (d > maxR) {
+        this.pos.x = zone.x + (dx / d) * maxR;
+        this.pos.z = zone.z + (dz / d) * maxR;
+      }
+      return;
+    }
+    if (ctx.mobaBounds) {
+      const h = ctx.mobaBounds - 1;
+      this.pos.x = Math.max(-h, Math.min(h, this.pos.x));
+      this.pos.z = Math.max(-h, Math.min(h, this.pos.z));
+      return;
+    }
+    this._clampToWorld();
+  }
+
+  // Bring a dead player back (multiplayer respawn / post-duel return).
+  revive(hpFrac = 1) {
+    this.dead = false;
+    this.hp = Math.max(1, Math.round(this.maxHp * hpFrac));
+    this.stunT = 0;
+    this.dashT = 0;
+  }
+
+  _inArc(tx, tz, maxDist, extraR = 0) {
+    const dx = tx - this.pos.x, dz = tz - this.pos.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist > maxDist + extraR) return false;
+    if (dist < 0.4) return true;
+    const dot = (dx / dist) * this.facing.x + (dz / dist) * this.facing.z;
+    return dot > 0.45; // ~±63°
+  }
+
+  // Visible swing arc — a crescent that sweeps and fades with the strike.
+  // Its outer radius matches the weapon's melee reach so the effect never
+  // looks bigger than the actual hit range.
+  _spawnSlash() {
+    const r = this.weapon.range;
+    const geo = new THREE.RingGeometry(r * 0.4, r, 14, 1, Math.PI / 2 - 1.1, 2.2);
+    geo.rotateX(Math.PI / 2); // arc lies flat, centered on local +z
+    const mat = new THREE.MeshBasicMaterial({
+      color: this.weapon.tier > 0 ? 0xffd98a : 0xffffff,
+      transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    const baseRy = Math.atan2(this.facing.x, this.facing.z);
+    mesh.position.set(this.pos.x, this.mesh.position.y + 0.85, this.pos.z);
+    mesh.rotation.y = baseRy - 0.5;
+    this.scene.add(mesh);
+    this.slashes.push({ mesh, baseRy, t: 0, life: 0.2 });
+  }
+
+  // ---------- level-up burst ----------
+  // Golden shockwave rings, a rising light column and a shower of sparks around
+  // the player. Purely cosmetic; pieces live in this.levelFx and self-dispose.
+  spawnLevelUpEffect() {
+    const cx = this.pos.x, cz = this.pos.z;
+    const baseY = this.mesh.position.y;
+    const GOLD = 0xffd24a, PALE = 0xfff2b0;
+
+    // two expanding ground rings
+    for (let r = 0; r < 2; r++) {
+      const geo = new THREE.RingGeometry(0.5, 0.75, 40);
+      geo.rotateX(-Math.PI / 2);
+      const mat = new THREE.MeshBasicMaterial({
+        color: r ? PALE : GOLD, transparent: true, opacity: 0.85,
+        side: THREE.DoubleSide, depthWrite: false,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(cx, baseY + 0.06, cz);
+      this.scene.add(mesh);
+      this.levelFx.push({ mesh, t: 0, life: 0.75, delay: r * 0.12, kind: 'ring' });
+    }
+
+    // vertical light column
+    const colGeo = new THREE.CylinderGeometry(0.7, 0.7, 4.5, 20, 1, true);
+    const colMat = new THREE.MeshBasicMaterial({
+      color: GOLD, transparent: true, opacity: 0.5,
+      side: THREE.DoubleSide, depthWrite: false,
+    });
+    const col = new THREE.Mesh(colGeo, colMat);
+    col.position.set(cx, baseY + 2.25, cz);
+    this.scene.add(col);
+    this.levelFx.push({ mesh: col, t: 0, life: 0.7, delay: 0, kind: 'column' });
+
+    // spark shower
+    for (let i = 0; i < 16; i++) {
+      const s = new THREE.Mesh(
+        new THREE.BoxGeometry(0.11, 0.11, 0.11),
+        new THREE.MeshBasicMaterial({ color: i % 2 ? PALE : GOLD, transparent: true, opacity: 1, depthWrite: false }),
+      );
+      const ang = (i / 16) * Math.PI * 2 + Math.random() * 0.3;
+      const spd = 3 + Math.random() * 3.5;
+      s.position.set(cx, baseY + 0.4, cz);
+      this.scene.add(s);
+      this.levelFx.push({
+        mesh: s, t: 0, life: 0.6 + Math.random() * 0.3, delay: 0, kind: 'spark',
+        vel: new THREE.Vector3(Math.cos(ang) * spd, 6 + Math.random() * 3, Math.sin(ang) * spd),
+      });
+    }
+  }
+
+  _updateLevelFx(dt) {
+    for (let i = this.levelFx.length - 1; i >= 0; i--) {
+      const f = this.levelFx[i];
+      if (f.delay > 0) { f.delay -= dt; continue; }
+      f.t += dt;
+      const k = Math.min(1, f.t / f.life);
+      const m = f.mesh;
+      if (f.kind === 'ring') {
+        const s = 0.4 + k * 3.2;
+        m.scale.set(s, 1, s);
+        m.material.opacity = 0.85 * (1 - k);
+      } else if (f.kind === 'column') {
+        m.scale.set(1 + k * 0.4, 1, 1 + k * 0.4);
+        m.position.y += dt * 1.5;
+        m.material.opacity = 0.5 * (1 - k);
+      } else { // spark
+        f.vel.y -= 16 * dt; // gravity
+        m.position.addScaledVector(f.vel, dt);
+        m.rotation.x += dt * 8; m.rotation.y += dt * 6;
+        m.material.opacity = 1 - k;
+      }
+      if (f.t >= f.life) {
+        this.scene.remove(m);
+        m.geometry.dispose();
+        m.material.dispose();
+        this.levelFx.splice(i, 1);
+      }
+    }
+  }
+
+  _updateSlashes(dt) {
+    for (let i = this.slashes.length - 1; i >= 0; i--) {
+      const s = this.slashes[i];
+      s.t += dt;
+      const k = Math.min(1, s.t / s.life);
+      s.mesh.rotation.y = s.baseRy - 0.5 + k * 1.1;         // sweep across the arc
+      s.mesh.material.opacity = 0.7 * (1 - k);
+      s.mesh.scale.setScalar(0.92 + k * 0.08);              // settles at 1.0 = full reach
+      if (s.t >= s.life) {
+        this.scene.remove(s.mesh);
+        s.mesh.geometry.dispose();
+        s.mesh.material.dispose();
+        this.slashes.splice(i, 1);
+      }
+    }
+  }
+
+  _doMelee(world, enemyMgr, pickups) {
+    const w = this.weapon;
+    this.attackCd = w.cd * this.cdMult;
+    this.attackDur = Math.min(0.34, w.cd * 0.8);
+    this.attackT = this.attackDur;
+    this._spawnSlash();
+    audio.sfx('attack_melee', 0.4);
+
+    for (const e of enemyMgr.alive()) {
+      if (this._inArc(e.pos.x, e.pos.z, w.range, e.hitR)) {
+        enemyMgr.damage(e, this.dmgMult * w.dmg, this.facing);
+      }
+    }
+
+    // chop the nearest tree in the arc
+    const trees = world.treesNear(this.pos, w.range + 0.6)
+      .filter(t => this._inArc(t.x, t.z, w.range, t.radius))
+      .sort((a, b) => (a.x - this.pos.x) ** 2 + (a.z - this.pos.z) ** 2
+                    - ((b.x - this.pos.x) ** 2 + (b.z - this.pos.z) ** 2));
+    if (trees.length) {
+      if (w.chop > 0) {
+        const tree = trees[0];
+        const wood = world.chop(tree, w.chop, this.pos);
+        this.hooks.onChop?.(tree, w.chop); // co-op keeps the partner's forest in sync
+        if (wood > 0) {
+          // wood falls out of the tree as collectible drops
+          const dropPos = new THREE.Vector3(tree.x, 0, tree.z);
+          const piles = Math.min(3, Math.max(1, Math.round(wood / 3)));
+          let left = wood;
+          for (let i = 0; i < piles; i++) {
+            const amount = i === piles - 1 ? left : Math.ceil(wood / piles);
+            left -= amount;
+            pickups.spawn('wood', amount, dropPos, 1.2);
+          }
+        }
+      } else if (!this.hintedAxe) {
+        this.hintedAxe = true;
+        this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2), 'You need an axe to chop trees!', '#ffcc66');
+      }
+    }
+  }
+
+  _doShoot(projectiles) {
+    const w = this.weapon;
+    this.attackCd = w.cd * this.cdMult;
+    this.attackDur = 0.25;
+    this.attackT = 0.25;
+    audio.sfx('attack_ranged', 0.4);
+    const speed = 24;
+    const origin = this.pos.clone().add(this.facing.clone().multiplyScalar(0.6)).setY(this.mesh.position.y + 1.1);
+    projectiles.spawnArrow(origin, this.facing.clone(), {
+      dmg: this.dmgMult * w.dmg, pierce: w.pierce, speed,
+      life: w.range / speed, // arrows fall dead at the weapon's max range
+    });
+  }
+
+  _animate(dt, moving) {
+    const { leftLeg, rightLeg, leftArm, rightArm, rightSocket } = this.mesh.userData;
+    const swing = moving ? Math.sin(this.walkT * 1.4) * 0.55 : 0;
+    leftLeg.rotation.x = swing;
+    rightLeg.rotation.x = -swing;
+
+    const bowEquipped = this.weapon.kind === 'bow';
+    if (this.attackT > 0) {
+      this.attackT -= dt;
+      const k = 1 - Math.max(0, this.attackT) / this.attackDur; // 0 → 1 over the swing
+      if (bowEquipped) {
+        leftArm.rotation.x = -1.5;
+        rightArm.rotation.x = -1.2 * Math.sin(k * Math.PI);
+      } else {
+        // real chop: wind up behind the shoulder, then whip down through the arc
+        const windup = 0.85 * Math.min(1, k / 0.3);
+        const strike = k <= 0.3 ? 0 : (k - 0.3) / 0.7;
+        const whip = strike * strike * (3 - 2 * strike); // smoothstep
+        rightArm.rotation.x = windup * (1 - whip) - 2.6 * whip;
+        rightArm.rotation.z = -0.35 * Math.sin(k * Math.PI); // slight diagonal sweep
+        rightSocket.rotation.x = -1.1 * whip * (1 - strike * 0.4); // wrist flick
+      }
+    } else {
+      rightArm.rotation.x = -swing * 0.6;
+      rightArm.rotation.z = 0;
+      rightSocket.rotation.x = 0;
+      leftArm.rotation.x = bowEquipped ? -0.5 : swing * 0.6;
+    }
+  }
+
+  // Plain-data state for future multiplayer snapshots.
+  snapshot() {
+    return {
+      x: +this.pos.x.toFixed(2), z: +this.pos.z.toFixed(2),
+      fx: +this.facing.x.toFixed(2), fz: +this.facing.z.toFixed(2),
+      hp: Math.round(this.hp), xp: this.xp, level: this.level,
+      meat: this.meat, wood: this.wood, stats: { ...this.stats },
+      eq: { ...this.equipment }, items: [...this.itemsOwned], spells: [...this.spellSlots],
+    };
+  }
+}

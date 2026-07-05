@@ -1,0 +1,623 @@
+// ---- Among The Woods: game bootstrap & main loop ----
+
+import * as THREE from 'three';
+import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOBA,
+         biomeIndexAt, progressAt, itemById, spellById } from './config.js';
+import { makeAimArc, updateAimArc } from './models.js';
+import { audio } from './audio.js';
+import { input } from './input.js';
+import { World } from './world.js';
+import { MobaWorld } from './mobaworld.js';
+import { Moba } from './moba.js';
+import { Player } from './player.js';
+import { EnemyManager } from './enemies.js';
+import { Projectiles } from './projectiles.js';
+import { Companions } from './companions.js';
+import { Pickups, pickupSfx } from './pickups.js';
+import { Minimap, MobaMinimap } from './minimap.js';
+import { UI } from './ui.js';
+import { Panels } from './panels.js';
+
+// ---------- renderer / scene ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.getElementById('game').appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(BIOMES[0].fog, 35, 110);
+scene.background = new THREE.Color(BIOMES[0].sky);
+
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 300);
+
+const hemi = new THREE.HemisphereLight(0xdfeadf, 0x3a4a35, 0.9);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xfff2dd, 1.4);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -40; sun.shadow.camera.right = 40;
+sun.shadow.camera.top = 40; sun.shadow.camera.bottom = -40;
+sun.shadow.camera.far = 120;
+scene.add(sun, sun.target);
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ---------- game state ----------
+const game = {
+  mode: 'menu',   // menu | play | dead | won
+  kind: 'survival', // survival | moba
+  paused: false,
+  time: 0,
+  biomeIndex: 0,
+  seed: 20260704,
+  // Serializable world snapshot for future multiplayer (host → guests).
+  snapshot() {
+    return {
+      t: Math.round(game.time * 1000),
+      seed: game.seed,
+      p: { u_local: player.snapshot() },
+      e: enemyMgr.snapshot(),
+    };
+  },
+};
+
+// multiplayer session (loaded on demand from the menu; null in solo play)
+let mp = null;
+// MOBA state (created when the mode starts)
+let moba = null;
+let mobaMini = null;
+let mobaSide = 'player';
+const combatMgr = () => {
+  if (mp?.active) return mp.combatMgr();
+  if (game.kind === 'moba') return moba.hostileMgr('player');
+  return enemyMgr;
+};
+
+const ui = new UI({
+  // the Single Player button starts whichever mode is selected in the menu
+  onStart: () => (selectedMode === 'moba' ? startMobaSolo() : startGame()),
+  onCastSpell: (i) => player.castSpell(i, { enemyMgr: combatMgr() }),
+});
+
+const panels = new Panels({
+  // in multiplayer the world can't stop for one player's shopping trip
+  onPauseChange: (open) => { game.paused = open && !mp?.active; ui.setPaused(false); },
+  onBuyItem: buyItem,
+  onBuySpell: buySpell,
+  onBuyStat: buyStat,
+  onEquip: (id) => { player.equip(id); panels.refresh(); },
+  onUnequip: (slot) => { player.unequip(slot); panels.refresh(); },
+  onToggleSpell: (id) => { player.toggleSpellSlot(id); panels.refresh(); },
+  onBuild: (id, lane) => buildBase(id, lane),
+  mobaTeam: () => mobaSide,
+});
+
+let world = new World(scene, game.seed);
+
+const player = new Player(scene, {
+  popup: (pos, text, color) => ui.popup(pos, text, color),
+  onHurt: () => ui.hurtFlash(),
+  onLevelUp: (level) => {
+    audio.sfx('evolve', 0.55);
+    player.spawnLevelUpEffect();
+    const freshItems = ITEMS.filter(i => i.level === level).map(i => i.name);
+    const freshSpells = SPELLS.filter(s => s.level === level).map(s => s.name);
+    const fresh = [...freshItems, ...freshSpells];
+    ui.toast(`⭐ Level ${level}!` + (fresh.length ? ` New: ${fresh.join(', ')}` : ''), 'level');
+    audio.sfx('evolve_ready', 0.4);
+    ui.pulseShopButton(true);
+  },
+  onDeath: () => {
+    if (game.kind === 'moba') { mobaRespawn(); return; }   // MOBA: respawn at base
+    if (mp?.active && mp.handleLocalDeath()) return;       // MP: arena loss / respawn
+    game.mode = 'dead';
+    aimArc.visible = false;
+    audio.stopMusic();
+    audio.sfx('defeat', 0.6);
+    ui.showEnd(false, endStats());
+  },
+  onEquipChange: () => companions.sync(player),
+  onChop: (tree, power) => mp?.sendChop(tree, power),
+});
+panels.player = player;
+
+// Apply a pickup's contents to the LOCAL player (used by direct collection
+// and by the co-op 'grant' event from the host).
+function grantPickup(kind, payload) {
+  if (kind === 'meat') {
+    player.meat += payload;
+    ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2), `+${payload} 🍖`, '#ff9d76');
+  } else if (kind === 'wood') {
+    player.wood += payload;
+    ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2), `+${payload} 🪵`, '#d8a468');
+  } else if (kind === 'item') {
+    const item = itemById(payload);
+    player.ownItem(payload);
+    ui.toast(`🎁 Loot: ${item.icon} ${item.name}!`, 'level');
+    panels.refresh();
+  }
+  pickupSfx[kind]();
+}
+
+const pickups = new Pickups(scene, world, {
+  onCollect: (p, target) => {
+    if (target === player) grantPickup(p.kind, p.payload);
+    else mp?.onRemoteCollect(p); // co-op host: the partner's proxy grabbed it
+  },
+});
+
+function discoverType(type) {
+  panels.discover(type);
+  const cfg = ENEMY_TYPES[type];
+  ui.toast(`🆕 New creature discovered: ${cfg.icon} ${cfg.name}! (see Bestiary — N)`, 'discover');
+  audio.sfx('evolve_ready', 0.35);
+}
+
+const enemyMgr = new EnemyManager(scene, world, {
+  popup: (pos, text, color) => ui.popup(pos, text, color),
+  onKill: (enemy) => {
+    // co-op: XP goes to whoever landed the killing blow
+    const creditedToPartner = mp?.active && mp.onKillCredit(enemy);
+    if (!creditedToPartner) {
+      player.kills++;
+      player.addXp(enemy.xp);
+      ui.popup(enemy.mesh.position.clone().setY(enemy.mesh.position.y + 2.1), `+${enemy.xp} XP`, '#c9a4ff');
+    }
+    // meat falls to the ground and is magnet-collected (shared in co-op)
+    const piles = Math.min(4, Math.max(1, Math.round(enemy.meat / 2)));
+    let left = enemy.meat;
+    for (let i = 0; i < piles; i++) {
+      const amount = i === piles - 1 ? left : Math.ceil(enemy.meat / piles);
+      left -= amount;
+      pickups.spawn('meat', amount, enemy.pos, 0.9 * enemy.sizeMult);
+    }
+    if (enemy.bossRank > 0) rollBossDrop(enemy);
+  },
+  onDiscover: discoverType,
+  onBossSpawn: (enemy) => {
+    ui.addTracker('boss' + enemy.id,
+      () => enemy.mesh.parent ? enemy.mesh.position.clone().setY(enemy.mesh.position.y + 2.6 * enemy.sizeMult) : null,
+      '💀'.repeat(enemy.bossRank), 'skulls');
+    ui.toast(`${'💀'.repeat(enemy.bossRank)} A pack mother appears! Her children keep coming until she falls.`, 'boss');
+  },
+  onBossDeath: (enemy) => ui.removeTracker('boss' + enemy.id),
+  // HP bar above every enemy (+ spell charge bar for casters)
+  onSpawn: (enemy) => {
+    const ranged = enemy.cfg.ranged;
+    const shotColor = ranged ? '#' + enemy.cfg.shotColor.toString(16).padStart(6, '0') : '';
+    const html = '<div class="hpbar"><div class="hpbar-fill"></div></div>' +
+      (ranged ? `<div class="castbar"><div class="castbar-fill" style="background:${shotColor}"></div></div>` : '');
+    ui.addTracker('hp' + enemy.id,
+      () => enemy.mesh.parent ? enemy.mesh.position.clone().setY(enemy.mesh.position.y + 1.5 * enemy.sizeMult + 0.5) : null,
+      html, 'hpwrap',
+      (el) => {
+        const pct = Math.max(0, enemy.hp / enemy.maxHp);
+        const fill = el.children[0].firstChild;
+        fill.style.width = (pct * 100) + '%';
+        fill.style.background = pct > 0.5 ? '#5fd35f' : pct > 0.25 ? '#e0c040' : '#e05050';
+        if (ranged) {
+          const charge = 1 - Math.max(0, enemy.spellTimer) / enemy.cfg.spellCd;
+          el.children[1].firstChild.style.width = (charge * 100) + '%';
+        }
+      });
+  },
+  onRemove: (enemy) => ui.removeTracker('hp' + enemy.id),
+});
+
+const projectiles = new Projectiles(scene);
+const companions = new Companions(scene);
+const minimap = new Minimap(document.getElementById('minimap'), world);
+
+// Boss loot: a chance to drop an unowned item near the player's level.
+function rollBossDrop(enemy) {
+  const rank = BOSS_RANKS[enemy.bossRank - 1];
+  if (Math.random() >= rank.dropChance) return;
+  const candidates = ITEMS.filter(i =>
+    !i.free && !player.hasItem(i.id) && i.level <= player.level + 1);
+  if (!candidates.length) { pickups.spawn('meat', 5, enemy.pos, 1); return; }
+  const item = candidates[Math.floor(Math.random() * candidates.length)];
+  pickups.spawn('item', item.id, enemy.pos, 0.5);
+}
+
+function endStats() {
+  const m = Math.floor(game.time / 60), s = Math.floor(game.time % 60);
+  return {
+    level: player.level,
+    kills: player.kills,
+    distance: Math.max(0, Math.round(-player.pos.z)),
+    wood: player.wood,
+    time: `${m}:${String(s).padStart(2, '0')}`,
+  };
+}
+
+// Shared entry into play mode (solo start button + multiplayer session begin).
+function startPlaying() {
+  ui.hideMenu();
+  game.mode = 'play';
+  audio.playMusic('level1');
+  // survival only — and the co-op guest renders the HOST's enemies
+  if (game.kind === 'survival' && !(mp?.active && mp.mode === 'coop' && !mp.isHost)) {
+    enemyMgr.spawnInitialWave();
+  }
+}
+
+function startGame() {
+  startPlaying();
+  ui.toast('Head north! Move the mouse to aim. Space / Left click to attack.', 'info');
+}
+
+// ---------- MOBA mode ----------
+// Swap the survival strip for the square three-lane map and place the hero.
+function setupMobaWorld(seed, side) {
+  game.kind = 'moba';
+  mobaSide = side;
+  world.dispose();
+  world = new MobaWorld(scene, seed);
+  pickups.world = world;
+  enemyMgr.world = world;
+  game.seed = seed;
+  const bp = MOBA.basePos[side];
+  const inward = side === 'player' ? 1 : -1;
+  player.pos.set(bp.x + 9 * inward, 0, bp.z - 9 * inward);
+  player.meat = 15;
+  $id('base-btn').classList.remove('hidden');
+  window.__game.world = world;
+}
+
+function mobaHooks() {
+  return {
+    popup: (pos, text, color) => ui.popup(pos, text, color),
+    discover: discoverType,
+    rewardLocal: (xp, meat, pos) => {
+      if (xp > 0) {
+        player.addXp(xp);
+        ui.popup(pos.clone().setY(2), `+${xp} XP`, '#c9a4ff');
+      }
+      if (meat > 0) pickups.spawn('meat', meat, pos, 0.8);
+    },
+    rewardPartner: (xp, meat) => mp?.sendMobaReward?.(xp, meat),
+    onBuilt: () => panels.refresh(),
+    onEnd: (playerWon) => {
+      const iWon = mobaSide === 'player' ? playerWon : !playerWon;
+      mp?.sendMobaEnd?.(!iWon); // tell the partner whether THEY won
+      endMoba(iWon);
+    },
+  };
+}
+
+function endMoba(iWon) {
+  if (game.mode !== 'play') return;
+  game.mode = iWon ? 'won' : 'dead';
+  aimArc.visible = false;
+  audio.stopMusic();
+  audio.sfx(iWon ? 'victory' : 'defeat', 0.6);
+  const end = document.getElementById('end-title');
+  ui.showEnd(iWon, endStats());
+  end.textContent = iWon ? 'Enemy base destroyed — VICTORY!' : 'Your base has fallen…';
+}
+
+function startMobaSolo() {
+  setupMobaWorld(Math.floor(Math.random() * 1e9), 'player');
+  moba = new Moba(scene, world, player, projectiles, pickups, ui, mobaHooks());
+  panels.moba = moba;
+  mobaMini = new MobaMinimap(document.getElementById('minimap'), moba);
+  startPlaying();
+  ui.toast('🏰 MOBA! Farm the jungle camps, then build Creep Dens & Towers (shop → Base tab).', 'level');
+}
+
+function mobaRespawn() {
+  ui.toast('☠️ You fell — respawning at your base…', 'boss');
+  setTimeout(() => {
+    if (game.mode !== 'play') return;
+    player.revive(1);
+    const bp = MOBA.basePos[mobaSide];
+    const inward = mobaSide === 'player' ? 1 : -1;
+    player.pos.set(bp.x + 9 * inward, 0, bp.z - 9 * inward);
+  }, 3000 + player.level * 500);
+}
+
+// Base tab purchases (solo & multiplayer; the MP guest builds via events).
+function buildBase(id, lane) {
+  const view = panels.moba;
+  if (!view) return;
+  const info = view.buildingInfo(mobaSide, id, lane);
+  if (!info.cost) return;
+  if (!Object.entries(info.cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
+  for (const [k, v] of Object.entries(info.cost)) player[k] -= v;
+  if (view === moba) moba.build('player', id, lane);
+  else { mp.sendMobaBuild(id, lane); view.registerBuild(id, lane); }
+  audio.sfx('purchase', 0.5);
+  panels.refresh();
+}
+
+// ---------- multiplayer lobby ----------
+const $id = (id) => document.getElementById(id);
+
+async function ensureMp() {
+  if (!mp) {
+    const { Multiplayer } = await import('./multiplayer.js');
+    mp = new Multiplayer({
+      scene, player, enemyMgr, pickups, projectiles, ui, panels, game, input,
+      get world() { return world; }, // MOBA swaps the world object at begin
+      popup: (pos, text, color) => ui.popup(pos, text, color),
+      onDiscover: discoverType,
+      grantPickup,
+      startPlaying,
+      onCoopWin: () => {
+        if (game.mode !== 'play') return;
+        game.mode = 'won';
+        audio.stopMusic();
+        audio.sfx('victory', 0.6);
+        ui.showEnd(true, endStats());
+      },
+      // ---- MOBA multiplayer wiring ----
+      setupMobaWorld,
+      createMobaHost: (seed) => {
+        setupMobaWorld(seed, 'player');
+        moba = new Moba(scene, world, player, projectiles, pickups, ui, mobaHooks());
+        moba.aiEnabled = false; // the other player IS the enemy team
+        panels.moba = moba;
+        mobaMini = new MobaMinimap(document.getElementById('minimap'), moba);
+        return moba;
+      },
+      attachMobaGuest: (seed, shadowView) => {
+        setupMobaWorld(seed, 'enemy');
+        panels.moba = shadowView;
+        mobaMini = new MobaMinimap(document.getElementById('minimap'), shadowView);
+      },
+      endMoba,
+    });
+    window.__game.mp = mp;
+  }
+  return mp;
+}
+
+function mpError(err) { $id('mp-error').textContent = err?.message || String(err); }
+
+// ---- main menu: pick a mode first, then solo / multiplayer ----
+let selectedMode = 'survival';
+
+function showModeOptions(mode) {
+  audio.sfx('click', 0.4);
+  selectedMode = mode;
+  $id('mode-select').classList.add('hidden');
+  const opts = $id('mode-options');
+  opts.classList.remove('hidden');
+  opts.classList.toggle('is-moba', mode === 'moba');
+  $id('mode-title').textContent = mode === 'moba' ? '🏰 MOBA' : '🌲 Survival';
+}
+$id('mode-survival-btn').addEventListener('click', () => showModeOptions('survival'));
+$id('mode-moba-btn').addEventListener('click', () => showModeOptions('moba'));
+$id('mode-back-btn').addEventListener('click', () => {
+  audio.sfx('click', 0.4);
+  $id('mode-options').classList.add('hidden');
+  $id('mode-select').classList.remove('hidden');
+  $id('mp-error').textContent = '';
+});
+$id('mp-moba-btn').addEventListener('click', async () => {
+  try {
+    const session = await ensureMp();
+    showWaiting(await session.host('moba', null));
+  } catch (e) { mpError(e); }
+});
+function showWaiting(code) {
+  $id('mp-choose').classList.add('hidden');
+  $id('mp-wait').classList.remove('hidden');
+  $id('mp-code-display').textContent = code;
+  $id('start-btn').classList.add('hidden'); // no solo start while hosting
+}
+$id('mp-coop-btn').addEventListener('click', async () => {
+  try {
+    const session = await ensureMp();
+    showWaiting(await session.host('coop', null));
+  } catch (e) { mpError(e); }
+});
+$id('mp-pvp-btn').addEventListener('click', async () => {
+  try {
+    const session = await ensureMp();
+    const interval = Number($id('mp-interval').value);
+    showWaiting(await session.host('pvp', interval));
+  } catch (e) { mpError(e); }
+});
+$id('mp-join-btn').addEventListener('click', async () => {
+  try {
+    const session = await ensureMp();
+    await session.join($id('mp-code').value);
+  } catch (e) { mpError(e); }
+});
+
+function buyItem(id) {
+  const item = itemById(id);
+  if (!item || player.hasItem(id) || player.level < item.level) return;
+  if (!Object.entries(item.cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
+  for (const [k, v] of Object.entries(item.cost)) player[k] -= v;
+  player.ownItem(id);
+  audio.sfx('purchase', 0.5);
+  panels.refresh();
+}
+
+function buySpell(id) {
+  const spell = spellById(id);
+  if (!spell || player.spellsOwned.has(id) || player.level < spell.level) return;
+  if (!Object.entries(spell.cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
+  for (const [k, v] of Object.entries(spell.cost)) player[k] -= v;
+  player.ownSpell(id);
+  audio.sfx('upgrade', 0.5);
+  panels.refresh();
+}
+
+function buyStat(id) {
+  const track = STAT_TRACKS.find(t => t.id === id);
+  const tier = player.stats[id];
+  if (!track || tier >= track.max || player.level < tier + 1) return;
+  const cost = track.cost(tier + 1);
+  if (!Object.entries(cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
+  for (const [k, v] of Object.entries(cost)) player[k] -= v;
+  player.stats[id]++;
+  player.recompute();
+  audio.sfx('upgrade', 0.5);
+  panels.refresh();
+}
+
+// ---------- keys ----------
+const inPlay = () => game.mode === 'play';
+input.onKey('KeyU', () => inPlay() && panels.toggle('shop'));
+input.onKey('KeyB', () => inPlay() && openBasePanel());
+
+// In MOBA, B (or the 🏰 Base button) jumps straight to the build tab.
+function openBasePanel() {
+  if (game.kind === 'moba') panels.shopTab = 'base';
+  panels.toggle('shop');
+}
+$id('base-btn').addEventListener('click', () => inPlay() && openBasePanel());
+input.onKey('KeyC', () => inPlay() && panels.toggle('character'));
+input.onKey('KeyN', () => inPlay() && panels.toggle('bestiary'));
+input.onKey('KeyQ', () => inPlay() && !game.paused && player.cycleWeapon());
+input.onKey('KeyM', () => audio.toggleMute());
+for (let i = 0; i < 6; i++) {
+  input.onKey('Digit' + (i + 1), () => inPlay() && !game.paused && player.castSpell(i, { enemyMgr: combatMgr() }));
+}
+input.onKey('Escape', () => {
+  if (!inPlay()) return;
+  if (panels.open) { panels.toggle(null); return; }
+  if (mp?.active) return; // the shared world can't pause
+  game.paused = !game.paused;
+  ui.setPaused(game.paused);
+});
+
+// ---------- aiming: the marker is clamped to the equipped weapon's range ----------
+const raycaster = new THREE.Raycaster();
+const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const aimPoint = new THREE.Vector3(0, 0, -10);
+
+// A short arc of the weapon-range circle, shown in the aim direction.
+const aimArc = makeAimArc();
+aimArc.visible = false;
+scene.add(aimArc);
+
+function updateAim() {
+  // normal free cursor: the aim point is exactly where the mouse hits the
+  // ground, and the player simply faces it (no clamping — cursor goes anywhere)
+  raycaster.setFromCamera(new THREE.Vector2(input.mouse.x, input.mouse.y), camera);
+  raycaster.ray.intersectPlane(groundPlane, aimPoint);
+
+  // range arc: a short, ground-hugging slice of the weapon's reach circle in
+  // the facing dir. The bow gets a narrower, thinner slice (its range is huge).
+  const dx = aimPoint.x - player.pos.x, dz = aimPoint.z - player.pos.z;
+  const range = player.attackRange;
+  const bow = player.weapon.kind === 'bow';
+  const halfAngle = bow ? 0.22 : 0.55;
+  const thickness = bow ? 0.35 : Math.min(0.5, range * 0.22);
+  aimArc.visible = true;
+  updateAimArc(aimArc, player.pos.x, player.pos.z, Math.atan2(dx, dz),
+    range, halfAngle, thickness, (x, z) => world.heightAt(x, z));
+  aimArc.material.color.setHex(bow ? 0x9fd8ff : 0xffe9a8);
+}
+
+// ---------- biome / atmosphere transitions ----------
+const fogColor = new THREE.Color(BIOMES[0].fog);
+const skyColor = new THREE.Color(BIOMES[0].sky);
+
+function updateAtmosphere(dt) {
+  const idx = biomeIndexAt(player.pos.z);
+  if (idx !== game.biomeIndex) {
+    game.biomeIndex = idx;
+    const biome = BIOMES[idx];
+    ui.banner(`— ${biome.name} —`);
+    audio.sfx('lane_unlock', 0.5);
+    audio.playMusic(idx >= 3 ? 'level3' : 'level1');
+  }
+  const biome = BIOMES[game.biomeIndex];
+  fogColor.lerp(new THREE.Color(biome.fog), Math.min(1, dt * 1.5));
+  skyColor.lerp(new THREE.Color(biome.sky), Math.min(1, dt * 1.5));
+  scene.fog.color.copy(fogColor);
+  scene.background.copy(skyColor);
+}
+
+// ---------- camera ----------
+function updateCamera() {
+  const py = player.mesh.position.y;
+  camera.position.set(player.pos.x, py + 26, player.pos.z + 14);
+  camera.lookAt(player.pos.x, py, player.pos.z - 2);
+  sun.position.set(player.pos.x + 18, 35, player.pos.z + 12);
+  sun.target.position.set(player.pos.x, 0, player.pos.z);
+}
+
+// ---------- main loop ----------
+const clock = new THREE.Clock();
+
+function tick() {
+  requestAnimationFrame(tick);
+  const dt = Math.min(clock.getDelta(), 0.05);
+
+  if (game.mode === 'play' && !game.paused) {
+    game.time += dt;
+    updateAim(dt);
+    const em = combatMgr(); // real mgr / co-op shadow / pvp arena / moba units
+    player.update(dt, {
+      input, world, enemyMgr: em, projectiles, pickups, aimPoint,
+      arenaZone: mp?.active ? mp.arenaZone() : null,
+      mobaBounds: game.kind === 'moba' ? MOBA.half : null,
+    });
+
+    if (game.kind === 'moba') {
+      if (mp?.active) {
+        mp.updateWorldSim(dt);
+        mp.update(dt);
+      } else {
+        moba.update(dt, [{ obj: player, team: 'player' }]);
+        projectiles.update(dt, em, [player]);
+        pickups.update(dt, [player]);
+      }
+      companions.update(dt, player, em, projectiles, world);
+      world.update(dt, player.pos);
+      mobaMini?.update(dt, player);
+      const st = document.getElementById('mp-status');
+      const line = panels.moba?.statusLine?.();
+      if (line) { st.textContent = line; st.classList.remove('hidden'); }
+      ui.updateHUD(player, 0, 'MOBA — destroy the enemy base');
+    } else {
+      if (mp?.active) {
+        mp.updateWorldSim(dt);
+        mp.update(dt);
+      } else {
+        enemyMgr.update(dt, [player], projectiles);
+        projectiles.update(dt, enemyMgr, [player]);
+        pickups.update(dt, [player]);
+      }
+      companions.update(dt, player, em, projectiles, world);
+      world.update(dt, player.pos);
+      minimap.update(dt, player, em);
+      updateAtmosphere(dt);
+
+      const progress = progressAt(player.pos.z);
+      ui.updateHUD(player, progress, BIOMES[game.biomeIndex].name);
+
+      if (player.pos.z <= WORLD.goalZ) {
+        game.mode = 'won';
+        aimArc.visible = false;
+        audio.stopMusic();
+        audio.sfx('victory', 0.6);
+        mp?.broadcastWin();
+        ui.showEnd(true, endStats());
+      }
+    }
+  }
+
+  updateCamera();
+  ui.updateOverlays(dt, camera);
+  renderer.render(scene, camera);
+}
+
+world.update(0, player.pos); // pre-generate the starting forest
+updateCamera();
+tick();
+
+// debug handle (also handy for the future multiplayer host loop)
+window.__game = { game, scene, world, player, enemyMgr, companions, pickups, panels, input, updateAim };
