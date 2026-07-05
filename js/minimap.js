@@ -79,6 +79,17 @@ export class Minimap {
     this.rows = this.cols;
     this.discovered = new Uint8Array(this.cols * this.rows);
     this.redrawT = 0;
+    // zoom levels: how many world meters the minimap shows across. Level 0 is
+    // the default close-up; +/- steps out 3 further (per user request).
+    this.viewSpans = [280, 480, 820, 1400];
+    this.zoom = 0;
+    this.deathAt = null; // last place the player died (⚰️ marker)
+  }
+
+  zoomBy(delta) {
+    this.zoom = Math.max(0, Math.min(this.viewSpans.length - 1, this.zoom + delta));
+    this.redrawT = 0; // redraw immediately
+    return this.zoom;
   }
 
   _cellAt(x, z) {
@@ -116,7 +127,7 @@ export class Minimap {
   _draw(player, enemyMgr, partner = null) {
     const { ctx, canvas } = this;
     const W = canvas.width, H = canvas.height;
-    const SPAN = 280; // world meters shown across the minimap
+    const SPAN = this.viewSpans[this.zoom]; // world meters shown across the minimap
     const scale = W / SPAN;
     const ox = player.pos.x - SPAN / 2, oz = player.pos.z - SPAN / 2;
     const toC = (x, z) => ({ x: (x - ox) * scale, y: (z - oz) * scale });
@@ -167,6 +178,14 @@ export class Minimap {
       }
     }
 
+    // last death spot (also where your dropped loot lies)
+    if (this.deathAt) {
+      const dp = toC(this.deathAt.x, this.deathAt.z);
+      ctx.textAlign = 'center';
+      ctx.font = '12px sans-serif';
+      ctx.fillText('⚰️', Math.max(6, Math.min(W - 6, dp.x)), Math.max(11, Math.min(H - 2, dp.y + 4)));
+    }
+
     // co-op partner: blue dot
     if (partner?.mesh?.visible) {
       const tp = toC(partner.pos.x, partner.pos.z);
@@ -206,6 +225,12 @@ export class Minimap {
     ctx.textAlign = 'center';
     ctx.font = '13px sans-serif';
     ctx.fillText('🏠', W / 2, H / 2 + 4);
+    if (this.deathAt) {
+      const dx = (this.deathAt.x + WORLD.radius) * scale;
+      const dy = (this.deathAt.z + WORLD.radius) * scale;
+      ctx.font = '15px sans-serif';
+      ctx.fillText('⚰️', dx, dy + 5);
+    }
     if (partner?.mesh?.visible) {
       const px = (partner.pos.x + WORLD.radius) * scale;
       const py = (partner.pos.z + WORLD.radius) * scale;

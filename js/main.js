@@ -2,7 +2,7 @@
 
 import * as THREE from 'three';
 import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOBA,
-         RESOURCES, HIDE_BEARING, hideForHp, radiusOf, costFor,
+         RESOURCES, HIDE_BEARING, HIDE_SMALL, HIDE_SMALL_CHANCE, hideForHp, radiusOf, costFor,
          biomeIndexAt, progressAt, itemById, spellById } from './config.js';
 import { makeAimArc, updateAimArc, makeRaft } from './models.js';
 import { Camp } from './camp.js';
@@ -178,9 +178,11 @@ const enemyMgr = new EnemyManager(scene, world, {
       left -= amount;
       pickups.spawn('meat', amount, enemy.pos, 0.9 * enemy.sizeMult);
     }
-    // bigger animals also drop their hide
+    // bigger animals drop their hide; tiny critters occasionally drop a scrap
     if (HIDE_BEARING.has(enemy.type)) {
       pickups.spawn('hide', hideForHp(enemy.maxHp), enemy.pos, 1.1 * enemy.sizeMult);
+    } else if (HIDE_SMALL.has(enemy.type) && Math.random() < HIDE_SMALL_CHANCE) {
+      pickups.spawn('hide', 1, enemy.pos, 0.9);
     }
     if (enemy.bossRank > 0) rollBossDrop(enemy);
   },
@@ -253,6 +255,7 @@ function startPlaying() {
       toast: (text, cls) => ui.toast(text, cls),
     });
     panels.camp = camp;
+    $id('minimap-zoom').classList.remove('hidden');
     player.pos.set(0, 0, -2); // wake up inside the cave
     // treasure islands spawn their loot lazily as their chunk is discovered
     world.onIsland = (lake) => {
@@ -295,6 +298,7 @@ function setupMobaWorld(seed, side) {
   game.kind = 'moba';
   mobaSide = side;
   camp?.dispose(); camp = null; panels.camp = null; // no survival camp in MOBA
+  $id('minimap-zoom').classList.add('hidden');
   world.dispose();
   world = new MobaWorld(scene, seed);
   pickups.world = world;
@@ -373,6 +377,7 @@ function dropHalfMeat(pos) {
 // full level (XP resets to that level's start) and half your meat spills where
 // you fell.
 function survivalRespawn() {
+  minimap.deathAt = { x: player.pos.x, z: player.pos.z }; // mark the death spot
   const dropped = dropHalfMeat(player.pos.clone());
   player.loseLevel();
   player.mesh.rotation.z = Math.PI / 2; // lie down while "out"
@@ -451,6 +456,7 @@ async function ensureMp() {
       onDiscover: discoverType,
       grantPickup,
       dropHalfMeat,
+      markDeath: (pos) => { minimap.deathAt = { x: pos.x, z: pos.z }; },
       startPlaying,
       onCoopWin: () => {
         if (game.mode !== 'play') return;
@@ -598,6 +604,15 @@ function toggleBigMap(force) {
 }
 input.onKey('KeyM', () => toggleBigMap());
 $id('minimap').addEventListener('click', () => toggleBigMap());
+
+// minimap zoom buttons (don't let their clicks open the big map)
+function updateZoomButtons() {
+  $id('mm-zoom-in').disabled = minimap.zoom <= 0;
+  $id('mm-zoom-out').disabled = minimap.zoom >= minimap.viewSpans.length - 1;
+}
+$id('mm-zoom-in').addEventListener('click', (e) => { e.stopPropagation(); minimap.zoomBy(-1); updateZoomButtons(); audio.sfx('click', 0.3); });
+$id('mm-zoom-out').addEventListener('click', (e) => { e.stopPropagation(); minimap.zoomBy(1); updateZoomButtons(); audio.sfx('click', 0.3); });
+updateZoomButtons();
 
 // Walk INTO your home (the cave at first, the upgraded building later) and
 // press E to open the build & upgrade menu.
@@ -808,5 +823,5 @@ updateCamera();
 tick();
 
 // debug handle (also handy for the future multiplayer host loop)
-window.__game = { game, scene, player, enemyMgr, companions, pickups, panels, input, updateAim,
+window.__game = { game, scene, player, enemyMgr, companions, pickups, panels, input, updateAim, minimap,
   get world() { return world; }, get camp() { return camp; } };

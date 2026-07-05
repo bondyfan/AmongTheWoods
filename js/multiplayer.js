@@ -761,6 +761,7 @@ export class Multiplayer {
     // the carried meat spills onto the ground where you fell
     const { ctx } = this;
     const p = ctx.player;
+    ctx.markDeath?.(p.pos);
     const dropped = ctx.dropHalfMeat(p.pos.clone());
     p.loseLevel();
     p.mesh.rotation.z = Math.PI / 2; // lie down while "out"

@@ -79,6 +79,9 @@ export const RES_ICONS = { meat: '🍖', wood: '🪵', stone: '🪨', hide: '�
 // hide drops only from animals that realistically have one
 export const HIDE_BEARING = new Set(['wolf', 'boar', 'elk', 'bear', 'icewolf', 'wendigo', 'yeti']);
 export const hideForHp = (hp) => Math.max(1, Math.round(hp / 80));
+// tiny critters give a scrap of hide too — averaged ~0.1 each (10% chance of 1)
+export const HIDE_SMALL = new Set(['rat', 'bat']);
+export const HIDE_SMALL_CHANCE = 0.1;
 
 // ---- Enemies. Spiders are the weak starter enemy; the animals get bigger
 // and meaner the further north you go. ----
