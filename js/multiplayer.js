@@ -750,15 +750,17 @@ export class Multiplayer {
   handleLocalDeath() {
     if (!this.active) return false;
     if (this.arena.active) { this._onArenaDeath(); return true; }
-    // out in the world: respawn at the spawn clearing — ALL meat is lost
+    // out in the world: respawn at the spawn cottage — a level and ALL meat are lost
     const { ctx } = this;
     const p = ctx.player;
+    p.loseLevel();
     p.meat = 0;
-    ctx.ui.toast('☠️ You fell… respawning at the meadow — all your meat is gone!', 'boss');
+    p.mesh.rotation.z = Math.PI / 2; // lie down while "out"
+    ctx.ui.toast(`☠️ You fell… you wake at the cabin. Level lost (now ${p.level}), meat gone.`, 'boss');
     setTimeout(() => {
       if (!this.active) return;
       p.revive(1);
-      p.pos.set(0, 0, 4);
+      p.pos.set(0, 0, 3);
     }, 3000);
     return true;
   }

@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { WORLD, BIOMES, biomeAt, biomeIndexAt } from './config.js';
 import * as MODELS from './models.js';
-import { makeTree, makeRock, makeGrassTuft, makeFlower, makeMushroom, makeBush, makeLog, makeBoulder } from './models.js';
+import { makeTree, makeRock, makeGrassTuft, makeFlower, makeMushroom, makeBush, makeLog, makeBoulder, makeCottage } from './models.js';
 import { audio } from './audio.js';
 
 const CHUNK = 40;
@@ -69,6 +69,7 @@ export class World {
     for (const f of this.fallingTrees) f.mesh.parent?.remove(f.mesh);
     this.fallingTrees = [];
     this.removeArena();
+    this.obstacles = [];
     this.nextTreeId = 1;
   }
 
@@ -266,6 +267,33 @@ export class World {
     const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
     mesh.receiveShadow = true;
     this._addStatic(mesh);
+    this._buildSpawnPoint();
+  }
+
+  // The starting / revive spot: a stone circle with a small cottage beside it.
+  _buildSpawnPoint() {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(3.4, 4.3, 28),
+      new THREE.MeshLambertMaterial({ color: 0x9a958a }));
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(0, this.heightAt(0, 3) + 0.06, 3);
+    ring.receiveShadow = true;
+    this._addStatic(ring);
+
+    const inner = new THREE.Mesh(
+      new THREE.CircleGeometry(3.4, 28),
+      new THREE.MeshLambertMaterial({ color: 0x7c8a68 }));
+    inner.rotation.x = -Math.PI / 2;
+    inner.position.set(0, this.heightAt(0, 3) + 0.05, 3);
+    inner.receiveShadow = true;
+    this._addStatic(inner);
+
+    const cottage = makeCottage();
+    cottage.position.set(-7, this.heightAt(-7, 5), 5);
+    cottage.rotation.y = 0.5;
+    this._addStatic(cottage);
+    this.obstacles = this.obstacles || [];
+    this.obstacles.push({ x: -7, z: 5, r: 2.4 });
   }
 
   _chunkKey(cx, cz) { return cx + ',' + cz; }
@@ -295,7 +323,7 @@ export class World {
       const x = cxw + rng() * CHUNK;
       const z = czw + rng() * CHUNK;
       if (!inBounds(x, z)) continue;
-      if (x * x + z * z < 40) continue; // keep the spawn clearing open
+      if (x * x + z * z < 100) continue; // keep the spawn clearing (ring + cottage) open
       const size = rng() < 0.45 ? 0 : rng() < 0.75 ? 1 : 2;
       const { mesh, radius } = makeTree(size, biome, rng);
       this._place(mesh, x, z);

@@ -116,11 +116,7 @@ const player = new Player(scene, {
   onDeath: () => {
     if (game.kind === 'moba') { mobaRespawn(); return; }   // MOBA: respawn at base
     if (mp?.active && mp.handleLocalDeath()) return;       // MP: arena loss / respawn
-    game.mode = 'dead';
-    aimArc.visible = false;
-    audio.stopMusic();
-    audio.sfx('defeat', 0.6);
-    ui.showEnd(false, endStats());
+    survivalRespawn();                                      // solo: wake at the cabin
   },
   onEquipChange: () => companions.sync(player),
   onChop: (tree, power) => mp?.sendChop(tree, power),
@@ -309,6 +305,21 @@ function startMobaSolo() {
   mobaMini = new MobaMinimap(document.getElementById('minimap'), moba);
   startPlaying();
   ui.toast('🏰 MOBA! Farm the jungle camps, then build Creep Dens & Towers (shop → Base tab).', 'level');
+}
+
+// Survival death is soft: you wake up at the spawn cottage, but you lose a
+// full level (XP resets to that level's start) and all your meat.
+function survivalRespawn() {
+  player.loseLevel();
+  player.meat = 0;
+  player.mesh.rotation.z = Math.PI / 2; // lie down while "out"
+  audio.sfx('defeat', 0.5);
+  ui.toast(`☠️ You fell… you wake at the cabin. Level lost (now ${player.level}), meat gone.`, 'boss');
+  setTimeout(() => {
+    if (game.mode !== 'play') return;
+    player.revive(1);
+    player.pos.set(0, 0, 3);
+  }, 3500);
 }
 
 function mobaRespawn() {

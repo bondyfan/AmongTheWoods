@@ -348,6 +348,14 @@ export class Player {
     this.hp = Math.max(1, Math.round(this.maxHp * hpFrac));
     this.stunT = 0;
     this.dashT = 0;
+    this.mesh.rotation.z = 0;
+  }
+
+  // Death penalty: drop one full level — back to the previous level with 0 XP
+  // progress into it (at level 1 the XP bar just resets to zero).
+  loseLevel() {
+    if (this.level > 1) this.level--;
+    this.xp = XP_LEVELS[this.level];
   }
 
   _inArc(tx, tz, maxDist, extraR = 0) {

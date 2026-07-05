@@ -442,6 +442,31 @@ export function updateAimArc(mesh, cx, cz, faceAngle, radius, halfAngle, thickne
   g.setIndex(idx);
 }
 
+// ---------- survival spawn cottage ----------
+export function makeCottage() {
+  const g = new THREE.Group();
+  const walls = box(3.4, 2.1, 2.8, 0x6e4d2a);
+  walls.position.y = 1.05;
+  const roof = cone(3.0, 1.9, 0x4c3520, 4);
+  roof.position.y = 3.05;
+  roof.rotation.y = Math.PI / 4;
+  const door = box(0.9, 1.4, 0.15, 0x2c1f12);
+  door.position.set(0.6, 0.7, 1.42);
+  const window1 = box(0.7, 0.6, 0.12, 0xf3d98a);
+  window1.position.set(-0.9, 1.3, 1.42);
+  const chimney = box(0.5, 1.2, 0.5, 0x8a8578);
+  chimney.position.set(-1.1, 3.2, -0.6);
+  // little log pile by the wall
+  for (let i = 0; i < 3; i++) {
+    const log = cyl(0.16, 0.16, 1.1, 0x8a6238, 6);
+    log.rotation.z = Math.PI / 2;
+    log.position.set(2.2, 0.16 + (i === 2 ? 0.28 : 0), -0.5 + (i % 2) * 0.36);
+    g.add(log);
+  }
+  g.add(walls, roof, door, window1, chimney);
+  return g;
+}
+
 // ---------- MOBA buildings ----------
 export const TEAM_COLORS = { player: 0x3a6fb5, enemy: 0xb53a3a };
 
