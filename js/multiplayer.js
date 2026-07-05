@@ -18,9 +18,9 @@
 import * as THREE from 'three';
 import { WoodsNet } from './net.js';
 import { ARENA, ARENA_RETURN_DELAY, arenaReward, ENEMY_TYPES, BOSS_RANKS,
-         MOBA_BUILDINGS, itemById } from './config.js';
+         MOBA_BUILDINGS, roundResource, itemById } from './config.js';
 import { makeMan, makeAxe, makeBow, makeEnemyMesh, makeMeatDrop, makeWoodDrop,
-         makeItemDrop, makeEnemyShot, makeWolf, makeMobaTower, makeMobaBase,
+         makeStoneDrop, makeHideDrop, makeIronDrop, makeItemDrop, makeEnemyShot, makeWolf, makeMobaTower, makeMobaBase,
          makeTeamFlag, TEAM_COLORS, mat } from './models.js';
 import { audio } from './audio.js';
 
@@ -140,6 +140,8 @@ class ShadowWorld {
           hp: e.hp, maxHp: e.m, hitR: cfg.hitR * sizeMult,
           dying: 0, stunT: 0, walkT: Math.random() * 10,
         };
+        const flyY = cfg.flying ? 1.5 : 0;
+        mesh.position.set(e.x, this.world.heightAt(e.x, e.z) + flyY, e.z);
         this.enemies.set(e.id, s);
         this._addBars(s);
         if (e.b > 0) {
@@ -162,7 +164,9 @@ class ShadowWorld {
       pickIds.add(p.i);
       let s = this.pickups.get(p.i);
       if (!s) {
-        const mesh = p.k === 'meat' ? makeMeatDrop() : p.k === 'wood' ? makeWoodDrop() : makeItemDrop();
+        const makers = { meat: makeMeatDrop, wood: makeWoodDrop, stone: makeStoneDrop,
+                         hide: makeHideDrop, iron: makeIronDrop, item: makeItemDrop };
+        const mesh = (makers[p.k] || makeItemDrop)();
         mesh.position.set(p.x, this.world.heightAt(p.x, p.z) + 0.45, p.z);
         this.scene.add(mesh);
         s = { id: p.i, kind: p.k, mesh, x: p.x, z: p.z, t: Math.random() * 6 };
@@ -465,16 +469,27 @@ export class Multiplayer {
     // The attacker's position/range travel with the hit so the guest can
     // reject phantom hits caused by its proxy position lagging behind.
     this.coopProxy = {
-      get pos() { return self.remote.pos; },
+      // combat uses the FRESHEST known position (targetPos), not the smoothed
+      // one — that alone removes ~100 ms of interpolation lag on the host
+      get pos() { return self.remote.targetPos; },
       get mesh() { return self.remote.mesh; },
       get dead() { return self.remote.dead; },
       takeDamage: (dmg, src) => WoodsNet.sendEvent({
         type: 'pdmg', dmg: Math.round(dmg * 10) / 10,
+        ai: src?.id,
         ax: src?.pos ? +src.pos.x.toFixed(1) : undefined,
         az: src?.pos ? +src.pos.z.toFixed(1) : undefined,
         ar: src?.range != null ? +src.range.toFixed(1) : undefined,
+        sh: src?.shot ? 1 : undefined,
       }),
-      applyStun: (sec) => WoodsNet.sendEvent({ type: 'pdmg', dmg: 0, stun: sec }),
+      applyStun: (sec, src) => WoodsNet.sendEvent({
+        type: 'pdmg', dmg: 0, stun: sec,
+        ai: src?.id,
+        ax: src?.pos ? +src.pos.x.toFixed(1) : undefined,
+        az: src?.pos ? +src.pos.z.toFixed(1) : undefined,
+        ar: src?.range != null ? +src.range.toFixed(1) : undefined,
+        sh: src?.shot ? 1 : undefined,
+      }),
     };
   }
 
@@ -795,6 +810,30 @@ export class Multiplayer {
     }
   }
 
+  _acceptPartnerDamage(ev, player) {
+    if (ev.sh) {
+      if (ev.ax === undefined) return true;
+      const d = Math.hypot(player.pos.x - ev.ax, player.pos.z - ev.az);
+      return d <= (ev.ar ?? 1.4) + 0.8;
+    }
+
+    if (ev.ai !== undefined && this.shadow?.enemies) {
+      const attacker = this.shadow.enemies.get(ev.ai);
+      if (!attacker || attacker.dying || !attacker.mesh.parent) return false;
+      const x = attacker.mesh.position.x;
+      const z = attacker.mesh.position.z;
+      const range = ev.ar ?? attacker.cfg?.range ?? 1.4;
+      const d = Math.hypot(player.pos.x - x, player.pos.z - z);
+      return d <= range + 0.65;
+    }
+
+    if (ev.ax !== undefined) {
+      const d = Math.hypot(player.pos.x - ev.ax, player.pos.z - ev.az);
+      return d <= (ev.ar ?? 2) + 0.8;
+    }
+    return true;
+  }
+
   // ---------- incoming events ----------
   _onEvent(ev) {
     const { ctx } = this;
@@ -812,10 +851,7 @@ export class Multiplayer {
         // lag compensation: the host computed this hit against my STALE proxy
         // position — if the attacker is nowhere near where I actually am now,
         // it's a phantom hit and I dodge it.
-        if (ev.ax !== undefined) {
-          const d = Math.hypot(p.pos.x - ev.ax, p.pos.z - ev.az);
-          if (d > (ev.ar ?? 2) + 3.2) break; // genuinely out of reach → miss
-        }
+        if (!this._acceptPartnerDamage(ev, p)) break;
         if (ev.dmg > 0) p.takeDamage(ev.dmg);
         if (ev.stun) p.applyStun(ev.stun);
         break;
@@ -860,7 +896,7 @@ export class Multiplayer {
       case 'mbuild': this.moba?.build('enemy', ev.id, ev.lane || null); break;
       case 'mreward': // guest: my kill on the host's sim
         p.addXp(ev.xp);
-        p.meat += ev.meat;
+        p.meat = roundResource(p.meat + ev.meat);
         ctx.popup(p.mesh.position.clone().setY(p.mesh.position.y + 2.1), `+${ev.xp} XP +${ev.meat} 🍖`, '#c9a4ff');
         audio.sfx('kill_gold', 0.3, 100);
         break;

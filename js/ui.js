@@ -1,7 +1,7 @@
 // ---- HUD, spellbar, floating popups, boss labels, toasts, menus ----
 
 import * as THREE from 'three';
-import { WORLD, XP_LEVELS, MAX_LEVEL, MAX_SPELL_SLOTS, itemById, spellById } from './config.js';
+import { WORLD, XP_LEVELS, MAX_LEVEL, MAX_SPELL_SLOTS, fmtResource, itemById, spellById } from './config.js';
 import { audio } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
@@ -44,11 +44,11 @@ export class UI {
     $('level-text').textContent = player.level >= MAX_LEVEL
       ? `Lv ${player.level} (MAX)`
       : `Lv ${player.level} — ${player.xp}/${XP_LEVELS[player.level + 1]} XP`;
-    $('meat').textContent = `🍖 ${player.meat}`;
-    $('wood').textContent = `🪵 ${player.wood}`;
-    $('stone').textContent = `🪨 ${player.stone}`;
-    $('hide').textContent = `🟫 ${player.hide}`;
-    $('iron').textContent = `🔩 ${player.iron}`;
+    $('meat').textContent = `🍖 ${fmtResource(player.meat)}`;
+    $('wood').textContent = `🪵 ${fmtResource(player.wood)}`;
+    $('stone').textContent = `🪨 ${fmtResource(player.stone)}`;
+    $('hide').textContent = `🟫 ${fmtResource(player.hide)}`;
+    $('iron').textContent = `🔩 ${fmtResource(player.iron)}`;
     $('progress-bar').style.width = (progressPct * 100) + '%';
     $('progress-text').textContent = `${Math.round(progressPct * WORLD.goalR)} m / ${WORLD.goalR} m from home`;
     $('biome-name').textContent = biomeName;

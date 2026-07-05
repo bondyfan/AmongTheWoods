@@ -2,8 +2,8 @@
 
 import * as THREE from 'three';
 import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOBA,
-         RESOURCES, HIDE_BEARING, HIDE_SMALL, HIDE_SMALL_CHANCE, hideForHp, radiusOf, costFor,
-         biomeIndexAt, progressAt, itemById, spellById } from './config.js';
+         RESOURCES, HIDE_BEARING, VERDANT_HIDE_DROP, hideForHp, radiusOf, costFor,
+         biomeIndexAt, progressAt, fmtResource, roundResource, itemById, spellById } from './config.js';
 import { makeAimArc, updateAimArc, makeRaft } from './models.js';
 import { Camp } from './camp.js';
 import { audio } from './audio.js';
@@ -139,9 +139,9 @@ function grantPickup(kind, payload) {
     ui.toast(`🎁 Loot: ${item.icon} ${item.name}!`, 'level');
     panels.refresh();
   } else {
-    player[kind] += payload;
+    player[kind] = roundResource(player[kind] + payload);
     const [icon, color] = RES_POPUP[kind];
-    ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2), `+${payload} ${icon}`, color);
+    ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2), `+${fmtResource(payload)} ${icon}`, color);
   }
   pickupSfx[kind]?.();
 }
@@ -152,6 +152,7 @@ const pickups = new Pickups(scene, world, {
     else mp?.onRemoteCollect(p); // co-op host: the partner's proxy grabbed it
   },
 });
+world.onWoodLog = (pos) => pickups.spawn('wood', 1, pos, 0.15);
 
 function discoverType(type) {
   panels.discover(type);
@@ -178,11 +179,10 @@ const enemyMgr = new EnemyManager(scene, world, {
       left -= amount;
       pickups.spawn('meat', amount, enemy.pos, 0.9 * enemy.sizeMult);
     }
-    // bigger animals drop their hide; tiny critters occasionally drop a scrap
-    if (HIDE_BEARING.has(enemy.type)) {
+    if (biomeIndexAt(enemy.pos.x, enemy.pos.z) === 0) {
+      pickups.spawn('hide', VERDANT_HIDE_DROP, enemy.pos, 0.9);
+    } else if (HIDE_BEARING.has(enemy.type)) {
       pickups.spawn('hide', hideForHp(enemy.maxHp), enemy.pos, 1.1 * enemy.sizeMult);
-    } else if (HIDE_SMALL.has(enemy.type) && Math.random() < HIDE_SMALL_CHANCE) {
-      pickups.spawn('hide', 1, enemy.pos, 0.9);
     }
     if (enemy.bossRank > 0) rollBossDrop(enemy);
   },
@@ -285,7 +285,7 @@ function campBuild(id) {
   const info = camp.buildingInfo(id);
   if (info.maxed || player.level < info.reqLevel) return;
   if (!Object.entries(info.cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
-  for (const [k, v] of Object.entries(info.cost)) player[k] -= v;
+  for (const [k, v] of Object.entries(info.cost)) player[k] = roundResource(player[k] - v);
   camp.build(id);
   player.campBonus = camp.homeHpBonus();
   player.recompute();
@@ -301,6 +301,7 @@ function setupMobaWorld(seed, side) {
   $id('minimap-zoom').classList.add('hidden');
   world.dispose();
   world = new MobaWorld(scene, seed);
+  world.onWoodLog = (pos) => pickups.spawn('wood', 1, pos, 0.15);
   pickups.world = world;
   enemyMgr.world = world;
   game.seed = seed;
@@ -352,16 +353,23 @@ function startMobaSolo() {
   ui.toast('🏰 MOBA! Farm the jungle camps, then build Creep Dens & Towers (shop → Base tab).', 'level');
 }
 
+function healAtMobaBase(dt) {
+  const bp = MOBA.basePos[mobaSide];
+  if (!bp || player.dead || player.hp >= player.maxHp) return;
+  if (Math.hypot(player.pos.x - bp.x, player.pos.z - bp.z) > MOBA.baseR) return;
+  player.hp = Math.min(player.maxHp, player.hp + 18 * dt);
+}
+
 // On death, HALF of every CARRIED resource spills onto the ground where you
 // fell — recoverable if you fight your way back; the rest is lost. Resources
 // stored in the camp chest are untouched (that's what it's for).
 function dropHalfMeat(pos) {
   let totalDropped = 0;
   for (const res of RESOURCES) {
-    const dropped = Math.floor(player[res] / 2);
+    const dropped = Math.floor(player[res] * 5) / 10;
     player[res] = 0;
     if (dropped <= 0) continue;
-    totalDropped += dropped;
+    totalDropped = roundResource(totalDropped + dropped);
     const piles = Math.min(3, Math.max(1, Math.round(dropped / 5)));
     let left = dropped;
     for (let i = 0; i < piles; i++) {
@@ -547,7 +555,7 @@ function buyItem(id) {
   if (item.needs && camp && !camp.has(item.needs)) return; // era gate (survival)
   const cost = costFor(item.cost, game.kind === 'moba');
   if (!Object.entries(cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
-  for (const [k, v] of Object.entries(cost)) player[k] -= v;
+  for (const [k, v] of Object.entries(cost)) player[k] = roundResource(player[k] - v);
   player.ownItem(id);
   audio.sfx('purchase', 0.5);
   panels.refresh();
@@ -557,7 +565,7 @@ function buySpell(id) {
   const spell = spellById(id);
   if (!spell || player.spellsOwned.has(id) || player.level < spell.level) return;
   if (!Object.entries(spell.cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
-  for (const [k, v] of Object.entries(spell.cost)) player[k] -= v;
+  for (const [k, v] of Object.entries(spell.cost)) player[k] = roundResource(player[k] - v);
   player.ownSpell(id);
   audio.sfx('upgrade', 0.5);
   panels.refresh();
@@ -569,7 +577,7 @@ function buyStat(id) {
   if (!track || tier >= track.max || player.level < tier + 1) return;
   const cost = track.cost(tier + 1);
   if (!Object.entries(cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
-  for (const [k, v] of Object.entries(cost)) player[k] -= v;
+  for (const [k, v] of Object.entries(cost)) player[k] = roundResource(player[k] - v);
   player.stats[id]++;
   player.recompute();
   audio.sfx('upgrade', 0.5);
@@ -754,6 +762,7 @@ function tick() {
         projectiles.update(dt, em, [player]);
         pickups.update(dt, [player]);
       }
+      healAtMobaBase(dt);
       companions.update(dt, player, em, projectiles, world);
       world.update(dt, player.pos);
       mobaMini?.update(dt, player);

@@ -21,7 +21,7 @@ export const BIOMES = [
     foliage: [0x2d6a2d, 0x3c7f37, 0x4c8f3f], trunk: 0x6b4a2d,
     trees: { pine: 0.4, leafy: 0.4, birch: 0.2, dead: 0 }, snowy: false,
     grass: 0x6fa04c, flowers: true, mushrooms: false,
-    enemies: ['rat', 'spider', 'snake'], packs: null, treeDensity: 1.0 },
+    enemies: ['rabbit', 'rat', 'spider', 'snake'], packs: null, treeDensity: 1.0 },
   { name: 'Dark Forest',    rMax: 1200, ground: 0x3d5c2f, ground2: 0x33502a, dirt: 0x5c4a30,
     fog: 0x93a986, sky: 0x8fa8b8,
     foliage: [0x1e4a22, 0x27552a, 0x1a3f2e], trunk: 0x4c3520,
@@ -75,13 +75,14 @@ export function progressAt(x, z) {
 // ---- resources ----
 export const RESOURCES = ['meat', 'wood', 'stone', 'hide', 'iron'];
 export const RES_ICONS = { meat: '🍖', wood: '🪵', stone: '🪨', hide: '🟫', iron: '🔩' };
+export const RESOURCE_STEP = 0.1;
+export const roundResource = (value) => Math.round((Number(value) || 0) / RESOURCE_STEP) * RESOURCE_STEP;
+export const fmtResource = (value) => roundResource(value).toFixed(1);
 
 // hide drops only from animals that realistically have one
 export const HIDE_BEARING = new Set(['wolf', 'boar', 'elk', 'bear', 'icewolf', 'wendigo', 'yeti']);
 export const hideForHp = (hp) => Math.max(1, Math.round(hp / 80));
-// tiny critters give a scrap of hide too — averaged ~0.1 each (10% chance of 1)
-export const HIDE_SMALL = new Set(['rat', 'bat']);
-export const HIDE_SMALL_CHANCE = 0.1;
+export const VERDANT_HIDE_DROP = 0.1;
 
 // ---- Enemies. Spiders are the weak starter enemy; the animals get bigger
 // and meaner the further north you go. ----
@@ -91,6 +92,8 @@ export const HIDE_SMALL_CHANCE = 0.1;
 // meleeDmg = bite/claw damage. Flying enemies hover above the ground.
 export const ENEMY_TYPES = {
   // -- Verdant Forest --
+  rabbit: { name: 'Rabbit', icon: '🐇',
+             hp: 1,   dmg: 0,  speed: 8.8, range: 0,   attackCd: 1.0, xp: 1,  meat: 1, hitR: 0.35, aggro: 0, passive: true },
   rat:     { name: 'Giant Rat', icon: '🐀',
              hp: 12,  dmg: 4,  speed: 7.2, range: 1.2, attackCd: 0.9, xp: 5,  meat: 1, hitR: 0.5,  aggro: 22 },
   spider:  { name: 'Forest Spider', icon: '🕷️',

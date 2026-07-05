@@ -68,6 +68,8 @@ export class World {
     this._lakeRegions = new Map();
     this._treasured = new Set();
     this.onIsland = null;        // main hooks this to drop island treasure
+    this.onWoodLog = null;       // main turns decorative fallen logs into pickups
+    this._woodLogDrops = new Set();
     this._genRings();
     this._genLakes();
     this._buildGround();
@@ -100,6 +102,7 @@ export class World {
     this.rings = []; this.lakes = [];
     this._lakeRegions.clear();
     this._treasured.clear();
+    this._woodLogDrops.clear();
     this._genRings();
     this._genLakes();
     this._buildGround();
@@ -447,7 +450,21 @@ export class World {
     scatter(1 + Math.floor(rng() * 2), () => makeRock(rng));
     if (biome.flowers) scatter(2 + Math.floor(rng() * 5), () => makeFlower(rng));
     if (biome.mushrooms) scatter(1 + Math.floor(rng() * 3), () => makeMushroom(rng));
-    if (rng() < 0.35) scatter(1, () => makeLog(biome.trunk, rng));
+    if (rng() < 0.35) {
+      const x = cxw + rng() * CHUNK, z = czw + rng() * CHUNK;
+      if (inBounds(x, z)) {
+        const id = `${key}:woodlog`;
+        if (this.onWoodLog && !this._woodLogDrops.has(id)) {
+          this._woodLogDrops.add(id);
+          this.onWoodLog({ x, z });
+        } else if (!this.onWoodLog) {
+          const obj = makeLog(biome.trunk, rng);
+          this._place(obj, x, z);
+          obj.rotation.y = rng() * Math.PI * 2;
+          group.add(obj);
+        }
+      }
+    }
 
     // -- ridge-ring boulders crossing this chunk (rivers are built globally) --
     const rockColor = biome.snowy ? 0xc8d4dc : 0x82817a;

@@ -258,6 +258,24 @@ export function makeRat() {
   return g;
 }
 
+export function makeRabbit() {
+  const g = quadruped({
+    bodyW: 0.28, bodyH: 0.26, bodyL: 0.48, color: 0xd8c6a4,
+    headSize: 0.2, snout: true, snoutColor: 0xf0d6c8, legH: 0.18, eyeColor: 0x1a0a0a,
+  });
+  const head = g.userData.head;
+  for (const ex of [-0.07, 0.07]) {
+    const ear = box(0.05, 0.34, 0.06, 0xd8c6a4);
+    ear.position.set(ex, 0.28, 0.02);
+    ear.rotation.z = ex < 0 ? 0.14 : -0.14;
+    head.add(ear);
+  }
+  const tail = sphere(0.09, 0xf0e4d0, 6);
+  tail.position.set(0, 0.28, 0.32);
+  g.add(tail);
+  return g;
+}
+
 export function makeSnake(kind = 'grass') {
   const palettes = {
     grass: { colors: [0x4a7a30, 0x3d6828], eyes: 0xffd23a, scale: 1 },
@@ -389,6 +407,7 @@ export function makeIceGolem() {
 
 export function makeEnemyMesh(type) {
   switch (type) {
+    case 'rabbit': return makeRabbit();
     case 'rat': return makeRat();
     case 'spider': return makeSpider('forest');
     case 'venomspider': return makeSpider('venom');

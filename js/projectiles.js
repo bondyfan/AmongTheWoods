@@ -86,8 +86,8 @@ export class Projectiles {
           if (t.dead) continue;
           const dx = t.pos.x - p.mesh.position.x, dz = t.pos.z - p.mesh.position.z;
           if (dx * dx + dz * dz < 0.72 ** 2) {
-            t.takeDamage(p.dmg, { pos: { x: p.mesh.position.x, z: p.mesh.position.z }, range: 1.4 });
-            if (p.stun) t.applyStun?.(p.stun);
+            t.takeDamage(p.dmg, { pos: { x: p.mesh.position.x, z: p.mesh.position.z }, range: 1.4, shot: true });
+            if (p.stun) t.applyStun?.(p.stun, { pos: { x: p.mesh.position.x, z: p.mesh.position.z }, range: 1.4, shot: true });
             consumed = true;
             break;
           }

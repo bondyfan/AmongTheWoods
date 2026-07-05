@@ -9,7 +9,7 @@
 
 import * as THREE from 'three';
 import { MOBA, CREEP_TYPES, DEN_WAVES, MOBA_BUILDINGS, MOBA_AI_TIMELINE,
-         ENEMY_TYPES, meatForHp } from './config.js';
+         ENEMY_TYPES, meatForHp, roundResource } from './config.js';
 import { lanePoint } from './mobaworld.js';
 import { makeEnemyMesh, makeWolf, makeMobaTower, makeMobaBase, makeDenHut,
          makeSmallHut, makeTeamFlag, TEAM_COLORS } from './models.js';
@@ -17,6 +17,7 @@ import { audio } from './audio.js';
 
 let nextUnitId = 1;
 const LANES = ['mid', 'top', 'bot'];
+const BASE_BLOCK_R = 9.5;
 const otherTeam = (t) => (t === 'player' ? 'enemy' : 'player');
 
 function newTeamState() {
@@ -55,10 +56,10 @@ export class Moba {
       const mesh = makeMobaBase(TEAM_COLORS[team]);
       const u = this._makeUnit({
         kind: 'base', team, type: 'base', mesh,
-        x: bp.x, z: bp.z, hp: MOBA.baseHp, dmg: 0, speed: 0, range: 0, hitR: 7,
+        x: bp.x, z: bp.z, hp: MOBA.baseHp, dmg: 0, speed: 0, range: 0, hitR: BASE_BLOCK_R,
       });
       this.bases[team] = u;
-      world.obstacles.push({ x: bp.x, z: bp.z, r: 7.5 });
+      world.obstacles.push({ x: bp.x, z: bp.z, r: BASE_BLOCK_R });
     }
 
     // jungle camps
@@ -269,7 +270,7 @@ export class Moba {
       this.incomeT = 10;
       const gain = this.teams.player.lodge * 2;
       if (gain > 0) {
-        this.player.meat += gain;
+        this.player.meat = roundResource(this.player.meat + gain);
         this.hooks.popup(this.player.mesh.position.clone().setY(this.player.mesh.position.y + 2.2), `+${gain} 🍖`, '#ff9d76');
       }
     }

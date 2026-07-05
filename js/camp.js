@@ -4,7 +4,7 @@
 // furnace smelts stone into iron; the boat opens the lakes; the guard tower
 // watches over home. Built things appear physically at fixed camp spots.
 
-import { CAMP_BUILDINGS, ERAS, RESOURCES } from './config.js';
+import { CAMP_BUILDINGS, ERAS, RESOURCES, fmtResource, roundResource } from './config.js';
 import { makeTent, makeCottage, makeFurnace, makeChest, makeBoatRack,
          makeMobaTower, makeGraveyard } from './models.js';
 import { audio } from './audio.js';
@@ -17,6 +17,9 @@ const SPOTS = {
   tower:   { x: 13, z: 17 },
   // 'grave' has no fixed spot — it is built wherever the player stands
 };
+const HOME_HEAL_RADIUS = 6;
+const HOME_HEAL_PER_SEC = 12;
+const HOME_ENEMY_BLOCK_RADIUS = 5.5;
 
 export class Camp {
   constructor(scene, world, player, hooks) {
@@ -30,6 +33,7 @@ export class Camp {
     this.gravePos = null;
     this.smeltT = 20;
     this.towerCd = 0;
+    this.healPopupT = 0;
   }
 
   has(need) {
@@ -98,37 +102,69 @@ export class Camp {
     mesh.position.set(spot.x, this.world.heightAt(spot.x, spot.z), spot.z);
     this.scene.add(mesh);
     this.meshes[id] = mesh;
-    if (id !== 'grave') this.world.obstacles.push({ x: spot.x, z: spot.z, r: id === 'home' ? 2.2 : 1.1 });
+    if (id !== 'grave') this.world.obstacles.push({ x: spot.x, z: spot.z, r: id === 'home' ? 3.2 : 1.1 });
   }
 
   // ---- chest ----
   depositAll() {
     let moved = 0;
-    for (const k of RESOURCES) { this.storage[k] += this.player[k]; moved += this.player[k]; this.player[k] = 0; }
+    for (const k of RESOURCES) {
+      this.storage[k] = roundResource(this.storage[k] + this.player[k]);
+      moved = roundResource(moved + this.player[k]);
+      this.player[k] = 0;
+    }
     if (moved) audio.sfx('click', 0.5);
     return moved;
   }
 
   withdrawAll() {
     let moved = 0;
-    for (const k of RESOURCES) { this.player[k] += this.storage[k]; moved += this.storage[k]; this.storage[k] = 0; }
+    for (const k of RESOURCES) {
+      this.player[k] = roundResource(this.player[k] + this.storage[k]);
+      moved = roundResource(moved + this.storage[k]);
+      this.storage[k] = 0;
+    }
     if (moved) audio.sfx('click', 0.5);
     return moved;
   }
 
   storageLine() {
-    return RESOURCES.map(k => `${this.storage[k]}`).join(' / ');
+    return RESOURCES.map(k => fmtResource(this.storage[k])).join(' / ');
   }
 
   // ---- per-frame: furnace smelting + guard tower ----
   update(dt, enemyMgr, projectiles) {
+    this.healPopupT = Math.max(0, this.healPopupT - dt);
+    const d = Math.hypot(this.player.pos.x - SPOTS.home.x, this.player.pos.z - SPOTS.home.z);
+    if (!this.player.dead && d < HOME_HEAL_RADIUS && this.player.hp < this.player.maxHp) {
+      this.player.hp = Math.min(this.player.maxHp, this.player.hp + HOME_HEAL_PER_SEC * dt);
+      if (this.healPopupT <= 0) {
+        this.healPopupT = 1.2;
+        this.hooks.popup?.(this.player.mesh.position.clone().setY(this.player.mesh.position.y + 2.3), '+ heal', '#7dff8a');
+      }
+    }
+    for (const e of enemyMgr?.alive?.() ?? []) {
+      const dx = e.pos.x - SPOTS.home.x, dz = e.pos.z - SPOTS.home.z;
+      const dist = Math.hypot(dx, dz) || 1;
+      const minDist = HOME_ENEMY_BLOCK_RADIUS + (e.hitR ?? 0.5);
+      if (dist < minDist) {
+        e.pos.x = SPOTS.home.x + (dx / dist) * minDist;
+        e.pos.z = SPOTS.home.z + (dz / dist) * minDist;
+      }
+    }
+
     if (this.levels.furnace >= 1) {
       this.smeltT -= dt;
       if (this.smeltT <= 0) {
         this.smeltT = 20;
         // smelt from carried stone first, then from the chest
-        if (this.player.stone >= 4) { this.player.stone -= 4; this.player.iron += 1; }
-        else if (this.storage.stone >= 4) { this.storage.stone -= 4; this.storage.iron += 1; }
+        if (this.player.stone >= 4) {
+          this.player.stone = roundResource(this.player.stone - 4);
+          this.player.iron = roundResource(this.player.iron + 1);
+        } else if (this.storage.stone >= 4) {
+          this.storage.stone = roundResource(this.storage.stone - 4);
+          this.storage.iron = roundResource(this.storage.iron + 1);
+        }
         else return;
         audio.sfx('upgrade', 0.3, 500);
         const m = this.meshes.furnace;

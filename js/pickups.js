@@ -3,6 +3,7 @@
 
 import * as THREE from 'three';
 import { makeMeatDrop, makeWoodDrop, makeItemDrop, makeStoneDrop, makeHideDrop, makeIronDrop } from './models.js';
+import { roundResource } from './config.js';
 import { audio } from './audio.js';
 
 const MAGNET_RADIUS = 3.2;
@@ -20,6 +21,7 @@ export class Pickups {
 
   // kind: 'meat'|'wood'|'stone'|'hide'|'iron'|'item'; payload: amount (or itemId)
   spawn(kind, payload, pos, scatter = 0.8) {
+    if (kind !== 'item') payload = roundResource(payload);
     const makers = { meat: makeMeatDrop, wood: makeWoodDrop, stone: makeStoneDrop,
                      hide: makeHideDrop, iron: makeIronDrop, item: makeItemDrop };
     const mesh = (makers[kind] || makeItemDrop)();

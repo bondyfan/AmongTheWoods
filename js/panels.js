@@ -3,7 +3,7 @@
 
 import { SHOP_GROUPS, SLOTS, SLOT_LABELS, ENEMY_TYPES, ITEMS, SPELLS,
          STAT_TRACKS, MOBA_BUILDINGS, CAMP_BUILDINGS, RES_ICONS,
-         MAX_SPELL_SLOTS, itemById, spellById, costFor } from './config.js';
+         MAX_SPELL_SLOTS, fmtResource, itemById, spellById, costFor } from './config.js';
 
 const NEED_NAMES = { tent: 'Hide Tent', cabin: 'Wooden Cabin', furnace: 'Stone Furnace' };
 import { audio } from './audio.js';
@@ -53,7 +53,7 @@ export class Panels {
 
   _costStr(cost) {
     if (!cost) return 'free';
-    return Object.entries(cost).map(([k, v]) => `${v} ${RES_ICONS[k] ?? k}`).join(' + ');
+    return Object.entries(cost).map(([k, v]) => `${fmtResource(v)} ${RES_ICONS[k] ?? k}`).join(' + ');
   }
 
   _affordable(cost) {
@@ -64,7 +64,7 @@ export class Panels {
   renderShop() {
     const p = this.player;
     $('shop-res').textContent =
-      `🍖 ${p.meat}  🪵 ${p.wood}  🪨 ${p.stone}  🟫 ${p.hide}  🔩 ${p.iron}`;
+      `🍖 ${fmtResource(p.meat)}  🪵 ${fmtResource(p.wood)}  🪨 ${fmtResource(p.stone)}  🟫 ${fmtResource(p.hide)}  🔩 ${fmtResource(p.iron)}`;
 
     // tabs (+ Base tab in MOBA, + Camp tab in survival)
     const groups = this.moba
@@ -294,7 +294,7 @@ export class Panels {
       chest.style.gridColumn = '1 / -1';
       chest.innerHTML = `<div class="card-head"><span class="icon">📦</span>
         <span class="name">Chest storage</span>
-        <span class="lv">🍖 ${camp.storage.meat} · 🪵 ${camp.storage.wood} · 🪨 ${camp.storage.stone} · 🟫 ${camp.storage.hide} · 🔩 ${camp.storage.iron}</span></div>
+        <span class="lv">🍖 ${fmtResource(camp.storage.meat)} · 🪵 ${fmtResource(camp.storage.wood)} · 🪨 ${fmtResource(camp.storage.stone)} · 🟫 ${fmtResource(camp.storage.hide)} · 🔩 ${fmtResource(camp.storage.iron)}</span></div>
         <div class="desc">Whatever is stored here survives your death.</div>
         <div class="card-foot">
           <button class="buy-btn" data-chest="deposit">Deposit all</button>

@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Among The Woods</title>
+
+  <script type="importmap">
+    { "imports": { "three": "./libs/three.module.js" } }
+  </script>
+  <script type="module" crossorigin src="/assets/index-Da0R06Rd.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-LLdgjIiP.css">
+</head>
+<body>
+  <div id="game"></div>
+
+  <!-- damage vignette -->
+  <div id="vignette"></div>
+
+  <!-- floating combat text + boss labels -->
+  <div id="popups"></div>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div id="top-left">
+      <div class="bar-wrap hp"><div id="hp-bar" class="bar"></div><span id="hp-text" class="bar-label"></span></div>
+      <div class="bar-wrap xp"><div id="xp-bar" class="bar"></div><span id="level-text" class="bar-label"></span></div>
+    </div>
+    <div id="top-center">
+      <div class="bar-wrap journey"><div id="progress-bar" class="bar"></div><span id="progress-text" class="bar-label"></span></div>
+      <div id="biome-name"></div>
+      <div id="mp-status" class="hidden"></div>
+    </div>
+    <div id="top-right">
+      <span id="meat">🍖 0</span>
+      <span id="wood">🪵 0</span>
+      <span id="stone">🪨 0</span>
+      <span id="hide">🟫 0</span>
+      <span id="iron">🔩 0</span>
+    </div>
+
+    <div id="weapon-display"></div>
+    <div id="spellbar"></div>
+
+    <canvas id="minimap" width="120" height="230"></canvas>
+    <div id="minimap-zoom" class="hidden">
+      <button id="mm-zoom-in" title="Zoom in">+</button>
+      <button id="mm-zoom-out" title="Zoom out">−</button>
+    </div>
+
+    <div id="hud-buttons">
+      <button id="base-btn" class="hidden">🏰 Base <kbd>B</kbd></button>
+      <button id="shop-btn">🛠 Upgrades <kbd>U</kbd></button>
+      <button id="char-btn">🧍 Character <kbd>C</kbd></button>
+      <button id="bestiary-btn">📕 Bestiary <kbd>N</kbd></button>
+      <button id="settings-btn">⚙️ Settings</button>
+    </div>
+  </div>
+
+  <div id="banner" class="hidden"></div>
+  <div id="home-hint" class="hidden">🏠 Your home — press <kbd>E</kbd> to build &amp; upgrade</div>
+  <div id="toasts"></div>
+  <div id="paused" class="overlay-text hidden">PAUSED — press Esc to resume</div>
+
+  <!-- upgrade shop -->
+  <div id="shop" class="panel hidden">
+    <div class="panel-head">
+      <h2>Upgrades</h2>
+      <span id="shop-res" class="panel-res"></span>
+      <button class="panel-close">✕</button>
+    </div>
+    <div id="shop-tabs"></div>
+    <div id="shop-items" class="card-grid"></div>
+  </div>
+
+  <!-- character sheet -->
+  <div id="character" class="panel hidden">
+    <div class="panel-head">
+      <h2>Character</h2>
+      <span id="char-stats" class="panel-res"></span>
+      <button class="panel-close">✕</button>
+    </div>
+    <div id="character-body">
+      <div>
+        <h3>Equipped</h3>
+        <div id="equip-slots"></div>
+      </div>
+      <div>
+        <h3>Pack</h3>
+        <div id="inventory"></div>
+        <h3>Spellbook</h3>
+        <div id="spellbook"></div>
+        <p id="spellbook-note" class="empty-note"></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- bestiary -->
+  <div id="bestiary" class="panel hidden">
+    <div class="panel-head">
+      <h2>Bestiary</h2>
+      <button class="panel-close">✕</button>
+    </div>
+    <div id="bestiary-items" class="card-grid"></div>
+  </div>
+
+  <!-- settings -->
+  <div id="settings" class="panel hidden">
+    <div class="panel-head">
+      <h2>Settings</h2>
+      <button class="panel-close">✕</button>
+    </div>
+    <div id="settings-body">
+      <label class="setting-row">
+        <input type="checkbox" id="set-mousemove">
+        <span><b>Mouse-directed movement</b><br>
+          <small>Hold <kbd>W</kbd> to run toward the cursor (<kbd>S</kbd> backs away,
+          <kbd>A</kbd>/<kbd>D</kbd> strafe). Off&nbsp;=&nbsp;classic WASD directions.</small></span>
+      </label>
+      <label class="setting-row">
+        <input type="checkbox" id="set-mute">
+        <span><b>Mute audio</b><br>
+          <small>Silence all music and sound effects.</small></span>
+      </label>
+    </div>
+  </div>
+
+  <!-- big world map (M / minimap click) -->
+  <div id="bigmap" class="panel hidden">
+    <div class="panel-head">
+      <h2>World Map</h2>
+      <span class="panel-res">Only what you have discovered is drawn.</span>
+      <button class="panel-close">✕</button>
+    </div>
+    <div id="bigmap-body"><canvas id="bigmap-canvas" width="620" height="620"></canvas></div>
+  </div>
+
+  <!-- respawn choice (dies with a graveyard built) -->
+  <div id="respawn-choice" class="hidden">
+    <h2>☠️ You fell…</h2>
+    <p>Where do you want to wake up?</p>
+    <button id="respawn-cave">🕳️ The Cave (home)</button>
+    <button id="respawn-grave">🪦 The Graveyard</button>
+  </div>
+
+  <!-- main menu -->
+  <div id="menu">
+    <div class="menu-inner">
+      <h1>Among<br>The Woods</h1>
+      <p class="tagline">Fight your way north through the wild, to the Frozen Peak.</p>
+
+      <!-- step 1: pick a mode -->
+      <div id="mode-select">
+        <button id="mode-survival-btn">🌲 Survival<br><small>Journey north to the Frozen Peak</small></button>
+        <button id="mode-moba-btn">🏰 MOBA<br><small>Three lanes, creeps &amp; towers</small></button>
+      </div>
+
+      <!-- step 2: single player or multiplayer for the chosen mode -->
+      <div id="mode-options" class="hidden">
+        <h2 id="mode-title"></h2>
+        <button id="start-btn">▶ Single Player</button>
+        <div id="mp-lobby">
+          <div id="mp-choose">
+            <button id="mp-coop-btn" class="surv-only">🤝 Create Co-op</button>
+            <div class="mp-row surv-only">
+              <button id="mp-pvp-btn">⚔️ Create PvP</button>
+              <select id="mp-interval">
+                <option value="1">duel every 1 min</option>
+                <option value="2">duel every 2 min</option>
+                <option value="3" selected>duel every 3 min</option>
+                <option value="4">duel every 4 min</option>
+                <option value="5">duel every 5 min</option>
+                <option value="10">duel every 10 min</option>
+              </select>
+            </div>
+            <button id="mp-moba-btn" class="moba-only">🌐 Create MOBA 1v1</button>
+            <div class="mp-row">
+              <input id="mp-code" maxlength="4" placeholder="CODE" autocomplete="off">
+              <button id="mp-join-btn">Join Game</button>
+            </div>
+          </div>
+          <div id="mp-wait" class="hidden">
+            Game code: <b id="mp-code-display"></b><br>
+            <span class="hint">Waiting for your friend to join…</span>
+          </div>
+          <div id="mp-error"></div>
+        </div>
+        <button id="mode-back-btn">← Back</button>
+      </div>
+      <div class="controls">
+        <div><kbd>WASD</kbd> / <kbd>↑↓←→</kbd> move &nbsp;·&nbsp; <span class="mouse">🖱</span> aim &nbsp;·&nbsp; <kbd>LMB</kbd>/<kbd>Space</kbd> attack</div>
+        <div><kbd>Q</kbd> switch weapon &nbsp;·&nbsp; <kbd>1</kbd>–<kbd>6</kbd> spells &nbsp;·&nbsp; <kbd>U</kbd> shop &nbsp;·&nbsp; <kbd>C</kbd> character &nbsp;·&nbsp; <kbd>N</kbd> bestiary</div>
+        <div><kbd>Esc</kbd> pause &nbsp;·&nbsp; <kbd>M</kbd> world map</div>
+      </div>
+      <p class="hint">Hunt for meat &amp; XP · loot flies to you · chop trees with an axe · beware the pack mothers 💀</p>
+    </div>
+  </div>
+
+  <!-- end screen -->
+  <div id="endscreen" class="hidden">
+    <div class="menu-inner">
+      <h1 id="end-title"></h1>
+      <p id="end-stats"></p>
+      <button id="restart-btn">↻ Try Again</button>
+    </div>
+  </div>
+
+</body>
+</html>

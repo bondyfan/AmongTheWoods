@@ -22,7 +22,7 @@ class Enemy {
     this.maxHp = this.hp;
     this.dmg = base.dmg * (1 + difficulty * 0.8) * (boss ? boss.dmgMult : 1);
     this.xp = Math.round(base.xp * (boss ? boss.xpMult : 1));
-    this.meat = meatForHp(this.maxHp); // 1 meat / 30 HP
+    this.meat = base.meat ?? meatForHp(this.maxHp);
     this.sizeMult = boss ? boss.sizeMult : 1;
     this.hitR = base.hitR * this.sizeMult;
     this.range = base.range * this.sizeMult;
@@ -271,6 +271,22 @@ export class EnemyManager {
         continue;
       }
 
+      if (e.cfg.passive && target && dist < 10) {
+        const away = new THREE.Vector3().subVectors(e.pos, target.pos);
+        const len = Math.hypot(away.x, away.z) || 1;
+        e.pos.x += (away.x / len) * e.speed * dt;
+        e.pos.z += (away.z / len) * e.speed * dt;
+        this.world.collide(e.pos, 0.3 * e.sizeMult);
+        e.mesh.rotation.y = Math.atan2(away.x, away.z);
+        e.walkT += dt * e.speed;
+        const ud = e.mesh.userData;
+        (ud.legs || []).forEach((leg, li) => {
+          leg.rotation.x = Math.sin(e.walkT * 3.4 + (li % 2) * Math.PI) * 0.7;
+        });
+        e.mesh.position.set(e.pos.x, this.world.heightAt(e.pos.x, e.pos.z), e.pos.z);
+        continue;
+      }
+
       if (dist < e.cfg.aggro) e.aggroed = true;
 
       // the ranged "spell" charges over time; firing freezes the caster briefly
@@ -329,10 +345,10 @@ export class EnemyManager {
       // The attacker is passed along so a lagging co-op guest can reject
       // phantom hits computed against its stale proxy position.
       e.attackCd -= dt;
-      if (target && e.attackCd <= 0 && dist < e.range) {
+      if (!e.cfg.passive && target && e.attackCd <= 0 && dist < e.range) {
         e.attackCd = e.cfg.attackCd;
         e.lungeT = 0.25;
-        target.takeDamage(e.meleeDmg, { pos: e.pos, range: e.range });
+        target.takeDamage(e.meleeDmg, { id: e.id, pos: e.pos, range: e.range, melee: true });
         audio.creature(e.type, 'attack', 0.3, 110);
       }
 
