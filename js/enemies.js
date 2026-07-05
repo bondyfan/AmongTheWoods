@@ -325,12 +325,14 @@ export class EnemyManager {
         audio.creature(e.type, 'attack', 0.32, 200);
       }
 
-      // melee attack (everyone bites/claws up close, ranged types included)
+      // melee attack (everyone bites/claws up close, ranged types included).
+      // The attacker is passed along so a lagging co-op guest can reject
+      // phantom hits computed against its stale proxy position.
       e.attackCd -= dt;
       if (target && e.attackCd <= 0 && dist < e.range) {
         e.attackCd = e.cfg.attackCd;
         e.lungeT = 0.25;
-        target.takeDamage(e.meleeDmg);
+        target.takeDamage(e.meleeDmg, { pos: e.pos, range: e.range });
         audio.creature(e.type, 'attack', 0.3, 110);
       }
 

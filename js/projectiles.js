@@ -81,12 +81,12 @@ export class Projectiles {
           }
         } else consumed = true; // target died mid-flight
       } else if (p.kind === 'enemyShot') {
-        // enemy shots only hurt players
+        // enemy shots only hurt players (attacker info → co-op lag validation)
         for (const t of playerTargets) {
           if (t.dead) continue;
           const dx = t.pos.x - p.mesh.position.x, dz = t.pos.z - p.mesh.position.z;
           if (dx * dx + dz * dz < 0.72 ** 2) {
-            t.takeDamage(p.dmg);
+            t.takeDamage(p.dmg, { pos: { x: p.mesh.position.x, z: p.mesh.position.z }, range: 1.4 });
             if (p.stun) t.applyStun?.(p.stun);
             consumed = true;
             break;

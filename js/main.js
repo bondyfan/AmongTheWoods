@@ -598,6 +598,19 @@ function toggleBigMap(force) {
 }
 input.onKey('KeyM', () => toggleBigMap());
 $id('minimap').addEventListener('click', () => toggleBigMap());
+
+// Walk INTO your home (the cave at first, the upgraded building later) and
+// press E to open the build & upgrade menu.
+function nearHome() {
+  if (game.kind !== 'survival' || !camp) return false;
+  if (radiusOf(player.pos.x, player.pos.z) < WORLD.caveR + 4) return true; // in/at the cave
+  return Math.hypot(player.pos.x - (-9), player.pos.z - 13) < 6;           // at the home building
+}
+input.onKey('KeyE', () => {
+  if (!inPlay() || !nearHome()) return;
+  panels.shopTab = 'camp';
+  panels.toggle('shop');
+});
 $id('bigmap').querySelector('.panel-close').addEventListener('click', () => toggleBigMap(false));
 $id('respawn-cave').addEventListener('click', () => reviveAt('cave'));
 $id('respawn-grave').addEventListener('click', () => reviveAt('grave'));
@@ -757,6 +770,9 @@ function tick() {
         raft.position.set(player.pos.x, player.mesh.position.y + 0.12, player.pos.z);
         raft.rotation.y = player.mesh.rotation.y;
       }
+
+      // home upgrade hint when standing at your home
+      $id('home-hint').classList.toggle('hidden', !nearHome() || panels.open);
 
       // the big map refreshes while open
       if (bigmapOpen) {

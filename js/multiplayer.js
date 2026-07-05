@@ -461,12 +461,19 @@ export class Multiplayer {
       stun: (e, sec) => WoodsNet.sendEvent({ type: 'hit', dmg: 0, stun: sec }),
     };
 
-    // enemy-attack proxy for co-op host: enemies can chase & hurt the partner
+    // enemy-attack proxy for co-op host: enemies can chase & hurt the partner.
+    // The attacker's position/range travel with the hit so the guest can
+    // reject phantom hits caused by its proxy position lagging behind.
     this.coopProxy = {
       get pos() { return self.remote.pos; },
       get mesh() { return self.remote.mesh; },
       get dead() { return self.remote.dead; },
-      takeDamage: (dmg) => WoodsNet.sendEvent({ type: 'pdmg', dmg: Math.round(dmg * 10) / 10 }),
+      takeDamage: (dmg, src) => WoodsNet.sendEvent({
+        type: 'pdmg', dmg: Math.round(dmg * 10) / 10,
+        ax: src?.pos ? +src.pos.x.toFixed(1) : undefined,
+        az: src?.pos ? +src.pos.z.toFixed(1) : undefined,
+        ar: src?.range != null ? +src.range.toFixed(1) : undefined,
+      }),
       applyStun: (sec) => WoodsNet.sendEvent({ type: 'pdmg', dmg: 0, stun: sec }),
     };
   }
@@ -563,9 +570,9 @@ export class Multiplayer {
     const { ctx } = this;
     const p = ctx.player;
 
-    // broadcast own state
+    // broadcast own state (fast in co-op/moba/arena so proxy lag stays small)
     const arenaHot = this.arena.active;
-    const rate = this.mode === 'coop' ? 110 : (arenaHot ? 80 : 500);
+    const rate = this.mode === 'coop' ? 70 : this.mode === 'moba' ? 80 : (arenaHot ? 70 : 500);
     WoodsNet.sendState({
       x: +p.pos.x.toFixed(1), z: +p.pos.z.toFixed(1),
       fx: +p.facing.x.toFixed(2), fz: +p.facing.z.toFixed(2),
@@ -799,11 +806,19 @@ export class Multiplayer {
         break;
       case 'arenaDeath': this._onArenaWin(); break;
 
-      case 'pdmg': // co-op guest: an enemy (simulated on the host) hit me
+      case 'pdmg': { // co-op guest: an enemy (simulated on the host) hit me
         if (p.dead) break;
+        // lag compensation: the host computed this hit against my STALE proxy
+        // position — if the attacker is nowhere near where I actually am now,
+        // it's a phantom hit and I dodge it.
+        if (ev.ax !== undefined) {
+          const d = Math.hypot(p.pos.x - ev.ax, p.pos.z - ev.az);
+          if (d > (ev.ar ?? 2) + 3.2) break; // genuinely out of reach → miss
+        }
         if (ev.dmg > 0) p.takeDamage(ev.dmg);
         if (ev.stun) p.applyStun(ev.stun);
         break;
+      }
       case 'ehit': { // co-op host: partner damaged enemy #id
         const e = ctx.enemyMgr.list.find(x => x.id === ev.id);
         if (e) {

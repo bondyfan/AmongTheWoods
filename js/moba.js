@@ -335,7 +335,7 @@ export class Moba {
   _attack(u, target) {
     u.attackCd = u.atkInterval;
     u.lungeT = 0.2;
-    if (target.hero) target.hero.takeDamage(u.dmg);
+    if (target.hero) target.hero.takeDamage(u.dmg, { pos: u.pos, range: u.range });
     else this.damageUnit(target, u.dmg, u.team === 'player' ? null : null);
   }
 
@@ -427,7 +427,9 @@ export class Moba {
       : target;
     this.projectiles.spawnBolt(from, proxy, {
       dmg: u.dmg,
-      onHit: () => target.hero ? target.hero.takeDamage(u.dmg) : this.damageUnit(target, u.dmg),
+      onHit: () => target.hero
+        ? target.hero.takeDamage(u.dmg, { pos: target.pos, range: 1.6 })
+        : this.damageUnit(target, u.dmg),
     });
     audio.sfx('attack_ranged', 0.18, 200);
   }
