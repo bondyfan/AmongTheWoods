@@ -44,6 +44,7 @@
       <button id="shop-btn">🛠 Upgrades <kbd>U</kbd></button>
       <button id="char-btn">🧍 Character <kbd>C</kbd></button>
       <button id="bestiary-btn">📕 Bestiary <kbd>N</kbd></button>
+      <button id="settings-btn">⚙️ Settings</button>
     </div>
   </div>
 
@@ -91,6 +92,22 @@
       <button class="panel-close">✕</button>
     </div>
     <div id="bestiary-items" class="card-grid"></div>
+  </div>
+
+  <!-- settings -->
+  <div id="settings" class="panel hidden">
+    <div class="panel-head">
+      <h2>Settings</h2>
+      <button class="panel-close">✕</button>
+    </div>
+    <div id="settings-body">
+      <label class="setting-row">
+        <input type="checkbox" id="set-mousemove">
+        <span><b>Mouse-directed movement</b><br>
+          <small>Hold <kbd>W</kbd> to run toward the cursor (<kbd>S</kbd> backs away,
+          <kbd>A</kbd>/<kbd>D</kbd> strafe). Off&nbsp;=&nbsp;classic WASD directions.</small></span>
+      </label>
+    </div>
   </div>
 
   <!-- main menu -->

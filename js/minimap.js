@@ -100,12 +100,13 @@ export class Minimap {
     }
   }
 
-  update(dt, player, enemyMgr) {
+  update(dt, player, enemyMgr, partner = null) {
     this.reveal(player.pos.x, player.pos.z);
+    if (partner?.mesh?.visible) this.reveal(partner.pos.x, partner.pos.z);
     this.redrawT -= dt;
     if (this.redrawT <= 0) {
       this.redrawT = 0.25;
-      this._draw(player, enemyMgr);
+      this._draw(player, enemyMgr, partner);
     }
   }
 
@@ -116,7 +117,7 @@ export class Minimap {
     };
   }
 
-  _draw(player, enemyMgr) {
+  _draw(player, enemyMgr, partner = null) {
     const { ctx, canvas } = this;
     const W = canvas.width, H = canvas.height;
     const sx = W / this.cols, sz = H / this.rows;
@@ -171,6 +172,17 @@ export class Minimap {
           ctx.fill();
         }
       }
+    }
+
+    // co-op partner: blue dot
+    if (partner?.mesh?.visible) {
+      const tp = this._toCanvas(partner.pos.x, partner.pos.z);
+      ctx.fillStyle = '#5fa8e0';
+      ctx.beginPath();
+      ctx.arc(tp.x, tp.y, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#000';
+      ctx.stroke();
     }
 
     // player dot

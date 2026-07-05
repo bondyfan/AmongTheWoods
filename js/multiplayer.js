@@ -750,11 +750,11 @@ export class Multiplayer {
   handleLocalDeath() {
     if (!this.active) return false;
     if (this.arena.active) { this._onArenaDeath(); return true; }
-    // out in the world: respawn at the spawn clearing, lose a quarter of meat
+    // out in the world: respawn at the spawn clearing — ALL meat is lost
     const { ctx } = this;
     const p = ctx.player;
-    p.meat = Math.floor(p.meat * 0.75);
-    ctx.ui.toast('☠️ You fell… respawning at the meadow (-25% meat).', 'boss');
+    p.meat = 0;
+    ctx.ui.toast('☠️ You fell… respawning at the meadow — all your meat is gone!', 'boss');
     setTimeout(() => {
       if (!this.active) return;
       p.revive(1);

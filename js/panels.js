@@ -21,6 +21,7 @@ export class Panels {
     $('shop-btn').addEventListener('click', () => this.toggle('shop'));
     $('char-btn').addEventListener('click', () => this.toggle('character'));
     $('bestiary-btn').addEventListener('click', () => this.toggle('bestiary'));
+    $('settings-btn').addEventListener('click', () => this.toggle('settings'));
     document.querySelectorAll('.panel-close').forEach(btn =>
       btn.addEventListener('click', () => this.toggle(null)));
   }
@@ -32,6 +33,7 @@ export class Panels {
     $('shop').classList.toggle('hidden', name !== 'shop');
     $('character').classList.toggle('hidden', name !== 'character');
     $('bestiary').classList.toggle('hidden', name !== 'bestiary');
+    $('settings').classList.toggle('hidden', name !== 'settings');
     if (name === 'shop') this.renderShop();
     if (name === 'character') this.renderCharacter();
     if (name === 'bestiary') this.renderBestiary();

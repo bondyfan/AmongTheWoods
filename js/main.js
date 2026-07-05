@@ -339,6 +339,21 @@ function buildBase(id, lane) {
 // ---------- multiplayer lobby ----------
 const $id = (id) => document.getElementById(id);
 
+// ---------- settings (persisted in localStorage) ----------
+const settings = Object.assign(
+  { mouseMove: false },
+  JSON.parse(localStorage.getItem('atw-settings') || '{}'),
+);
+{
+  const box = $id('set-mousemove');
+  box.checked = settings.mouseMove;
+  box.addEventListener('change', () => {
+    settings.mouseMove = box.checked;
+    localStorage.setItem('atw-settings', JSON.stringify(settings));
+    audio.sfx('click', 0.4);
+  });
+}
+
 async function ensureMp() {
   if (!mp) {
     const { Multiplayer } = await import('./multiplayer.js');
@@ -564,6 +579,7 @@ function tick() {
       input, world, enemyMgr: em, projectiles, pickups, aimPoint,
       arenaZone: mp?.active ? mp.arenaZone() : null,
       mobaBounds: game.kind === 'moba' ? MOBA.half : null,
+      mouseMove: settings.mouseMove,
     });
 
     if (game.kind === 'moba') {
@@ -593,7 +609,9 @@ function tick() {
       }
       companions.update(dt, player, em, projectiles, world);
       world.update(dt, player.pos);
-      minimap.update(dt, player, em);
+      // co-op: show the partner on the minimap too
+      minimap.update(dt, player, em,
+        mp?.active && mp.mode === 'coop' ? mp.remote : null);
       updateAtmosphere(dt);
 
       const progress = progressAt(player.pos.z);

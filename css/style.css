@@ -249,6 +249,20 @@ kbd {
 .inv-item.slotted { border-color: #86b45e; background: rgba(110, 190, 90, 0.12); }
 .inv-item .lv { font-size: 11px; opacity: 0.6; }
 .empty-note { font-size: 13px; opacity: 0.55; margin: 4px 0; }
+
+/* ---------- settings panel ---------- */
+#settings { width: min(520px, 94vw); }
+#settings-body { padding: 18px 22px; }
+.setting-row {
+  display: flex; align-items: flex-start; gap: 14px; cursor: pointer;
+  padding: 10px 12px; border-radius: 10px;
+}
+.setting-row:hover { background: rgba(255,255,255,0.05); }
+.setting-row input[type="checkbox"] {
+  width: 20px; height: 20px; margin-top: 2px; cursor: pointer; accent-color: #86b45e;
+  flex: 0 0 auto;
+}
+.setting-row small { opacity: 0.7; line-height: 1.45; display: inline-block; margin-top: 3px; }
 .card {
   background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);
   border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;

@@ -271,6 +271,18 @@ export class Player {
       this.walkT += dt * 20;
     } else {
       let mx = input.moveX, mz = input.moveZ;
+      // optional mouse-directed movement (settings): W runs toward the cursor,
+      // S backs away, A/D strafe — all relative to the aim direction
+      if (ctx.mouseMove && (mx !== 0 || mz !== 0)) {
+        const fx = aimPoint.x - this.pos.x, fz = aimPoint.z - this.pos.z;
+        const fl = Math.hypot(fx, fz);
+        if (fl > 0.01) {
+          const dX = fx / fl, dZ = fz / fl;   // forward = toward the cursor
+          const fwd = -mz, strafe = mx;       // W → forward, D → strafe right
+          mx = dX * fwd - dZ * strafe;
+          mz = dZ * fwd + dX * strafe;
+        }
+      }
       moving = mx !== 0 || mz !== 0;
       if (moving) {
         const len = Math.hypot(mx, mz);
