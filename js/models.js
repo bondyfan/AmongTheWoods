@@ -359,6 +359,17 @@ function humanoid({ fur, face, eyes, width = 1, height = 1 }) {
   return g;
 }
 
+export function makeZombie() {
+  const g = humanoid({ fur: 0x6a7a52, face: 0x8a9a6a, eyes: 0xff3322, width: 0.72, height: 0.92 });
+  // tattered rags + a lolling head tilt
+  const rags = box(0.7, 0.4, 0.5, 0x4a4238);
+  rags.position.y = 0.95;
+  g.add(rags);
+  g.userData.head.rotation.z = 0.25;
+  g.userData.arms.forEach(a => { a.rotation.x = -1.1; }); // classic zombie reach
+  return g;
+}
+
 export function makeWendigo() {
   const g = humanoid({ fur: 0x4a4a52, face: 0xb8b0a4, eyes: 0xff2222, width: 0.8, height: 1.05 });
   // crooked antlers
@@ -390,6 +401,7 @@ export function makeEnemyMesh(type) {
     case 'boar': return makeBoar();
     case 'elk': return makeElk();
     case 'bear': return makeBear();
+    case 'zombie': return makeZombie();
     case 'wendigo': return makeWendigo();
     case 'yeti': return makeYeti();
     case 'icegolem': return makeIceGolem();
@@ -536,6 +548,23 @@ export function makeBoatRack() {
     g.add(leg);
   }
   g.add(hull);
+  return g;
+}
+
+export function makeGraveyard() {
+  const g = new THREE.Group();
+  for (let i = 0; i < 4; i++) {
+    const slab = box(0.5, 0.8 + (i % 2) * 0.25, 0.14, 0x8a8578);
+    slab.position.set(-1.2 + i * 0.85, 0.42, (i % 2) * 0.8 - 0.4);
+    slab.rotation.z = (i - 1.5) * 0.06;
+    const top = cyl(0.25, 0.25, 0.14, 0x8a8578, 8);
+    top.rotation.x = Math.PI / 2;
+    top.position.set(slab.position.x, 0.84 + (i % 2) * 0.25, slab.position.z);
+    g.add(slab, top);
+  }
+  const soil = box(3.6, 0.1, 2.2, 0x4a3a2e);
+  soil.position.y = 0.05;
+  g.add(soil);
   return g;
 }
 

@@ -254,19 +254,18 @@ function startPlaying() {
     });
     panels.camp = camp;
     player.pos.set(0, 0, -2); // wake up inside the cave
-    // treasure islands (solo & MP host — the co-op guest sees the host's loot)
-    if (!mp?.active || mp.isHost) {
-      for (const lake of world.islands) {
-        const at = { x: lake.x, z: lake.z };
-        pickups.spawn('meat', 8, at, 1.2);
-        pickups.spawn('stone', 6, at, 1.2);
-        pickups.spawn('hide', 3, at, 1.2);
-        if (Math.random() < 0.4) {
-          const candidates = ITEMS.filter(i => !i.free);
-          pickups.spawn('item', candidates[Math.floor(Math.random() * candidates.length)].id, at, 0.6);
-        }
+    // treasure islands spawn their loot lazily as their chunk is discovered
+    world.onIsland = (lake) => {
+      if (mp?.active && !mp.isHost) return; // co-op guest sees the host's loot
+      const at = { x: lake.x, z: lake.z };
+      pickups.spawn('meat', 8, at, 1.2);
+      pickups.spawn('stone', 6, at, 1.2);
+      pickups.spawn('hide', 3, at, 1.2);
+      if (Math.random() < 0.4) {
+        const candidates = ITEMS.filter(i => !i.free);
+        pickups.spawn('item', candidates[Math.floor(Math.random() * candidates.length)].id, at, 0.6);
       }
-    }
+    };
     // the co-op guest renders the HOST's enemies
     if (!(mp?.active && mp.mode === 'coop' && !mp.isHost)) enemyMgr.spawnInitialWave();
   }
@@ -378,12 +377,21 @@ function survivalRespawn() {
   player.loseLevel();
   player.mesh.rotation.z = Math.PI / 2; // lie down while "out"
   audio.sfx('defeat', 0.5);
-  ui.toast(`☠️ You fell… you wake in the cave. Level lost (now ${player.level}); half your carried loot (${dropped}) spilled where you died. Chest storage is safe.`, 'boss');
+  ui.toast(`☠️ You fell… Level lost (now ${player.level}); half your carried loot (${dropped}) spilled where you died. Chest storage is safe.`, 'boss');
   setTimeout(() => {
     if (game.mode !== 'play') return;
-    player.revive(1);
-    player.pos.set(0, 0, -2);
-  }, 3500);
+    // with a graveyard built you choose where to wake up
+    if (camp?.has('grave') && camp.gravePos) $id('respawn-choice').classList.remove('hidden');
+    else reviveAt('cave');
+  }, 2500);
+}
+
+function reviveAt(where) {
+  $id('respawn-choice').classList.add('hidden');
+  if (game.mode !== 'play') return;
+  player.revive(1);
+  if (where === 'grave' && camp?.gravePos) player.pos.set(camp.gravePos.x, 0, camp.gravePos.z + 2);
+  else player.pos.set(0, 0, -2);
 }
 
 function mobaRespawn() {
@@ -426,6 +434,10 @@ const settings = Object.assign(
     settings.mouseMove = box.checked;
     localStorage.setItem('atw-settings', JSON.stringify(settings));
     audio.sfx('click', 0.4);
+  });
+  const mute = $id('set-mute');
+  mute.addEventListener('change', () => {
+    if (mute.checked !== audio.muted) audio.toggleMute();
   });
 }
 
@@ -572,12 +584,29 @@ $id('base-btn').addEventListener('click', () => inPlay() && openBasePanel());
 input.onKey('KeyC', () => inPlay() && panels.toggle('character'));
 input.onKey('KeyN', () => inPlay() && panels.toggle('bestiary'));
 input.onKey('KeyQ', () => inPlay() && !game.paused && player.cycleWeapon());
-input.onKey('KeyM', () => audio.toggleMute());
+// M / minimap click → the big world map (mute moved to Settings)
+let bigmapOpen = false;
+let bigmapT = 0;
+function toggleBigMap(force) {
+  if (game.kind !== 'survival' || game.mode !== 'play') { bigmapOpen = false; return; }
+  bigmapOpen = force !== undefined ? force : !bigmapOpen;
+  $id('bigmap').classList.toggle('hidden', !bigmapOpen);
+  if (bigmapOpen) {
+    audio.sfx('click', 0.4);
+    minimap.drawBig($id('bigmap-canvas'), player, mp?.mode === 'coop' ? mp.remote : null);
+  }
+}
+input.onKey('KeyM', () => toggleBigMap());
+$id('minimap').addEventListener('click', () => toggleBigMap());
+$id('bigmap').querySelector('.panel-close').addEventListener('click', () => toggleBigMap(false));
+$id('respawn-cave').addEventListener('click', () => reviveAt('cave'));
+$id('respawn-grave').addEventListener('click', () => reviveAt('grave'));
 for (let i = 0; i < 6; i++) {
   input.onKey('Digit' + (i + 1), () => inPlay() && !game.paused && player.castSpell(i, { enemyMgr: combatMgr() }));
 }
 input.onKey('Escape', () => {
   if (!inPlay()) return;
+  if (bigmapOpen) { toggleBigMap(false); return; }
   if (panels.open) { panels.toggle(null); return; }
   if (mp?.active) return; // the shared world can't pause
   game.paused = !game.paused;
@@ -729,9 +758,17 @@ function tick() {
         raft.rotation.y = player.mesh.rotation.y;
       }
 
+      // the big map refreshes while open
+      if (bigmapOpen) {
+        bigmapT -= dt;
+        if (bigmapT <= 0) {
+          bigmapT = 0.5;
+          minimap.drawBig($id('bigmap-canvas'), player, mp?.mode === 'coop' ? mp.remote : null);
+        }
+      }
+
       const progress = progressAt(player.pos.x, player.pos.z);
-      ui.updateHUD(player, progress,
-        `${BIOMES[game.biomeIndex].name} · ${camp?.era() ?? ''}`);
+      ui.updateHUD(player, progress, BIOMES[game.biomeIndex].name);
 
       if (radiusOf(player.pos.x, player.pos.z) >= WORLD.goalR) {
         game.mode = 'won';

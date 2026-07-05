@@ -51,6 +51,8 @@ const angDiff = (a, b) => {
   return Math.abs(d);
 };
 
+const LAKE_REGION = 220; // deterministic lakes are generated per region cell
+
 export class World {
   constructor(scene, seed = 1337) {
     this.scene = scene;
@@ -58,16 +60,17 @@ export class World {
     this.chunks = new Map();     // "cx,cz" -> { group, trees: [], rocks: [] }
     this.fallingTrees = [];
     this.nextTreeId = 1;
-    this._statics = [];          // ground/lake/river/cave meshes (for reset)
+    this._statics = [];          // underlay/river/cave meshes (for reset)
     this._arena = null;
     this.obstacles = [];
     this.rings = [];
-    this.lakes = [];
-    this.islands = [];
+    this.lakes = [];             // kept for API compat (MOBA overrides); unused here
+    this._lakeRegions = new Map();
+    this._treasured = new Set();
+    this.onIsland = null;        // main hooks this to drop island treasure
     this._genRings();
     this._genLakes();
     this._buildGround();
-    this._buildLakes();
     this._buildRingRivers();
     this._buildCave();
   }
@@ -94,11 +97,12 @@ export class World {
   reset(seed) {
     this.dispose();
     this.seed = seed;
-    this.rings = []; this.lakes = []; this.islands = [];
+    this.rings = []; this.lakes = [];
+    this._lakeRegions.clear();
+    this._treasured.clear();
     this._genRings();
     this._genLakes();
     this._buildGround();
-    this._buildLakes();
     this._buildRingRivers();
     this._buildCave();
   }
@@ -140,61 +144,58 @@ export class World {
           + valueNoise(x, z, 10, this.seed + 7) * 0.55
           - 1.2;
     const r = radiusOf(x, z);
-    if (r < 34) h *= Math.max(0.1, (r - 14) / 20);
+    if (r < 28) h *= Math.max(0.1, (r - 10) / 18);
     return h;
   }
 
   // ---- ring barriers at the biome edges: ridge (boulders + gates) or river
-  // (water ring + bridges). Deterministic from the seed. ----
+  // (water ring + bridges). Bigger rings get more gates. ----
   _genRings() {
     const rng = mulberry32(this.seed ^ 0x5eed);
-    const radii = BIOMES.slice(0, -1).map(b => b.rMax); // 120/240/360/460
+    const radii = BIOMES.slice(0, -1).map(b => b.rMax);
     this.rings = radii.map((r, i) => {
       const type = i % 2 === 0 ? 'ridge' : 'river';
       const gaps = [];
-      const count = 2 + (rng() < 0.5 ? 1 : 0);          // 2-3 gates per ring
+      const count = Math.max(2, Math.round(r / 250));
       for (let g = 0; g < count; g++) {
-        const width = (type === 'river' ? 9 : 15) + rng() * 6; // meters of opening
+        const width = (type === 'river' ? 9 : 15) + rng() * 8; // meters of opening
         gaps.push({ a: rng() * Math.PI * 2, w: width / r });   // width in radians
       }
       return { r, type, gaps };
     });
   }
 
-  // ---- lakes; the big ones get a treasure island in the middle ----
-  _genLakes() {
-    const rng = mulberry32(this.seed ^ 0xa9ae);
-    for (let i = 0; i < 140; i++) {
-      const a = rng() * Math.PI * 2;
-      const r = 60 + rng() * (WORLD.radius - 100);
-      const x = Math.sin(a) * r, z = Math.cos(a) * r;
+  // ---- lakes are generated lazily per region cell (the world is huge) ----
+  _genLakes() {} // kept for subclass overrides (MOBA disables lakes)
+
+  _regionLakes(rx, rz) {
+    const key = rx + ',' + rz;
+    let list = this._lakeRegions.get(key);
+    if (list) return list;
+    list = [];
+    const rng = mulberry32(this.seed ^ (rx * 92821) ^ (rz * 68917) ^ 0xa9ae);
+    const count = rng() < 0.55 ? 1 : rng() < 0.4 ? 2 : 0;
+    for (let i = 0; i < count; i++) {
+      const x = rx * LAKE_REGION + 20 + rng() * (LAKE_REGION - 40);
+      const z = rz * LAKE_REGION + 20 + rng() * (LAKE_REGION - 40);
       const lr = 6 + rng() * 12;
+      const r = radiusOf(x, z);
+      if (r < 70 || r > WORLD.radius - 30) continue;
       if (this.rings.some(w => Math.abs(r - w.r) < lr + 12)) continue;
-      if (this.lakes.some(l => Math.hypot(x - l.x, z - l.z) < lr + l.r + 16)) continue;
       const island = lr >= 14 ? { r: 4.5 } : null;
-      const lake = { x, z, r: lr, island };
-      this.lakes.push(lake);
-      if (island) this.islands.push(lake);
+      list.push({ x, z, r: lr, island, id: key + ':' + i });
     }
+    this._lakeRegions.set(key, list);
+    return list;
   }
 
-  _buildLakes() {
-    for (const lake of this.lakes) {
-      const geo = new THREE.CircleGeometry(lake.r, 20);
-      const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
-        color: 0x3f6f9e, transparent: true, opacity: 0.85,
-      }));
-      mesh.rotation.x = -Math.PI / 2;
-      mesh.position.set(lake.x, this.heightAt(lake.x, lake.z) + 0.22, lake.z);
-      this._addStatic(mesh);
-      if (lake.island) {
-        const sand = new THREE.Mesh(new THREE.CircleGeometry(lake.island.r + 0.8, 14),
-          new THREE.MeshLambertMaterial({ color: 0xd8c58a }));
-        sand.rotation.x = -Math.PI / 2;
-        sand.position.set(lake.x, this.heightAt(lake.x, lake.z) + 0.28, lake.z);
-        this._addStatic(sand);
-      }
-    }
+  lakesNear(x, z) {
+    const rx = Math.floor(x / LAKE_REGION), rz = Math.floor(z / LAKE_REGION);
+    const out = [];
+    for (let dx = -1; dx <= 1; dx++)
+      for (let dz = -1; dz <= 1; dz++)
+        out.push(...this._regionLakes(rx + dx, rz + dz));
+    return out;
   }
 
   // river rings hug the terrain; every gate gets a bridge
@@ -202,7 +203,7 @@ export class World {
     for (const ring of this.rings) {
       if (ring.type !== 'river') continue;
       const half = RING_HALF.river;
-      const segs = Math.max(64, Math.round(ring.r));
+      const segs = Math.max(64, Math.min(4096, Math.round(ring.r)));
       const geo = new THREE.RingGeometry(ring.r - half, ring.r + half, segs, 1);
       geo.rotateX(-Math.PI / 2);
       const pos = geo.attributes.position;
@@ -224,35 +225,32 @@ export class World {
     }
   }
 
-  // ---- the starting cave: a boulder horseshoe with stalagmites, opening south ----
+  // ---- the starting cave: a small boulder horseshoe, opening toward +z
+  // (down-screen, where the camp is). Every boulder gets its own collision
+  // circle so the walls block EXACTLY where the rocks are. ----
   _buildCave() {
     const rng = mulberry32(this.seed ^ 0xca4e);
     const R = WORLD.caveR;
-    for (let a = 0.55; a < Math.PI * 2 - 0.55; a += 1.9 / R) {
-      const bx = Math.sin(a + Math.PI) * R, bz = Math.cos(a + Math.PI) * R; // opening toward +z
-      const b = makeBoulder(1.7 + rng() * 1.0, 0x5c584e, rng);
-      b.position.set(bx, this.heightAt(bx, bz) + 0.35, bz);
+    const OPEN_HALF = 0.62; // radians of clear opening around the +z direction
+    for (let a = OPEN_HALF; a < Math.PI * 2 - OPEN_HALF; a += 1.7 / R) {
+      const bx = Math.sin(a) * R, bz = Math.cos(a) * R; // a=0 → +z (the opening)
+      const scale = 1.4 + rng() * 0.8;
+      const b = makeBoulder(scale, 0x5c584e, rng);
+      b.position.set(bx, this.heightAt(bx, bz) + 0.3, bz);
       this._addStatic(b);
+      this.obstacles.push({ x: bx, z: bz, r: scale * 0.85 }); // matches the rock
     }
-    // inner obstacle ring so you can't clip through the cave wall
-    this.obstacles.push(
-      { x: 0, z: -R, r: R * 0.55 },
-      { x: -R * 0.85, z: -R * 0.3, r: R * 0.45 },
-      { x: R * 0.85, z: -R * 0.3, r: R * 0.45 },
-      { x: -R * 0.95, z: R * 0.45, r: R * 0.35 },
-      { x: R * 0.95, z: R * 0.45, r: R * 0.35 },
-    );
-    for (let i = 0; i < 5; i++) {
-      const a = rng() * Math.PI * 2, d = 3 + rng() * (R - 6);
-      const sx = Math.sin(a) * d, sz = Math.cos(a) * d - 2;
-      if (Math.hypot(sx, sz) < 2.5) continue; // keep the spawn spot clear
+    for (let i = 0; i < 3; i++) {
+      const a = Math.PI * 0.6 + rng() * Math.PI * 0.8; // back of the cave
+      const d = 3 + rng() * (R - 5);
+      const sx = Math.sin(a) * d, sz = Math.cos(a) * d;
       const s = makeStalagmite(rng);
       s.position.set(sx, this.heightAt(sx, sz), sz);
       this._addStatic(s);
     }
     // a small campfire just outside the cave mouth — home
     const fire = makeCampfire();
-    fire.position.set(3, this.heightAt(3, 19), 19);
+    fire.position.set(2, this.heightAt(2, 14), 14);
     this._addStatic(fire);
   }
 
@@ -291,11 +289,23 @@ export class World {
     return out;
   }
 
+  // The world is far too big for one vertex-colored plane — the detailed
+  // ground is built per chunk (see _genChunk); this is just a dark underlay
+  // so the fog-shrouded distance never shows the void.
   _buildGround() {
-    const size = WORLD.radius * 2 + 40;
-    const seg = Math.round(size / 4.4);
-    const geo = new THREE.PlaneGeometry(size, size, seg, seg);
+    const size = WORLD.radius * 2 + 400;
+    const geo = new THREE.PlaneGeometry(size, size, 1, 1);
     geo.rotateX(-Math.PI / 2);
+    const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: 0x2c3a24 }));
+    mesh.position.y = -2.6;
+    this._addStatic(mesh);
+  }
+
+  // vertex-colored terrain tile for one chunk
+  _groundTile(cxw, czw) {
+    const geo = new THREE.PlaneGeometry(CHUNK, CHUNK, 10, 10);
+    geo.rotateX(-Math.PI / 2);
+    geo.translate(cxw + CHUNK / 2, 0, czw + CHUNK / 2);
     const pos = geo.attributes.position;
     const colors = new Float32Array(pos.count * 3);
     const col = new THREE.Color();
@@ -311,7 +321,7 @@ export class World {
     geo.computeVertexNormals();
     const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
     mesh.receiveShadow = true;
-    this._addStatic(mesh);
+    return mesh;
   }
 
   _chunkKey(cx, cz) { return cx + ',' + cz; }
@@ -322,7 +332,7 @@ export class World {
   }
 
   isWater(x, z) {
-    for (const lake of this.lakes) {
+    for (const lake of this.lakesNear(x, z)) {
       const d = Math.hypot(x - lake.x, z - lake.z);
       if (d < lake.r) {
         if (lake.island && d < lake.island.r) return false; // the island is land
@@ -351,12 +361,37 @@ export class World {
     const midR = radiusOf(cxw + CHUNK / 2, czw + CHUNK / 2);
     const biome = biomeAt(cxw + CHUNK / 2, czw + CHUNK / 2);
 
+    // detailed vertex-colored terrain for this chunk
+    group.add(this._groundTile(cxw, czw));
+
+    // lakes whose center falls in this chunk get their water mesh here
+    const chunkLakes = this.lakesNear(cxw + CHUNK / 2, czw + CHUNK / 2);
+    for (const lake of chunkLakes) {
+      if (lake.x < cxw || lake.x >= cxw + CHUNK || lake.z < czw || lake.z >= czw + CHUNK) continue;
+      const mesh = new THREE.Mesh(new THREE.CircleGeometry(lake.r, 20),
+        new THREE.MeshLambertMaterial({ color: 0x3f6f9e, transparent: true, opacity: 0.85 }));
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.set(lake.x, this.heightAt(lake.x, lake.z) + 0.22, lake.z);
+      group.add(mesh);
+      if (lake.island) {
+        const sand = new THREE.Mesh(new THREE.CircleGeometry(lake.island.r + 0.8, 14),
+          new THREE.MeshLambertMaterial({ color: 0xd8c58a }));
+        sand.rotation.x = -Math.PI / 2;
+        sand.position.set(lake.x, this.heightAt(lake.x, lake.z) + 0.28, lake.z);
+        group.add(sand);
+        if (!this._treasured.has(lake.id)) {
+          this._treasured.add(lake.id);
+          this.onIsland?.(lake); // main drops the island treasure
+        }
+      }
+    }
+
     const inBounds = (x, z) => {
       const r = radiusOf(x, z);
-      if (r > WORLD.radius - 3 || r < 17) return false;               // world edge + cave/camp
-      if (x > -10 && x < 14 && z > 14 && z < 34) return false;        // camp building spots
+      if (r > WORLD.radius - 3 || r < 14) return false;               // world edge + cave
+      if (x > -13 && x < 16 && z > 8 && z < 24) return false;         // camp building spots
       if (this.rings.some(w => Math.abs(r - w.r) < 5)) return false;  // ring bands
-      if (this.lakes.some(l => {
+      if (chunkLakes.some(l => {
         const d = Math.hypot(x - l.x, z - l.z);
         return d < l.r + 1.2 && !(l.island && d < l.island.r);
       })) return false;
@@ -415,17 +450,33 @@ export class World {
     if (rng() < 0.35) scatter(1, () => makeLog(biome.trunk, rng));
 
     // -- ridge-ring boulders crossing this chunk (rivers are built globally) --
+    const rockColor = biome.snowy ? 0xc8d4dc : 0x82817a;
     for (const ring of this.rings) {
       if (ring.type !== 'ridge') continue;
       if (Math.abs(midR - ring.r) > CHUNK) continue;
-      const rockColor = biome.snowy ? 0xc8d4dc : 0x82817a;
-      for (let a = 0; a < Math.PI * 2; a += 2.3 / ring.r) {
+      // only walk the angle range this chunk subtends (rings are HUGE)
+      const aMid = Math.atan2(cxw + CHUNK / 2, czw + CHUNK / 2);
+      const aSpan = (CHUNK * 1.5) / ring.r;
+      for (let a = aMid - aSpan; a < aMid + aSpan; a += 2.3 / ring.r) {
         const bx = Math.sin(a) * ring.r, bz = Math.cos(a) * ring.r;
         if (bx < cxw - 2 || bx > cxw + CHUNK + 2 || bz < czw - 2 || bz > czw + CHUNK + 2) continue;
         if (ring.gaps.some(g => angDiff(a, g.a) < g.w / 2 + 0.6 / ring.r)) continue;
         const jx = bx + (rng() - 0.5) * 1.2, jz = bz + (rng() - 0.5) * 1.8;
         const b = makeBoulder(1.5 + rng() * 1.1, rockColor, rng);
         b.position.set(jx, this.heightAt(jx, jz) + 0.35, jz);
+        group.add(b);
+      }
+    }
+
+    // -- world-edge boulders --
+    if (Math.abs(midR - WORLD.radius) < CHUNK * 1.5) {
+      const aMid = Math.atan2(cxw + CHUNK / 2, czw + CHUNK / 2);
+      const aSpan = (CHUNK * 1.5) / WORLD.radius;
+      for (let a = aMid - aSpan; a < aMid + aSpan; a += 2.6 / WORLD.radius) {
+        const bx = Math.sin(a) * WORLD.radius, bz = Math.cos(a) * WORLD.radius;
+        if (bx < cxw - 4 || bx > cxw + CHUNK + 4 || bz < czw - 4 || bz > czw + CHUNK + 4) continue;
+        const b = makeBoulder(1.9 + rng() * 1.2, 0x7c786c, rng);
+        b.position.set(bx, this.heightAt(bx, bz) + 0.3, bz);
         group.add(b);
       }
     }
@@ -527,7 +578,7 @@ export class World {
 
     // lakes (boats float over them; islands are solid ground)
     if (!opts.boat) {
-      for (const lake of this.lakes) {
+      for (const lake of this.lakesNear(pos.x, pos.z)) {
         const d = Math.hypot(pos.x - lake.x, pos.z - lake.z);
         if (lake.island && d < lake.island.r + r * 0.5) continue; // on the island
         if (d < lake.r + r) pushOut(lake.x, lake.z, r + lake.r);

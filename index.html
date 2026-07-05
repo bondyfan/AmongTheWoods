@@ -110,7 +110,30 @@
           <small>Hold <kbd>W</kbd> to run toward the cursor (<kbd>S</kbd> backs away,
           <kbd>A</kbd>/<kbd>D</kbd> strafe). Off&nbsp;=&nbsp;classic WASD directions.</small></span>
       </label>
+      <label class="setting-row">
+        <input type="checkbox" id="set-mute">
+        <span><b>Mute audio</b><br>
+          <small>Silence all music and sound effects.</small></span>
+      </label>
     </div>
+  </div>
+
+  <!-- big world map (M / minimap click) -->
+  <div id="bigmap" class="panel hidden">
+    <div class="panel-head">
+      <h2>World Map</h2>
+      <span class="panel-res">Only what you have discovered is drawn.</span>
+      <button class="panel-close">✕</button>
+    </div>
+    <div id="bigmap-body"><canvas id="bigmap-canvas" width="620" height="620"></canvas></div>
+  </div>
+
+  <!-- respawn choice (dies with a graveyard built) -->
+  <div id="respawn-choice" class="hidden">
+    <h2>☠️ You fell…</h2>
+    <p>Where do you want to wake up?</p>
+    <button id="respawn-cave">🕳️ The Cave (home)</button>
+    <button id="respawn-grave">🪦 The Graveyard</button>
   </div>
 
   <!-- main menu -->
@@ -160,7 +183,7 @@
       <div class="controls">
         <div><kbd>WASD</kbd> / <kbd>↑↓←→</kbd> move &nbsp;·&nbsp; <span class="mouse">🖱</span> aim &nbsp;·&nbsp; <kbd>LMB</kbd>/<kbd>Space</kbd> attack</div>
         <div><kbd>Q</kbd> switch weapon &nbsp;·&nbsp; <kbd>1</kbd>–<kbd>6</kbd> spells &nbsp;·&nbsp; <kbd>U</kbd> shop &nbsp;·&nbsp; <kbd>C</kbd> character &nbsp;·&nbsp; <kbd>N</kbd> bestiary</div>
-        <div><kbd>Esc</kbd> pause &nbsp;·&nbsp; <kbd>M</kbd> mute</div>
+        <div><kbd>Esc</kbd> pause &nbsp;·&nbsp; <kbd>M</kbd> world map</div>
       </div>
       <p class="hint">Hunt for meat &amp; XP · loot flies to you · chop trees with an axe · beware the pack mothers 💀</p>
     </div>

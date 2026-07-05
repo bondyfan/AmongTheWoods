@@ -68,7 +68,8 @@ export class MobaWorld extends World {
   }
 
   _genRings() { this.rings = []; }   // no ring barriers on the MOBA map
-  _genLakes() { this.lakes = []; this.islands = []; } // no lakes (keeps lanes reliable)
+  _genLakes() { this.lakes = []; }   // no lakes (keeps lanes reliable)
+  lakesNear() { return []; }
   _buildRingRivers() {}
   _buildCave() {}                    // no starting cave either
 

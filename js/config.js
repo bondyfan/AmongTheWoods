@@ -1,11 +1,12 @@
 // ---- World & progression configuration ----
 
 // The survival world is RADIAL: you start in a cave at the center and the
-// biomes are concentric rings expanding outward in every direction.
+// biomes are concentric rings expanding outward in every direction. It is
+// HUGE — what fits on the minimap is barely the first ring.
 export const WORLD = {
-  radius: 545,      // playable circle
-  goalR: 520,       // reach this distance from home to win
-  caveR: 13,        // the starting cave at the center
+  radius: 5500,     // playable circle — 10× the old world
+  goalR: 5400,      // reach this distance from home to win
+  caveR: 9,         // the starting cave at the center
 };
 
 export const radiusOf = (x, z) => Math.hypot(x, z);
@@ -15,31 +16,43 @@ export const radiusOf = (x, z) => Math.hypot(x, z);
 // trees = weights for tree variants, snowy adds snow caps to pines.
 // packs: null = no packs in this ring, otherwise spawn config.
 export const BIOMES = [
-  { name: 'Verdant Forest', rMax: 120,  ground: 0x55803c, ground2: 0x669147, dirt: 0x8a6b42,
+  { name: 'Verdant Forest', rMax: 550,  ground: 0x55803c, ground2: 0x669147, dirt: 0x8a6b42,
     fog: 0xc8dcae, sky: 0xaecfe8,
     foliage: [0x2d6a2d, 0x3c7f37, 0x4c8f3f], trunk: 0x6b4a2d,
     trees: { pine: 0.4, leafy: 0.4, birch: 0.2, dead: 0 }, snowy: false,
     grass: 0x6fa04c, flowers: true, mushrooms: false,
     enemies: ['rat', 'spider', 'snake'], packs: null, treeDensity: 1.0 },
-  { name: 'Dark Forest',    rMax: 240,  ground: 0x3d5c2f, ground2: 0x33502a, dirt: 0x5c4a30,
+  { name: 'Dark Forest',    rMax: 1200, ground: 0x3d5c2f, ground2: 0x33502a, dirt: 0x5c4a30,
     fog: 0x93a986, sky: 0x8fa8b8,
     foliage: [0x1e4a22, 0x27552a, 0x1a3f2e], trunk: 0x4c3520,
     trees: { pine: 0.55, leafy: 0.25, birch: 0, dead: 0.2 }, snowy: false,
     grass: 0x44663a, flowers: false, mushrooms: true,
     enemies: ['spider', 'snake', 'wolf', 'venomspider', 'bat'], packs: { skulls: [0.8, 0.2, 0] }, treeDensity: 1.3 },
-  { name: 'Highlands',      rMax: 360,  ground: 0x7a7a55, ground2: 0x8b845e, dirt: 0x97815a,
+  { name: 'Haunted Forest', rMax: 2000, ground: 0x414b38, ground2: 0x39432f, dirt: 0x544a52,
+    fog: 0x8a86a0, sky: 0x9a92b0,
+    foliage: [0x2a3a28, 0x1e2e20, 0x3a3448], trunk: 0x3a3230,
+    trees: { pine: 0.3, leafy: 0.1, birch: 0, dead: 0.6 }, snowy: false,
+    grass: 0x5c6650, flowers: false, mushrooms: true,
+    enemies: ['zombie', 'bat', 'venomspider', 'wolf'], packs: { skulls: [0.6, 0.3, 0.1] }, treeDensity: 1.1 },
+  { name: 'Murky Swamp',    rMax: 2900, ground: 0x4a5a3a, ground2: 0x40503a, dirt: 0x3d4a3a,
+    fog: 0xa3b096, sky: 0xa8b4a0,
+    foliage: [0x3a5a30, 0x2e4a2a, 0x4a6438], trunk: 0x453a28,
+    trees: { pine: 0.2, leafy: 0.5, birch: 0, dead: 0.3 }, snowy: false,
+    grass: 0x60704a, flowers: false, mushrooms: true,
+    enemies: ['snake', 'venomspider', 'stormsnake', 'boar'], packs: { skulls: [0.5, 0.4, 0.1] }, treeDensity: 0.9 },
+  { name: 'Highlands',      rMax: 3800, ground: 0x7a7a55, ground2: 0x8b845e, dirt: 0x97815a,
     fog: 0xb9b9a2, sky: 0x9db4c4,
     foliage: [0x5c6e33, 0x6d7d3a, 0x4e5e2c], trunk: 0x5c4a33,
     trees: { pine: 0.5, leafy: 0.1, birch: 0.1, dead: 0.3 }, snowy: false,
     grass: 0x8f9060, flowers: false, mushrooms: false,
-    enemies: ['wolf', 'boar', 'elk', 'venomspider', 'stormsnake'], packs: { skulls: [0.5, 0.4, 0.1] }, treeDensity: 0.7 },
-  { name: 'Snowfall Woods', rMax: 460, ground: 0xdfe7ec, ground2: 0xd0dce4, dirt: 0xb4c4d1,
+    enemies: ['wolf', 'boar', 'elk', 'venomspider', 'stormsnake'], packs: { skulls: [0.4, 0.4, 0.2] }, treeDensity: 0.7 },
+  { name: 'Snowfall Woods', rMax: 4700, ground: 0xdfe7ec, ground2: 0xd0dce4, dirt: 0xb4c4d1,
     fog: 0xe6edf2, sky: 0xc9d9e4,
     foliage: [0x3d6155, 0x4a6e60, 0x35564b], trunk: 0x4a3a30,
     trees: { pine: 0.8, leafy: 0, birch: 0, dead: 0.2 }, snowy: true,
     grass: 0xc2d2dc, flowers: false, mushrooms: false,
     enemies: ['icewolf', 'icespider', 'bear', 'stormsnake'], packs: { skulls: [0.3, 0.5, 0.2] }, treeDensity: 0.85 },
-  { name: 'Frozen Peak',    rMax: 9999, ground: 0xf2f6fa, ground2: 0xe4ecf3, dirt: 0xc9d6e1,
+  { name: 'Frozen Peak',    rMax: 99999, ground: 0xf2f6fa, ground2: 0xe4ecf3, dirt: 0xc9d6e1,
     fog: 0xf4f8fc, sky: 0xdfe9f2,
     foliage: [0x8fb0c0, 0x3d6155, 0xcfdfe8], trunk: 0x3d3229,
     trees: { pine: 0.7, leafy: 0, birch: 0, dead: 0.3 }, snowy: true,
@@ -89,6 +102,9 @@ export const ENEMY_TYPES = {
              ranged: true, shootRange: 12, spellCd: 2.5, projectileSpeed: 15, shotColor: 0x8aff3a },
   bat:     { name: 'Cave Bat', icon: '🦇',
              hp: 18,  dmg: 6,  speed: 9.5, range: 1.4, attackCd: 1.1, xp: 12, meat: 1, hitR: 0.6,  aggro: 30, flying: true },
+  // -- Haunted Forest --
+  zombie:  { name: 'Zombie', icon: '🧟',
+             hp: 90,  dmg: 14, speed: 4.6, range: 1.7, attackCd: 1.3, xp: 28, meat: 2, hitR: 0.85, aggro: 32 },
   // -- Highlands --
   boar:    { name: 'Wild Boar', icon: '🐗',
              hp: 80,  dmg: 16, speed: 7.5, range: 1.7, attackCd: 1.1, xp: 25, meat: 3, hitR: 0.9,  aggro: 24 },
@@ -170,6 +186,13 @@ export const ITEMS = [
   { id: 'rapidBow',   slot: 'weapon', level: 8, icon: '🌀', name: 'Windstorm Bow', cost: { wood: 45, iron: 14, hide: 10 }, needs: 'furnace',
     weapon: { kind: 'bow', dmg: 30, cd: 0.35, range: 10, pierce: true, tier: 3 },
     desc: 'Very fast piercing arrows, reach 10 m.' },
+  // -- medieval (Age 5, needs the Keep) --
+  { id: 'steelSword', slot: 'weapon', level: 9, icon: '⚔️', name: 'Knight\'s Sword', cost: { iron: 25, wood: 10, hide: 8 }, needs: 'keep',
+    weapon: { kind: 'melee', dmg: 150, cd: 0.42, range: 2.1, chop: 4, tier: 3 },
+    desc: 'Medieval steel. Damage 150, lightning-fast swings.' },
+  { id: 'crossbow',   slot: 'weapon', level: 9, icon: '🎯', name: 'Crossbow',       cost: { wood: 50, iron: 20 }, needs: 'keep',
+    weapon: { kind: 'bow', dmg: 60, cd: 0.9, range: 12, pierce: true, tier: 3 },
+    desc: 'Medieval war machine. Piercing bolts for 60 damage.' },
   // -- head (crafted from hides at the tent) --
   { id: 'leatherCap', slot: 'head', level: 3, icon: '🧢', name: 'Hide Cap',      cost: { hide: 4, meat: 10 }, needs: 'tent', stats: { hp: 25 },
     desc: '+25 max health.' },
@@ -264,15 +287,19 @@ export const STAT_TRACKS = [
 // the other buildings add utility. Stored chest resources survive death.
 // ==========================================================================
 export const CAMP_BUILDINGS = [
-  { id: 'home', icon: '⛺', max: 3,
-    names: ['Hide Tent', 'Wooden Cabin', 'Stone House'],
+  // your HOME is the cave itself — upgrading it advances the whole era.
+  // (10 ages planned; the first 5 are in, age 5 = the medieval keep)
+  { id: 'home', icon: '⛺', max: 4,
+    names: ['Hide Tent', 'Wooden Cabin', 'Stone House', 'Medieval Keep'],
     levels: [
       { level: 2, cost: { hide: 6, wood: 10 },
-        desc: 'Stone-age home stitched from hides. Unlocks hide clothing.' },
+        desc: 'Age 2 — a hide tent by the cave mouth. Unlocks hide clothing.' },
       { level: 4, cost: { wood: 60, stone: 10 },
-        desc: 'Timber-age cabin. Unlocks bows. +15 max health.' },
+        desc: 'Age 3 — a timber cabin. Unlocks bows. +15 max health.' },
       { level: 7, cost: { stone: 80, wood: 30, iron: 6 },
-        desc: 'Iron-age stone house. +40 max health.' },
+        desc: 'Age 4 — an iron-age stone house. +40 max health.' },
+      { level: 9, cost: { stone: 200, wood: 150, iron: 30, hide: 20, meat: 100 },
+        desc: 'Age 5 — a MEDIEVAL KEEP. Unlocks knightly gear. +80 max health.' },
     ] },
   { id: 'chest', icon: '📦', max: 1,
     names: ['Storage Chest'],
@@ -298,10 +325,16 @@ export const CAMP_BUILDINGS = [
       { level: 8, cost: { wood: 60, stone: 40, iron: 10 },
         desc: 'Watches over your camp: automatically shoots enemies that come near home.' },
     ] },
+  { id: 'grave', icon: '🪦', max: 1,
+    names: ['Graveyard'],
+    levels: [
+      { level: 5, cost: { stone: 30, wood: 20, meat: 20 },
+        desc: 'A remote respawn shrine, built WHERE YOU STAND. When you die you choose: wake at the cave or at the graveyard.' },
+    ] },
 ];
 
-// era = how far your home has advanced (display + flavor)
-export const ERAS = ['Stone Age', 'Settlement', 'Timber Age', 'Iron Age'];
+// era = how far your home has advanced (10 ages planned, 5 coded so far)
+export const ERAS = ['Stone Age', 'Hide Camp', 'Timber Age', 'Iron Age', 'Medieval'];
 
 // ---- Multiplayer ----
 // PvP duels happen in an arena parked outside the world circle.

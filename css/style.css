@@ -263,6 +263,27 @@ kbd {
   flex: 0 0 auto;
 }
 .setting-row small { opacity: 0.7; line-height: 1.45; display: inline-block; margin-top: 3px; }
+
+/* ---------- big world map ---------- */
+#bigmap { width: min(680px, 94vw); }
+#bigmap-body { display: flex; justify-content: center; padding: 14px; overflow: auto; }
+#bigmap-canvas { border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); max-width: 100%; }
+#minimap { cursor: pointer; pointer-events: auto; }
+
+/* ---------- respawn choice ---------- */
+#respawn-choice {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  z-index: 50; text-align: center; padding: 26px 34px;
+  background: rgba(12, 20, 10, 0.92); border: 2px solid #5d7442; border-radius: 16px;
+}
+#respawn-choice h2 { font-size: 26px; margin-bottom: 8px; }
+#respawn-choice p { opacity: 0.8; margin-bottom: 16px; }
+#respawn-choice button {
+  display: block; width: 100%; margin-top: 10px; font-size: 17px; padding: 12px 22px;
+  cursor: pointer; background: linear-gradient(#4c6b35, #34491f); color: #f0ead8;
+  border: 2px solid #6d8f4c; border-radius: 10px;
+}
+#respawn-choice button:hover { filter: brightness(1.15); }
 .card {
   background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);
   border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;

@@ -110,22 +110,87 @@ export class Minimap {
     }
   }
 
-  _toCanvas(x, z) {
-    return {
-      x: ((x + WORLD.radius) / this.span) * this.canvas.width,
-      y: ((z + WORLD.radius) / this.span) * this.canvas.height,
-    };
-  }
-
+  // The minimap is a ZOOMED-IN local view centered on the player — it never
+  // betrays how big the world really is or where the next ring begins; you
+  // only see what you've discovered.
   _draw(player, enemyMgr, partner = null) {
     const { ctx, canvas } = this;
     const W = canvas.width, H = canvas.height;
-    const sx = W / this.cols, sz = H / this.rows;
+    const SPAN = 280; // world meters shown across the minimap
+    const scale = W / SPAN;
+    const ox = player.pos.x - SPAN / 2, oz = player.pos.z - SPAN / 2;
+    const toC = (x, z) => ({ x: (x - ox) * scale, y: (z - oz) * scale });
 
     ctx.fillStyle = '#0a0f08';
     ctx.fillRect(0, 0, W, H);
 
-    // discovered cells colored by their biome ring
+    // discovered cells in view, colored by their biome
+    const c0x = Math.max(0, Math.floor((ox + WORLD.radius) / CELL));
+    const c0z = Math.max(0, Math.floor((oz + WORLD.radius) / CELL));
+    const cN = Math.ceil(SPAN / CELL) + 1;
+    for (let rz = c0z; rz < Math.min(this.rows, c0z + cN); rz++) {
+      for (let cx = c0x; cx < Math.min(this.cols, c0x + cN); cx++) {
+        if (!this.discovered[rz * this.cols + cx]) continue;
+        const wx = (cx + 0.5) * CELL - WORLD.radius;
+        const wz = (rz + 0.5) * CELL - WORLD.radius;
+        if (radiusOf(wx, wz) > WORLD.radius) continue;
+        const biome = biomeAt(wx, wz);
+        ctx.fillStyle = '#' + biome.ground.toString(16).padStart(6, '0');
+        const p = toC(wx - CELL / 2, wz - CELL / 2);
+        ctx.fillRect(p.x, p.y, CELL * scale + 1, CELL * scale + 1);
+      }
+    }
+
+    // home marker (only when it's inside the view)
+    const hc = toC(0, 0);
+    if (hc.x > 0 && hc.x < W && hc.y > 0 && hc.y < H) {
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('🏠', hc.x, hc.y + 3);
+    }
+
+    // enemies: red dots, pack mothers: skulls
+    if (enemyMgr) {
+      ctx.textAlign = 'center';
+      for (const e of enemyMgr.alive()) {
+        const p = toC(e.pos.x, e.pos.z);
+        if (p.x < 0 || p.x > W || p.y < 0 || p.y > H) continue;
+        if (e.bossRank > 0) {
+          ctx.font = '9px sans-serif';
+          ctx.fillText('💀', p.x, p.y + 3);
+        } else {
+          ctx.fillStyle = '#e04040';
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+
+    // co-op partner: blue dot
+    if (partner?.mesh?.visible) {
+      const tp = toC(partner.pos.x, partner.pos.z);
+      if (tp.x > 0 && tp.x < W && tp.y > 0 && tp.y < H) {
+        ctx.fillStyle = '#5fa8e0';
+        ctx.beginPath(); ctx.arc(tp.x, tp.y, 3, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#000'; ctx.stroke();
+      }
+    }
+
+    // player: always dead center
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.arc(W / 2, H / 2, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#000'; ctx.stroke();
+  }
+
+  // The BIG map (M / minimap click): everything discovered so far, scaled to
+  // fit — the undiscovered world stays black.
+  drawBig(canvas, player, partner = null) {
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    ctx.fillStyle = '#0a0f08';
+    ctx.fillRect(0, 0, W, H);
+    const scale = W / this.span;
     for (let rz = 0; rz < this.rows; rz++) {
       for (let cx = 0; cx < this.cols; cx++) {
         if (!this.discovered[rz * this.cols + cx]) continue;
@@ -134,67 +199,23 @@ export class Minimap {
         if (radiusOf(wx, wz) > WORLD.radius) continue;
         const biome = biomeAt(wx, wz);
         ctx.fillStyle = '#' + biome.ground.toString(16).padStart(6, '0');
-        ctx.fillRect(cx * sx, rz * sz, Math.ceil(sx), Math.ceil(sz));
+        ctx.fillRect(cx * CELL * scale, rz * CELL * scale,
+          Math.max(1.5, CELL * scale + 0.5), Math.max(1.5, CELL * scale + 0.5));
       }
     }
-
-    // ring barriers as circles (ridges dark, rivers blue)
-    const c = this._toCanvas(0, 0);
-    for (const ring of this.world.rings || []) {
-      ctx.strokeStyle = ring.type === 'river' ? 'rgba(63,111,158,0.8)' : 'rgba(38,38,31,0.8)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(c.x, c.y, (ring.r / this.span) * W * 2 / 2, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-    // world edge
-    ctx.strokeStyle = 'rgba(255,233,168,0.5)';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(c.x, c.y, (WORLD.radius / this.span) * W, 0, Math.PI * 2);
-    ctx.stroke();
-
-    // home marker
-    ctx.fillStyle = '#ffe9a8';
-    ctx.font = '9px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('🏠', c.x, c.y + 3);
-
-    // enemies: red dots, pack mothers: skulls
-    if (enemyMgr) {
-      for (const e of enemyMgr.alive()) {
-        const p = this._toCanvas(e.pos.x, e.pos.z);
-        if (p.y < 0 || p.y > H) continue;
-        if (e.bossRank > 0) {
-          ctx.font = '9px sans-serif';
-          ctx.fillText('💀', p.x, p.y + 3);
-        } else {
-          ctx.fillStyle = '#e04040';
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, 1.8, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-    }
-
-    // co-op partner: blue dot
+    ctx.font = '13px sans-serif';
+    ctx.fillText('🏠', W / 2, H / 2 + 4);
     if (partner?.mesh?.visible) {
-      const tp = this._toCanvas(partner.pos.x, partner.pos.z);
+      const px = (partner.pos.x + WORLD.radius) * scale;
+      const py = (partner.pos.z + WORLD.radius) * scale;
       ctx.fillStyle = '#5fa8e0';
-      ctx.beginPath();
-      ctx.arc(tp.x, tp.y, 3, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#000';
-      ctx.stroke();
+      ctx.beginPath(); ctx.arc(px, py, 4, 0, Math.PI * 2); ctx.fill();
     }
-
-    // player dot
-    const pp = this._toCanvas(player.pos.x, player.pos.z);
+    const px = (player.pos.x + WORLD.radius) * scale;
+    const py = (player.pos.z + WORLD.radius) * scale;
     ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.arc(pp.x, pp.y, 3, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#000';
-    ctx.stroke();
+    ctx.beginPath(); ctx.arc(px, py, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#000'; ctx.stroke();
   }
 }
