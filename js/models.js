@@ -276,6 +276,24 @@ export function makeRabbit() {
   return g;
 }
 
+export function makeSheep() {
+  const g = quadruped({
+    bodyW: 0.55, bodyH: 0.5, bodyL: 0.85, color: 0xe9e4d6,
+    headSize: 0.3, snout: true, snoutColor: 0x4a423a, earColor: 0x4a423a,
+    legH: 0.28, eyeColor: 0x1a0a0a,
+  });
+  // woolly lumps over the body
+  for (const [x, y, z] of [[-0.2, 0.85, -0.25], [0.22, 0.9, 0.05], [-0.15, 0.88, 0.3], [0.1, 0.92, -0.15]]) {
+    const puff = sphere(0.2, 0xf4f0e4, 6);
+    puff.position.set(x, y, z);
+    g.add(puff);
+  }
+  const head = g.userData.head;
+  head.material = head.material.clone();
+  head.material.color.setHex(0x4a423a); // dark face under the wool
+  return g;
+}
+
 export function makeSnake(kind = 'grass') {
   const palettes = {
     grass: { colors: [0x4a7a30, 0x3d6828], eyes: 0xffd23a, scale: 1 },
@@ -408,6 +426,7 @@ export function makeIceGolem() {
 export function makeEnemyMesh(type) {
   switch (type) {
     case 'rabbit': return makeRabbit();
+    case 'sheep': return makeSheep();
     case 'rat': return makeRat();
     case 'spider': return makeSpider('forest');
     case 'venomspider': return makeSpider('venom');

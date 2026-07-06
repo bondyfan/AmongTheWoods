@@ -199,7 +199,8 @@ const enemyMgr = new EnemyManager(scene, world, {
     ui.addTracker('boss' + enemy.id,
       () => enemy.mesh.parent ? enemy.mesh.position.clone().setY(enemy.mesh.position.y + 2.6 * enemy.sizeMult) : null,
       '💀'.repeat(enemy.bossRank), 'skulls');
-    ui.toast(`${'💀'.repeat(enemy.bossRank)} A pack mother appears! Her children keep coming until she falls.`, 'boss');
+    // herd-guardian ambush bosses stay quiet — finding them is the surprise
+    if (!enemy.ambush) ui.toast(`${'💀'.repeat(enemy.bossRank)} A pack mother appears! Her children keep coming until she falls.`, 'boss');
   },
   onBossDeath: (enemy) => ui.removeTracker('boss' + enemy.id),
   // HP bar above every enemy (+ spell charge bar for casters)

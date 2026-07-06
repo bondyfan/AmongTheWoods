@@ -170,7 +170,8 @@ export class Minimap {
           ctx.font = '9px sans-serif';
           ctx.fillText('💀', p.x, p.y + 3);
         } else {
-          ctx.fillStyle = '#e04040';
+          // hostiles are red; harmless grazing critters are white
+          ctx.fillStyle = e.cfg?.passive ? '#f2efe6' : '#e04040';
           ctx.beginPath();
           ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
           ctx.fill();

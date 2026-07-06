@@ -70,6 +70,7 @@ export class EnemyManager {
     this.list = [];
     this.spawnTimer = 1.5;
     this.packTimer = 20;
+    this.critterTimer = 5;
     this.discovered = new Set();
   }
 
@@ -133,9 +134,15 @@ export class EnemyManager {
     return targets.filter(t => !t.dead && !this.world.isTargetSafe?.(t.pos));
   }
 
+  // hostile count only — grazing critters must not eat the enemy budget
   _nearbyAlive(pos, radius) {
-    return this.alive().filter(e =>
-      Math.hypot(e.pos.x - pos.x, e.pos.z - pos.z) < radius).length;
+    return this.alive().filter(e => !e.cfg.passive
+      && Math.hypot(e.pos.x - pos.x, e.pos.z - pos.z) < radius).length;
+  }
+
+  _nearbyCritters(pos, radius) {
+    return this.alive().filter(e => e.cfg.passive
+      && Math.hypot(e.pos.x - pos.x, e.pos.z - pos.z) < radius).length;
   }
 
   _trySpawnAt(anchor) {
@@ -152,20 +159,42 @@ export class EnemyManager {
     else this._spawn(type, x, z, progress);
   }
 
-  // passive critters (rabbits) always arrive as a small grazing herd
+  // passive critters always arrive as a grazing herd; some herds hide a boss
   _spawnHerd(type, x, z, progress) {
+    const cfg = ENEMY_TYPES[type];
+    const [lo, hi] = cfg.herd ?? [3, 10];
     const groupId = nextGroupId++;
-    const count = 3 + Math.floor(Math.random() * 8); // 3–10
+    const count = lo + Math.floor(Math.random() * (hi - lo + 1));
+    const ringR = 1.5 + Math.sqrt(count) * 1.4; // bigger herds graze wider
     for (let i = 0; i < count; i++) {
       const a = (i / count) * Math.PI * 2;
-      const r = 1.5 + Math.random() * 3.5;
+      const r = ringR * (0.4 + Math.random() * 0.6);
       const e = this._spawn(type, x + Math.cos(a) * r, z + Math.sin(a) * r, progress);
       e.groupId = groupId;
+    }
+    if (cfg.guardian) { // e.g. a 1-skull wolf lurking among the sheep
+      const g = this._spawn(cfg.guardian, x, z, progress, 1);
+      g.aggroed = false;    // it guards the herd instead of hunting you down
+      g.noReinforce = true; // an ambush guard, not a pack mother
+      g.ambush = true;      // no "pack mother" announcement
     }
   }
 
   _trySpawn(targets) {
     for (const anchor of this._spawnAnchors(targets)) this._trySpawnAt(anchor);
+  }
+
+  // grazing critter herds (rabbits, sheep) spawn on their own slow clock so
+  // they never crowd out the actual enemies
+  _trySpawnCritters(targets) {
+    for (const anchor of this._spawnAnchors(targets)) {
+      const biome = biomeAt(anchor.pos.x, anchor.pos.z);
+      if (!biome.critters) continue;
+      if (this._nearbyCritters(anchor.pos, 95) > 8) continue;
+      const type = biome.critters[Math.floor(Math.random() * biome.critters.length)];
+      const { x, z } = this._spawnPoint(anchor);
+      this._spawnHerd(type, x, z, progressAt(anchor.pos.x, anchor.pos.z));
+    }
   }
 
   // A pack ("smečka"): a burst of one type, often led by a boss mother.
@@ -208,7 +237,7 @@ export class EnemyManager {
     if (!anchor || this.world.isTargetSafe?.(anchor.pos)) return;
     const progress = progressAt(anchor.pos.x, anchor.pos.z);
     for (const boss of this.list) {
-      if (boss.bossRank === 0 || boss.dying) continue;
+      if (boss.bossRank === 0 || boss.dying || boss.noReinforce) continue;
       boss.reinforceT -= dt;
       if (boss.reinforceT > 0) continue;
       const rank = BOSS_RANKS[boss.bossRank - 1];
@@ -274,6 +303,12 @@ export class EnemyManager {
     if (this.packTimer <= 0) {
       this.packTimer = 26 + Math.random() * 18 - progress * 8;
       this._trySpawnPack(targets);
+    }
+
+    this.critterTimer -= dt;
+    if (this.critterTimer <= 0) {
+      this.critterTimer = 16 + Math.random() * 14;
+      this._trySpawnCritters(targets);
     }
 
     this._bossReinforcements(dt, targets);
