@@ -679,10 +679,15 @@ function nearHome() {
   if (radiusOf(player.pos.x, player.pos.z) < WORLD.caveR + 4) return true; // in/at the cave
   return Math.hypot(player.pos.x - (-9), player.pos.z - 13) < 6;           // at the home building
 }
+// E is contextual: at the chest it opens the chest, at home the base modal
+function nearChest() {
+  return game.kind === 'survival' && camp?.has('chest')
+    && Math.hypot(player.pos.x - 6, player.pos.z - 16) < 4;
+}
 input.onKey('KeyE', () => {
-  if (!inPlay() || !nearHome()) return;
-  panels.shopTab = 'camp';
-  panels.toggle('shop');
+  if (!inPlay()) return;
+  if (nearChest()) panels.toggle('chest');
+  else if (nearHome()) panels.toggle('base');
 });
 
 // ---- pet: resurrection (R at home / the graveyard) & mode cycling (P) ----
@@ -839,6 +844,13 @@ const clock = new THREE.Clock();
 
 function tick() {
   requestAnimationFrame(tick);
+  step();
+}
+
+// One simulation step. Normally driven by rAF; in multiplayer a Web-Worker
+// clock keeps stepping while the tab is HIDDEN (rAF pauses there, which froze
+// the shared world for the partner — enemies, snapshots, everything).
+function step() {
   const dt = Math.min(clock.getDelta(), 0.05);
 
   if (game.mode === 'play' && !game.paused) {
@@ -895,8 +907,13 @@ function tick() {
         raft.rotation.y = player.mesh.rotation.y;
       }
 
-      // home upgrade hint when standing at your home
-      $id('home-hint').classList.toggle('hidden', !nearHome() || panels.open);
+      // contextual E hint: chest, or home build & upgrade
+      const hintEl = $id('home-hint');
+      const hint = panels.open ? null
+        : nearChest() ? '📦 Storage chest — press <kbd>E</kbd> to open'
+        : nearHome() ? '🏠 Your home — press <kbd>E</kbd> to build &amp; upgrade' : null;
+      if (hint) { hintEl.innerHTML = hint; hintEl.classList.remove('hidden'); }
+      else hintEl.classList.add('hidden');
 
       // fallen-pet resurrection hint (at home or at the graveyard)
       const petHint = $id('pet-hint');
@@ -939,6 +956,13 @@ function tick() {
 world.update(0, player.pos); // pre-generate the starting forest
 updateCamera();
 tick();
+
+// Web-Worker heartbeat: worker timers aren't visibility-throttled, so a
+// hidden multiplayer tab keeps simulating (~10 Hz) instead of freezing the
+// shared world for the partner. Solo games still pause in the background.
+const bgClock = new Worker(URL.createObjectURL(
+  new Blob(['setInterval(() => postMessage(0), 100);'], { type: 'text/javascript' })));
+bgClock.onmessage = () => { if (document.hidden && mp?.active) step(); };
 
 // debug handle (also handy for the future multiplayer host loop)
 window.__game = { game, scene, player, enemyMgr, companions, pickups, panels, input, updateAim, minimap,

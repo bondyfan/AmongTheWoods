@@ -271,7 +271,9 @@ class ShadowWorld {
   update(dt, localPlayer) {
     for (const s of this.enemies.values()) {
       const prev = s.pos.clone();
-      s.pos.lerp(s.target, Math.min(1, dt * 8));
+      // big jumps (respawn/teleport/stale) snap instead of sliding across
+      if (s.pos.distanceToSquared(s.target) > 144) s.pos.copy(s.target);
+      s.pos.lerp(s.target, Math.min(1, dt * 11));
       const moved = s.pos.distanceTo(prev);
       if (moved > 0.01) {
         s.walkT += moved * 2.5;
@@ -649,14 +651,21 @@ export class Multiplayer {
     this.shadow?.update(dt, p);
     this.mobaShadow?.update(dt);
 
-    // host: stream the world snapshot
+    // host: stream the world snapshot. Only entities near EITHER player are
+    // sent — a full-map snapshot grows unbounded (stale pickups, far enemies)
+    // and a fat payload at 7 Hz backs up the Firebase write queue, which is
+    // exactly what the guest experiences as units lagging seconds behind.
     if (this.isHost && this.mode === 'coop') {
       this._snapT -= dt;
       if (this._snapT <= 0) {
-        this._snapT = 0.14;
+        this._snapT = 0.1;
+        const p1 = ctx.player.pos, p2 = this.remote?.targetPos;
+        const nearAny = (x, z) =>
+          Math.hypot(x - p1.x, z - p1.z) < 130 ||
+          (p2 && Math.hypot(x - p2.x, z - p2.z) < 130);
         WoodsNet.sendSnap({
-          e: ctx.enemyMgr.snapshot(),
-          p: ctx.pickups.snapshot(),
+          e: ctx.enemyMgr.snapshot().filter(s => nearAny(s.x, s.z)),
+          p: ctx.pickups.snapshot().filter(s => nearAny(s.x, s.z)),
           s: ctx.projectiles.snapshotShots(),
         });
       }

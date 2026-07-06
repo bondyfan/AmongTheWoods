@@ -456,11 +456,12 @@ export class World {
     let count = Math.round((8 + rng() * 8) * biome.treeDensity);
     let denseWood = false;
     if (biome.denseForests) {
+      // high threshold → thick woods are OCCASIONAL landmarks, not the norm
       const f = valueNoise(cxw + CHUNK / 2, czw + CHUNK / 2, 240, this.seed + 133);
-      if (f > 0.54) {
-        const k = Math.min(1, (f - 0.54) / 0.16);
-        count = Math.min(64, Math.round(count * (1 + k * k * 4.5)));
-        denseWood = k > 0.35; // thick woods grow TALL trees, not saplings
+      if (f > 0.68) {
+        const k = Math.min(1, (f - 0.68) / 0.1);
+        count = Math.min(64, Math.round(count * (2 + k * k * 3.5)));
+        denseWood = true; // thick woods grow TALL trees, not saplings
       }
     }
     for (let i = 0; i < count; i++) {
