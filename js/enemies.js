@@ -7,6 +7,7 @@ import { makeEnemyMesh } from './models.js';
 import { audio } from './audio.js';
 
 let nextEnemyId = 1;
+let nextGroupId = 1; // herds of passive critters (rabbits) share a group
 const SPAWN_DENSITY = 1.15;
 const MAX_ALIVE_HARD = 35; // absolute cap, reinforcements included
 // give up a chase after this long without reaching the target, then jog home
@@ -45,6 +46,8 @@ class Enemy {
     this.pauseT = 0;
     this.stunT = 0;
     this.aggroed = bossRank > 0;
+    this.groupId = 0;     // passive herd membership
+    this.spooked = false; // passive critters flee only after the herd is hurt
     this.spawnPos = { x, z }; // leash: where to run back to after a failed chase
     this.chaseT = 0;
     this.returning = false;
@@ -145,7 +148,20 @@ export class EnemyManager {
     // biome — even if the spawn point lands just across a ring border
     const biome = biomeAt(anchor.pos.x, anchor.pos.z);
     const type = biome.enemies[Math.floor(Math.random() * biome.enemies.length)];
-    this._spawn(type, x, z, progress);
+    if (ENEMY_TYPES[type].passive) this._spawnHerd(type, x, z, progress);
+    else this._spawn(type, x, z, progress);
+  }
+
+  // passive critters (rabbits) always arrive as a small grazing herd
+  _spawnHerd(type, x, z, progress) {
+    const groupId = nextGroupId++;
+    const count = 3 + Math.floor(Math.random() * 8); // 3–10
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * Math.PI * 2;
+      const r = 1.5 + Math.random() * 3.5;
+      const e = this._spawn(type, x + Math.cos(a) * r, z + Math.sin(a) * r, progress);
+      e.groupId = groupId;
+    }
   }
 
   _trySpawn(targets) {
@@ -215,6 +231,13 @@ export class EnemyManager {
     enemy.aggroed = true;
     enemy.returning = false; // getting hit re-engages a leashed enemy
     enemy.chaseT = 0;
+    if (enemy.cfg.passive && !enemy.spooked) {
+      // one hurt rabbit spooks the whole herd
+      enemy.spooked = true;
+      if (enemy.groupId) for (const o of this.list) {
+        if (o.groupId === enemy.groupId) o.spooked = true;
+      }
+    }
     enemy.lastHitBy = srcId; // kill credit (co-op XP attribution)
     this.hooks.popup(enemy.mesh.position.clone().setY(enemy.mesh.position.y + 1.4 * enemy.sizeMult + 0.4),
       Math.round(dmg).toString(), '#ffffff');
@@ -300,7 +323,7 @@ export class EnemyManager {
         continue;
       }
 
-      if (e.cfg.passive && target && dist < 10) {
+      if (e.cfg.passive && e.spooked && target && dist < 14) {
         const away = new THREE.Vector3().subVectors(e.pos, target.pos);
         const len = Math.hypot(away.x, away.z) || 1;
         e.pos.x += (away.x / len) * e.speed * dt;
@@ -330,8 +353,9 @@ export class EnemyManager {
         }
       }
 
-      // the ranged "spell" charges over time; firing freezes the caster briefly
-      if (e.cfg.ranged) e.spellTimer -= dt;
+      // the ranged "spell" charges over time (only while angry, so casters
+      // don't sit charged waiting to snipe); firing freezes the caster briefly
+      if (e.cfg.ranged && e.aggroed) e.spellTimer -= dt;
       if (e.pauseT > 0) e.pauseT -= dt;
 
       let vx = 0, vz = 0;

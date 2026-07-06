@@ -108,7 +108,7 @@ export const ENEMY_TYPES = {
              hp: 45,  dmg: 10, speed: 8.0, range: 1.6, attackCd: 1.0, xp: 15, meat: 2, hitR: 0.8,  aggro: 26 },
   venomspider: { name: 'Venom Spider', icon: '☣️',
              hp: 55,  dmg: 11, meleeDmg: 7, speed: 6.0, range: 1.4, attackCd: 1.1, xp: 20, meat: 2, hitR: 0.8, aggro: 30,
-             ranged: true, shootRange: 12, spellCd: 2.5, projectileSpeed: 15, shotColor: 0x8aff3a },
+             ranged: true, shootRange: 8.5, spellCd: 2.5, projectileSpeed: 15, shotColor: 0x8aff3a },
   bat:     { name: 'Cave Bat', icon: '🦇',
              hp: 18,  dmg: 6,  speed: 9.5, range: 1.4, attackCd: 1.1, xp: 12, meat: 1, hitR: 0.6,  aggro: 30, flying: true },
   // -- Haunted Forest --
@@ -121,13 +121,13 @@ export const ENEMY_TYPES = {
              hp: 110, dmg: 20, speed: 7.2, range: 1.9, attackCd: 1.4, xp: 32, meat: 4, hitR: 1.0,  aggro: 24 },
   stormsnake: { name: 'Storm Serpent', icon: '⚡',
              hp: 70,  dmg: 8,  meleeDmg: 9, speed: 7.0, range: 1.5, attackCd: 1.2, xp: 28, meat: 3, hitR: 0.6, aggro: 30,
-             ranged: true, shootRange: 14, spellCd: 3.0, projectileSpeed: 30, shotColor: 0xffe94a, stun: 1.2 },
+             ranged: true, shootRange: 10, spellCd: 3.0, projectileSpeed: 30, shotColor: 0xffe94a, stun: 1.2 },
   // -- Snowfall Woods --
   icewolf: { name: 'Ice Wolf', icon: '❄️',
              hp: 120, dmg: 18, speed: 8.6, range: 1.6, attackCd: 0.9, xp: 35, meat: 4, hitR: 0.8,  aggro: 28 },
   icespider: { name: 'Frost Spider', icon: '🕸️',
              hp: 100, dmg: 16, meleeDmg: 10, speed: 6.2, range: 1.4, attackCd: 1.1, xp: 30, meat: 3, hitR: 0.8, aggro: 30,
-             ranged: true, shootRange: 13, spellCd: 2.2, projectileSpeed: 17, shotColor: 0x8ae0ff },
+             ranged: true, shootRange: 9, spellCd: 2.2, projectileSpeed: 17, shotColor: 0x8ae0ff },
   bear:    { name: 'Grizzly Bear', icon: '🐻',
              hp: 180, dmg: 26, speed: 5.5, range: 2.1, attackCd: 1.5, xp: 45, meat: 5, hitR: 1.2,  aggro: 26 },
   // -- Frozen Peak --
@@ -137,7 +137,7 @@ export const ENEMY_TYPES = {
              hp: 350, dmg: 40, speed: 5.0, range: 2.5, attackCd: 1.7, xp: 70, meat: 8, hitR: 1.5,  aggro: 30 },
   icegolem: { name: 'Ice Golem', icon: '🗿',
              hp: 400, dmg: 45, meleeDmg: 30, speed: 3.6, range: 2.2, attackCd: 1.8, xp: 80, meat: 9, hitR: 1.4, aggro: 30,
-             ranged: true, shootRange: 14, spellCd: 4.0, projectileSpeed: 13, shotColor: 0xbfe8ff, stun: 0.8 },
+             ranged: true, shootRange: 10, spellCd: 4.0, projectileSpeed: 13, shotColor: 0xbfe8ff, stun: 0.8 },
 };
 
 // Pack bosses ("the mother") by skull rank (index 0 = 1 skull).
