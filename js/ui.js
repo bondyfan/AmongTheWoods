@@ -2,6 +2,7 @@
 
 import * as THREE from 'three';
 import { WORLD, XP_LEVELS, MAX_LEVEL, MAX_SPELL_SLOTS, fmtResource, itemById, spellById } from './config.js';
+import { itemIcon } from './icons.js';
 import { audio } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
@@ -54,7 +55,7 @@ export class UI {
     $('biome-name').textContent = biomeName;
 
     const weapon = itemById(player.equipment.weapon);
-    $('weapon-display').innerHTML = `${weapon.icon} ${weapon.name} <kbd>Q</kbd>`;
+    $('weapon-display').innerHTML = `${itemIcon(weapon)} ${weapon.name} <kbd>Q</kbd>`;
 
     this.updateSpellbar(player);
   }

@@ -173,7 +173,7 @@ export const ITEMS = [
   { id: 'fists',      slot: 'weapon', level: 1, icon: '🖐️', name: 'Bare Hands',   cost: null, free: true,
     weapon: { kind: 'melee', dmg: 12, cd: 0.45, range: 1.5, chop: 0.5, tier: 0 },
     desc: 'Punch things. Can slowly break small trees for wood (rocks need a real tool).' },
-  { id: 'club',       slot: 'weapon', level: 2, icon: '🏏', name: 'Wooden Club',   cost: { wood: 8 },
+  { id: 'club',       slot: 'weapon', level: 2, icon: '🏏', name: 'Wooden Club',   cost: { wood: 4 },
     weapon: { kind: 'melee', dmg: 22, cd: 0.5, range: 1.7, chop: 1, tier: 1 },
     desc: 'A crude stone-age club. Damage 22, chops trees and mines rocks.' },
   { id: 'stoneAxe',   slot: 'weapon', level: 3, icon: '🪓', name: 'Stone Axe',     cost: { wood: 12, stone: 10 },

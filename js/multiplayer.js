@@ -436,6 +436,7 @@ export class Multiplayer {
     this.meta = null;
     this._snapT = 0;
     this._deadSince = 0;
+    this._posHist = []; // my recent positions — lag-compensated hit validation
 
     this.arena = {
       active: false, nextAt: 0, prevPos: null,
@@ -584,6 +585,13 @@ export class Multiplayer {
     if (!this.active) return;
     const { ctx } = this;
     const p = ctx.player;
+
+    // remember where I've been for ~0.9 s — incoming hits were computed by the
+    // host against a position of mine that old, so they must be checked
+    // against my recent path, not just against where I am right now
+    const now = performance.now();
+    this._posHist.push({ x: p.pos.x, z: p.pos.z, t: now });
+    while (this._posHist.length && now - this._posHist[0].t > 900) this._posHist.shift();
 
     // broadcast own state (fast in co-op/moba/arena so proxy lag stays small)
     const arenaHot = this.arena.active;
@@ -810,32 +818,32 @@ export class Multiplayer {
     }
   }
 
+  // The host computed this hit against my position as it knew it — which is
+  // 100–300 ms stale by the time the event arrives. Checking the attacker
+  // against where I am NOW rejects nearly every hit on a moving player, so
+  // instead the attacker is checked against my recent PATH: if it was within
+  // reach of any spot I stood on in the last ~0.6 s, the hit is honest and
+  // lands; a true phantom (attacker never near my path) is still dodged.
   _acceptPartnerDamage(ev, player) {
-    const hostDistanceOk = (extra = 0.95) => {
-      if (ev.ax === undefined) return false;
-      const d = Math.hypot(player.pos.x - ev.ax, player.pos.z - ev.az);
-      return d <= (ev.ar ?? 2) + extra;
+    const wasNear = (x, z, r) => {
+      if (x === undefined) return true; // no attacker info → fail open
+      const now = performance.now();
+      if (Math.hypot(player.pos.x - x, player.pos.z - z) <= r) return true;
+      return this._posHist.some(h => now - h.t < 600 && Math.hypot(h.x - x, h.z - z) <= r);
     };
 
-    if (ev.sh) {
-      if (ev.ax === undefined) return true;
-      return hostDistanceOk(0.8);
-    }
+    if (ev.sh) return wasNear(ev.ax, ev.az, (ev.ar ?? 1.4) + 0.8);
 
+    // melee: prefer the attacker as I see it on my screen (shadow enemy),
+    // fall back to the position the host reported with the hit
     if (ev.ai !== undefined && this.shadow?.enemies) {
       const attacker = this.shadow.enemies.get(ev.ai);
-      if (attacker && !attacker.dying && attacker.mesh.parent) {
-        const x = attacker.mesh.position.x;
-        const z = attacker.mesh.position.z;
-        const range = ev.ar ?? attacker.cfg?.range ?? 1.4;
-        const d = Math.hypot(player.pos.x - x, player.pos.z - z);
-        if (d <= range + 0.85) return true;
+      if (attacker && !attacker.dying && attacker.mesh.parent
+          && wasNear(attacker.mesh.position.x, attacker.mesh.position.z, (ev.ar ?? 1.4) + 0.8)) {
+        return true;
       }
-      return hostDistanceOk(1.0);
     }
-
-    if (ev.ax !== undefined) return hostDistanceOk(1.0);
-    return true;
+    return wasNear(ev.ax, ev.az, (ev.ar ?? 2) + 0.8);
   }
 
   // ---------- incoming events ----------

@@ -6,6 +6,7 @@ import { SHOP_GROUPS, SLOTS, SLOT_LABELS, ENEMY_TYPES, ITEMS, SPELLS,
          MAX_SPELL_SLOTS, fmtResource, itemById, spellById, costFor } from './config.js';
 
 const NEED_NAMES = { tent: 'Hide Tent', cabin: 'Wooden Cabin', furnace: 'Stone Furnace' };
+import { itemIcon } from './icons.js';
 import { audio } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
@@ -119,7 +120,7 @@ export class Panels {
 
       const slotTag = isSpells ? '📖 spell' : SLOT_LABELS[entry.slot].toLowerCase();
       card.innerHTML = `
-        <div class="card-head"><span class="icon">${entry.icon}</span>
+        <div class="card-head"><span class="icon">${itemIcon(entry)}</span>
           <span class="name">${entry.name}</span><span class="lv">Lv ${entry.level} · ${slotTag}</span></div>
         <div class="desc">${entry.desc}</div>
         <div class="card-foot">${status}</div>`;
@@ -177,7 +178,7 @@ export class Panels {
       div.className = 'equip-slot' + (item ? ' filled' : '');
       div.innerHTML = `
         <span class="slot-label">${SLOT_LABELS[slot]}</span>
-        <span class="slot-item">${item ? `${item.icon} ${item.name}` : '<i>empty</i>'}</span>
+        <span class="slot-item">${item ? `${itemIcon(item)} ${item.name}` : '<i>empty</i>'}</span>
         ${item && !(slot === 'weapon' && id === 'fists')
           ? `<button class="unequip-btn" data-slot="${slot}">✕</button>` : ''}`;
       slotsEl.appendChild(div);
@@ -199,7 +200,7 @@ export class Panels {
       const item = itemById(id);
       const div = document.createElement('button');
       div.className = 'inv-item';
-      div.innerHTML = `${item.icon} <b>${item.name}</b> <span class="lv">${SLOT_LABELS[item.slot]}</span>`;
+      div.innerHTML = `${itemIcon(item)} <b>${item.name}</b> <span class="lv">${SLOT_LABELS[item.slot]}</span>`;
       div.title = item.desc;
       div.addEventListener('click', () => this.hooks.onEquip(id));
       inv.appendChild(div);
