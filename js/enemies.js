@@ -9,10 +9,20 @@ import { audio } from './audio.js';
 let nextEnemyId = 1;
 let nextGroupId = 1; // herds of passive critters (rabbits) share a group
 const SPAWN_DENSITY = 1.15;
-const MAX_ALIVE_HARD = 35; // absolute cap, reinforcements included
+const MAX_ALIVE_HARD = 140; // hard cap on simultaneously live units
 // give up a chase after this long without reaching the target, then jog home
 const LEASH_TIME = 7;
 const LEASH_TIME_BOSS = 16;
+// Persistent zone population: the world is carved into ZONE×ZONE cells; each
+// cell populates ONCE (always out of the player's sight), the dead STAY dead,
+// and a fully wiped cell only repopulates REPOP_COOLDOWN after the wipe.
+// Units left far behind melt back into their zone's pool (they're remembered,
+// not respawned) and rematerialize when someone returns.
+const ZONE = 120;
+const ZONE_ACTIVATE = 175;   // zones this close to a player materialize
+const ZONE_RELEASE = 205;    // live units further than this return to the pool
+const SPAWN_MIN_DIST = 62;   // nothing ever appears closer than this to a player
+const REPOP_COOLDOWN = 1800; // 30 minutes
 
 class Enemy {
   constructor(type, x, z, difficulty, bossRank = 0) {
@@ -69,9 +79,8 @@ export class EnemyManager {
     this.hooks = hooks;
     this.list = [];
     this.webs = []; // decorative cobwebs left around spider packs
-    this.spawnTimer = 1.5;
-    this.packTimer = 20;
-    this.critterTimer = 5;
+    this.zones = new Map(); // "zx,zz" -> { pool, everPopulated, cleared, nextRepopAt }
+    this.zoneTimer = 1;
     this.discovered = new Set();
   }
 
@@ -84,8 +93,9 @@ export class EnemyManager {
     this._spawn('rat', 8, 42, 0);
   }
 
-  _spawn(type, x, z, difficulty, bossRank = 0) {
+  _spawn(type, x, z, difficulty, bossRank = 0, flags = null) {
     const e = new Enemy(type, x, z, difficulty, bossRank);
+    if (flags) Object.assign(e, flags); // ambush/noReinforce BEFORE the hooks fire
     this.scene.add(e.mesh);
     this.list.push(e);
     if (!this.discovered.has(type)) {
@@ -110,7 +120,8 @@ export class EnemyManager {
     const theta = (!allSides && ar > 5 && Math.random() < 0.65)
       ? outAngle + (Math.random() - 0.5) * 1.8
       : Math.random() * Math.PI * 2;
-    const dist = 30 + Math.random() * 14;
+    // reinforcements arrive from OFF-SCREEN — spawns must never be visible
+    const dist = SPAWN_MIN_DIST + Math.random() * 14;
     let x = anchor.pos.x + Math.sin(theta) * dist + (Math.random() - 0.5) * spread;
     let z = anchor.pos.z + Math.cos(theta) * dist + (Math.random() - 0.5) * spread;
     // stay in the anchor's ring band so they actually have to fight
@@ -135,102 +146,139 @@ export class EnemyManager {
     return targets.filter(t => !t.dead && !this.world.isTargetSafe?.(t.pos));
   }
 
-  // hostile count only — grazing critters must not eat the enemy budget
-  _nearbyAlive(pos, radius) {
-    return this.alive().filter(e => !e.cfg.passive
-      && Math.hypot(e.pos.x - pos.x, e.pos.z - pos.z) < radius).length;
-  }
+  // ---------- persistent zone population ----------
 
-  _nearbyCritters(pos, radius) {
-    return this.alive().filter(e => e.cfg.passive
-      && Math.hypot(e.pos.x - pos.x, e.pos.z - pos.z) < radius).length;
-  }
+  // Roll what LIVES in this zone: a few singles, maybe a pack with a boss
+  // mother, maybe a grazing critter herd (with its lurking guardian).
+  _generatePool(cx, cz) {
+    const biome = biomeAt(cx, cz);
+    const progress = progressAt(cx, cz);
+    const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+    const pool = [];
+    const singles = Math.round((3 + progress * 7) * SPAWN_DENSITY);
+    for (let i = 0; i < singles; i++) pool.push({ type: pick(biome.enemies) });
 
-  _trySpawnAt(anchor) {
-    const progress = progressAt(anchor.pos.x, anchor.pos.z);
-    const maxActive = Math.round((8 + Math.floor(progress * 12)) * SPAWN_DENSITY);
-    if (this._nearbyAlive(anchor.pos, 95) >= maxActive) return;
-    const { x, z } = this._spawnPoint(anchor);
-    // creature type is chosen from the ring the ANCHOR is standing in, so a
-    // next-ring creature (e.g. bats) can never appear before you reach its
-    // biome — even if the spawn point lands just across a ring border
-    const biome = biomeAt(anchor.pos.x, anchor.pos.z);
-    const type = biome.enemies[Math.floor(Math.random() * biome.enemies.length)];
-    if (ENEMY_TYPES[type].passive) this._spawnHerd(type, x, z, progress);
-    else this._spawn(type, x, z, progress);
-  }
-
-  // passive critters always arrive as a grazing herd; some herds hide a boss
-  _spawnHerd(type, x, z, progress) {
-    const cfg = ENEMY_TYPES[type];
-    const [lo, hi] = cfg.herd ?? [3, 10];
-    const groupId = nextGroupId++;
-    const count = lo + Math.floor(Math.random() * (hi - lo + 1));
-    const ringR = 1.5 + Math.sqrt(count) * 1.4; // bigger herds graze wider
-    for (let i = 0; i < count; i++) {
-      const a = (i / count) * Math.PI * 2;
-      const r = ringR * (0.4 + Math.random() * 0.6);
-      const e = this._spawn(type, x + Math.cos(a) * r, z + Math.sin(a) * r, progress);
-      e.groupId = groupId;
+    if (biome.packs && Math.random() < 0.4) {
+      const type = pick(biome.enemies);
+      let rank = 0;
+      if (Math.random() < 0.7) {
+        let roll = Math.random();
+        rank = 1;
+        for (let i = 0; i < 3; i++) {
+          roll -= biome.packs.skulls[i];
+          if (roll <= 0) { rank = i + 1; break; }
+        }
+      }
+      const gid = nextGroupId++;
+      const count = rank > 0 ? BOSS_RANKS[rank - 1].packSize : 5 + Math.floor(Math.random() * 6);
+      for (let i = 0; i < count; i++) pool.push({ type, groupId: gid });
+      if (rank > 0) pool.push({ type, bossRank: rank, groupId: gid });
     }
-    if (cfg.guardian) { // e.g. a 1-skull wolf lurking among the sheep
-      const g = this._spawn(cfg.guardian, x, z, progress, 1);
-      g.aggroed = false;    // it guards the herd instead of hunting you down
-      g.noReinforce = true; // an ambush guard, not a pack mother
-      g.ambush = true;      // no "pack mother" announcement
+
+    if (biome.critters && Math.random() < 0.55) {
+      const type = pick(biome.critters);
+      const cfg = ENEMY_TYPES[type];
+      const [lo, hi] = cfg.herd ?? [3, 10];
+      const gid = nextGroupId++;
+      const count = lo + Math.floor(Math.random() * (hi - lo + 1));
+      for (let i = 0; i < count; i++) pool.push({ type, groupId: gid });
+      if (cfg.guardian) pool.push({ type: cfg.guardian, bossRank: 1, groupId: gid, guardian: true });
     }
+    return pool;
   }
 
-  _trySpawn(targets) {
-    for (const anchor of this._spawnAnchors(targets)) this._trySpawnAt(anchor);
-  }
+  // Materialize a zone's pool into live units — every placement is at least
+  // SPAWN_MIN_DIST from every player, so nothing ever pops in on screen.
+  _materializeZone(zone, key, cx, cz, targets) {
+    const living = targets.filter(t => !t.dead);
+    const tryPoint = () => {
+      for (let i = 0; i < 14; i++) {
+        const x = cx + (Math.random() - 0.5) * ZONE;
+        const z = cz + (Math.random() - 0.5) * ZONE;
+        const r = Math.hypot(x, z);
+        if (r < 45 || r > WORLD.radius - 6) continue;
+        if (living.some(t => Math.hypot(t.pos.x - x, t.pos.z - z) < SPAWN_MIN_DIST)) continue;
+        return { x, z };
+      }
+      return null; // player is covering the zone — retry on a later tick
+    };
 
-  // grazing critter herds (rabbits, sheep) spawn on their own slow clock so
-  // they never crowd out the actual enemies
-  _trySpawnCritters(targets) {
-    for (const anchor of this._spawnAnchors(targets)) {
-      const biome = biomeAt(anchor.pos.x, anchor.pos.z);
-      if (!biome.critters) continue;
-      if (this._nearbyCritters(anchor.pos, 95) > 8) continue;
-      const type = biome.critters[Math.floor(Math.random() * biome.critters.length)];
-      const { x, z } = this._spawnPoint(anchor);
-      this._spawnHerd(type, x, z, progressAt(anchor.pos.x, anchor.pos.z));
+    const progress = progressAt(cx, cz);
+    const byGroup = new Map();
+    for (const spec of zone.pool) {
+      const gk = spec.groupId ?? `solo-${nextGroupId++}`;
+      if (!byGroup.has(gk)) byGroup.set(gk, []);
+      byGroup.get(gk).push(spec);
     }
+    const remaining = [];
+    for (const [, specs] of byGroup) {
+      if (this.alive().length >= MAX_ALIVE_HARD) { remaining.push(...specs); continue; }
+      const at = tryPoint();
+      if (!at) { remaining.push(...specs); continue; }
+      const ringR = 1.5 + Math.sqrt(specs.length) * 1.6;
+      specs.forEach((spec, i) => {
+        const a = (i / specs.length) * Math.PI * 2;
+        const rr = specs.length > 1 ? ringR * (0.4 + Math.random() * 0.6) : 0;
+        const e = this._spawn(spec.type, at.x + Math.cos(a) * rr, at.z + Math.sin(a) * rr,
+          progress, spec.bossRank || 0, {
+            // repeat announcements are muted; herd guardians are always quiet
+            ambush: !!(spec.guardian || spec.announced),
+            noReinforce: !!spec.guardian,
+          });
+        e.aggroed = false;
+        e.zoneKey = key;
+        e.groupId = spec.groupId || 0;
+        // remembered when the unit melts back into the pool later
+        e._spec = { type: spec.type, bossRank: spec.bossRank || 0,
+                    groupId: spec.groupId, guardian: spec.guardian, announced: true };
+        if (spec.bossRank && !spec.guardian && !spec.announced) audio.sfx('lane_unlock', 0.45);
+      });
+      if (specs.length > 3 && /spider/i.test(specs[0].type)) this._spawnWebs(at);
+    }
+    zone.pool = remaining;
   }
 
-  // A pack ("smečka"): a burst of one type, often led by a boss mother.
-  _trySpawnPack(targets) {
-    const anchor = this._anchor(targets);
-    if (!anchor || this.world.isTargetSafe?.(anchor.pos)) return;
-    const biome = BIOMES[biomeIndexAt(anchor.pos.x, anchor.pos.z)];
-    if (!biome.packs) return; // no packs in the Verdant Forest
+  _updateZones(targets) {
+    const anchors = this._spawnAnchors(targets);
+    if (!anchors.length) return;
+    // live head-count per zone (dead/dying don't count — the dead STAY dead)
+    const liveByZone = new Map();
+    for (const e of this.list) {
+      if (e.dying || !e.zoneKey) continue;
+      liveByZone.set(e.zoneKey, (liveByZone.get(e.zoneKey) || 0) + 1);
+    }
+    const seen = new Set();
+    for (const a of anchors) {
+      const z0 = Math.floor((a.pos.z - ZONE_ACTIVATE) / ZONE), z1 = Math.floor((a.pos.z + ZONE_ACTIVATE) / ZONE);
+      const x0 = Math.floor((a.pos.x - ZONE_ACTIVATE) / ZONE), x1 = Math.floor((a.pos.x + ZONE_ACTIVATE) / ZONE);
+      for (let zx = x0; zx <= x1; zx++) for (let zz = z0; zz <= z1; zz++) {
+        const key = zx + ',' + zz;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const cx = zx * ZONE + ZONE / 2, cz = zz * ZONE + ZONE / 2;
+        if (Math.hypot(cx - a.pos.x, cz - a.pos.z) > ZONE_ACTIVATE) continue;
+        const zr = Math.hypot(cx, cz);
+        if (zr < 60 || zr > WORLD.radius) continue; // the camp area stays wild-free
+        let zone = this.zones.get(key);
+        if (!zone) { zone = { pool: null, everPopulated: false, cleared: false, nextRepopAt: 0 }; this.zones.set(key, zone); }
+        const live = liveByZone.get(key) || 0;
+        const poolEmpty = !zone.pool || zone.pool.length === 0;
 
-    const progress = progressAt(anchor.pos.x, anchor.pos.z);
-    const type = biome.enemies[Math.floor(Math.random() * biome.enemies.length)];
-    const center = this._spawnPoint(anchor);
-
-    // the mother/boss with a skull rank rolled from the biome's weights
-    let rank = 0;
-    if (Math.random() < 0.7) {
-      let roll = Math.random();
-      rank = 1;
-      for (let i = 0; i < 3; i++) {
-        roll -= biome.packs.skulls[i];
-        if (roll <= 0) { rank = i + 1; break; }
+        if (poolEmpty && live === 0) {
+          if (!zone.everPopulated) {
+            zone.pool = this._generatePool(cx, cz);   // first visit ever
+            zone.everPopulated = true;
+          } else if (!zone.cleared) {
+            zone.cleared = true;                       // the wipe starts the clock
+            zone.nextRepopAt = this.world.time + REPOP_COOLDOWN;
+          } else if (this.world.time >= zone.nextRepopAt) {
+            zone.pool = this._generatePool(cx, cz);   // 30 min later: new blood
+            zone.cleared = false;
+          }
+        }
+        if (zone.pool?.length) this._materializeZone(zone, key, cx, cz, targets);
       }
     }
-
-    const count = rank > 0 ? BOSS_RANKS[rank - 1].packSize : 5 + Math.floor(Math.random() * 6);
-    for (let i = 0; i < count; i++) {
-      const a = (i / count) * Math.PI * 2;
-      const r = 2 + Math.random() * 4;
-      this._spawn(type, center.x + Math.cos(a) * r, center.z + Math.sin(a) * r, progress);
-    }
-    if (rank > 0) {
-      this._spawn(type, center.x, center.z, progress, rank);
-      audio.sfx('lane_unlock', 0.45);
-    }
-    if (/spider/i.test(type)) this._spawnWebs(center);
   }
 
   // spider packs leave their hunting ground draped in cobwebs for a while
@@ -307,24 +355,11 @@ export class EnemyManager {
   // player solo, or both players in co-op (the remote one via a network proxy).
   update(dt, targets, projectiles) {
     const anchor = this._anchor(targets);
-    const progress = progressAt(anchor.pos.x, anchor.pos.z);
 
-    this.spawnTimer -= dt;
-    if (this.spawnTimer <= 0) {
-      this.spawnTimer = 2.2 - 1.2 * progress;
-      this._trySpawn(targets);
-    }
-
-    this.packTimer -= dt;
-    if (this.packTimer <= 0) {
-      this.packTimer = 26 + Math.random() * 18 - progress * 8;
-      this._trySpawnPack(targets);
-    }
-
-    this.critterTimer -= dt;
-    if (this.critterTimer <= 0) {
-      this.critterTimer = 16 + Math.random() * 14;
-      this._trySpawnCritters(targets);
+    this.zoneTimer -= dt;
+    if (this.zoneTimer <= 0) {
+      this.zoneTimer = 0.8;
+      this._updateZones(targets);
     }
 
     this._bossReinforcements(dt, targets);
@@ -368,9 +403,16 @@ export class EnemyManager {
         : new THREE.Vector3();
       if (!target) dist = Math.hypot(anchor.pos.x - e.pos.x, anchor.pos.z - e.pos.z);
 
-      // despawn if left far behind (bosses persist longer)
-      if (dist > (e.bossRank ? 110 : 75)) {
-        if (e.bossRank > 0) this.hooks.onBossDeath(e);
+      // left far behind → the unit melts back into its zone's pool (it's
+      // REMEMBERED, not killed — it rematerializes when someone returns)
+      if (dist > ZONE_RELEASE) {
+        if (e.zoneKey) {
+          const zone = this.zones.get(e.zoneKey);
+          zone?.pool?.push(e._spec ?? {
+            type: e.type, bossRank: e.bossRank, groupId: e.groupId, announced: true,
+          });
+        }
+        if (e.bossRank > 0) this.hooks.onBossDeath(e); // clears the skull tracker
         this._remove(e, i);
         continue;
       }
