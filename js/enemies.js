@@ -7,9 +7,11 @@ import { makeEnemyMesh } from './models.js';
 import { audio } from './audio.js';
 
 let nextEnemyId = 1;
-const SPAWN_DENSITY = 1.25;
-const SPAWN_INTERVAL_MULT = 0.8;
+const SPAWN_DENSITY = 1.15;
 const MAX_ALIVE_HARD = 35; // absolute cap, reinforcements included
+// give up a chase after this long without reaching the target, then jog home
+const LEASH_TIME = 7;
+const LEASH_TIME_BOSS = 16;
 
 class Enemy {
   constructor(type, x, z, difficulty, bossRank = 0) {
@@ -24,7 +26,7 @@ class Enemy {
     this.maxHp = this.hp;
     this.dmg = base.dmg * (1 + difficulty * 0.8) * (boss ? boss.dmgMult : 1);
     this.xp = Math.round(base.xp * (boss ? boss.xpMult : 1));
-    this.meat = base.meat ?? meatForHp(this.maxHp);
+    this.meat = meatForHp(this.maxHp); // 1 meat / 30 HP — bosses pay out big
     this.sizeMult = boss ? boss.sizeMult : 1;
     this.hitR = base.hitR * this.sizeMult;
     this.range = base.range * this.sizeMult;
@@ -43,6 +45,9 @@ class Enemy {
     this.pauseT = 0;
     this.stunT = 0;
     this.aggroed = bossRank > 0;
+    this.spawnPos = { x, z }; // leash: where to run back to after a failed chase
+    this.chaseT = 0;
+    this.returning = false;
     this.wanderDir = Math.random() * Math.PI * 2;
     this.wanderT = 0;
     this.walkT = Math.random() * 10;
@@ -140,8 +145,7 @@ export class EnemyManager {
     // biome — even if the spawn point lands just across a ring border
     const biome = biomeAt(anchor.pos.x, anchor.pos.z);
     const type = biome.enemies[Math.floor(Math.random() * biome.enemies.length)];
-    const e = this._spawn(type, x, z, progress);
-    if (!e.cfg.passive) e.aggroed = true;
+    this._spawn(type, x, z, progress);
   }
 
   _trySpawn(targets) {
@@ -174,8 +178,7 @@ export class EnemyManager {
     for (let i = 0; i < count; i++) {
       const a = (i / count) * Math.PI * 2;
       const r = 2 + Math.random() * 4;
-      const e = this._spawn(type, center.x + Math.cos(a) * r, center.z + Math.sin(a) * r, progress);
-      if (!e.cfg.passive) e.aggroed = true;
+      this._spawn(type, center.x + Math.cos(a) * r, center.z + Math.sin(a) * r, progress);
     }
     if (rank > 0) {
       this._spawn(type, center.x, center.z, progress, rank);
@@ -197,8 +200,7 @@ export class EnemyManager {
       if (this.alive().length >= MAX_ALIVE_HARD) continue;
       for (let i = 0; i < rank.reinforceCount; i++) {
         const { x, z } = this._spawnPoint(anchor, { allSides: true });
-        const e = this._spawn(boss.type, x, z, progress);
-        if (!e.cfg.passive) e.aggroed = true;
+        this._spawn(boss.type, x, z, progress);
       }
     }
   }
@@ -211,6 +213,8 @@ export class EnemyManager {
     if (enemy.dying) return;
     enemy.hp -= dmg;
     enemy.aggroed = true;
+    enemy.returning = false; // getting hit re-engages a leashed enemy
+    enemy.chaseT = 0;
     enemy.lastHitBy = srcId; // kill credit (co-op XP attribution)
     this.hooks.popup(enemy.mesh.position.clone().setY(enemy.mesh.position.y + 1.4 * enemy.sizeMult + 0.4),
       Math.round(dmg).toString(), '#ffffff');
@@ -239,13 +243,13 @@ export class EnemyManager {
 
     this.spawnTimer -= dt;
     if (this.spawnTimer <= 0) {
-      this.spawnTimer = (2.2 - 1.2 * progress) * SPAWN_INTERVAL_MULT;
+      this.spawnTimer = 2.2 - 1.2 * progress;
       this._trySpawn(targets);
     }
 
     this.packTimer -= dt;
     if (this.packTimer <= 0) {
-      this.packTimer = (26 + Math.random() * 18 - progress * 8) * SPAWN_INTERVAL_MULT;
+      this.packTimer = 26 + Math.random() * 18 - progress * 8;
       this._trySpawnPack(targets);
     }
 
@@ -312,7 +316,19 @@ export class EnemyManager {
         continue;
       }
 
-      if (dist < e.cfg.aggro) e.aggroed = true;
+      // aggro + leash: a chase that never reaches its target is abandoned
+      // after LEASH_TIME and the enemy jogs back to where it spawned
+      if (e.returning) {
+        if (dist < e.cfg.aggro * 0.5) { e.returning = false; e.aggroed = true; e.chaseT = 0; }
+      } else if (dist < e.cfg.aggro) e.aggroed = true;
+      if (e.aggroed && target && !e.returning) {
+        if (dist > e.range * 1.5) e.chaseT += dt; else e.chaseT = 0;
+        if (e.chaseT > (e.bossRank ? LEASH_TIME_BOSS : LEASH_TIME)) {
+          e.aggroed = false;
+          e.returning = true;
+          e.chaseT = 0;
+        }
+      }
 
       // the ranged "spell" charges over time; firing freezes the caster briefly
       if (e.cfg.ranged) e.spellTimer -= dt;
@@ -326,6 +342,11 @@ export class EnemyManager {
           vx = (toPlayer.x / dist) * e.speed;
           vz = (toPlayer.z / dist) * e.speed;
         }
+      } else if (e.returning) {
+        const hx = e.spawnPos.x - e.pos.x, hz = e.spawnPos.z - e.pos.z;
+        const hd = Math.hypot(hx, hz);
+        if (hd < 2) e.returning = false;
+        else { vx = (hx / hd) * e.speed * 0.8; vz = (hz / hd) * e.speed * 0.8; }
       } else {
         e.wanderT -= dt;
         if (e.wanderT <= 0) {
@@ -351,7 +372,6 @@ export class EnemyManager {
       e.pos.x += vx * dt;
       e.pos.z += vz * dt;
       if (!e.cfg.flying) this.world.collide(e.pos, 0.4 * e.sizeMult);
-      if (!e.cfg.flying) this.world.pushOutOfSafeZones?.(e.pos, e.hitR ?? 0.5);
 
       // ranged spell: charged + target in shoot range → stop, fire, resume after 0.5 s
       if (target && e.cfg.ranged && e.aggroed && e.spellTimer <= 0

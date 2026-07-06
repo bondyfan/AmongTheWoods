@@ -19,7 +19,6 @@ const SPOTS = {
 };
 const HOME_HEAL_RADIUS = 6;
 const HOME_HEAL_PER_SEC = 12;
-const HOME_ENEMY_BLOCK_RADIUS = 5.5;
 
 export class Camp {
   constructor(scene, world, player, hooks) {
@@ -34,8 +33,8 @@ export class Camp {
     this.smeltT = 20;
     this.towerCd = 0;
     this.healPopupT = 0;
+    // healing + no-attack zone around home — activates once the tent is built
     this.safeZone = { x: SPOTS.home.x, z: SPOTS.home.z, r: HOME_HEAL_RADIUS };
-    this.world.safeZones.push(this.safeZone);
   }
 
   has(need) {
@@ -72,6 +71,7 @@ export class Camp {
     const info = this.buildingInfo(id);
     if (info.maxed) return false;
     this.levels[id]++;
+    if (id === 'home' && this.levels.home === 1) this.world.safeZones.push(this.safeZone);
     this._placeMesh(id);
     audio.sfx('tower_build', 0.55);
     this.hooks.toast?.(`🏕️ Built: ${this.buildingInfo(id).name}!`, 'level');
@@ -138,20 +138,12 @@ export class Camp {
   update(dt, enemyMgr, projectiles) {
     this.healPopupT = Math.max(0, this.healPopupT - dt);
     const d = Math.hypot(this.player.pos.x - SPOTS.home.x, this.player.pos.z - SPOTS.home.z);
-    if (!this.player.dead && d < HOME_HEAL_RADIUS && this.player.hp < this.player.maxHp) {
+    if (this.levels.home >= 1 && !this.player.dead
+        && d < HOME_HEAL_RADIUS && this.player.hp < this.player.maxHp) {
       this.player.hp = Math.min(this.player.maxHp, this.player.hp + HOME_HEAL_PER_SEC * dt);
       if (this.healPopupT <= 0) {
         this.healPopupT = 1.2;
         this.hooks.popup?.(this.player.mesh.position.clone().setY(this.player.mesh.position.y + 2.3), '+ heal', '#7dff8a');
-      }
-    }
-    for (const e of enemyMgr?.alive?.() ?? []) {
-      const dx = e.pos.x - SPOTS.home.x, dz = e.pos.z - SPOTS.home.z;
-      const dist = Math.hypot(dx, dz) || 1;
-      const minDist = HOME_ENEMY_BLOCK_RADIUS + (e.hitR ?? 0.5);
-      if (dist < minDist) {
-        e.pos.x = SPOTS.home.x + (dx / dist) * minDist;
-        e.pos.z = SPOTS.home.z + (dz / dist) * minDist;
       }
     }
 

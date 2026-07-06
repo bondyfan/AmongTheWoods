@@ -75,9 +75,12 @@ export function progressAt(x, z) {
 // ---- resources ----
 export const RESOURCES = ['meat', 'wood', 'stone', 'hide', 'iron'];
 export const RES_ICONS = { meat: '🍖', wood: '🪵', stone: '🪨', hide: '🟫', iron: '🔩' };
-export const RESOURCE_STEP = 0.1;
-export const roundResource = (value) => Math.round((Number(value) || 0) / RESOURCE_STEP) * RESOURCE_STEP;
-export const fmtResource = (value) => roundResource(value).toFixed(1);
+// resources come in tenths (hide scraps); ×10/÷10 keeps whole numbers exact
+export const roundResource = (value) => Math.round((Number(value) || 0) * 10) / 10;
+export const fmtResource = (value) => {
+  const r = roundResource(value);
+  return Number.isInteger(r) ? String(r) : r.toFixed(1);
+};
 
 // hide drops only from animals that realistically have one
 export const HIDE_BEARING = new Set(['wolf', 'boar', 'elk', 'bear', 'icewolf', 'wendigo', 'yeti']);

@@ -152,7 +152,13 @@ const pickups = new Pickups(scene, world, {
     else mp?.onRemoteCollect(p); // co-op host: the partner's proxy grabbed it
   },
 });
-world.onWoodLog = (pos) => pickups.spawn('wood', 1, pos, 0.15);
+// fallen logs become wood pickups — host-side only, like island treasure,
+// so the co-op guest doesn't mint unsynced local duplicates
+const spawnWoodLog = (pos) => {
+  if (mp?.active && !mp.isHost) return;
+  pickups.spawn('wood', 1, pos, 0.15);
+};
+world.onWoodLog = spawnWoodLog;
 
 function discoverType(type) {
   panels.discover(type);
@@ -179,10 +185,12 @@ const enemyMgr = new EnemyManager(scene, world, {
       left -= amount;
       pickups.spawn('meat', amount, enemy.pos, 0.9 * enemy.sizeMult);
     }
-    if (biomeIndexAt(enemy.pos.x, enemy.pos.z) === 0) {
-      pickups.spawn('hide', VERDANT_HIDE_DROP, enemy.pos, 0.9);
-    } else if (HIDE_BEARING.has(enemy.type)) {
+    // big animals always drop their full hide (even if they chased you back
+    // into the Verdant Forest); small critters there — and bats — leave a scrap
+    if (HIDE_BEARING.has(enemy.type)) {
       pickups.spawn('hide', hideForHp(enemy.maxHp), enemy.pos, 1.1 * enemy.sizeMult);
+    } else if (biomeIndexAt(enemy.pos.x, enemy.pos.z) === 0 || enemy.type === 'bat') {
+      pickups.spawn('hide', VERDANT_HIDE_DROP, enemy.pos, 0.9);
     }
     if (enemy.bossRank > 0) rollBossDrop(enemy);
   },
@@ -301,7 +309,7 @@ function setupMobaWorld(seed, side) {
   $id('minimap-zoom').classList.add('hidden');
   world.dispose();
   world = new MobaWorld(scene, seed);
-  world.onWoodLog = (pos) => pickups.spawn('wood', 1, pos, 0.15);
+  world.onWoodLog = spawnWoodLog;
   pickups.world = world;
   enemyMgr.world = world;
   game.seed = seed;
