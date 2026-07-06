@@ -60,6 +60,8 @@ const baseDist = (x, z) => Math.min(
 const campDist = (x, z) => Math.min(...MOBA.camps.map(c => Math.hypot(x - c.x, z - c.z)));
 
 export class MobaWorld extends World {
+  _mountainK() { return 0; } // no mountains on the MOBA map
+
   // flat-ish terrain, fully flat on lanes and bases
   heightAt(x, z) {
     let h = super.heightAt(x, z) * 0.5;

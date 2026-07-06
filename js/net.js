@@ -133,9 +133,13 @@ export const WoodsNet = {
     },
 
     // Events go into the PARTNER's inbox; each side consumes (and deletes) its own.
+    // undefined fields are stripped — Firebase THROWS on undefined values, which
+    // silently killed every event carrying an optional field (e.g. pdmg.sh).
     sendEvent(obj) {
         if (!this.partnerUid) return;
-        push(ref(db, roomPath(this.code) + "/ev/" + this.partnerUid), { ...obj, from: this.uid });
+        const clean = { from: this.uid };
+        for (const [k, v] of Object.entries(obj)) if (v !== undefined) clean[k] = v;
+        push(ref(db, roomPath(this.code) + "/ev/" + this.partnerUid), clean);
     },
 
     onEvent(fn) {

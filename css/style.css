@@ -282,13 +282,15 @@ kbd {
 #minimap { cursor: pointer; pointer-events: auto; }
 
 /* ---------- home upgrade hint ---------- */
-#home-hint {
+#home-hint, #pet-hint {
   position: fixed; bottom: 128px; left: 50%; transform: translateX(-50%);
   z-index: 11; font-size: 15px; font-weight: bold; white-space: nowrap;
   background: rgba(12, 20, 10, 0.85); border: 1px solid #86b45e;
   padding: 8px 18px; border-radius: 10px; pointer-events: none;
   text-shadow: 0 1px 3px rgba(0,0,0,0.8);
 }
+
+#pet-hint { bottom: 174px; border-color: #c9a4ff; }
 
 /* ---------- respawn choice ---------- */
 #respawn-choice {

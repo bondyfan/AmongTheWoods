@@ -34,8 +34,10 @@ export class Player {
     this.itemsOwned = new Set(['fists']);
     this.equipment = { weapon: 'fists', head: null, chest: null, boots: null, pet: null, orb: null };
 
-    // -- trainable stat tracks (0..10 each) --
-    this.stats = { range: 0, power: 0, swift: 0 };
+    // -- trainable stat tracks (0..10 each; pet 0..5) --
+    this.stats = { range: 0, power: 0, swift: 0, pet: 0 };
+    this.petDead = false;             // a dead pet stays dead until resurrected
+    this.petMode = 'aggressive';      // 'aggressive' | 'defensive' | 'passive'
 
     // -- spells --
     this.spellsOwned = new Set();
@@ -181,7 +183,11 @@ export class Player {
       range: base.range + (base.kind === 'bow' ? 2.0 : 0.1) * s.range,
     };
     this.attackRange = this.weapon.range; // aim marker clamps to this
-    this.pet = equipped('pet')?.pet || null;
+    // pet training: +100 hp & +25% damage per tier (base 100 hp)
+    const petBase = equipped('pet')?.pet;
+    this.pet = petBase
+      ? { dmg: petBase.dmg * (1 + 0.25 * s.pet), maxHp: 100 + 100 * s.pet }
+      : null;
     this.orb = equipped('orb')?.orb || null;
 
     this._refreshWeaponMeshes();

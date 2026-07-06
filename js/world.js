@@ -143,12 +143,26 @@ export class World {
     if (this._arena) { this.scene.remove(this._arena); this._arena = null; }
   }
 
-  // Terrain height — gentle rolling hills, flattened around the cave & camp.
+  // How strongly (0..1) a mountain massif rises here — masked low-frequency
+  // noise, kept away from ring barriers so gates and bridges stay usable.
+  _mountainK(x, z, r = radiusOf(x, z)) {
+    const m = valueNoise(x, z, 420, this.seed + 57);
+    if (m <= 0.62) return 0;
+    if ((this.rings || []).some(w => Math.abs(r - w.r) < 35)) return 0;
+    const k = (m - 0.62) / 0.38;
+    return k * k;
+  }
+
+  // Terrain height — detail bumps + long rolling hills + occasional mountain
+  // massifs with rugged tops; flattened around the cave & camp.
   heightAt(x, z) {
     let h = valueNoise(x, z, 30, this.seed) * 1.9
           + valueNoise(x, z, 10, this.seed + 7) * 0.55
           - 1.2;
     const r = radiusOf(x, z);
+    h += (valueNoise(x, z, 160, this.seed + 31) - 0.5) * 5;
+    const mk = this._mountainK(x, z, r);
+    if (mk > 0) h += mk * (13 + valueNoise(x, z, 55, this.seed + 91) * 9);
     if (r < 28) h *= Math.max(0.1, (r - 10) / 18);
     return h;
   }
@@ -187,6 +201,7 @@ export class World {
       const r = radiusOf(x, z);
       if (r < 70 || r > WORLD.radius - 30) continue;
       if (this.rings.some(w => Math.abs(r - w.r) < lr + 12)) continue;
+      if (this._mountainK(x, z, r) > 0.02) continue; // no lakes up a mountainside
       const island = lr >= 14 ? { r: 4.5 } : null;
       list.push({ x, z, r: lr, island, id: key + ':' + i });
     }
@@ -403,8 +418,12 @@ export class World {
       return true;
     };
 
-    // -- trees --
-    const count = Math.round((8 + rng() * 8) * biome.treeDensity);
+    // -- trees -- (low-frequency noise carves occasional DENSE forest patches)
+    let count = Math.round((8 + rng() * 8) * biome.treeDensity);
+    if (biome.denseForests) {
+      const f = valueNoise(cxw + CHUNK / 2, czw + CHUNK / 2, 240, this.seed + 133);
+      if (f > 0.58) count = Math.min(30, Math.round(count * (1 + (f - 0.58) * 8)));
+    }
     for (let i = 0; i < count; i++) {
       const x = cxw + rng() * CHUNK;
       const z = czw + rng() * CHUNK;

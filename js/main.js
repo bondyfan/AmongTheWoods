@@ -2,7 +2,7 @@
 
 import * as THREE from 'three';
 import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOBA,
-         RESOURCES, HIDE_BEARING, VERDANT_HIDE_DROP, hideForHp, radiusOf, costFor,
+         RESOURCES, RES_ICONS, HIDE_BEARING, VERDANT_HIDE_DROP, hideForHp, radiusOf, costFor,
          biomeIndexAt, progressAt, fmtResource, roundResource, itemById, spellById } from './config.js';
 import { makeAimArc, updateAimArc, makeRaft } from './models.js';
 import { Camp } from './camp.js';
@@ -227,7 +227,12 @@ const enemyMgr = new EnemyManager(scene, world, {
 });
 
 const projectiles = new Projectiles(scene);
-const companions = new Companions(scene);
+const companions = new Companions(scene, {
+  popup: (pos, text, color) => ui.popup(pos, text, color),
+  toast: (text, cls) => ui.toast(text, cls),
+  addTracker: (...a) => ui.addTracker(...a),
+  removeTracker: (id) => ui.removeTracker(id),
+});
 const minimap = new Minimap(document.getElementById('minimap'), world);
 
 // Boss loot: a chance to drop an unowned item near the player's level.
@@ -643,6 +648,56 @@ input.onKey('KeyE', () => {
   panels.shopTab = 'camp';
   panels.toggle('shop');
 });
+
+// ---- pet: resurrection (R at home / the graveyard) & mode cycling (P) ----
+function nearGrave() {
+  return camp?.gravePos
+    && Math.hypot(player.pos.x - camp.gravePos.x, player.pos.z - camp.gravePos.z) < 6;
+}
+
+// resurrection costs 10% of everything invested in the pet (item + training)
+function petResurrectCost() {
+  const item = itemById(player.equipment.pet);
+  if (!item) return null;
+  const total = { ...item.cost };
+  const track = STAT_TRACKS.find(t => t.id === 'pet');
+  for (let t = 1; t <= player.stats.pet; t++) {
+    for (const [k, v] of Object.entries(track.cost(t))) total[k] = (total[k] || 0) + v;
+  }
+  const out = {};
+  for (const [k, v] of Object.entries(total)) out[k] = Math.max(1, Math.ceil(v * 0.1));
+  return out;
+}
+
+function canResurrectPetHere() {
+  return game.kind === 'survival' && player.petDead && player.equipment.pet
+    && !player.dead && (nearHome() || nearGrave());
+}
+
+input.onKey('KeyR', () => {
+  if (!inPlay() || !canResurrectPetHere()) return;
+  const cost = petResurrectCost();
+  if (!Object.entries(cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
+  for (const [k, v] of Object.entries(cost)) player[k] = roundResource(player[k] - v);
+  player.petDead = false;
+  companions.sync(player);
+  ui.toast('🐺 Your pet is back at your side!', 'level');
+  audio.sfx('spawn', 0.6);
+  panels.refresh();
+});
+
+const PET_MODES = ['aggressive', 'defensive', 'passive'];
+const PET_MODE_LABEL = {
+  aggressive: '🗡️ Aggressive — attacks anything near you',
+  defensive: '🛡️ Defensive — only fights what attacks you',
+  passive: '💤 Passive — never attacks',
+};
+input.onKey('KeyP', () => {
+  if (!inPlay() || !player.equipment.pet) return;
+  player.petMode = PET_MODES[(PET_MODES.indexOf(player.petMode) + 1) % PET_MODES.length];
+  ui.toast(`🐺 Pet mode: ${PET_MODE_LABEL[player.petMode]}`, 'level');
+  audio.sfx('click', 0.4);
+});
 $id('bigmap').querySelector('.panel-close').addEventListener('click', () => toggleBigMap(false));
 $id('respawn-cave').addEventListener('click', () => reviveAt('cave'));
 $id('respawn-grave').addEventListener('click', () => reviveAt('grave'));
@@ -806,6 +861,15 @@ function tick() {
 
       // home upgrade hint when standing at your home
       $id('home-hint').classList.toggle('hidden', !nearHome() || panels.open);
+
+      // fallen-pet resurrection hint (at home or at the graveyard)
+      const petHint = $id('pet-hint');
+      if (canResurrectPetHere() && !panels.open) {
+        const cost = petResurrectCost();
+        petHint.textContent = `🐺 Resurrect pet — press R (${Object.entries(cost)
+          .map(([k, v]) => `${fmtResource(v)} ${RES_ICONS[k] ?? k}`).join(' + ')})`;
+        petHint.classList.remove('hidden');
+      } else petHint.classList.add('hidden');
 
       // the big map refreshes while open
       if (bigmapOpen) {

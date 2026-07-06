@@ -48,6 +48,10 @@ class RemotePlayer {
     this.attackT = 0;
     this.weaponId = 'fists';
     this._shownWeapon = null;
+    this.petId = 0;              // partner's pet, mirrored locally
+    this.petMesh = null;
+    this.petPos = new THREE.Vector3();
+    this.petWalkT = 0;
     this.lastSeen = 0;
 
     ui.addTracker('mp-partner',
@@ -73,6 +77,19 @@ class RemotePlayer {
     if (s.atk && this.attackT <= 0) this.attackT = 0.25;
     this.dead = !!s.dead;
     if (s.w !== this.weaponId) { this.weaponId = s.w; this._refreshWeapon(); }
+
+    // partner's pet: a mirrored wolf trotting at their side
+    const pet = s.pet || 0;
+    if (pet !== this.petId) {
+      this.petId = pet;
+      if (this.petMesh) { this.scene.remove(this.petMesh); this.petMesh = null; }
+      if (pet) {
+        this.petMesh = makeWolf('tame');
+        if (pet === 'alphaWolf') this.petMesh.scale.multiplyScalar(1.45);
+        this.scene.add(this.petMesh);
+        this.petPos.copy(this.targetPos).add(new THREE.Vector3(1.4, 0, 1.6));
+      }
+    }
   }
 
   _refreshWeapon() {
@@ -99,11 +116,30 @@ class RemotePlayer {
       rightArm.rotation.x = -2.1 * Math.sin((1 - this.attackT / 0.25) * Math.PI);
     } else { rightArm.rotation.x = -swing * 0.6; leftArm.rotation.x = swing * 0.6; }
     this.mesh.rotation.z = this.dead ? Math.PI / 2 : 0;
+
+    // the mirrored pet trots after its owner
+    if (this.petMesh) {
+      this.petMesh.visible = this.mesh.visible;
+      const dest = this.pos.clone().add(new THREE.Vector3(1.4, 0, 1.6));
+      const to = dest.sub(this.petPos);
+      const d = to.length();
+      if (d > 0.35) {
+        this.petPos.addScaledVector(to, Math.min(1, (9.5 * dt) / d));
+        this.petWalkT += dt * 9.5;
+        this.petMesh.rotation.y = Math.atan2(to.x, to.z) + Math.PI;
+      }
+      this.petMesh.position.set(this.petPos.x,
+        this.world.heightAt(this.petPos.x, this.petPos.z), this.petPos.z);
+      (this.petMesh.userData.legs || []).forEach((leg, li) => {
+        leg.rotation.x = Math.sin(this.petWalkT * 2.0 + (li % 2) * Math.PI) * 0.6;
+      });
+    }
   }
 
   dispose() {
     this.ui.removeTracker('mp-partner');
     this.scene.remove(this.mesh);
+    if (this.petMesh) this.scene.remove(this.petMesh);
   }
 }
 
@@ -602,6 +638,7 @@ export class Multiplayer {
       hp: Math.round(p.hp), mhp: p.maxHp, lv: p.level,
       w: p.equipment.weapon, mv: (ctx.input.moveX || ctx.input.moveZ) ? 1 : 0,
       atk: p.attackT > 0 ? 1 : 0, dead: p.dead ? 1 : 0,
+      pet: (p.equipment.pet && !p.petDead) ? p.equipment.pet : 0,
     }, rate);
 
     this.remote?.update(dt);
