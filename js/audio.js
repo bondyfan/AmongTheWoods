@@ -10,7 +10,15 @@ class AudioManager {
     this.music = null;
     this.musicName = null;
     this.musicVolume = 0.35;
+    this.sfxVolume = 1;          // master multiplier from the settings slider
     this.lastPlayed = new Map(); // throttle per-sfx
+  }
+
+  setSfxVolume(v) { this.sfxVolume = Math.max(0, Math.min(1, v)); }
+
+  setMusicVolume(v) {
+    this.musicVolume = Math.max(0, Math.min(1, v));
+    if (this.music && !this.muted) this.music.volume = this.musicVolume;
   }
 
   _base(name) {
@@ -28,7 +36,7 @@ class AudioManager {
     if (now - (this.lastPlayed.get(name) || 0) < throttleMs) return;
     this.lastPlayed.set(name, now);
     const a = this._base(name).cloneNode();
-    a.volume = volume;
+    a.volume = Math.min(1, volume * this.sfxVolume);
     a.play().catch(() => {});
   }
 

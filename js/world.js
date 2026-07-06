@@ -8,7 +8,8 @@
 import * as THREE from 'three';
 import { WORLD, BIOMES, biomeAt, radiusOf } from './config.js';
 import { makeTree, makeRock, makeGrassTuft, makeFlower, makeMushroom, makeBush,
-         makeLog, makeBoulder, makeBridge, makeCampfire, makeStalagmite } from './models.js';
+         makeLog, makeBoulder, makeBridge, makeCampfire, makeStalagmite,
+         makeBerryBush } from './models.js';
 import { audio } from './audio.js';
 
 const CHUNK = 40;
@@ -52,6 +53,7 @@ const angDiff = (a, b) => {
 };
 
 const LAKE_REGION = 220; // deterministic lakes are generated per region cell
+const BERRY_REGROW = 600; // seconds until a harvested bush bears fruit again
 
 export class World {
   constructor(scene, seed = 1337) {
@@ -71,6 +73,8 @@ export class World {
     this.onIsland = null;        // main hooks this to drop island treasure
     this.onWoodLog = null;       // main turns decorative fallen logs into pickups
     this._woodLogDrops = new Set();
+    this.time = 0;               // world clock (drives berry regrowth)
+    this._berryEaten = new Map(); // bush key -> world time it was harvested
     this._genRings();
     this._genLakes();
     this._buildGround();
@@ -105,6 +109,8 @@ export class World {
     this._lakeRegions.clear();
     this._treasured.clear();
     this._woodLogDrops.clear();
+    this._berryEaten.clear();
+    this.time = 0;
     this._genRings();
     this._genLakes();
     this._buildGround();
@@ -519,11 +525,38 @@ export class World {
       }
     }
 
+    // -- a berry bush (about as common as fallen logs); berries regrow --
+    const bushes = [];
+    if (rng() < 0.35) {
+      const x = cxw + rng() * CHUNK, z = czw + rng() * CHUNK;
+      if (inBounds(x, z)) {
+        const bkey = key + ':berry';
+        const mesh = makeBerryBush(rng);
+        this._place(mesh, x, z);
+        group.add(mesh);
+        const eatenAt = this._berryEaten.get(bkey);
+        const ripe = eatenAt === undefined || this.time >= eatenAt + BERRY_REGROW;
+        if (!ripe) mesh.userData.berries.forEach(m => m.visible = false);
+        bushes.push({ id: this.nextTreeId++, key: bkey, mesh, x, z,
+                      radius: 0.75, alive: true, berries: ripe, kind: 'bush' });
+      }
+    }
+
     this.scene.add(group);
-    this.chunks.set(key, { group, trees, rocks });
+    this.chunks.set(key, { group, trees, rocks, bushes });
   }
 
   update(dt, playerPos) {
+    this.time += dt;
+    // berry regrowth on loaded bushes (unloaded ones re-check on chunk gen)
+    for (const chunk of this.chunks.values()) {
+      for (const b of chunk.bushes ?? []) {
+        if (!b.berries && this.time >= (this._berryEaten.get(b.key) ?? 0) + BERRY_REGROW) {
+          b.berries = true;
+          b.mesh.userData.berries.forEach(m => m.visible = true);
+        }
+      }
+    }
     const pcx = Math.floor(playerPos.x / CHUNK), pcz = Math.floor(playerPos.z / CHUNK);
     for (let dx = -VIEW_RADIUS; dx <= VIEW_RADIUS; dx++)
       for (let dz = -VIEW_RADIUS; dz <= VIEW_RADIUS; dz++)
@@ -555,7 +588,7 @@ export class World {
     }
 
     for (const chunk of this.chunks.values()) {
-      for (const t of [...chunk.trees, ...chunk.rocks]) {
+      for (const t of [...chunk.trees, ...chunk.rocks, ...(chunk.bushes ?? [])]) {
         if (t.shake > 0) {
           t.shake -= dt;
           t.mesh.rotation.z = Math.sin(t.shake * 40) * 0.05 * t.shake;
@@ -572,7 +605,7 @@ export class World {
       for (let dz = -1; dz <= 1; dz++) {
         const chunk = this.chunks.get(this._chunkKey(pcx + dx, pcz + dz));
         if (!chunk) continue;
-        for (const t of chunk[listKey]) {
+        for (const t of chunk[listKey] ?? []) {
           if (!t.alive) continue;
           const ddx = t.x - pos.x, ddz = t.z - pos.z;
           if (ddx * ddx + ddz * ddz < (radius + t.radius) ** 2) out.push(t);
@@ -583,6 +616,18 @@ export class World {
 
   treesNear(pos, radius) { return this._near(pos, radius, 'trees'); }
   rocksNear(pos, radius) { return this._near(pos, radius, 'rocks'); }
+  bushesNear(pos, radius) { return this._near(pos, radius, 'bushes'); }
+
+  // knock the ripe berries off a bush; they regrow after BERRY_REGROW seconds
+  pickBerries(bush) {
+    if (!bush.berries) return false;
+    bush.berries = false;
+    this._berryEaten.set(bush.key, this.time);
+    bush.mesh.userData.berries.forEach(m => m.visible = false);
+    bush.shake = 0.3;
+    audio.sfx('base_hit', 0.3);
+    return true;
+  }
 
   // Push a circle (pos, r) out of solids. opts.boat lets the circle float
   // over lakes and ring rivers (but never past the world edge).

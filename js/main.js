@@ -101,6 +101,7 @@ const panels = new Panels({
   onBuild: (id, lane) => buildBase(id, lane),
   onCampBuild: (id) => campBuild(id),
   mobaTeam: () => mobaSide,
+  nearHome: () => nearHome(), // the home building only upgrades in person
 });
 
 let world = new World(scene, game.seed);
@@ -138,6 +139,12 @@ function grantPickup(kind, payload) {
     player.ownItem(payload);
     ui.toast(`🎁 Loot: ${item.icon} ${item.name}!`, 'level');
     panels.refresh();
+  } else if (kind === 'berry') {
+    // berries are eaten on pickup: +10 health each
+    player.hp = Math.min(player.maxHp, player.hp + 10 * payload);
+    ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2), `+${Math.round(10 * payload)} ❤️`, '#ff7a7a');
+    audio.sfx('purchase', 0.35, 400);
+    return;
   } else {
     player[kind] = roundResource(player[kind] + payload);
     const [icon, color] = RES_POPUP[kind];
@@ -466,6 +473,31 @@ const settings = Object.assign(
   mute.addEventListener('change', () => {
     if (mute.checked !== audio.muted) audio.toggleMute();
   });
+
+  // volume sliders (persisted); music slider maps 100% → volume 0.7
+  const sfxSlider = $id('set-sfx'), musicSlider = $id('set-music');
+  settings.sfxVol ??= 100;
+  settings.musicVol ??= 50;
+  sfxSlider.value = settings.sfxVol;
+  musicSlider.value = settings.musicVol;
+  audio.setSfxVolume(settings.sfxVol / 100);
+  audio.setMusicVolume((settings.musicVol / 100) * 0.7);
+  sfxSlider.addEventListener('input', () => {
+    settings.sfxVol = +sfxSlider.value;
+    audio.setSfxVolume(settings.sfxVol / 100);
+    localStorage.setItem('atw-settings', JSON.stringify(settings));
+    audio.sfx('click', 0.4);
+  });
+  musicSlider.addEventListener('input', () => {
+    settings.musicVol = +musicSlider.value;
+    audio.setMusicVolume((settings.musicVol / 100) * 0.7);
+    localStorage.setItem('atw-settings', JSON.stringify(settings));
+  });
+
+  // show the room code so a friend can join the running game
+  $id('settings-btn').addEventListener('click', () => {
+    $id('set-mpcode').textContent = (mp?.active && mpCode) ? mpCode : '— (not in a multiplayer game)';
+  });
 }
 
 async function ensureMp() {
@@ -537,7 +569,10 @@ $id('mp-moba-btn').addEventListener('click', async () => {
     showWaiting(await session.host('moba', null));
   } catch (e) { mpError(e); }
 });
+let mpCode = null; // current room code, shown in Settings for late joiners
+
 function showWaiting(code) {
+  mpCode = code;
   $id('mp-choose').classList.add('hidden');
   $id('mp-wait').classList.remove('hidden');
   $id('mp-code-display').textContent = code;
@@ -560,6 +595,7 @@ $id('mp-join-btn').addEventListener('click', async () => {
   try {
     const session = await ensureMp();
     await session.join($id('mp-code').value);
+    mpCode = $id('mp-code').value.trim().toUpperCase();
   } catch (e) { mpError(e); }
 });
 

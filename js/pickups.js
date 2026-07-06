@@ -2,7 +2,8 @@
 // the player when they come close. ----
 
 import * as THREE from 'three';
-import { makeMeatDrop, makeWoodDrop, makeItemDrop, makeStoneDrop, makeHideDrop, makeIronDrop } from './models.js';
+import { makeMeatDrop, makeWoodDrop, makeItemDrop, makeStoneDrop, makeHideDrop, makeIronDrop,
+         makeBerryDrop } from './models.js';
 import { roundResource } from './config.js';
 import { audio } from './audio.js';
 
@@ -23,7 +24,7 @@ export class Pickups {
   spawn(kind, payload, pos, scatter = 0.8) {
     if (kind !== 'item') payload = roundResource(payload);
     const makers = { meat: makeMeatDrop, wood: makeWoodDrop, stone: makeStoneDrop,
-                     hide: makeHideDrop, iron: makeIronDrop, item: makeItemDrop };
+                     hide: makeHideDrop, iron: makeIronDrop, berry: makeBerryDrop, item: makeItemDrop };
     const mesh = (makers[kind] || makeItemDrop)();
     const x = pos.x + (Math.random() - 0.5) * scatter * 2;
     const z = pos.z + (Math.random() - 0.5) * scatter * 2;

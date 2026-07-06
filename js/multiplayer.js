@@ -20,7 +20,8 @@ import { WoodsNet } from './net.js';
 import { ARENA, ARENA_RETURN_DELAY, arenaReward, ENEMY_TYPES, BOSS_RANKS,
          MOBA_BUILDINGS, roundResource, itemById } from './config.js';
 import { makeMan, makeAxe, makeBow, makeEnemyMesh, makeMeatDrop, makeWoodDrop,
-         makeStoneDrop, makeHideDrop, makeIronDrop, makeItemDrop, makeEnemyShot, makeWolf, makeMobaTower, makeMobaBase,
+         makeStoneDrop, makeHideDrop, makeIronDrop, makeBerryDrop, makeItemDrop,
+         makeEnemyShot, makeWolf, makeMobaTower, makeMobaBase,
          makeTeamFlag, TEAM_COLORS, mat } from './models.js';
 import { audio } from './audio.js';
 
@@ -127,6 +128,9 @@ class RemotePlayer {
         this.petPos.addScaledVector(to, Math.min(1, (9.5 * dt) / d));
         this.petWalkT += dt * 9.5;
         this.petMesh.rotation.y = Math.atan2(to.x, to.z) + Math.PI;
+        this.world.collide?.(this.petPos, 0.35);
+        if (this.petPos.distanceTo(this.pos) > 40) // owner teleported far away
+          this.petPos.copy(this.pos).add(new THREE.Vector3(1.4, 0, 1.6));
       }
       this.petMesh.position.set(this.petPos.x,
         this.world.heightAt(this.petPos.x, this.petPos.z), this.petPos.z);
@@ -201,7 +205,7 @@ class ShadowWorld {
       let s = this.pickups.get(p.i);
       if (!s) {
         const makers = { meat: makeMeatDrop, wood: makeWoodDrop, stone: makeStoneDrop,
-                         hide: makeHideDrop, iron: makeIronDrop, item: makeItemDrop };
+                         hide: makeHideDrop, iron: makeIronDrop, berry: makeBerryDrop, item: makeItemDrop };
         const mesh = (makers[p.k] || makeItemDrop)();
         mesh.position.set(p.x, this.world.heightAt(p.x, p.z) + 0.45, p.z);
         this.scene.add(mesh);

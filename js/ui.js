@@ -76,14 +76,14 @@ export class UI {
       const cdEl = el.querySelector('.spell-cd');
       if (!id) {
         el.classList.add('empty');
-        iconEl.textContent = '';
+        iconEl.innerHTML = '';
         cdEl.style.height = '0%';
         el.title = '';
         continue;
       }
       const spell = spellById(id);
       el.classList.remove('empty');
-      iconEl.textContent = spell.icon;
+      iconEl.innerHTML = itemIcon(spell);
       el.title = `${spell.name} — ${spell.desc}`;
       const cd = player.spellCds[id] || 0;
       cdEl.style.height = (cd / spell.cd * 100) + '%';

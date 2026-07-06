@@ -56,7 +56,106 @@ const wolfHead = (extra = '') => S(`
   <path d="M16 20l-1.6 2.4h3.2z" fill="#33373c"/>
   ${extra}`);
 
+const bolt = (fill, dark) => `<path d="M18 2L7 18h6l-3 12 12-17h-6l4-11z" fill="${fill}" stroke="${dark}" stroke-width="1.3" stroke-linejoin="round"/>`;
+
 export const ITEM_ICONS = {
+  // ===== spells =====
+  haste: S(bolt('#ffe94a', '#b8960a')),
+  powerDash: S(`
+    <path d="M4 20c4 0 4-8 8-8M8 24c5 0 5-8 10-8" fill="none" stroke="#9adcff" stroke-width="2.2" stroke-linecap="round"/>
+    <path d="M14 22l9-6c2-1.4 4.5-1 6 .8l-4 8c-1 2-3.4 2.6-5.2 1.4z" fill="#5fa8e0" stroke="#2d6a9e" stroke-width="1.5" stroke-linejoin="round"/>`),
+  heal: S(`
+    <path d="M16 28C8 22 4 17 4 12c0-4 3-7 7-7 2.4 0 4 1.2 5 3 1-1.8 2.6-3 5-3 4 0 7 3 7 7 0 5-4 10-12 16z"
+      fill="#6fd86f" stroke="#2e7d32" stroke-width="1.6" stroke-linejoin="round"/>
+    <path d="M16 12v8M12 16h8" stroke="#eafff0" stroke-width="2.4" stroke-linecap="round"/>`),
+  stunDash: S(`
+    <path d="M16 4c6 0 11 5 11 11 0 8-9 13-11 13S5 23 5 15C5 9 10 4 16 4z" fill="none" stroke="#bfa8ff" stroke-width="0" />
+    <path d="M25 7c-4 8-14 4-18 12 4 3 12 4 17-1 3-3 3-8 1-11z" fill="#a98fe8" stroke="#5f4a9e" stroke-width="1.5" stroke-linejoin="round"/>
+    <path d="M8 22c6-6 14-3 18-9" fill="none" stroke="#e4dcff" stroke-width="1.6" stroke-linecap="round"/>
+    <circle cx="7" cy="9" r="1.5" fill="#ffe94a"/><circle cx="12" cy="5" r="1.2" fill="#ffe94a"/>`),
+  shockwave: S(`
+    <circle cx="16" cy="16" r="4.5" fill="#ffb84a" stroke="#a86a10" stroke-width="1.5"/>
+    <circle cx="16" cy="16" r="9" fill="none" stroke="#ff9d3a" stroke-width="2" opacity="0.75"/>
+    <circle cx="16" cy="16" r="13.5" fill="none" stroke="#ff8030" stroke-width="1.8" opacity="0.45"/>`),
+  frostNova: S(`
+    <path d="M16 3v26M5 9.5l22 13M27 9.5l-22 13" stroke="#9adcff" stroke-width="2.2" stroke-linecap="round"/>
+    <path d="M16 7l-3-3M16 7l3-3M16 25l-3 3M16 25l3 3M8 11l-4-1M8 21l-4 1M24 11l4-1M24 21l4 1"
+      stroke="#9adcff" stroke-width="1.6" stroke-linecap="round"/>
+    <circle cx="16" cy="16" r="3" fill="#e6f7ff" stroke="#5fb8e8" stroke-width="1.2"/>`),
+  rage: S(`
+    <path d="M9 5c0 4-5 6-5 12 0 6 5 11 12 11s12-5 12-11c0-6-5-8-5-12-2 2-3 4-3 6-1-4-4-6-7-9 0 4-4 6-4 9-1-2-1-4 0-6z"
+      fill="#ff7038" stroke="#a83010" stroke-width="1.5" stroke-linejoin="round"/>
+    <path d="M13 24c0-3 1.4-5 3-7 1.6 2 3 4 3 7 0 2-1.3 3.4-3 3.4S13 26 13 24z" fill="#ffd23a"/>`),
+  // ===== training tracks =====
+  range: S(`
+    <circle cx="16" cy="16" r="12" fill="none" stroke="#e05050" stroke-width="2"/>
+    <circle cx="16" cy="16" r="7.5" fill="none" stroke="#e05050" stroke-width="1.6"/>
+    <circle cx="16" cy="16" r="3" fill="#e05050"/>
+    <line x1="16" y1="16" x2="28" y2="4" stroke="${WOOD}" stroke-width="2" stroke-linecap="round"/>
+    <path d="M28 4l-6 1M28 4l-1 6" stroke="${WOOD_D}" stroke-width="1.6" stroke-linecap="round"/>`),
+  power: S(`
+    <path d="M6 21c0-6 4-12 10-12s10 6 10 12" fill="none" stroke="${SKIN_D}" stroke-width="0"/>
+    <path d="M5 22c1-7 4-12 8-12 3 0 4 2 3 5-2 5-6 8-9 9-1.4.4-2-.6-2-2z" fill="${SKIN}" stroke="${SKIN_D}" stroke-width="1.5" stroke-linejoin="round"/>
+    <path d="M27 22c-1-7-4-12-8-12-3 0-4 2-3 5 2 5 6 8 9 9 1.4.4 2-.6 2-2z" fill="${SKIN}" stroke="${SKIN_D}" stroke-width="1.5" stroke-linejoin="round"/>
+    <circle cx="16" cy="24" r="4.5" fill="#e05050" stroke="#8e2020" stroke-width="1.4"/>`),
+  swift: S(`
+    <path d="M4 10h16M4 16h13M4 22h10" stroke="#9adcff" stroke-width="2.2" stroke-linecap="round"/>
+    <path d="M20 6l8 10-8 10c-2-4-2-16 0-20z" fill="#5fa8e0" stroke="#2d6a9e" stroke-width="1.5" stroke-linejoin="round"/>`),
+  pet: S(`
+    <ellipse cx="16" cy="21" rx="6" ry="5" fill="${LEATHER}" stroke="${LEATHER_D}" stroke-width="1.4"/>
+    <ellipse cx="8" cy="12" rx="2.8" ry="3.6" fill="${LEATHER}" stroke="${LEATHER_D}" stroke-width="1.3"/>
+    <ellipse cx="24" cy="12" rx="2.8" ry="3.6" fill="${LEATHER}" stroke="${LEATHER_D}" stroke-width="1.3"/>
+    <ellipse cx="14" cy="6.5" rx="2.5" ry="3.2" fill="${LEATHER}" stroke="${LEATHER_D}" stroke-width="1.3" transform="rotate(-12 14 6.5)"/>
+    <ellipse cx="19" cy="6.5" rx="2.5" ry="3.2" fill="${LEATHER}" stroke="${LEATHER_D}" stroke-width="1.3" transform="rotate(12 19 6.5)"/>`),
+  // ===== camp buildings =====
+  home: S(`
+    <path d="M16 4L3 26h26z" fill="${LEATHER}" stroke="${LEATHER_D}" stroke-width="1.6" stroke-linejoin="round"/>
+    <path d="M16 4L9 26h14z" fill="#c99a63" stroke="${LEATHER_D}" stroke-width="1.2" stroke-linejoin="round"/>
+    <path d="M16 12l-4 14h8z" fill="#4a3520"/>`),
+  chest: S(`
+    <path d="M5 12c0-3 2-5 5-5h12c3 0 5 2 5 5v4H5z" fill="${WOOD}" stroke="${WOOD_D}" stroke-width="1.6"/>
+    <rect x="5" y="16" width="22" height="10" rx="1.5" fill="#8a5a2b" stroke="${WOOD_D}" stroke-width="1.6"/>
+    <rect x="13.6" y="13" width="4.8" height="7" rx="1" fill="${GOLD}" stroke="${GOLD_D}" stroke-width="1.3"/>
+    <circle cx="16" cy="17" r="0.9" fill="${GOLD_D}"/>`),
+  furnace: S(`
+    <path d="M7 28V12l4-6h10l4 6v16z" fill="${STONE}" stroke="${STONE_D}" stroke-width="1.6" stroke-linejoin="round"/>
+    <path d="M12 28v-8c0-2.5 1.6-4 4-4s4 1.5 4 4v8z" fill="#2a2320"/>
+    <path d="M16 19c1.6 2 2.4 3.4 2.4 5 0 1.5-1 2.6-2.4 2.6s-2.4-1.1-2.4-2.6c0-1.6.8-3 2.4-5z" fill="#ff8030"/>
+    <path d="M13 3h2.6v4H13zM17.4 2H20v5h-2.6z" fill="${STONE_D}"/>`),
+  boat: S(`
+    <path d="M3 18h26c-1 5-6 9-13 9S4 23 3 18z" fill="${WOOD}" stroke="${WOOD_D}" stroke-width="1.6" stroke-linejoin="round"/>
+    <line x1="16" y1="4" x2="16" y2="18" stroke="${WOOD_D}" stroke-width="2"/>
+    <path d="M16 4c5 1 8 5 8 10h-8z" fill="#e8e2d4" stroke="#b0a890" stroke-width="1.3" stroke-linejoin="round"/>
+    <path d="M5 21h22" stroke="${WOOD_D}" stroke-width="1" opacity="0.5"/>`),
+  tower: S(`
+    <path d="M9 28V10h14v18z" fill="${STONE}" stroke="${STONE_D}" stroke-width="1.6"/>
+    <path d="M7 10V5h3v3h3V5h6v3h3V5h3v5z" fill="${STONE}" stroke="${STONE_D}" stroke-width="1.4" stroke-linejoin="round"/>
+    <rect x="13.6" y="19" width="4.8" height="9" fill="#3a3230"/>
+    <rect x="13.8" y="12" width="4.4" height="3.4" rx="0.8" fill="#3a3230"/>`),
+  grave: S(`
+    <path d="M9 28V12c0-4 3-7 7-7s7 3 7 7v16z" fill="${STONE}" stroke="${STONE_D}" stroke-width="1.6"/>
+    <path d="M16 12v10M12.5 15.5h7" stroke="${STONE_D}" stroke-width="2" stroke-linecap="round"/>
+    <path d="M5 28h22" stroke="#4a5a3a" stroke-width="2.4" stroke-linecap="round"/>`),
+  // ===== MOBA base buildings (tower shared with the camp tower) =====
+  den: S(`
+    <path d="M4 27L16 6l12 21z" fill="${WOOD}" stroke="${WOOD_D}" stroke-width="1.6" stroke-linejoin="round"/>
+    <path d="M11 27l5-9 5 9z" fill="#3a2c1a"/>
+    <circle cx="14.4" cy="23" r="0.9" fill="#ffd23a"/><circle cx="17.6" cy="23" r="0.9" fill="#ffd23a"/>`),
+  forge: S(`
+    <path d="M5 24h22v4H5z" fill="${STONE}" stroke="${STONE_D}" stroke-width="1.5"/>
+    <path d="M8 24V15h16v9" fill="${STONE}" stroke="${STONE_D}" stroke-width="1.5"/>
+    <path d="M12 24v-5c0-2 1.6-3.4 4-3.4s4 1.4 4 3.4v5z" fill="#ff8030"/>
+    <path d="M20 4l6 2-1.6 4.4L26 13l-5 2-4-8z" fill="${IRON}" stroke="${IRON_D}" stroke-width="1.4" stroke-linejoin="round"/>`),
+  lodge: S(`
+    <path d="M4 16L16 5l12 11v11H4z" fill="${WOOD}" stroke="${WOOD_D}" stroke-width="1.6" stroke-linejoin="round"/>
+    <path d="M2 17L16 4l14 13" fill="none" stroke="${WOOD_D}" stroke-width="2.2" stroke-linecap="round"/>
+    <rect x="12.5" y="18" width="7" height="9" fill="#3a2c1a"/>
+    <rect x="21" y="7" width="3" height="6" fill="${WOOD_D}"/>`),
+  walls: S(`
+    <path d="M4 28V12h24v16z" fill="${STONE}" stroke="${STONE_D}" stroke-width="1.6"/>
+    <path d="M4 12V7h4v3h4V7h4v3h4V7h4v3h4V7h4v5z" fill="${STONE}" stroke="${STONE_D}" stroke-width="1.4" stroke-linejoin="round"/>
+    <path d="M4 20h24M10 12v8M22 12v8M16 20v8" stroke="${STONE_D}" stroke-width="1.2" opacity="0.7"/>`),
+
   // -- weapons: melee --
   fists: S(`
     <path d="M8 15c0-5 3-8 7-8h6c4 0 6 3 6 6v5c0 6-4 10-9 10s-10-4-10-9z"

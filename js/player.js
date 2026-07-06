@@ -539,6 +539,12 @@ export class Player {
       }
     }
 
+    // berry bushes: any melee swing knocks ripe berries to the ground
+    for (const bush of (world.bushesNear?.(this.pos, w.range + 0.6) ?? [])) {
+      if (!bush.berries || !this._inArc(bush.x, bush.z, w.range, bush.radius)) continue;
+      if (world.pickBerries(bush)) pickups.spawn('berry', 1, new THREE.Vector3(bush.x, 0, bush.z), 0.7);
+    }
+
     // chop the nearest tree in the arc
     const trees = world.treesNear(this.pos, w.range + 0.6)
       .filter(t => this._inArc(t.x, t.z, w.range, t.radius))

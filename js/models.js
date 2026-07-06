@@ -294,6 +294,62 @@ export function makeSheep() {
   return g;
 }
 
+// flat ground cobweb: concentric rings + spokes, laid around spider packs
+export function makeCobweb(rng = Math.random) {
+  const g = new THREE.Group();
+  const mat = new THREE.LineBasicMaterial({ color: 0xe8e8e0, transparent: true, opacity: 0.55 });
+  const pts = [];
+  const spokes = 7;
+  const R = 1.2 + rng() * 1.2;
+  for (let s = 0; s < spokes; s++) {
+    const a = (s / spokes) * Math.PI * 2;
+    pts.push(new THREE.Vector3(0, 0, 0), new THREE.Vector3(Math.cos(a) * R, 0, Math.sin(a) * R));
+  }
+  for (const k of [0.4, 0.7, 1]) {
+    for (let s = 0; s < spokes; s++) {
+      const a1 = (s / spokes) * Math.PI * 2, a2 = ((s + 1) / spokes) * Math.PI * 2;
+      pts.push(new THREE.Vector3(Math.cos(a1) * R * k, 0, Math.sin(a1) * R * k),
+               new THREE.Vector3(Math.cos(a2) * R * k, 0, Math.sin(a2) * R * k));
+    }
+  }
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  g.add(new THREE.LineSegments(geo, mat));
+  return g;
+}
+
+// berry bush: leafy mound with red berries that hide while regrowing
+export function makeBerryBush(rng = Math.random) {
+  const g = new THREE.Group();
+  for (const [x, y, z, s] of [[0, 0.35, 0, 0.55], [-0.4, 0.28, 0.15, 0.4], [0.38, 0.3, -0.1, 0.42], [0.05, 0.3, 0.4, 0.38]]) {
+    const puff = sphere(s, 0x3d6b2e, 6);
+    puff.position.set(x, y, z);
+    g.add(puff);
+  }
+  const berries = [];
+  for (let i = 0; i < 7; i++) {
+    const a = rng() * Math.PI * 2, r = 0.25 + rng() * 0.45;
+    const b = sphere(0.09, 0xd8302e, 5);
+    b.position.set(Math.cos(a) * r, 0.45 + rng() * 0.35, Math.sin(a) * r);
+    g.add(b);
+    berries.push(b);
+  }
+  g.userData.berries = berries;
+  return g;
+}
+
+export function makeBerryDrop() {
+  const g = new THREE.Group();
+  for (const [x, z] of [[-0.09, 0], [0.09, 0.04], [0, -0.09]]) {
+    const b = sphere(0.11, 0xd8302e, 6);
+    b.position.set(x, 0.1, z);
+    g.add(b);
+  }
+  const leaf = box(0.14, 0.03, 0.08, 0x3d6b2e);
+  leaf.position.set(0, 0.22, 0);
+  g.add(leaf);
+  return g;
+}
+
 export function makeSnake(kind = 'grass') {
   const palettes = {
     grass: { colors: [0x4a7a30, 0x3d6828], eyes: 0xffd23a, scale: 1 },

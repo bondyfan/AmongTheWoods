@@ -109,7 +109,7 @@ export const ENEMY_TYPES = {
              hp: 1,   dmg: 0,  speed: 5.9, range: 0,   attackCd: 1.0, xp: 1,  meat: 1, hitR: 0.35, aggro: 0,
              passive: true, herd: [3, 10] },
   sheep:  { name: 'Sheep', icon: '🐑',
-             hp: 40,  dmg: 0,  speed: 5.0, range: 0,   attackCd: 1.0, xp: 4,  hitR: 0.6, aggro: 0,
+             hp: 40,  dmg: 0,  speed: 1.8, range: 0,   attackCd: 1.0, xp: 4,  hitR: 0.6, aggro: 0,
              passive: true, herd: [10, 20], guardian: 'wolf' },
   rat:     { name: 'Giant Rat', icon: '🐀',
              hp: 12,  dmg: 4,  speed: 7.2, range: 1.2, attackCd: 0.9, xp: 5,  meat: 1, hitR: 0.5,  aggro: 22 },

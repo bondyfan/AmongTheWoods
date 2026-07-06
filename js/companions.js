@@ -52,6 +52,7 @@ class PetWolf {
     if (dist > (target ? 1.2 : 0.4)) {
       this.pos.addScaledVector(to, Math.min(1, (speed * dt) / dist));
       this.walkT += dt * speed;
+      world.collide(this.pos, 0.35); // no ghosting through rocks and walls
     }
 
     if (target && dist < 1.5 + target.hitR && this.biteCd <= 0) {

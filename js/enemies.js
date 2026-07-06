@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { WORLD, ENEMY_TYPES, BOSS_RANKS, BIOMES, biomeAt, biomeIndexAt, progressAt, meatForHp } from './config.js';
-import { makeEnemyMesh } from './models.js';
+import { makeEnemyMesh, makeCobweb } from './models.js';
 import { audio } from './audio.js';
 
 let nextEnemyId = 1;
@@ -68,6 +68,7 @@ export class EnemyManager {
     //          onSpawn(e), onRemove(e) }  — onSpawn/onRemove drive the HP bars.
     this.hooks = hooks;
     this.list = [];
+    this.webs = []; // decorative cobwebs left around spider packs
     this.spawnTimer = 1.5;
     this.packTimer = 20;
     this.critterTimer = 5;
@@ -229,6 +230,21 @@ export class EnemyManager {
       this._spawn(type, center.x, center.z, progress, rank);
       audio.sfx('lane_unlock', 0.45);
     }
+    if (/spider/i.test(type)) this._spawnWebs(center);
+  }
+
+  // spider packs leave their hunting ground draped in cobwebs for a while
+  _spawnWebs(center) {
+    const n = 6 + Math.floor(Math.random() * 5);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, r = Math.random() * 13;
+      const x = center.x + Math.cos(a) * r, z = center.z + Math.sin(a) * r;
+      const web = makeCobweb();
+      web.position.set(x, this.world.heightAt(x, z) + 0.07, z);
+      web.rotation.y = Math.random() * Math.PI * 2;
+      this.scene.add(web);
+      this.webs.push({ mesh: web, t: 120 });
+    }
   }
 
   // While a boss lives, her children keep arriving from ALL directions.
@@ -312,6 +328,14 @@ export class EnemyManager {
     }
 
     this._bossReinforcements(dt, targets);
+
+    // cobwebs slowly fade and vanish
+    for (let i = this.webs.length - 1; i >= 0; i--) {
+      const w = this.webs[i];
+      w.t -= dt;
+      if (w.t < 8) w.mesh.children[0].material.opacity = 0.55 * Math.max(0, w.t / 8);
+      if (w.t <= 0) { this.scene.remove(w.mesh); this.webs.splice(i, 1); }
+    }
 
     for (let i = this.list.length - 1; i >= 0; i--) {
       const e = this.list[i];

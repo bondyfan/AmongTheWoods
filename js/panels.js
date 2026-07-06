@@ -153,7 +153,7 @@ export class Panels {
       else status = `<button class="buy-btn" data-id="${track.id}">Train to ${nextTier} — ${this._costStr(cost)}</button>`;
 
       card.innerHTML = `
-        <div class="card-head"><span class="icon">${track.icon}</span>
+        <div class="card-head"><span class="icon">${itemIcon(track)}</span>
           <span class="name">${track.name}</span><span class="lv">${tier}/${track.max}</span></div>
         <div class="desc">${track.desc}</div>
         <div class="card-foot">${status}</div>`;
@@ -215,7 +215,7 @@ export class Panels {
       const slotIdx = p.spellSlots.indexOf(id);
       const div = document.createElement('button');
       div.className = 'inv-item' + (slotIdx >= 0 ? ' slotted' : '');
-      div.innerHTML = `${spell.icon} <b>${spell.name}</b> <span class="lv">${slotIdx >= 0 ? `key ${slotIdx + 1}` : 'not slotted'}</span>`;
+      div.innerHTML = `${itemIcon(spell)} <b>${spell.name}</b> <span class="lv">${slotIdx >= 0 ? `key ${slotIdx + 1}` : 'not slotted'}</span>`;
       div.title = spell.desc + ` (cooldown ${spell.cd}s)`;
       div.addEventListener('click', () => this.hooks.onToggleSpell(id));
       book.appendChild(div);
@@ -242,7 +242,7 @@ export class Panels {
         : `<button class="buy-btn" data-id="${def.id}" data-lane="${lane || ''}">` +
           `${info.level === 0 ? 'Build' : 'Upgrade to ' + (info.level + 1)} — ${this._costStr(info.cost)}</button>`;
       card.innerHTML = `
-        <div class="card-head"><span class="icon">${def.icon}</span>
+        <div class="card-head"><span class="icon">${itemIcon(def)}</span>
           <span class="name">${label}</span><span class="lv">${info.level}/${def.max}</span></div>
         <div class="desc">${def.desc}</div>
         <div class="card-foot">${status}</div>`;
@@ -258,17 +258,22 @@ export class Panels {
   _renderCamp(wrap) {
     const p = this.player;
     const camp = this.camp;
+    // the home building (and the era it carries) is only shown when you're
+    // actually standing at your home — you upgrade it in person, not remotely
+    const atHome = this.hooks.nearHome?.() ?? false;
 
-    // era banner
-    const era = document.createElement('div');
-    era.className = 'card owned';
-    era.style.gridColumn = '1 / -1';
-    era.innerHTML = `<div class="card-head"><span class="icon">🕰️</span>
-      <span class="name">Current era: ${camp.era()}</span></div>
-      <div class="desc">Upgrade your home to advance through the ages and unlock new gear.</div>`;
-    wrap.appendChild(era);
+    if (atHome) {
+      const era = document.createElement('div');
+      era.className = 'card owned';
+      era.style.gridColumn = '1 / -1';
+      era.innerHTML = `<div class="card-head"><span class="icon">${itemIcon({ id: 'home' })}</span>
+        <span class="name">Current era: ${camp.era()}</span></div>
+        <div class="desc">Upgrade your home to advance through the ages and unlock new gear.</div>`;
+      wrap.appendChild(era);
+    }
 
     for (const def of CAMP_BUILDINGS) {
+      if (def.id === 'home' && !atHome) continue;
       const info = camp.buildingInfo(def.id);
       const levelLocked = !info.maxed && p.level < info.reqLevel;
       const affordable = info.cost && this._affordable(info.cost);
@@ -280,7 +285,7 @@ export class Panels {
       else status = `<button class="camp-btn" data-id="${def.id}">` +
         `${info.level === 0 ? 'Build' : 'Upgrade to'} ${info.nextName} — ${this._costStr(info.cost)}</button>`;
       card.innerHTML = `
-        <div class="card-head"><span class="icon">${def.icon}</span>
+        <div class="card-head"><span class="icon">${itemIcon(def)}</span>
           <span class="name">${info.level > 0 ? info.name : (info.nextName ?? info.name)}</span>
           <span class="lv">${info.level}/${def.max}</span></div>
         <div class="desc">${info.desc}</div>
@@ -293,7 +298,7 @@ export class Panels {
       const chest = document.createElement('div');
       chest.className = 'card owned';
       chest.style.gridColumn = '1 / -1';
-      chest.innerHTML = `<div class="card-head"><span class="icon">📦</span>
+      chest.innerHTML = `<div class="card-head"><span class="icon">${itemIcon({ id: 'chest' })}</span>
         <span class="name">Chest storage</span>
         <span class="lv">🍖 ${fmtResource(camp.storage.meat)} · 🪵 ${fmtResource(camp.storage.wood)} · 🪨 ${fmtResource(camp.storage.stone)} · 🟫 ${fmtResource(camp.storage.hide)} · 🔩 ${fmtResource(camp.storage.iron)}</span></div>
         <div class="desc">Whatever is stored here survives your death.</div>
