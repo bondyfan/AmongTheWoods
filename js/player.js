@@ -8,6 +8,10 @@ import { WORLD, XP_LEVELS, MAX_LEVEL, itemById, spellById, MAX_SPELL_SLOTS } fro
 import { makeMan, makeAxe, makeBow } from './models.js';
 import { audio } from './audio.js';
 
+const MAX_CLIMB_SLOPE = 1.0; // steeper ground than this is a wall
+const GRAVITY = 34;
+const SAFE_FALL = 5.5;       // meters of free fall before damage kicks in
+
 export class Player {
   constructor(scene, hooks) {
     this.hooks = hooks; // { popup, onLevelUp, onDeath, onHurt, onEquipChange }
@@ -255,6 +259,35 @@ export class Player {
     return (this.xp - cur) / (next - cur);
   }
 
+  // Vertical motion: glide smoothly over hills; walking off a cliff means
+  // free fall — and a long enough drop costs health on landing.
+  _updateVertical(dt, world) {
+    const ground = world.heightAt(this.pos.x, this.pos.z);
+    if (this.y == null) { this.y = ground; this.vy = 0; this.fallFrom = null; }
+    if (this.y > ground + 0.3) {
+      if (this.fallFrom == null) { this.fallFrom = this.y; this.vy = 0; }
+      this.vy -= GRAVITY * dt;
+      this.y = Math.max(ground, this.y + this.vy * dt);
+      if (this.y <= ground + 1e-6) {
+        const fall = this.fallFrom - ground;
+        this.fallFrom = null; this.vy = 0;
+        if (fall > SAFE_FALL) {
+          const dmg = Math.round((fall - SAFE_FALL) * 6);
+          this.hooks.popup?.(this.mesh.position.clone().setY(this.mesh.position.y + 2), `-${dmg} 🩸 fall`, '#ff6a5a');
+          audio.sfx('hit', 0.5, 60);
+          this.takeDamage(dmg);
+        } else if (fall > 1.2) audio.sfx('base_hit', 0.25, 200);
+      }
+    } else {
+      this.fallFrom = null; this.vy = 0;
+      const gap = ground - this.y;
+      // big gap = teleport/respawn → snap; otherwise glide up/down smoothly
+      if (Math.abs(gap) > 3) this.y = ground;
+      else this.y += gap * Math.min(1, dt * 18);
+    }
+    return this.y;
+  }
+
   takeDamage(dmg) {
     if (this.dead) return;
     this.hp -= dmg;
@@ -281,7 +314,7 @@ export class Player {
     // stunned: frozen in place, can't move or attack
     if (this.stunT > 0) {
       this.stunT -= dt;
-      this.mesh.position.set(this.pos.x, world.heightAt(this.pos.x, this.pos.z), this.pos.z);
+      this.mesh.position.set(this.pos.x, this._updateVertical(dt, world), this.pos.z);
       this.attackCd -= dt;
       this._updateSlashes(dt);
       return;
@@ -325,8 +358,19 @@ export class Player {
         // paddling is a touch slower than running
         const onWater = ctx.boat && world.isWater?.(this.pos.x, this.pos.z);
         const speed = this.speed * (onWater ? 0.85 : 1);
-        this.pos.x += mx * speed * dt;
-        this.pos.z += mz * speed * dt;
+        // cliffs are walls: block any step that climbs too steeply (walking
+        // DOWN or falling off is always allowed); sliding along one is fine
+        const h0 = world.heightAt(this.pos.x, this.pos.z);
+        const canStep = (dx, dz) => {
+          const l = Math.hypot(dx, dz);
+          if (l < 1e-6) return false;
+          const ahead = world.heightAt(this.pos.x + (dx / l) * 0.9, this.pos.z + (dz / l) * 0.9);
+          return (ahead - h0) / 0.9 <= MAX_CLIMB_SLOPE;
+        };
+        const dx = mx * speed * dt, dz = mz * speed * dt;
+        if (canStep(dx, dz)) { this.pos.x += dx; this.pos.z += dz; }
+        else if (canStep(dx, 0)) this.pos.x += dx;
+        else if (canStep(0, dz)) this.pos.z += dz;
         world.collide(this.pos, 0.45, { boat: ctx.boat });
         this._applyBounds(ctx);
         this.walkT += dt * speed;
@@ -337,7 +381,7 @@ export class Player {
     this.facing.set(aimPoint.x - this.pos.x, 0, aimPoint.z - this.pos.z);
     if (this.facing.lengthSq() < 0.01) this.facing.set(0, 0, -1);
     this.facing.normalize();
-    this.mesh.position.set(this.pos.x, world.heightAt(this.pos.x, this.pos.z), this.pos.z);
+    this.mesh.position.set(this.pos.x, this._updateVertical(dt, world), this.pos.z);
     // local +z toward the aim point, so arm swings (toward +z) punch forward
     this.mesh.rotation.y = Math.atan2(this.facing.x, this.facing.z);
 

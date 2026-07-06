@@ -54,6 +54,7 @@ const angDiff = (a, b) => {
 
 const LAKE_REGION = 220; // deterministic lakes are generated per region cell
 const BERRY_REGROW = 600; // seconds until a harvested bush bears fruit again
+const TERRACE_STEP = 5;   // mountain plateau height — cliffs between them
 
 export class World {
   constructor(scene, seed = 1337) {
@@ -154,9 +155,16 @@ export class World {
   _mountainK(x, z, r = radiusOf(x, z)) {
     const m = valueNoise(x, z, 420, this.seed + 57);
     if (m <= 0.62) return 0;
-    if ((this.rings || []).some(w => Math.abs(r - w.r) < 35)) return 0;
+    // fade massifs out SMOOTHLY near ring barriers (a hard cutoff would
+    // leave impassable vertical walls circling every ring)
+    let fade = 1;
+    for (const w of this.rings || []) {
+      const d = Math.abs(r - w.r);
+      if (d < 55) fade = Math.min(fade, Math.max(0, (d - 25) / 30));
+    }
+    if (fade <= 0) return 0;
     const k = (m - 0.62) / 0.38;
-    return k * k;
+    return k * k * fade;
   }
 
   // Terrain height — detail bumps + long rolling hills + occasional mountain
@@ -168,7 +176,16 @@ export class World {
     const r = radiusOf(x, z);
     h += (valueNoise(x, z, 160, this.seed + 31) - 0.5) * 5;
     const mk = this._mountainK(x, z, r);
-    if (mk > 0) h += mk * (13 + valueNoise(x, z, 55, this.seed + 91) * 9);
+    if (mk > 0) {
+      let m = mk * (20 + valueNoise(x, z, 55, this.seed + 91) * 12);
+      // terraces: flat plateaus separated by short CLIFF walls — too steep to
+      // walk up (the player's slope gate blocks them) but fine to drop off
+      const t = m / TERRACE_STEP, fl = Math.floor(t), f = t - fl;
+      const RAMP = 0.25; // last quarter of each band is the cliff face
+      const s = f < 1 - RAMP ? 0 : (f - (1 - RAMP)) / RAMP;
+      m = (fl + s * s * (3 - 2 * s)) * TERRACE_STEP;
+      h += m;
+    }
     if (r < 28) h *= Math.max(0.1, (r - 10) / 18);
     return h;
   }
@@ -327,20 +344,30 @@ export class World {
     this._addStatic(mesh);
   }
 
-  // vertex-colored terrain tile for one chunk
+  // vertex-colored terrain tile for one chunk (finer mesh where cliffs are)
   _groundTile(cxw, czw) {
-    const geo = new THREE.PlaneGeometry(CHUNK, CHUNK, 10, 10);
+    const segs = this._mountainK(cxw + CHUNK / 2, czw + CHUNK / 2) > 0 ? 20 : 10;
+    const geo = new THREE.PlaneGeometry(CHUNK, CHUNK, segs, segs);
     geo.rotateX(-Math.PI / 2);
     geo.translate(cxw + CHUNK / 2, 0, czw + CHUNK / 2);
     const pos = geo.attributes.position;
     const colors = new Float32Array(pos.count * 3);
     const col = new THREE.Color();
     const void_ = new THREE.Color(0x11170e);
+    const rock = new THREE.Color(0x7a766b);
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i), z = pos.getZ(i);
-      pos.setY(i, this.heightAt(x, z));
+      const h = this.heightAt(x, z);
+      pos.setY(i, h);
       if (radiusOf(x, z) > WORLD.radius + 6) col.copy(void_);
-      else this._groundColor(x, z, col);
+      else {
+        this._groundColor(x, z, col);
+        // steep ground reads as bare rock, so cliff faces stand out
+        const slope = Math.max(
+          Math.abs(this.heightAt(x + 1.4, z) - h),
+          Math.abs(this.heightAt(x, z + 1.4) - h)) / 1.4;
+        if (slope > 0.55) col.lerp(rock, Math.min(1, (slope - 0.55) / 0.7));
+      }
       colors[i * 3] = col.r; colors[i * 3 + 1] = col.g; colors[i * 3 + 2] = col.b;
     }
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
@@ -424,17 +451,25 @@ export class World {
       return true;
     };
 
-    // -- trees -- (low-frequency noise carves occasional DENSE forest patches)
+    // -- trees -- (low-frequency noise carves occasional DENSE forest patches:
+    // full-strength patches pack ~4x the trees, wall-to-wall woods)
     let count = Math.round((8 + rng() * 8) * biome.treeDensity);
+    let denseWood = false;
     if (biome.denseForests) {
       const f = valueNoise(cxw + CHUNK / 2, czw + CHUNK / 2, 240, this.seed + 133);
-      if (f > 0.58) count = Math.min(30, Math.round(count * (1 + (f - 0.58) * 8)));
+      if (f > 0.54) {
+        const k = Math.min(1, (f - 0.54) / 0.16);
+        count = Math.min(64, Math.round(count * (1 + k * k * 4.5)));
+        denseWood = k > 0.35; // thick woods grow TALL trees, not saplings
+      }
     }
     for (let i = 0; i < count; i++) {
       const x = cxw + rng() * CHUNK;
       const z = czw + rng() * CHUNK;
       if (!inBounds(x, z)) continue;
-      const size = rng() < 0.45 ? 0 : rng() < 0.75 ? 1 : 2;
+      const size = denseWood
+        ? (rng() < 0.12 ? 0 : rng() < 0.5 ? 1 : 2)
+        : (rng() < 0.45 ? 0 : rng() < 0.75 ? 1 : 2);
       const { mesh, radius } = makeTree(size, biome, rng);
       this._place(mesh, x, z);
       mesh.rotation.y = rng() * Math.PI * 2;
