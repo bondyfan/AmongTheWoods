@@ -126,6 +126,7 @@ const player = new Player(scene, {
   },
   onEquipChange: () => companions.sync(player),
   onChop: (tree, power) => mp?.sendChop(tree, power),
+  onBerry: (key) => mp?.sendBerry(key),
 });
 panels.player = player;
 

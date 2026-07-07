@@ -98,6 +98,12 @@ export class Minimap {
     return { cx, cz };
   }
 
+  _isDiscovered(x, z) {
+    const { cx, cz } = this._cellAt(x, z);
+    if (cx < 0 || cx >= this.cols || cz < 0 || cz >= this.rows) return false;
+    return !!this.discovered[cz * this.cols + cx];
+  }
+
   reveal(x, z) {
     const r = Math.ceil(REVEAL_RADIUS / CELL);
     const { cx, cz } = this._cellAt(x, z);
@@ -166,6 +172,8 @@ export class Minimap {
       for (const e of enemyMgr.alive()) {
         const p = toC(e.pos.x, e.pos.z);
         if (p.x < 0 || p.x > W || p.y < 0 || p.y > H) continue;
+        // the fog of war hides creatures in unexplored land
+        if (!this._isDiscovered(e.pos.x, e.pos.z)) continue;
         if (e.bossRank > 0) {
           ctx.font = '9px sans-serif';
           ctx.fillText('💀', p.x, p.y + 3);

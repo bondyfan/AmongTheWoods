@@ -389,11 +389,14 @@ export class EnemyManager {
 
       if (!e.cfg.flying) this.world.pushOutOfSafeZones?.(e.pos, e.hitR ?? 0.5);
 
-      // chase the nearest living target
+      // chase the nearest living target — but creatures never see across a
+      // biome border: a player past the ring is invisible to them
+      const eBiome = biomeIndexAt(e.pos.x, e.pos.z);
       let target = null, dist = Infinity;
       for (const t of targets) {
         if (t.dead) continue;
         if (this.world.isTargetSafe?.(t.pos)) continue;
+        if (biomeIndexAt(t.pos.x, t.pos.z) !== eBiome) continue;
         const d = Math.hypot(t.pos.x - e.pos.x, t.pos.z - e.pos.z);
         if (d < dist) { dist = d; target = t; }
       }
@@ -443,8 +446,8 @@ export class EnemyManager {
       // aggro + leash: a chase that never reaches its target is abandoned
       // after LEASH_TIME and the enemy jogs back to where it spawned
       if (e.returning) {
-        if (dist < e.cfg.aggro * 0.5) { e.returning = false; e.aggroed = true; e.chaseT = 0; }
-      } else if (dist < e.cfg.aggro) e.aggroed = true;
+        if (target && dist < e.cfg.aggro * 0.5) { e.returning = false; e.aggroed = true; e.chaseT = 0; }
+      } else if (target && dist < e.cfg.aggro) e.aggroed = true;
       if (e.aggroed && target && !e.returning) {
         if (dist > e.range * 1.5) e.chaseT += dt; else e.chaseT = 0;
         if (e.chaseT > (e.bossRank ? LEASH_TIME_BOSS : LEASH_TIME)) {

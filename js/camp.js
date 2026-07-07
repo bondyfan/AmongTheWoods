@@ -33,8 +33,10 @@ export class Camp {
     this.smeltT = 20;
     this.towerCd = 0;
     this.healPopupT = 0;
-    // healing + no-attack zone around home — activates once the tent is built
-    this.safeZone = { x: SPOTS.home.x, z: SPOTS.home.z, r: HOME_HEAL_RADIUS };
+    // the whole base (cave + camp spots) is a no-attack zone from the very
+    // start: creatures neither see nor enter it. Healing still needs the tent.
+    this.safeZone = { x: 0, z: 6, r: 20 };
+    this.world.safeZones.push(this.safeZone);
   }
 
   has(need) {
@@ -71,7 +73,6 @@ export class Camp {
     const info = this.buildingInfo(id);
     if (info.maxed) return false;
     this.levels[id]++;
-    if (id === 'home' && this.levels.home === 1) this.world.safeZones.push(this.safeZone);
     this._placeMesh(id);
     audio.sfx('tower_build', 0.55);
     this.hooks.toast?.(`🏕️ Built: ${this.buildingInfo(id).name}!`, 'level');

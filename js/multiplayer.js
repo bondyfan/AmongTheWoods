@@ -868,6 +868,10 @@ export class Multiplayer {
     }
   }
 
+  sendBerry(key) {
+    if (this.active && this.mode === 'coop') WoodsNet.sendEvent({ type: 'berry', k: key });
+  }
+
   // The host computed this hit against my position as it knew it — which is
   // 100–300 ms stale by the time the event arrives. Checking the attacker
   // against where I am NOW rejects nearly every hit on a moving player, so
@@ -944,6 +948,7 @@ export class Multiplayer {
         if (trees.length) ctx.world.chop(trees[0], ev.power, { x: ev.x + 1, z: ev.z });
         break;
       }
+      case 'berry': ctx.world.applyRemoteBerry?.(ev.k); break; // partner emptied a bush
       case 'win': ctx.onCoopWin?.(); break;
 
       // ---------- MOBA ----------

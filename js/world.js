@@ -372,6 +372,14 @@ export class World {
     }
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geo.computeVertexNormals();
+    // soften slope shading: valley walls facing away from the sun rendered
+    // almost black — squashing normals toward 'up' keeps terrain readable
+    const nrm = geo.attributes.normal;
+    for (let i = 0; i < nrm.count; i++) {
+      const nx = nrm.getX(i) * 0.4, ny = nrm.getY(i), nz = nrm.getZ(i) * 0.4;
+      const l = Math.hypot(nx, ny, nz) || 1;
+      nrm.setXYZ(i, nx / l, ny / l, nz / l);
+    }
     const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
     mesh.receiveShadow = true;
     return mesh;
@@ -663,6 +671,20 @@ export class World {
     bush.shake = 0.3;
     audio.sfx('base_hit', 0.3);
     return true;
+  }
+
+  // co-op: the partner harvested this bush — empty it here too (bushes are
+  // seed-deterministic, so the key matches on both clients)
+  applyRemoteBerry(key) {
+    this._berryEaten.set(key, this.time);
+    for (const chunk of this.chunks.values()) {
+      for (const b of chunk.bushes ?? []) {
+        if (b.key === key && b.berries) {
+          b.berries = false;
+          b.mesh.userData.berries.forEach(m => m.visible = false);
+        }
+      }
+    }
   }
 
   // Push a circle (pos, r) out of solids. opts.boat lets the circle float

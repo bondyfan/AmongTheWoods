@@ -586,7 +586,10 @@ export class Player {
     // berry bushes: any melee swing knocks ripe berries to the ground
     for (const bush of (world.bushesNear?.(this.pos, w.range + 0.6) ?? [])) {
       if (!bush.berries || !this._inArc(bush.x, bush.z, w.range, bush.radius)) continue;
-      if (world.pickBerries(bush)) pickups.spawn('berry', 1, new THREE.Vector3(bush.x, 0, bush.z), 0.7);
+      if (world.pickBerries(bush)) {
+        pickups.spawn('berry', 1, new THREE.Vector3(bush.x, 0, bush.z), 0.7);
+        this.hooks.onBerry?.(bush.key); // co-op: the partner's bush empties too
+      }
     }
 
     // chop the nearest tree in the arc
