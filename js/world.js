@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import { WORLD, BIOMES, biomeAt, radiusOf } from './config.js';
 import { makeTree, makeRock, makeGrassTuft, makeFlower, makeMushroom, makeBush,
          makeLog, makeBoulder, makeBridge, makeCampfire, makeStalagmite,
-         makeBerryBush } from './models.js';
+         makeBerryBush, makeShrine, makeMonolith, makeCrypt } from './models.js';
 import { audio } from './audio.js';
 
 const CHUNK = 40;
@@ -76,8 +76,11 @@ export class World {
     this._woodLogDrops = new Set();
     this.time = 0;               // world clock (drives berry regrowth)
     this._berryEaten = new Map(); // bush key -> world time it was harvested
+    this.pois = [];              // landmarks: shrines / monoliths / crypts
+    this.onPoiSpawned = null;    // main hooks this to post crypt guards
     this._genRings();
     this._genLakes();
+    this._genPois();
     this._buildGround();
     this._buildRingRivers();
     this._buildCave();
@@ -114,6 +117,7 @@ export class World {
     this.time = 0;
     this._genRings();
     this._genLakes();
+    this._genPois();
     this._buildGround();
     this._buildRingRivers();
     this._buildCave();
@@ -209,6 +213,41 @@ export class World {
 
   // ---- lakes are generated lazily per region cell (the world is huge) ----
   _genLakes() {} // kept for subclass overrides (MOBA disables lakes)
+
+  // ---- landmarks: a handful of seeded POIs per biome ring. Shrines bless,
+  // monoliths hoard resources, crypts hide treasure behind a guard pack. ----
+  _genPois() {
+    const rng = mulberry32(this.seed ^ 0x9013);
+    this.pois = [];
+    const types = ['shrine', 'monolith', 'crypt'];
+    let id = 1;
+    for (let ring = 0; ring < BIOMES.length; ring++) {
+      const rMin = ring === 0 ? 130 : BIOMES[ring - 1].rMax + 70;
+      const rMax = Math.min(BIOMES[ring].rMax - 70, WORLD.radius - 120);
+      if (rMax <= rMin) continue;
+      const count = ring === 0 ? 2 : 3;
+      for (let i = 0; i < count; i++) {
+        let placed = null;
+        for (let tries = 0; tries < 10 && !placed; tries++) {
+          const a = rng() * Math.PI * 2;
+          const r = rMin + rng() * (rMax - rMin);
+          const x = Math.sin(a) * r, z = Math.cos(a) * r;
+          if (this.rings.some(w => Math.abs(r - w.r) < 25)) continue;
+          if (this.lakesNear(x, z).some(l => Math.hypot(x - l.x, z - l.z) < l.r + 8)) continue;
+          placed = { x, z };
+        }
+        if (!placed) continue;
+        this.pois.push({
+          id: id++, type: types[Math.floor(rng() * types.length)],
+          x: placed.x, z: placed.z, ring, claimed: false, guarded: false, mesh: null,
+        });
+      }
+    }
+  }
+
+  poisNear(x, z, radius) {
+    return this.pois.filter(p => Math.hypot(p.x - x, p.z - z) < radius);
+  }
 
   _regionLakes(rx, rz) {
     const key = rx + ',' + rz;
@@ -584,6 +623,21 @@ export class World {
         bushes.push({ id: this.nextTreeId++, key: bkey, mesh, x, z,
                       radius: 0.75, alive: true, berries: ripe, kind: 'bush' });
       }
+    }
+
+    // -- landmarks whose spot falls inside this chunk --
+    for (const poi of this.pois) {
+      if (poi.x < cxw || poi.x >= cxw + CHUNK || poi.z < czw || poi.z >= czw + CHUNK) continue;
+      const mesh = poi.type === 'shrine' ? makeShrine()
+        : poi.type === 'monolith' ? makeMonolith() : makeCrypt();
+      mesh.position.set(poi.x, this.heightAt(poi.x, poi.z), poi.z);
+      group.add(mesh);
+      poi.mesh = mesh;
+      if (!poi.obstacleAdded) {
+        poi.obstacleAdded = true;
+        this.obstacles.push({ x: poi.x, z: poi.z, r: poi.type === 'crypt' ? 2.2 : 1.6 });
+      }
+      this.onPoiSpawned?.(poi); // main posts crypt guards (once per session)
     }
 
     this.scene.add(group);

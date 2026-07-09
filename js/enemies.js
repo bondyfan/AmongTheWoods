@@ -2,7 +2,8 @@
 // AI (melee, ranged spitters, flyers), damage ----
 
 import * as THREE from 'three';
-import { WORLD, ENEMY_TYPES, BOSS_RANKS, BIOMES, biomeAt, biomeIndexAt, progressAt, meatForHp } from './config.js';
+import { WORLD, ENEMY_TYPES, BOSS_RANKS, BIOMES, biomeAt, biomeIndexAt, progressAt,
+         meatForHp, bossNameFor } from './config.js';
 import { makeEnemyMesh, makeCobweb } from './models.js';
 import { audio } from './audio.js';
 
@@ -55,6 +56,9 @@ class Enemy {
     this.spellTimer = base.ranged ? base.spellCd * (0.5 + Math.random() * 0.5) : 0;
     this.pauseT = 0;
     this.stunT = 0;
+    this.windupT = 0;   // heavy attackers telegraph before landing the blow
+    this.flashT = 0;    // hit-feedback scale pop
+    this.enraged = false;
     this.aggroed = bossRank > 0;
     this.groupId = 0;     // passive herd membership
     this.spooked = false; // passive critters flee only after the herd is hurt
@@ -79,6 +83,7 @@ export class EnemyManager {
     this.hooks = hooks;
     this.list = [];
     this.webs = []; // decorative cobwebs left around spider packs
+    this.slams = []; // telegraphed boss ground-slam rings
     this.zones = new Map(); // "zx,zz" -> { pool, everPopulated, cleared, nextRepopAt }
     this.zoneTimer = 1;
     this.discovered = new Set();
@@ -96,6 +101,7 @@ export class EnemyManager {
   _spawn(type, x, z, difficulty, bossRank = 0, flags = null) {
     const e = new Enemy(type, x, z, difficulty, bossRank);
     if (flags) Object.assign(e, flags); // ambush/noReinforce BEFORE the hooks fire
+    if (bossRank > 0 && !e.bossName) e.bossName = bossNameFor(type, e.id);
     this.scene.add(e.mesh);
     this.list.push(e);
     if (!this.discovered.has(type)) {
@@ -318,12 +324,13 @@ export class EnemyManager {
     if (!enemy.dying) enemy.stunT = Math.max(enemy.stunT, sec);
   }
 
-  damage(enemy, dmg, knockDir, srcId = 'local') {
+  damage(enemy, dmg, knockDir, srcId = 'local', opts = null) {
     if (enemy.dying) return;
     enemy.hp -= dmg;
     enemy.aggroed = true;
     enemy.returning = false; // getting hit re-engages a leashed enemy
     enemy.chaseT = 0;
+    enemy.flashT = 0.12;     // brief white-hot scale pop so hits READ
     if (enemy.cfg.passive && !enemy.spooked) {
       // one hurt rabbit spooks the whole herd
       enemy.spooked = true;
@@ -333,7 +340,7 @@ export class EnemyManager {
     }
     enemy.lastHitBy = srcId; // kill credit (co-op XP attribution)
     this.hooks.popup(enemy.mesh.position.clone().setY(enemy.mesh.position.y + 1.4 * enemy.sizeMult + 0.4),
-      Math.round(dmg).toString(), '#ffffff');
+      Math.round(dmg).toString(), opts?.crit ? '#ffd23a' : '#ffffff', opts?.crit ? 'big' : '');
     if (knockDir && enemy.bossRank === 0) {
       enemy.pos.x += knockDir.x * 0.45;
       enemy.pos.z += knockDir.z * 0.45;
@@ -370,6 +377,26 @@ export class EnemyManager {
       w.t -= dt;
       if (w.t < 8) w.mesh.children[0].material.opacity = 0.55 * Math.max(0, w.t / 8);
       if (w.t <= 0) { this.scene.remove(w.mesh); this.webs.splice(i, 1); }
+    }
+
+    // boss ground slams: the red ring is the warning — get OUT of it
+    for (let i = this.slams.length - 1; i >= 0; i--) {
+      const s = this.slams[i];
+      s.t -= dt;
+      s.mesh.material.opacity = 0.18 + 0.42 * (1 - Math.max(0, s.t) / 0.75);
+      if (s.t <= 0) {
+        for (const t of targets) {
+          if (t.dead) continue;
+          if (Math.hypot(t.pos.x - s.x, t.pos.z - s.z) < s.r + 0.4) {
+            t.takeDamage(s.dmg, { pos: { x: s.x, z: s.z }, range: s.r + 0.4 });
+          }
+        }
+        audio.sfx('special', 0.5, 100);
+        this.scene.remove(s.mesh);
+        s.mesh.geometry.dispose();
+        s.mesh.material.dispose();
+        this.slams.splice(i, 1);
+      }
     }
 
     for (let i = this.list.length - 1; i >= 0; i--) {
@@ -427,6 +454,34 @@ export class EnemyManager {
         continue;
       }
 
+      // ---- boss abilities ----
+      if (e.bossRank > 0) {
+        // 2+ skull mothers slam the ground: telegraphed AoE around them
+        if (e.bossRank >= 2) {
+          e.slamCd = (e.slamCd ?? 5) - dt;
+          if (e.slamCd <= 0 && target && dist < 5) {
+            e.slamCd = 8;
+            e.pauseT = Math.max(e.pauseT, 0.8); // she rears up for the blow
+            const mesh = new THREE.Mesh(
+              new THREE.RingGeometry(0.5, 4.5, 28),
+              new THREE.MeshBasicMaterial({ color: 0xff5030, transparent: true, opacity: 0.18, side: THREE.DoubleSide }));
+            mesh.rotation.x = -Math.PI / 2;
+            mesh.position.set(e.pos.x, this.world.heightAt(e.pos.x, e.pos.z) + 0.12, e.pos.z);
+            this.scene.add(mesh);
+            this.slams.push({ t: 0.75, x: e.pos.x, z: e.pos.z, r: 4.5,
+                              dmg: Math.round(e.meleeDmg * 1.3), mesh });
+            audio.creature(e.type, 'attack', 0.5, 80);
+          }
+        }
+        // below 30% health the mother fights like a cornered animal
+        if (!e.enraged && e.hp < e.maxHp * 0.3) {
+          e.enraged = true;
+          e.speed *= 1.25; e.meleeDmg *= 1.3; e.dmg *= 1.3;
+          this.hooks.popup(e.mesh.position.clone().setY(e.mesh.position.y + 2), 'ENRAGED!', '#ff5030', 'big');
+          audio.creature(e.type, 'attack', 0.55, 60);
+        }
+      }
+
       if (e.cfg.passive && e.spooked && target && dist < 14) {
         const away = new THREE.Vector3().subVectors(e.pos, target.pos);
         const len = Math.hypot(away.x, away.z) || 1;
@@ -463,12 +518,30 @@ export class EnemyManager {
       if (e.pauseT > 0) e.pauseT -= dt;
 
       let vx = 0, vz = 0;
-      if (e.pauseT > 0) {
-        // stopped to cast — no movement this frame
+      if (e.pauseT > 0 || e.windupT > 0) {
+        // stopped to cast / winding up a haymaker — no movement this frame
       } else if (e.aggroed && target) {
-        if (dist > e.range * 0.75) {
+        const beh = e.cfg.behavior;
+        if (beh === 'kite' && e.cfg.ranged) {
+          // skirmishers hold their preferred distance and back off when rushed
+          const sr = e.cfg.shootRange;
+          if (dist < sr * 0.55) {
+            vx = -(toPlayer.x / dist) * e.speed * 0.9;
+            vz = -(toPlayer.z / dist) * e.speed * 0.9;
+          } else if (dist > sr * 0.9) {
+            vx = (toPlayer.x / dist) * e.speed;
+            vz = (toPlayer.z / dist) * e.speed;
+          }
+        } else if (dist > e.range * 0.75) {
           vx = (toPlayer.x / dist) * e.speed;
           vz = (toPlayer.z / dist) * e.speed;
+          // pack hunters fan out and close in from the flanks
+          if (beh === 'pack' && dist > 3) {
+            const a = (e.id % 2 ? 1 : -1) * Math.min(0.85, (dist - 2) / 15);
+            const cos = Math.cos(a), sin = Math.sin(a);
+            const nx = vx * cos - vz * sin, nz = vx * sin + vz * cos;
+            vx = nx; vz = nz;
+          }
         }
       } else if (e.returning) {
         const hx = e.spawnPos.x - e.pos.x, hz = e.spawnPos.z - e.pos.z;
@@ -519,11 +592,28 @@ export class EnemyManager {
       // The attacker is passed along so a lagging co-op guest can reject
       // phantom hits computed against its stale proxy position.
       e.attackCd -= dt;
-      if (!e.cfg.passive && target && e.attackCd <= 0 && dist < e.range) {
+      if (e.windupT > 0) {
+        // heavy hitters (bears, yetis) telegraph a slow haymaker — step out!
+        e.windupT -= dt;
+        if (e.windupT <= 0) {
+          e.lungeT = 0.25;
+          if (target && dist < e.range * 1.35) {
+            target.takeDamage(e.meleeDmg * 1.25,
+              { id: e.id, pos: e.pos, range: e.range * 1.35, melee: true, poison: e.cfg.poison });
+          }
+          audio.creature(e.type, 'attack', 0.4, 110);
+        }
+      } else if (!e.cfg.passive && target && e.attackCd <= 0 && dist < e.range) {
         e.attackCd = e.cfg.attackCd;
-        e.lungeT = 0.25;
-        target.takeDamage(e.meleeDmg, { id: e.id, pos: e.pos, range: e.range, melee: true });
-        audio.creature(e.type, 'attack', 0.3, 110);
+        if (e.cfg.behavior === 'heavy') {
+          e.windupT = 0.55;
+          e.flashT = 0.55; // visible swell while it winds up
+        } else {
+          e.lungeT = 0.25;
+          target.takeDamage(e.meleeDmg,
+            { id: e.id, pos: e.pos, range: e.range, melee: true, poison: e.cfg.poison });
+          audio.creature(e.type, 'attack', 0.3, 110);
+        }
       }
 
       // presentation
@@ -546,6 +636,12 @@ export class EnemyManager {
         seg.position.x = Math.sin(e.walkT * 2.4 + si * 1.1) * 0.13;
       });
 
+      // hit-flash / windup swell / enraged bulk — all read through scale
+      if (e.flashT > 0) e.flashT -= dt;
+      const pulse = (e.flashT > 0 ? 1 + 0.14 * Math.min(1, e.flashT / 0.12) : 1)
+        * (e.enraged ? 1.08 : 1);
+      e.mesh.scale.setScalar(e.sizeMult * pulse);
+
       const groundY = this.world.heightAt(e.pos.x, e.pos.z)
         + e.flyY + (e.cfg.flying ? Math.sin(e.walkT * 1.5) * 0.25 : 0);
       if (e.lungeT > 0) {
@@ -567,6 +663,7 @@ export class EnemyManager {
       id: e.id, t: e.type, b: e.bossRank,
       x: +e.pos.x.toFixed(1), z: +e.pos.z.toFixed(1),
       hp: Math.round(e.hp), m: Math.round(e.maxHp),
+      ...(e.bossRank > 0 && e.bossName ? { n: e.bossName } : {}),
     }));
   }
 }

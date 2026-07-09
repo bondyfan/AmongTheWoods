@@ -83,7 +83,14 @@ export class Minimap {
     // the default close-up; +/- steps out 3 further (per user request).
     this.viewSpans = [280, 480, 820, 1400];
     this.zoom = 0;
-    this.deathAt = null; // last place the player died (⚰️ marker)
+    this.deathAt = null;   // last place the player died (⚰️ marker)
+    this.treasureAt = null; // active treasure-map dig site (✖)
+    this.pings = [];       // co-op pings: { x, z, t }
+  }
+
+  addPing(x, z) {
+    this.pings.push({ x, z, t: 8 });
+    this.redrawT = 0;
   }
 
   zoomBy(delta) {
@@ -120,6 +127,7 @@ export class Minimap {
   update(dt, player, enemyMgr, partner = null) {
     this.reveal(player.pos.x, player.pos.z);
     if (partner?.mesh?.visible) this.reveal(partner.pos.x, partner.pos.z);
+    this.pings = this.pings.filter(p => (p.t -= dt) > 0);
     this.redrawT -= dt;
     if (this.redrawT <= 0) {
       this.redrawT = 0.25;
@@ -175,6 +183,16 @@ export class Minimap {
         // the fog of war hides creatures in unexplored land
         if (!this._isDiscovered(e.pos.x, e.pos.z)) continue;
         if (e.bossRank > 0) {
+          // bosses PULSE so they read at a glance
+          const pulse = 3 + Math.sin(performance.now() / 220) * 1.6;
+          ctx.save();
+          ctx.shadowColor = '#ff4030';
+          ctx.shadowBlur = 8;
+          ctx.fillStyle = 'rgba(255, 60, 40, 0.85)';
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, pulse, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
           ctx.font = '9px sans-serif';
           ctx.fillText('💀', p.x, p.y + 3);
         } else {
@@ -185,6 +203,41 @@ export class Minimap {
           ctx.fill();
         }
       }
+    }
+
+    // landmarks — only once their cell has been explored
+    for (const poi of this.world.pois ?? []) {
+      if (!this._isDiscovered(poi.x, poi.z)) continue;
+      const p = toC(poi.x, poi.z);
+      if (p.x < 0 || p.x > W || p.y < 0 || p.y > H) continue;
+      ctx.textAlign = 'center';
+      ctx.font = '10px sans-serif';
+      ctx.globalAlpha = poi.claimed ? 0.35 : 1;
+      ctx.fillStyle = poi.type === 'shrine' ? '#7fd1ff' : poi.type === 'crypt' ? '#f0ead8' : '#c9b8ff';
+      ctx.fillText(poi.type === 'shrine' ? '✦' : poi.type === 'crypt' ? '☗' : '▲', p.x, p.y + 3);
+      ctx.globalAlpha = 1;
+    }
+
+    // active treasure map: X marks the spot (it's a map — always shown)
+    if (this.treasureAt) {
+      const p = toC(this.treasureAt.x, this.treasureAt.z);
+      if (p.x > 0 && p.x < W && p.y > 0 && p.y < H) {
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.fillStyle = '#ff5030';
+        ctx.fillText('✖', p.x, p.y + 4);
+      }
+    }
+
+    // co-op pings: fading orange rings
+    for (const ping of this.pings) {
+      const p = toC(ping.x, ping.z);
+      if (p.x < 0 || p.x > W || p.y < 0 || p.y > H) continue;
+      ctx.strokeStyle = `rgba(255, 165, 40, ${Math.min(1, ping.t / 2)})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 4 + Math.sin(performance.now() / 150) * 1.5, 0, Math.PI * 2);
+      ctx.stroke();
     }
 
     // last death spot (also where your dropped loot lies)
@@ -234,6 +287,22 @@ export class Minimap {
     ctx.textAlign = 'center';
     ctx.font = '13px sans-serif';
     ctx.fillText('🏠', W / 2, H / 2 + 4);
+    // discovered landmarks + the active treasure map
+    ctx.font = '11px sans-serif';
+    for (const poi of this.world.pois ?? []) {
+      if (!this._isDiscovered(poi.x, poi.z)) continue;
+      ctx.globalAlpha = poi.claimed ? 0.35 : 1;
+      ctx.fillStyle = poi.type === 'shrine' ? '#7fd1ff' : poi.type === 'crypt' ? '#f0ead8' : '#c9b8ff';
+      ctx.fillText(poi.type === 'shrine' ? '✦' : poi.type === 'crypt' ? '☗' : '▲',
+        (poi.x + WORLD.radius) * scale, (poi.z + WORLD.radius) * scale + 4);
+      ctx.globalAlpha = 1;
+    }
+    if (this.treasureAt) {
+      ctx.font = 'bold 13px sans-serif';
+      ctx.fillStyle = '#ff5030';
+      ctx.fillText('✖', (this.treasureAt.x + WORLD.radius) * scale, (this.treasureAt.z + WORLD.radius) * scale + 5);
+      ctx.font = '11px sans-serif';
+    }
     if (this.deathAt) {
       const dx = (this.deathAt.x + WORLD.radius) * scale;
       const dy = (this.deathAt.z + WORLD.radius) * scale;

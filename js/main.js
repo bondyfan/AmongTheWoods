@@ -3,7 +3,8 @@
 import * as THREE from 'three';
 import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOBA,
          RESOURCES, RES_ICONS, HIDE_BEARING, VERDANT_HIDE_DROP, hideForHp, radiusOf, costFor,
-         biomeIndexAt, progressAt, fmtResource, roundResource, itemById, spellById } from './config.js';
+         biomeIndexAt, progressAt, fmtResource, roundResource, itemById, spellById,
+         consumableById } from './config.js';
 import { makeAimArc, updateAimArc, makeRaft } from './models.js';
 import { Camp } from './camp.js';
 import { audio } from './audio.js';
@@ -86,7 +87,7 @@ const combatMgr = () => {
 const ui = new UI({
   // the Single Player button starts whichever mode is selected in the menu
   onStart: () => (selectedMode === 'moba' ? startMobaSolo() : startGame()),
-  onCastSpell: (i) => player.castSpell(i, { enemyMgr: combatMgr() }),
+  onCastSpell: (i) => { player.castSpell(i, { enemyMgr: combatMgr() }); ui.flashSpell(i); },
 });
 
 const panels = new Panels({
@@ -100,6 +101,8 @@ const panels = new Panels({
   onToggleSpell: (id) => { player.toggleSpellSlot(id); panels.refresh(); },
   onBuild: (id, lane) => buildBase(id, lane),
   onCampBuild: (id) => campBuild(id),
+  onBuyConsumable: (id) => buyConsumable(id),
+  onChestChange: () => mp?.sendCampSync?.(),
   mobaTeam: () => mobaSide,
   nearHome: () => nearHome(), // the home building only upgrades in person
 });
@@ -107,11 +110,13 @@ const panels = new Panels({
 let world = new World(scene, game.seed);
 
 const player = new Player(scene, {
-  popup: (pos, text, color) => ui.popup(pos, text, color),
+  popup: (pos, text, color, cls) => ui.popup(pos, text, color, cls),
   onHurt: () => ui.hurtFlash(),
   onLevelUp: (level) => {
     audio.sfx('evolve', 0.55);
     player.spawnLevelUpEffect();
+    ui.banner('⭐ LEVEL UP!');
+    ui.goldFlash();
     const freshItems = ITEMS.filter(i => i.level === level).map(i => i.name);
     const freshSpells = SPELLS.filter(s => s.level === level).map(s => s.name);
     const fresh = [...freshItems, ...freshSpells];
@@ -176,7 +181,7 @@ function discoverType(type) {
 }
 
 const enemyMgr = new EnemyManager(scene, world, {
-  popup: (pos, text, color) => ui.popup(pos, text, color),
+  popup: (pos, text, color, cls) => ui.popup(pos, text, color, cls),
   onKill: (enemy) => {
     // co-op: XP goes to whoever landed the killing blow
     const creditedToPartner = mp?.active && mp.onKillCredit(enemy);
@@ -194,21 +199,27 @@ const enemyMgr = new EnemyManager(scene, world, {
       pickups.spawn('meat', amount, enemy.pos, 0.9 * enemy.sizeMult);
     }
     // big animals always drop their full hide (even if they chased you back
-    // into the Verdant Forest); small critters there — and bats — leave a scrap
+    // into the Verdant Forest); small critters there — and bats — leave a
+    // scrap, with an occasional whole pelt so Lv3 hide gear is reachable early
     if (HIDE_BEARING.has(enemy.type)) {
       pickups.spawn('hide', hideForHp(enemy.maxHp), enemy.pos, 1.1 * enemy.sizeMult);
     } else if (biomeIndexAt(enemy.pos.x, enemy.pos.z) === 0 || enemy.type === 'bat') {
-      pickups.spawn('hide', VERDANT_HIDE_DROP, enemy.pos, 0.9);
+      pickups.spawn('hide', Math.random() < 0.1 ? 1 : VERDANT_HIDE_DROP, enemy.pos, 0.9);
     }
     if (enemy.bossRank > 0) rollBossDrop(enemy);
   },
   onDiscover: discoverType,
   onBossSpawn: (enemy) => {
+    const skulls = '💀'.repeat(enemy.bossRank);
     ui.addTracker('boss' + enemy.id,
       () => enemy.mesh.parent ? enemy.mesh.position.clone().setY(enemy.mesh.position.y + 2.6 * enemy.sizeMult) : null,
-      '💀'.repeat(enemy.bossRank), 'skulls');
+      `<div class="boss-name">${enemy.bossName ?? ''}</div>${skulls}`, 'skulls');
     // herd-guardian ambush bosses stay quiet — finding them is the surprise
-    if (!enemy.ambush) ui.toast(`${'💀'.repeat(enemy.bossRank)} A pack mother appears! Her children keep coming until she falls.`, 'boss');
+    if (!enemy.ambush) {
+      ui.toast(`${skulls} ${enemy.bossName ?? 'A pack mother'} appears! Her children keep coming until she falls.`, 'boss');
+      ui.hurtFlash();
+      shakeT = 0.35; // the ground trembles when a mother arrives
+    }
   },
   onBossDeath: (enemy) => ui.removeTracker('boss' + enemy.id),
   // HP bar above every enemy (+ spell charge bar for casters)
@@ -219,7 +230,7 @@ const enemyMgr = new EnemyManager(scene, world, {
       (ranged ? `<div class="castbar"><div class="castbar-fill" style="background:${shotColor}"></div></div>` : '');
     ui.addTracker('hp' + enemy.id,
       () => enemy.mesh.parent ? enemy.mesh.position.clone().setY(enemy.mesh.position.y + 1.5 * enemy.sizeMult + 0.5) : null,
-      html, 'hpwrap',
+      html, 'hpwrap' + (enemy.bossRank > 0 ? ' boss' : ''),
       (el) => {
         const pct = Math.max(0, enemy.hp / enemy.maxHp);
         const fill = el.children[0].firstChild;
@@ -246,12 +257,25 @@ const minimap = new Minimap(document.getElementById('minimap'), world);
 // Boss loot: a chance to drop an unowned item near the player's level.
 function rollBossDrop(enemy) {
   const rank = BOSS_RANKS[enemy.bossRank - 1];
-  if (Math.random() >= rank.dropChance) return;
-  const candidates = ITEMS.filter(i =>
-    !i.free && !player.hasItem(i.id) && i.level <= player.level + 1);
-  if (!candidates.length) { pickups.spawn('meat', 5, enemy.pos, 1); return; }
-  const item = candidates[Math.floor(Math.random() * candidates.length)];
-  pickups.spawn('item', item.id, enemy.pos, 0.5);
+  if (Math.random() < rank.dropChance) {
+    const candidates = ITEMS.filter(i =>
+      !i.free && !player.hasItem(i.id) && i.level <= player.level + 1);
+    if (!candidates.length) { pickups.spawn('meat', 5, enemy.pos, 1); return; }
+    const item = candidates[Math.floor(Math.random() * candidates.length)];
+    pickups.spawn('item', item.id, enemy.pos, 0.5);
+    return;
+  }
+  // no item? she may cough up a TREASURE MAP instead — an X somewhere out
+  // there, dig it up with E for a fat cache
+  if (game.kind === 'survival' && !player.treasureAt && Math.random() < 0.3) {
+    const a = Math.random() * Math.PI * 2;
+    const r = Math.min(WORLD.radius - 150,
+      Math.max(120, radiusOf(enemy.pos.x, enemy.pos.z) + (Math.random() - 0.3) * 300));
+    player.treasureAt = { x: Math.sin(a) * r, z: Math.cos(a) * r };
+    minimap.treasureAt = player.treasureAt;
+    ui.toast('🗺️ The boss dropped a TREASURE MAP! An ✖ marks the spot on your maps.', 'level');
+    audio.sfx('kill_gold', 0.5);
+  }
 }
 
 function endStats() {
@@ -283,13 +307,37 @@ function startPlaying() {
     world.onIsland = (lake) => {
       if (mp?.active && !mp.isHost) return; // co-op guest sees the host's loot
       const at = { x: lake.x, z: lake.z };
-      pickups.spawn('meat', 8, at, 1.2);
-      pickups.spawn('stone', 6, at, 1.2);
-      pickups.spawn('hide', 3, at, 1.2);
-      if (Math.random() < 0.4) {
+      // island treasure scales with the biome ring — deep islands pay deep
+      const bi = biomeIndexAt(lake.x, lake.z);
+      const k = 1 + bi * 0.6;
+      pickups.spawn('meat', Math.round(8 * k), at, 1.2);
+      pickups.spawn('stone', Math.round(6 * k), at, 1.2);
+      pickups.spawn('hide', Math.round(3 * k), at, 1.2);
+      if (bi >= 3) pickups.spawn('iron', 2 + bi, at, 1.2);
+      if (Math.random() < 0.4 + bi * 0.06) {
         const candidates = ITEMS.filter(i => !i.free);
         pickups.spawn('item', candidates[Math.floor(Math.random() * candidates.length)].id, at, 0.6);
       }
+    };
+    // crypt landmarks come pre-garrisoned: a silent guard pack, rank by depth
+    world.onPoiSpawned = (poi) => {
+      if (poi.claimed || poi.guarded || poi.type !== 'crypt') return;
+      if (mp?.active && !mp.isHost) return; // host simulates the guards
+      poi.guarded = true;
+      const rank = poi.ring < 2 ? 1 : poi.ring < 4 ? 2 : 3;
+      const biome = BIOMES[biomeIndexAt(poi.x, poi.z)];
+      const type = biome.enemies[Math.floor(Math.random() * biome.enemies.length)];
+      const progress = progressAt(poi.x, poi.z);
+      for (let i = 0; i < 4 + rank; i++) {
+        const a = (i / (4 + rank)) * Math.PI * 2;
+        const g = enemyMgr._spawn(type, poi.x + Math.cos(a) * 4.5, poi.z + Math.sin(a) * 4.5, progress);
+        g.aggroed = false;
+        g.cryptId = poi.id;
+      }
+      const boss = enemyMgr._spawn(type, poi.x + 3, poi.z + 3, progress, rank,
+        { ambush: true, noReinforce: true });
+      boss.aggroed = false;
+      boss.cryptId = poi.id;
     };
     // the co-op guest renders the HOST's enemies
     if (!(mp?.active && mp.mode === 'coop' && !mp.isHost)) enemyMgr.spawnInitialWave();
@@ -309,9 +357,19 @@ function campBuild(id) {
   if (!Object.entries(info.cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
   for (const [k, v] of Object.entries(info.cost)) player[k] = roundResource(player[k] - v);
   camp.build(id);
-  player.campBonus = camp.homeHpBonus();
-  player.recompute();
+  applyCampPerks();
   panels.refresh();
+  mp?.sendCampSync?.();
+}
+
+// era perks: hp bonus + magnet reach + chop power + XP gain
+function applyCampPerks() {
+  if (!camp) return;
+  player.campBonus = camp.homeHpBonus();
+  player.chopMult = camp.chopMult();
+  player.xpMult = camp.xpMult();
+  pickups.magnetMult = camp.magnetMult();
+  player.recompute();
 }
 
 // ---------- MOBA mode ----------
@@ -507,12 +565,29 @@ async function ensureMp() {
     mp = new Multiplayer({
       scene, player, enemyMgr, pickups, projectiles, ui, panels, game, input,
       get world() { return world; }, // MOBA swaps the world object at begin
-      popup: (pos, text, color) => ui.popup(pos, text, color),
+      get camp() { return camp; },
+      popup: (pos, text, color, cls) => ui.popup(pos, text, color, cls),
       onDiscover: discoverType,
       grantPickup,
       dropHalfMeat,
       markDeath: (pos) => { minimap.deathAt = { x: pos.x, z: pos.z }; },
       startPlaying,
+      showPing: (x, z) => showPing(x, z),
+      // shared base: apply the partner's camp levels/storage locally
+      onCampSync: (lv, st, gp) => {
+        if (!camp || !lv) return;
+        if (gp) camp.gravePos = gp;
+        for (const [id, v] of Object.entries(lv)) {
+          while ((camp.levels[id] ?? 0) < v) {
+            camp.levels[id]++;
+            camp._placeMesh(id, id === 'grave' ? gp : undefined);
+          }
+        }
+        if (st) Object.assign(camp.storage, st);
+        applyCampPerks();
+        panels.refresh();
+        ui.toast('🏕️ Camp updated by your partner.', '');
+      },
       onCoopWin: () => {
         if (game.mode !== 'play') return;
         game.mode = 'won';
@@ -574,6 +649,8 @@ let mpCode = null; // current room code, shown in Settings for late joiners
 
 function showWaiting(code) {
   mpCode = code;
+  $id('mp-code-display').title = 'Click to copy';
+  $id('mp-code-display').style.cursor = 'pointer';
   $id('mp-choose').classList.add('hidden');
   $id('mp-wait').classList.remove('hidden');
   $id('mp-code-display').textContent = code;
@@ -593,11 +670,26 @@ $id('mp-pvp-btn').addEventListener('click', async () => {
   } catch (e) { mpError(e); }
 });
 $id('mp-join-btn').addEventListener('click', async () => {
+  const btn = $id('mp-join-btn');
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '⏳ Connecting…';
   try {
     const session = await ensureMp();
     await session.join($id('mp-code').value);
     mpCode = $id('mp-code').value.trim().toUpperCase();
   } catch (e) { mpError(e); }
+  btn.disabled = false;
+  btn.textContent = label;
+});
+
+// the room code is a copy button — share it with one click
+$id('mp-code-display').addEventListener('click', async () => {
+  if (!mpCode) return;
+  try {
+    await navigator.clipboard.writeText(mpCode);
+    ui.toast('📋 Game code copied!', 'level');
+  } catch { /* clipboard may be unavailable — the code is on screen anyway */ }
 });
 
 function buyItem(id) {
@@ -610,6 +702,7 @@ function buyItem(id) {
   player.ownItem(id);
   audio.sfx('purchase', 0.5);
   panels.refresh();
+  panels.flashCard(item.name);
 }
 
 function buySpell(id) {
@@ -620,6 +713,7 @@ function buySpell(id) {
   player.ownSpell(id);
   audio.sfx('upgrade', 0.5);
   panels.refresh();
+  panels.flashCard(spell.name);
 }
 
 function buyStat(id) {
@@ -633,6 +727,18 @@ function buyStat(id) {
   player.recompute();
   audio.sfx('upgrade', 0.5);
   panels.refresh();
+  panels.flashCard(track.name);
+}
+
+function buyConsumable(id) {
+  const c = consumableById(id);
+  if (!c) return;
+  if (!Object.entries(c.cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
+  for (const [k, v] of Object.entries(c.cost)) player[k] = roundResource(player[k] - v);
+  player.consumables[id] = (player.consumables[id] ?? 0) + 1;
+  audio.sfx('purchase', 0.5);
+  panels.refresh();
+  panels.flashCard(c.name);
 }
 
 // ---------- keys ----------
@@ -680,15 +786,99 @@ function nearHome() {
   if (radiusOf(player.pos.x, player.pos.z) < WORLD.caveR + 4) return true; // in/at the cave
   return Math.hypot(player.pos.x - (-9), player.pos.z - 13) < 6;           // at the home building
 }
-// E is contextual: at the chest it opens the chest, at home the base modal
+// E is contextual: revive partner > chest > home > landmark > treasure dig
 function nearChest() {
   return game.kind === 'survival' && camp?.has('chest')
     && Math.hypot(player.pos.x - 6, player.pos.z - 16) < 4;
 }
+function nearPoi() {
+  if (game.kind !== 'survival') return null;
+  return world.poisNear?.(player.pos.x, player.pos.z, 4).find(p => !p.claimed) ?? null;
+}
+function nearTreasure() {
+  return game.kind === 'survival' && player.treasureAt
+    && Math.hypot(player.pos.x - player.treasureAt.x, player.pos.z - player.treasureAt.z) < 5;
+}
+
+// landmark rewards: shrines bless, monoliths pay out, crypts must be cleared
+function claimPoi(poi) {
+  if (poi.type === 'crypt') {
+    const guards = enemyMgr.alive().filter(e => e.cryptId === poi.id);
+    if (guards.length) {
+      ui.toast(`☠️ The crypt is still guarded — ${guards.length} keeper${guards.length > 1 ? 's' : ''} left!`, 'boss');
+      audio.sfx('error', 0.5);
+      return;
+    }
+  }
+  poi.claimed = true;
+  const ring = poi.ring;
+  const at = { x: poi.x + 1.8, z: poi.z + 1.8 };
+  if (poi.type === 'shrine') {
+    player.shrineBonus += 10;
+    player.recompute();
+    player.hp = player.maxHp;
+    ui.toast('✦ The shrine blesses you: +10 max health, wounds healed.', 'level');
+    audio.sfx('evolve_ready', 0.5);
+  } else if (poi.type === 'monolith') {
+    pickups.spawn('stone', 12 + ring * 6, at, 1.5);
+    pickups.spawn('meat', 8 + ring * 5, at, 1.5);
+    if (ring >= 2) pickups.spawn('iron', 2 + ring * 2, at, 1.2);
+    ui.toast('▲ The monolith crumbles — a cache of resources spills out.', 'level');
+    audio.sfx('kill_gold', 0.5);
+  } else { // crypt
+    pickups.spawn('meat', 15 + ring * 6, at, 1.7);
+    pickups.spawn('hide', 3 + ring * 2, at, 1.4);
+    const candidates = ITEMS.filter(i => !i.free && !player.hasItem(i.id));
+    if (candidates.length) {
+      pickups.spawn('item', candidates[Math.floor(Math.random() * candidates.length)].id, at, 0.6);
+    }
+    ui.toast('☗ The crypt gives up its treasure!', 'level');
+    audio.sfx('victory', 0.45);
+  }
+  minimap.redrawT = 0;
+}
+
+function digTreasure() {
+  const t = player.treasureAt;
+  const ring = biomeIndexAt(t.x, t.z);
+  pickups.spawn('meat', 20 + ring * 8, t, 1.7);
+  pickups.spawn('stone', 10 + ring * 5, t, 1.5);
+  pickups.spawn('hide', 4 + ring * 2, t, 1.4);
+  if (ring >= 2) pickups.spawn('iron', 3 + ring * 2, t, 1.2);
+  if (Math.random() < 0.35) {
+    const candidates = ITEMS.filter(i => !i.free && !player.hasItem(i.id));
+    if (candidates.length) {
+      pickups.spawn('item', candidates[Math.floor(Math.random() * candidates.length)].id, t, 0.6);
+    }
+  }
+  player.treasureAt = null;
+  minimap.treasureAt = null;
+  ui.toast('💰 You dug up the treasure!', 'level');
+  audio.sfx('victory', 0.5);
+}
+
 input.onKey('KeyE', () => {
   if (!inPlay()) return;
+  if (mp?.tryRevivePartner?.()) return; // co-op: helping a downed friend wins
   if (nearChest()) panels.toggle('chest');
   else if (nearHome()) panels.toggle('base');
+  else if (nearPoi()) claimPoi(nearPoi());
+  else if (nearTreasure()) digTreasure();
+});
+
+// H — the keybind legend; F / G — field consumables
+input.onKey('KeyH', () => { if (inPlay()) panels.toggle('help'); });
+input.onKey('KeyF', () => {
+  if (!inPlay() || game.paused) return;
+  if (!player.useConsumable('salve') && player.consumables.salve <= 0) {
+    ui.toast('🧪 No Healing Salve — buy some in Upgrades → Supplies.', '');
+  }
+});
+input.onKey('KeyG', () => {
+  if (!inPlay() || game.paused) return;
+  if (!player.useConsumable('roast') && player.consumables.roast <= 0) {
+    ui.toast('🍗 No Roasted Meat — buy some in Upgrades → Supplies.', '');
+  }
 });
 
 // ---- pet: resurrection (R at home / the graveyard) & mode cycling (P) ----
@@ -744,7 +934,11 @@ $id('bigmap').querySelector('.panel-close').addEventListener('click', () => togg
 $id('respawn-cave').addEventListener('click', () => reviveAt('cave'));
 $id('respawn-grave').addEventListener('click', () => reviveAt('grave'));
 for (let i = 0; i < 6; i++) {
-  input.onKey('Digit' + (i + 1), () => inPlay() && !game.paused && player.castSpell(i, { enemyMgr: combatMgr() }));
+  input.onKey('Digit' + (i + 1), () => {
+    if (!inPlay() || game.paused) return;
+    player.castSpell(i, { enemyMgr: combatMgr() });
+    ui.flashSpell(i);
+  });
 }
 input.onKey('Escape', () => {
   if (!inPlay()) return;
@@ -754,6 +948,36 @@ input.onKey('Escape', () => {
   game.paused = !game.paused;
   ui.setPaused(game.paused);
 });
+
+// ---------- co-op ping (middle mouse): 3D ring + minimap marker ----------
+const pingMarkers = [];
+function showPing(x, z, mine = false) {
+  const mesh = new THREE.Mesh(new THREE.RingGeometry(0.3, 1.2, 24),
+    new THREE.MeshBasicMaterial({ color: 0xffa528, transparent: true, opacity: 0.9, side: THREE.DoubleSide }));
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.set(x, world.heightAt(x, z) + 0.15, z);
+  scene.add(mesh);
+  pingMarkers.push({ mesh, t: 8 });
+  minimap.addPing(x, z);
+  audio.sfx('click', 0.5, mine ? 350 : 0);
+}
+function updatePings(dt) {
+  for (let i = pingMarkers.length - 1; i >= 0; i--) {
+    const p = pingMarkers[i];
+    p.t -= dt;
+    const k = 1 + Math.sin(performance.now() / 160) * 0.18;
+    p.mesh.scale.set(k, k, k);
+    p.mesh.material.opacity = Math.min(0.9, p.t / 2);
+    if (p.t <= 0) { scene.remove(p.mesh); pingMarkers.splice(i, 1); }
+  }
+}
+window.addEventListener('pointerdown', (e) => {
+  if (e.button !== 1 || !inPlay() || game.paused) return;
+  e.preventDefault();
+  showPing(aimPoint.x, aimPoint.z, true);
+  mp?.sendPing?.(aimPoint.x, aimPoint.z);
+});
+window.addEventListener('auxclick', (e) => { if (e.button === 1) e.preventDefault(); });
 
 // ---------- aiming: the marker is clamped to the equipped weapon's range ----------
 const raycaster = new THREE.Raycaster();
@@ -795,6 +1019,13 @@ const skyColor = new THREE.Color(BIOMES[0].sky);
 
 const caveFog = new THREE.Color(0x0c0f0a);
 
+// biomes with teeth announce their hazard the first time you step in
+const BIOME_HAZARD_NOTES = {
+  'Murky Swamp': '🦶 The mud drags at your boots — you move slower here.',
+  'Haunted Forest': '☠️ Zombie claws fester: their hits poison you for a few seconds.',
+};
+let envSpeedMult = 1;
+
 function updateAtmosphere(dt) {
   const idx = biomeIndexAt(player.pos.x, player.pos.z);
   if (idx !== game.biomeIndex) {
@@ -803,7 +1034,10 @@ function updateAtmosphere(dt) {
     ui.banner(`— ${biome.name} —`);
     audio.sfx('lane_unlock', 0.5);
     audio.playMusic(idx >= 3 ? 'level3' : 'level1');
+    const note = BIOME_HAZARD_NOTES[biome.name];
+    if (note) ui.toast(note, 'boss');
   }
+  envSpeedMult = BIOMES[game.biomeIndex].name === 'Murky Swamp' ? 0.82 : 1;
   const biome = BIOMES[game.biomeIndex];
 
   // the cave is dark; light floods in as you walk toward the mouth
@@ -832,10 +1066,18 @@ function updateAtmosphere(dt) {
 }
 
 // ---------- camera ----------
-function updateCamera() {
+let shakeT = 0; // brief tremble on boss entrances
+function updateCamera(dt = 0) {
   const py = player.mesh.position.y;
-  camera.position.set(player.pos.x, py + 26, player.pos.z + 14);
-  camera.lookAt(player.pos.x, py, player.pos.z - 2);
+  let sx = 0, sz = 0;
+  if (shakeT > 0) {
+    shakeT -= dt;
+    const k = Math.min(1, shakeT / 0.35) * 0.5;
+    sx = (Math.random() - 0.5) * k;
+    sz = (Math.random() - 0.5) * k;
+  }
+  camera.position.set(player.pos.x + sx, py + 26, player.pos.z + 14 + sz);
+  camera.lookAt(player.pos.x + sx, py, player.pos.z - 2 + sz);
   sun.position.set(player.pos.x + 18, 35, player.pos.z + 12);
   sun.target.position.set(player.pos.x, 0, player.pos.z);
 }
@@ -864,6 +1106,7 @@ function step() {
       mobaBounds: game.kind === 'moba' ? MOBA.half : null,
       mouseMove: settings.mouseMove,
       boat: game.kind === 'survival' && camp?.has('boat'),
+      envSpeedMult,
     });
 
     if (game.kind === 'moba') {
@@ -899,6 +1142,7 @@ function step() {
       minimap.update(dt, player, em,
         mp?.active && mp.mode === 'coop' ? mp.remote : null);
       updateAtmosphere(dt);
+      updatePings(dt);
 
       // raft under the hero while paddling
       const onWater = camp?.has('boat') && world.isWater(player.pos.x, player.pos.z);
@@ -908,11 +1152,20 @@ function step() {
         raft.rotation.y = player.mesh.rotation.y;
       }
 
-      // contextual E hint: chest, or home build & upgrade
+      // contextual E hint: revive > chest > home > landmark > treasure
       const hintEl = $id('home-hint');
+      const poi = nearPoi();
+      const POI_HINTS = {
+        shrine: '✦ Ancient shrine — press <kbd>E</kbd> to receive its blessing',
+        monolith: '▲ Rune monolith — press <kbd>E</kbd> to break the seal',
+        crypt: '☗ Forgotten crypt — clear the keepers, then <kbd>E</kbd> to loot',
+      };
       const hint = panels.open ? null
+        : mp?.revivablePartner?.() ? '💚 Your partner is DOWN — press <kbd>E</kbd> to revive!'
         : nearChest() ? '📦 Storage chest — press <kbd>E</kbd> to open'
-        : nearHome() ? '🏠 Your home — press <kbd>E</kbd> to build &amp; upgrade' : null;
+        : nearHome() ? '🏠 Your home — press <kbd>E</kbd> to build &amp; upgrade'
+        : poi ? POI_HINTS[poi.type]
+        : nearTreasure() ? '💰 This is the spot — press <kbd>E</kbd> to dig' : null;
       if (hint) { hintEl.innerHTML = hint; hintEl.classList.remove('hidden'); }
       else hintEl.classList.add('hidden');
 
@@ -949,7 +1202,7 @@ function step() {
     }
   }
 
-  updateCamera();
+  updateCamera(dt);
   ui.updateOverlays(dt, camera);
   renderer.render(scene, camera);
 }

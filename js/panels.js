@@ -2,7 +2,7 @@
 // equipment slots, bestiary of discovered creatures ----
 
 import { SHOP_GROUPS, SLOTS, SLOT_LABELS, ENEMY_TYPES, ITEMS, SPELLS,
-         STAT_TRACKS, MOBA_BUILDINGS, CAMP_BUILDINGS, RES_ICONS,
+         STAT_TRACKS, MOBA_BUILDINGS, CAMP_BUILDINGS, RES_ICONS, CONSUMABLES,
          MAX_SPELL_SLOTS, fmtResource, itemById, spellById, costFor } from './config.js';
 
 const NEED_NAMES = { tent: 'Hide Tent', cabin: 'Wooden Cabin', furnace: 'Stone Furnace' };
@@ -27,6 +27,7 @@ export class Panels {
     $('char-btn').addEventListener('click', () => this.toggle('character'));
     $('bestiary-btn').addEventListener('click', () => this.toggle('bestiary'));
     $('settings-btn').addEventListener('click', () => this.toggle('settings'));
+    $('help-btn').addEventListener('click', () => this.toggle('help'));
     document.querySelectorAll('.panel-close').forEach(btn =>
       btn.addEventListener('click', () => this.toggle(null)));
   }
@@ -41,6 +42,7 @@ export class Panels {
     $('settings').classList.toggle('hidden', name !== 'settings');
     $('basepanel').classList.toggle('hidden', name !== 'base');
     $('chestpanel').classList.toggle('hidden', name !== 'chest');
+    $('helppanel').classList.toggle('hidden', name !== 'help');
     if (name === 'shop') this.renderShop();
     if (name === 'character') this.renderCharacter();
     if (name === 'bestiary') this.renderBestiary();
@@ -82,7 +84,7 @@ export class Panels {
     const groups = this.moba
       ? [...SHOP_GROUPS, { key: 'base', label: '🏰 Base' }]
       : this.camp
-        ? [{ key: 'camp', label: '🏕️ Camp' }, ...SHOP_GROUPS]
+        ? [{ key: 'camp', label: '🏕️ Camp' }, ...SHOP_GROUPS, { key: 'supplies', label: '🧪 Supplies' }]
         : SHOP_GROUPS;
     const tabs = $('shop-tabs');
     tabs.innerHTML = '';
@@ -109,6 +111,10 @@ export class Panels {
     }
     if (this.shopTab === 'camp') {
       this._renderCamp(wrap);
+      return;
+    }
+    if (this.shopTab === 'supplies') {
+      this._renderSupplies(wrap);
       return;
     }
 
@@ -142,6 +148,37 @@ export class Panels {
       btn.addEventListener('click', () =>
         isSpells ? this.hooks.onBuySpell(btn.dataset.id) : this.hooks.onBuyItem(btn.dataset.id));
     });
+  }
+
+  // Consumables: repeatable purchases, used in the field with F / G.
+  _renderSupplies(wrap) {
+    for (const c of CONSUMABLES) {
+      const owned = this.player.consumables?.[c.id] ?? 0;
+      const affordable = this._affordable(c.cost);
+      const card = document.createElement('div');
+      card.className = 'card' + (affordable ? ' buyable' : ' expensive');
+      card.innerHTML = `
+        <div class="card-head"><span class="icon">${itemIcon(c)}</span>
+          <span class="name">${c.name}</span><span class="lv">carried ×${owned} · key ${c.key}</span></div>
+        <div class="desc">${c.desc}</div>
+        <div class="card-foot"><button class="buy-btn" data-id="${c.id}">Buy — ${this._costStr(c.cost)}</button></div>`;
+      wrap.appendChild(card);
+    }
+    wrap.querySelectorAll('.buy-btn').forEach(btn =>
+      btn.addEventListener('click', () => this.hooks.onBuyConsumable?.(btn.dataset.id)));
+  }
+
+  // brief green pulse on the card that was just purchased
+  flashCard(name) {
+    for (const el of document.querySelectorAll('.card .name')) {
+      if (el.textContent === name) {
+        const card = el.closest('.card');
+        card.classList.remove('just-bought');
+        void card.offsetWidth;
+        card.classList.add('just-bought');
+        return;
+      }
+    }
   }
 
   // Trainable stat tracks: 10 tiers, tier N needs player level N.
@@ -344,6 +381,7 @@ export class Panels {
       btn.addEventListener('click', () => {
         if (btn.dataset.chest === 'deposit') camp.depositAll();
         else camp.withdrawAll();
+        this.hooks.onChestChange?.(); // co-op: keep the partner's chest in sync
         this.renderChest();
       });
     });

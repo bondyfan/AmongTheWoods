@@ -107,6 +107,28 @@ export const ITEM_ICONS = {
     <ellipse cx="24" cy="12" rx="2.8" ry="3.6" fill="${LEATHER}" stroke="${LEATHER_D}" stroke-width="1.3"/>
     <ellipse cx="14" cy="6.5" rx="2.5" ry="3.2" fill="${LEATHER}" stroke="${LEATHER_D}" stroke-width="1.3" transform="rotate(-12 14 6.5)"/>
     <ellipse cx="19" cy="6.5" rx="2.5" ry="3.2" fill="${LEATHER}" stroke="${LEATHER_D}" stroke-width="1.3" transform="rotate(12 19 6.5)"/>`),
+  // ===== charms =====
+  wolfPendant: S(`
+    <path d="M6 6c3 5 8 8 10 8s7-3 10-8" fill="none" stroke="${LEATHER_D}" stroke-width="1.8"/>
+    <path d="M16 13c-2.4 0-4 1.6-4 3.6 0 3.6 2.4 8 4 10.4 1.6-2.4 4-6.8 4-10.4 0-2-1.6-3.6-4-3.6z"
+      fill="#f0ead8" stroke="#a89f88" stroke-width="1.5" stroke-linejoin="round"/>
+    <circle cx="16" cy="13.4" r="1.5" fill="${GOLD}" stroke="${GOLD_D}" stroke-width="1"/>`),
+  hawkAmulet: S(`
+    <path d="M7 5c3 5 7 8 9 8s6-3 9-8" fill="none" stroke="${LEATHER_D}" stroke-width="1.8"/>
+    <path d="M16 12c-4 3-5 9-3 15 1.2-1 2-2.4 2.4-4 .4 1.2 1 2.2 1.8 3 .4-1.6 1-3.2 1-5 1 .8 1.6 2 1.8 3.4 2-5 .6-10-4-12.4z"
+      fill="#c9b8ff" stroke="#6e4fa8" stroke-width="1.4" stroke-linejoin="round"/>`),
+  // ===== consumables =====
+  salve: S(`
+    <path d="M12 4h8v3l-2 2v3c3 1.5 5 4.5 5 8 0 4.5-3.5 8-7 8s-7-3.5-7-8c0-3.5 2-6.5 5-8V9l-2-2z"
+      fill="#d8f2e0" stroke="#4a8a6a" stroke-width="1.5" stroke-linejoin="round" opacity="0.9"/>
+    <path d="M10 19c0 4 2.6 6.8 6 6.8s6-2.8 6-6.8c0-2.6-1.4-4.8-4-6v-2h-4v2c-2.6 1.2-4 3.4-4 6z" fill="#6fd86f" opacity="0.85"/>
+    <rect x="11.4" y="2.6" width="9.2" height="2.6" rx="1.2" fill="#8a5a2b" stroke="#5f3d1c" stroke-width="1"/>`),
+  roast: S(`
+    <path d="M8 20c-2 0-3.6 1.6-3.6 3.4 0 1.4 1 2.6 2.4 2.8.2 1.4 1.4 2.4 2.8 2.4 1.8 0 3.4-1.6 3.4-3.6z"
+      fill="#f0ead8" stroke="#a89f88" stroke-width="1.3"/>
+    <path d="M11 21C14 24 21 26 25 22c4.5-4.5 3-12-2-15-3.5-2-8-1.5-10.5 1C9 11.5 8.5 18.5 11 21z"
+      fill="#b5682a" stroke="#7c3f16" stroke-width="1.5" stroke-linejoin="round"/>
+    <path d="M14 10c2-1.4 5-1.4 7 .4" fill="none" stroke="#ffd9a0" stroke-width="1.6" stroke-linecap="round"/>`),
   // ===== camp buildings =====
   home: S(`
     <path d="M16 4L3 26h26z" fill="${LEATHER}" stroke="${LEATHER_D}" stroke-width="1.6" stroke-linejoin="round"/>

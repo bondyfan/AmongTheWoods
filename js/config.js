@@ -119,15 +119,16 @@ export const ENEMY_TYPES = {
              hp: 16,  dmg: 8,  speed: 6.8, range: 1.5, attackCd: 1.3, xp: 10, meat: 1, hitR: 0.6,  aggro: 20 },
   // -- Dark Forest --
   wolf:    { name: 'Black Wolf', icon: '🐺',
-             hp: 45,  dmg: 10, speed: 8.0, range: 1.6, attackCd: 1.0, xp: 15, meat: 2, hitR: 0.8,  aggro: 26 },
+             hp: 45,  dmg: 10, speed: 8.0, range: 1.6, attackCd: 1.0, xp: 15, meat: 2, hitR: 0.8,  aggro: 26, behavior: 'pack' },
   venomspider: { name: 'Venom Spider', icon: '☣️',
              hp: 55,  dmg: 11, meleeDmg: 7, speed: 6.0, range: 1.4, attackCd: 1.1, xp: 20, meat: 2, hitR: 0.8, aggro: 30,
-             ranged: true, shootRange: 8.5, spellCd: 2.5, projectileSpeed: 15, shotColor: 0x8aff3a },
+             ranged: true, shootRange: 8.5, spellCd: 2.5, projectileSpeed: 15, shotColor: 0x8aff3a, behavior: 'kite' },
   bat:     { name: 'Cave Bat', icon: '🦇',
              hp: 18,  dmg: 6,  speed: 9.5, range: 1.4, attackCd: 1.1, xp: 12, meat: 1, hitR: 0.6,  aggro: 30, flying: true },
   // -- Haunted Forest --
   zombie:  { name: 'Zombie', icon: '🧟',
-             hp: 90,  dmg: 14, speed: 4.6, range: 1.7, attackCd: 1.3, xp: 28, meat: 2, hitR: 0.85, aggro: 32 },
+             hp: 90,  dmg: 14, speed: 4.6, range: 1.7, attackCd: 1.3, xp: 28, meat: 2, hitR: 0.85, aggro: 32,
+             poison: { dps: 2, dur: 4 } }, // rotting claws fester — Haunted Forest hazard
   // -- Highlands --
   boar:    { name: 'Wild Boar', icon: '🐗',
              hp: 80,  dmg: 16, speed: 7.5, range: 1.7, attackCd: 1.1, xp: 25, meat: 3, hitR: 0.9,  aggro: 24 },
@@ -138,17 +139,17 @@ export const ENEMY_TYPES = {
              ranged: true, shootRange: 10, spellCd: 3.0, projectileSpeed: 30, shotColor: 0xffe94a, stun: 1.2 },
   // -- Snowfall Woods --
   icewolf: { name: 'Ice Wolf', icon: '❄️',
-             hp: 120, dmg: 18, speed: 8.6, range: 1.6, attackCd: 0.9, xp: 35, meat: 4, hitR: 0.8,  aggro: 28 },
+             hp: 120, dmg: 18, speed: 8.6, range: 1.6, attackCd: 0.9, xp: 35, meat: 4, hitR: 0.8,  aggro: 28, behavior: 'pack' },
   icespider: { name: 'Frost Spider', icon: '🕸️',
              hp: 100, dmg: 16, meleeDmg: 10, speed: 6.2, range: 1.4, attackCd: 1.1, xp: 30, meat: 3, hitR: 0.8, aggro: 30,
-             ranged: true, shootRange: 9, spellCd: 2.2, projectileSpeed: 17, shotColor: 0x8ae0ff },
+             ranged: true, shootRange: 9, spellCd: 2.2, projectileSpeed: 17, shotColor: 0x8ae0ff, behavior: 'kite' },
   bear:    { name: 'Grizzly Bear', icon: '🐻',
-             hp: 180, dmg: 26, speed: 5.5, range: 2.1, attackCd: 1.5, xp: 45, meat: 5, hitR: 1.2,  aggro: 26 },
+             hp: 180, dmg: 26, speed: 5.5, range: 2.1, attackCd: 1.5, xp: 45, meat: 5, hitR: 1.2,  aggro: 26, behavior: 'heavy' },
   // -- Frozen Peak --
   wendigo: { name: 'Wendigo', icon: '👹',
              hp: 220, dmg: 30, speed: 8.4, range: 2.0, attackCd: 1.2, xp: 55, meat: 6, hitR: 0.9,  aggro: 34 },
   yeti:    { name: 'Yeti', icon: '🏔️',
-             hp: 350, dmg: 40, speed: 5.0, range: 2.5, attackCd: 1.7, xp: 70, meat: 8, hitR: 1.5,  aggro: 30 },
+             hp: 350, dmg: 40, speed: 5.0, range: 2.5, attackCd: 1.7, xp: 70, meat: 8, hitR: 1.5,  aggro: 30, behavior: 'heavy' },
   icegolem: { name: 'Ice Golem', icon: '🗿',
              hp: 400, dmg: 45, meleeDmg: 30, speed: 3.6, range: 2.2, attackCd: 1.8, xp: 80, meat: 9, hitR: 1.4, aggro: 30,
              ranged: true, shootRange: 10, spellCd: 4.0, projectileSpeed: 13, shotColor: 0xbfe8ff, stun: 0.8 },
@@ -170,14 +171,35 @@ export const BOSS_RANKS = [
 // then +1 per additional 30 HP. Tougher enemies (and bosses) pay out more.
 export const meatForHp = (hp) => Math.max(1, Math.ceil(hp / 30));
 
+// Boss "pack mothers" carry NAMES — picked per creature family at spawn.
+export const BOSS_NAMES = {
+  spider: ['Broodmother Silkfang', 'The Hollow Widow', 'Venomweaver'],
+  wolf: ['Greyjaw', 'The Pale Howler', 'Rotfang'],
+  snake: ['Old Coilback', 'The Whispering Fang', 'Mirescale'],
+  zombie: ['The Shambler King', 'Gravejaw', 'Rotbelly'],
+  bear: ['Ironpelt', 'Old Thunderhide'],
+  boar: ['Tuskrend', 'The Mud Tyrant'],
+  elk: ['Antlered Death', 'The Grey Stag'],
+  bat: ['Nightscreech', 'The Rafter Queen'],
+  rat: ['The Gutter Matron', 'Plaguewhisker'],
+  wendigo: ['The Pale Wendigo', 'Hollowhunger'],
+  yeti: ['Frostmaw', 'The White Silence'],
+  golem: ['The Frozen Warden', 'Shatterheart'],
+};
+export function bossNameFor(type, id) {
+  const key = Object.keys(BOSS_NAMES).find(k => type.toLowerCase().includes(k)) ?? 'wolf';
+  const pool = BOSS_NAMES[key];
+  return pool[id % pool.length];
+}
+
 // Cumulative XP required to reach each level (index = level).
 export const XP_LEVELS = [0, 0, 40, 110, 220, 380, 600, 880, 1230, 1660, 2200];
 export const MAX_LEVEL = 10;
 
 // ---- Equippable items (WoW-style slots). Bought in the shop or dropped by
 // pack bosses. Only ONE weapon is wielded at a time — Q cycles owned weapons. ----
-export const SLOTS = ['weapon', 'head', 'chest', 'boots', 'pet', 'orb'];
-export const SLOT_LABELS = { weapon: 'Weapon', head: 'Head', chest: 'Chest', boots: 'Boots', pet: 'Pet', orb: 'Orb' };
+export const SLOTS = ['weapon', 'head', 'chest', 'boots', 'charm', 'pet', 'orb'];
+export const SLOT_LABELS = { weapon: 'Weapon', head: 'Head', chest: 'Chest', boots: 'Boots', charm: 'Charm', pet: 'Pet', orb: 'Orb' };
 
 // Gear progresses through the ages. `needs` gates an item behind a camp
 // building (survival): 'tent' → Hide Tent, 'cabin' → Wooden Cabin,
@@ -237,6 +259,13 @@ export const ITEMS = [
     desc: '+35% movement speed.' },
   { id: 'windBoots',    slot: 'boots', level: 9, icon: '💨', name: 'Windwalkers',    cost: { hide: 14, iron: 8, meat: 40 }, needs: 'furnace', stats: { speed: 0.50 },
     desc: '+50% movement speed.' },
+  // -- charms (mid-game trinkets — ONE charm slot, pick your bonus) --
+  { id: 'wolfPendant', slot: 'charm', level: 5, icon: '🦷', name: 'Wolf-Fang Pendant',
+    cost: { hide: 8, meat: 30 }, needs: 'tent', stats: { dmgPct: 0.10 },
+    desc: '+10% weapon damage.' },
+  { id: 'hawkAmulet', slot: 'charm', level: 7, icon: '🪶', name: 'Hawk-Feather Amulet',
+    cost: { hide: 12, iron: 4, meat: 40 }, needs: 'cabin', stats: { aspd: 0.10 },
+    desc: '+10% attack speed.' },
   // -- pet (companion) --
   { id: 'tamedWolf', slot: 'pet', level: 4, icon: '🐺', name: 'Tamed Wolf', cost: { meat: 165 }, pet: { dmg: 14 },
     desc: 'A loyal wolf fights by your side (100 HP — train it up in Training).' },
@@ -255,6 +284,15 @@ export const ITEMS = [
 ];
 
 export const itemById = (id) => ITEMS.find(i => i.id === id);
+
+// ---- Consumables: cheap repeatable meat sinks, used with F / G in the field.
+export const CONSUMABLES = [
+  { id: 'salve', icon: '🧪', name: 'Healing Salve', key: 'F', cost: { meat: 20 },
+    heal: 40, desc: 'Drink with F: instantly restores 40 health.' },
+  { id: 'roast', icon: '🍗', name: 'Roasted Meat', key: 'G', cost: { meat: 10 },
+    heal: 15, speedDur: 30, desc: 'Eat with G: +15 health and +10% speed for 30 s.' },
+];
+export const consumableById = (id) => CONSUMABLES.find(c => c.id === id);
 
 // MOBA has no mining/hides/smelting — special resources are paid in meat
 // there (3 meat per unit) so every item stays purchasable.
@@ -290,20 +328,22 @@ export const SPELLS = [
 export const spellById = (id) => SPELLS.find(s => s.id === id);
 
 // ---- Trainable stat tracks: 10 tiers each, tier N needs player level N.
-// Costs scale quadratically and are steep on purpose — training is a heavy
-// long-term meat investment, not something you can rush early. ----
+// Costs scale quadratically up to tier 6, then LINEARLY — the late tiers
+// should feel expensive, not like a second full-time job. ----
+const trainCost = (base) => (t) =>
+  t <= 6 ? base * t * t : base * 36 + base * 10 * (t - 6);
 export const STAT_TRACKS = [
   { id: 'range', icon: '📏', name: 'Range Training', max: 10,
     desc: '+2 m bow range, +0.1 m melee reach per level. Level 10 reaches across the whole screen.',
-    cost: (t) => ({ meat: 25 * t * t, ...(t >= 3 ? { wood: 10 * (t - 2) } : {}) }) },
+    cost: (t) => ({ meat: trainCost(25)(t), ...(t >= 3 ? { wood: 10 * (t - 2) } : {}) }) },
   { id: 'power', icon: '💪', name: 'Power Training', max: 10,
     desc: '+5% weapon damage per level.',
-    cost: (t) => ({ meat: 28 * t * t, ...(t >= 3 ? { wood: 12 * (t - 2) } : {}) }) },
+    cost: (t) => ({ meat: trainCost(28)(t), ...(t >= 3 ? { wood: 12 * (t - 2) } : {}) }) },
   { id: 'swift', icon: '🤺', name: 'Swift Hands', max: 10,
     desc: '+4% attack speed per level.',
-    cost: (t) => ({ meat: 26 * t * t, ...(t >= 3 ? { wood: 11 * (t - 2) } : {}) }) },
+    cost: (t) => ({ meat: trainCost(26)(t), ...(t >= 3 ? { wood: 11 * (t - 2) } : {}) }) },
   { id: 'pet', icon: '🐾', name: 'Pet Training', max: 5,
-    desc: '+100 pet health and +25% pet damage per level (100 HP base, up to 600).',
+    desc: '+100 pet health and +25% pet damage per level (100 HP base, up to 600 + level bonus).',
     cost: (t) => ({ meat: 40 * t * t, hide: 4 * t }) },
 ];
 
@@ -319,13 +359,13 @@ export const CAMP_BUILDINGS = [
     names: ['Hide Tent', 'Wooden Cabin', 'Stone House', 'Medieval Keep'],
     levels: [
       { level: 2, cost: { hide: 6, wood: 10 },
-        desc: 'Age 2 — a hide tent by the cave mouth. Unlocks hide clothing.' },
+        desc: 'Age 2 — a hide tent by the cave mouth. Unlocks hide clothing. +20 max health.' },
       { level: 4, cost: { wood: 60, stone: 10 },
-        desc: 'Age 3 — a timber cabin. Unlocks bows. +15 max health.' },
+        desc: 'Age 3 — a timber cabin. Unlocks bows. +60 max health, loot magnet reaches further.' },
       { level: 7, cost: { stone: 80, wood: 30, iron: 6 },
-        desc: 'Age 4 — an iron-age stone house. +40 max health.' },
+        desc: 'Age 4 — an iron-age stone house. +120 max health, +25% chopping & mining power.' },
       { level: 9, cost: { stone: 200, wood: 150, iron: 30, hide: 20, meat: 100 },
-        desc: 'Age 5 — a MEDIEVAL KEEP. Unlocks knightly gear. +80 max health.' },
+        desc: 'Age 5 — a MEDIEVAL KEEP. Unlocks knightly gear. +180 max health, +15% XP.' },
     ] },
   { id: 'chest', icon: '📦', max: 1,
     names: ['Storage Chest'],

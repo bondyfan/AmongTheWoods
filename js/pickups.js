@@ -18,6 +18,7 @@ export class Pickups {
     this.world = world;
     this.hooks = hooks; // { onCollect(pickup) }
     this.list = [];
+    this.magnetMult = 1; // camp cabin perk widens the loot magnet
   }
 
   // kind: 'meat'|'wood'|'stone'|'hide'|'iron'|'item'; payload: amount (or itemId)
@@ -50,7 +51,7 @@ export class Pickups {
         if (d < dist) { dist = d; target = t; }
       }
 
-      if (target && !p.magnet && dist < MAGNET_RADIUS) p.magnet = true;
+      if (target && !p.magnet && dist < MAGNET_RADIUS * this.magnetMult) p.magnet = true;
 
       if (p.magnet && target) {
         // fly to the player, faster the closer it gets

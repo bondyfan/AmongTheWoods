@@ -11,7 +11,7 @@ export class Projectiles {
     this.list = [];
   }
 
-  spawnArrow(origin, dir, { dmg, pierce, speed, life }) {
+  spawnArrow(origin, dir, { dmg, pierce, speed, life, crit }) {
     const mesh = makeArrow();
     mesh.position.copy(origin);
     mesh.rotation.y = Math.atan2(dir.x, dir.z) + Math.PI;
@@ -19,7 +19,7 @@ export class Projectiles {
     this.list.push({
       id: nextProjectileId++, kind: 'arrow', mesh,
       vel: dir.clone().multiplyScalar(speed),
-      dmg, pierce, life, hit: new Set(),
+      dmg, pierce, life, crit, hit: new Set(),
     });
   }
 
@@ -99,7 +99,7 @@ export class Projectiles {
           const dx = e.pos.x - p.mesh.position.x, dz = e.pos.z - p.mesh.position.z;
           if (dx * dx + dz * dz < (e.hitR + 0.25) ** 2) {
             p.hit.add(e.id);
-            enemyMgr.damage(e, p.dmg, null);
+            enemyMgr.damage(e, p.dmg, null, 'local', { crit: p.crit });
             if (!(p.kind === 'arrow' && p.pierce)) { consumed = true; break; }
           }
         }

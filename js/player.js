@@ -4,13 +4,16 @@
 // multiplayer snapshots); the THREE mesh is pure presentation.
 
 import * as THREE from 'three';
-import { WORLD, XP_LEVELS, MAX_LEVEL, itemById, spellById, MAX_SPELL_SLOTS } from './config.js';
+import { WORLD, XP_LEVELS, MAX_LEVEL, itemById, spellById, consumableById,
+         biomeIndexAt, MAX_SPELL_SLOTS } from './config.js';
 import { makeMan, makeAxe, makeBow } from './models.js';
 import { audio } from './audio.js';
 
 const MAX_CLIMB_SLOPE = 1.0; // steeper ground than this is a wall
 const GRAVITY = 34;
 const SAFE_FALL = 5.5;       // meters of free fall before damage kicks in
+const CRIT_CHANCE = 0.1;     // every attack can crit for CRIT_MULT damage
+const CRIT_MULT = 1.6;
 
 export class Player {
   constructor(scene, hooks) {
@@ -36,12 +39,22 @@ export class Player {
 
     // -- items & equipment --
     this.itemsOwned = new Set(['fists']);
-    this.equipment = { weapon: 'fists', head: null, chest: null, boots: null, pet: null, orb: null };
+    this.equipment = { weapon: 'fists', head: null, chest: null, boots: null, charm: null, pet: null, orb: null };
 
     // -- trainable stat tracks (0..10 each; pet 0..5) --
     this.stats = { range: 0, power: 0, swift: 0, pet: 0 };
     this.petDead = false;             // a dead pet stays dead until resurrected
     this.petMode = 'aggressive';      // 'aggressive' | 'defensive' | 'passive'
+
+    // -- consumables (F/G), poison, camp era perks --
+    this.consumables = { salve: 0, roast: 0 };
+    this.roastT = 0;                  // roasted-meat speed buff timer
+    this.poisonT = 0;                 // zombie poison DoT
+    this.poisonDps = 0;
+    this.poisonTickT = 0;
+    this.xpMult = 1;                  // keep perk
+    this.chopMult = 1;                // stone-house perk
+    this.shrineBonus = 0;             // permanent +max HP from claimed shrines
 
     // -- spells --
     this.spellsOwned = new Set();
@@ -166,7 +179,7 @@ export class Player {
   recompute() {
     const equipped = (slot) => itemById(this.equipment[slot]);
     const oldMax = this.maxHp || 100;
-    let hp = 100, speedMult = 1;
+    let hp = 100 + (this.shrineBonus || 0), speedMult = 1;
     for (const slot of ['head', 'chest', 'boots']) {
       const it = equipped(slot);
       if (it?.stats?.hp) hp += it.stats.hp;
@@ -186,13 +199,21 @@ export class Player {
       cd: base.cd * (1 - 0.04 * s.swift),
       range: base.range + (base.kind === 'bow' ? 2.0 : 0.1) * s.range,
     };
+    // charm: a single trinket slot with a flat percentage bonus
+    const charm = equipped('charm');
+    if (charm?.stats?.dmgPct) this.weapon.dmg *= 1 + charm.stats.dmgPct;
+    if (charm?.stats?.aspd) this.weapon.cd *= 1 - charm.stats.aspd;
     this.attackRange = this.weapon.range; // aim marker clamps to this
-    // pet training: +100 hp & +25% damage per tier (base 100 hp)
+    // pet: training (+100 hp, +25% dmg per tier) AND the owner's level
+    // (+50 hp per 2 levels, +3% dmg per level) so it stays relevant late
     const petBase = equipped('pet')?.pet;
     this.pet = petBase
-      ? { dmg: petBase.dmg * (1 + 0.25 * s.pet), maxHp: 100 + 100 * s.pet }
+      ? { dmg: petBase.dmg * (1 + 0.25 * s.pet) * (1 + 0.03 * this.level),
+          maxHp: 100 + 100 * s.pet + 50 * Math.floor(this.level / 2) }
       : null;
-    this.orb = equipped('orb')?.orb || null;
+    // orbs scale with Power training like weapons do — no dead stat slots
+    const orbBase = equipped('orb')?.orb;
+    this.orb = orbBase ? { ...orbBase, dmg: orbBase.dmg * (1 + 0.05 * s.power) } : null;
 
     this._refreshWeaponMeshes();
     this._refreshOutfit();
@@ -246,9 +267,10 @@ export class Player {
 
   // ---------- progression ----------
   addXp(n) {
-    this.xp += n;
+    this.xp += Math.round(n * (this.xpMult || 1));
     while (this.level < MAX_LEVEL && this.xp >= XP_LEVELS[this.level + 1]) {
       this.level++;
+      this.recompute(); // level-scaled stats (pet) pick the level up immediately
       this.hooks.onLevelUp(this.level);
     }
   }
@@ -288,9 +310,15 @@ export class Player {
     return this.y;
   }
 
-  takeDamage(dmg) {
+  takeDamage(dmg, src = null) {
     if (this.dead) return;
     this.hp -= dmg;
+    // rotting claws (zombies): a festering DoT — the Haunted Forest hazard
+    if (src?.poison) {
+      this.poisonT = src.poison.dur ?? 4;
+      this.poisonDps = src.poison.dps ?? 2;
+      this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2), '☠️ poisoned', '#8aff3a');
+    }
     audio.sfx('hit', 0.45, 120);
     this.hooks.onHurt?.();
     if (this.hp <= 0) {
@@ -298,6 +326,20 @@ export class Player {
       this.dead = true;
       this.hooks.onDeath();
     }
+  }
+
+  // consumables bought in the Supplies tab, used in the field with F / G
+  useConsumable(id) {
+    if (this.dead || (this.consumables[id] ?? 0) <= 0) return false;
+    const c = consumableById(id);
+    if (!c) return false;
+    this.consumables[id]--;
+    this.hp = Math.min(this.maxHp, this.hp + c.heal);
+    if (c.speedDur) this.roastT = c.speedDur;
+    this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
+      `${c.icon} +${c.heal} ❤️${c.speedDur ? ' +🏃' : ''}`, '#7fe07f');
+    audio.sfx('purchase', 0.4, 250);
+    return true;
   }
 
   // ---------- per-frame ----------
@@ -309,7 +351,20 @@ export class Player {
     // timed effects
     this.hasteT = Math.max(0, this.hasteT - dt);
     this.rageT = Math.max(0, this.rageT - dt);
+    this.roastT = Math.max(0, this.roastT - dt);
     for (const id in this.spellCds) this.spellCds[id] = Math.max(0, this.spellCds[id] - dt);
+
+    // poison ticks in whole numbers once a second so the popups stay readable
+    if (this.poisonT > 0) {
+      this.poisonT -= dt;
+      this.poisonTickT -= dt;
+      if (this.poisonTickT <= 0) {
+        this.poisonTickT = 1;
+        this.hp -= this.poisonDps;
+        this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 1.9), `-${this.poisonDps} ☠️`, '#8aff3a');
+        if (this.hp <= 0) { this.hp = 0; this.dead = true; this.hooks.onDeath(); return; }
+      }
+    }
 
     // stunned: frozen in place, can't move or attack
     if (this.stunT > 0) {
@@ -355,9 +410,11 @@ export class Player {
       if (moving) {
         const len = Math.hypot(mx, mz);
         mx /= len; mz /= len;
-        // paddling is a touch slower than running
+        // paddling is a touch slower than running; roast buff speeds you up;
+        // the swamp (ctx.envSpeedMult) drags at your boots
         const onWater = ctx.boat && world.isWater?.(this.pos.x, this.pos.z);
-        const speed = this.speed * (onWater ? 0.85 : 1);
+        const speed = this.speed * (onWater ? 0.85 : 1)
+          * (this.roastT > 0 ? 1.1 : 1) * (ctx.envSpeedMult ?? 1);
         // cliffs are walls: block any step that climbs too steeply (walking
         // DOWN or falling off is always allowed); sliding along one is fine
         const h0 = world.heightAt(this.pos.x, this.pos.z);
@@ -450,7 +507,7 @@ export class Player {
     if (dist > maxDist + extraR) return false;
     if (dist < 0.4) return true;
     const dot = (dx / dist) * this.facing.x + (dz / dist) * this.facing.z;
-    return dot > 0.45; // ~±63°
+    return dot > 0.55; // ~±45° — swings must actually be aimed
   }
 
   // Visible swing arc — a crescent that sweeps and fades with the strike.
@@ -577,9 +634,10 @@ export class Player {
     this._spawnSlash();
     audio.sfx('attack_melee', 0.4);
 
+    const crit = Math.random() < CRIT_CHANCE;
     for (const e of enemyMgr.alive()) {
       if (this._inArc(e.pos.x, e.pos.z, w.range, e.hitR)) {
-        enemyMgr.damage(e, this.dmgMult * w.dmg, this.facing);
+        enemyMgr.damage(e, this.dmgMult * w.dmg * (crit ? CRIT_MULT : 1), this.facing, 'local', { crit });
       }
     }
 
@@ -599,7 +657,7 @@ export class Player {
                     - ((b.x - this.pos.x) ** 2 + (b.z - this.pos.z) ** 2));
     if (trees.length && w.chop > 0) {
       const tree = trees[0];
-      const wood = world.chop(tree, w.chop, this.pos);
+      const wood = world.chop(tree, w.chop * this.chopMult, this.pos);
       this.hooks.onChop?.(tree, w.chop); // co-op keeps the partner's forest in sync
       if (wood > 0) {
         const dropPos = new THREE.Vector3(tree.x, 0, tree.z);
@@ -618,11 +676,16 @@ export class Player {
         .sort((a, b) => (a.x - this.pos.x) ** 2 + (a.z - this.pos.z) ** 2
                       - ((b.x - this.pos.x) ** 2 + (b.z - this.pos.z) ** 2));
       if (rocks.length) {
-        const stone = world.mineRock(rocks[0], w.chop, this.pos);
+        const stone = world.mineRock(rocks[0], w.chop * this.chopMult, this.pos);
         if (stone > 0) {
           const dropPos = new THREE.Vector3(rocks[0].x, 0, rocks[0].z);
           pickups.spawn('stone', Math.ceil(stone / 2), dropPos, 1.0);
           pickups.spawn('stone', Math.floor(stone / 2) || 1, dropPos, 1.0);
+          // Dark Forest onward, rocks carry veins of raw iron
+          if (biomeIndexAt(this.pos.x, this.pos.z) >= 1 && Math.random() < 0.15) {
+            pickups.spawn('iron', 1, dropPos, 0.8);
+            this.hooks.popup(dropPos.clone().setY(1.6), '🔩 iron vein!', '#c8d0d8');
+          }
         }
       }
     } else if (w.chop < 1 && !this.hintedRock
@@ -639,9 +702,10 @@ export class Player {
     this.attackT = 0.25;
     audio.sfx('attack_ranged', 0.4);
     const speed = 24;
+    const crit = Math.random() < CRIT_CHANCE;
     const origin = this.pos.clone().add(this.facing.clone().multiplyScalar(0.6)).setY(this.mesh.position.y + 1.1);
     projectiles.spawnArrow(origin, this.facing.clone(), {
-      dmg: this.dmgMult * w.dmg, pierce: w.pierce, speed,
+      dmg: this.dmgMult * w.dmg * (crit ? CRIT_MULT : 1), pierce: w.pierce, speed, crit,
       life: w.range / speed, // arrows fall dead at the weapon's max range
     });
   }

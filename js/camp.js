@@ -49,10 +49,16 @@ export class Camp {
 
   era() { return ERAS[Math.min(this.levels.home, ERAS.length - 1)]; }
 
-  // max-hp bonus from the home building
+  // max-hp bonus from the home building — worth building FOR, not box-ticking
   homeHpBonus() {
-    return [0, 0, 15, 40, 80][Math.min(this.levels.home, 4)];
+    return [0, 20, 60, 120, 180][Math.min(this.levels.home, 4)];
   }
+
+  // secondary era perks: cabin pulls loot from further, the stone house
+  // swings harder at trees & rocks, the keep sharpens your wits (+XP)
+  magnetMult() { return this.has('cabin') ? 1.3 : 1; }
+  chopMult() { return this.has('stonehouse') ? 1.25 : 1; }
+  xpMult() { return this.has('keep') ? 1.15 : 1; }
 
   buildingInfo(id) {
     const def = CAMP_BUILDINGS.find(b => b.id === id);
@@ -79,12 +85,13 @@ export class Camp {
     return true;
   }
 
-  _placeMesh(id) {
+  _placeMesh(id, spotOverride = null) {
     if (this.meshes[id]) this.scene.remove(this.meshes[id]);
     // the graveyard is a remote shrine built wherever the player stands
-    const spot = id === 'grave'
-      ? { x: Math.round(this.player.pos.x), z: Math.round(this.player.pos.z) }
-      : SPOTS[id];
+    const spot = spotOverride
+      ?? (id === 'grave'
+        ? { x: Math.round(this.player.pos.x), z: Math.round(this.player.pos.z) }
+        : SPOTS[id]);
     let mesh;
     if (id === 'home') {
       const lvl = this.levels.home;

@@ -57,7 +57,47 @@ export class UI {
     const weapon = itemById(player.equipment.weapon);
     $('weapon-display').innerHTML = `${itemIcon(weapon)} ${weapon.name} <kbd>Q</kbd>`;
 
+    // critical health: pulsing bar + red screen edges
+    const critHp = !player.dead && player.hp > 0 && player.hp < player.maxHp * 0.2;
+    document.querySelector('.bar-wrap.hp').classList.toggle('crit', critHp);
+    $('lowhp').classList.toggle('hidden', !critHp);
+
+    // pet status line — the P/R controls are invisible without it
+    const petEl = $('pet-display');
+    if (player.equipment.pet) {
+      petEl.classList.remove('hidden');
+      const MODES = { aggressive: '🗡️ Aggressive', defensive: '🛡️ Defensive', passive: '💤 Passive' };
+      petEl.innerHTML = player.petDead
+        ? '🐺 💀 <i>down</i> — revive at home/graveyard <kbd>R</kbd>'
+        : `🐺 ${MODES[player.petMode] ?? player.petMode} <kbd>P</kbd>`;
+    } else petEl.classList.add('hidden');
+
+    // carried supplies (F/G consumables)
+    const supEl = $('supply-display');
+    const { salve = 0, roast = 0 } = player.consumables ?? {};
+    if (salve > 0 || roast > 0) {
+      supEl.classList.remove('hidden');
+      supEl.innerHTML = `${salve > 0 ? `🧪×${salve} <kbd>F</kbd>` : ''} ${roast > 0 ? `🍗×${roast} <kbd>G</kbd>` : ''}`;
+    } else supEl.classList.add('hidden');
+
     this.updateSpellbar(player);
+  }
+
+  // quick visual confirmation that a spell actually fired
+  flashSpell(slotIndex) {
+    const el = $('spellbar').children[slotIndex];
+    if (!el) return;
+    el.classList.remove('cast');
+    void el.offsetWidth;
+    el.classList.add('cast');
+  }
+
+  // level-up: golden screen-edge flash (the 3D ring gets lost in combat)
+  goldFlash() {
+    const el = $('gold-flash');
+    el.classList.remove('anim');
+    void el.offsetWidth;
+    el.classList.add('anim');
   }
 
   updateSpellbar(player) {
@@ -112,13 +152,14 @@ export class UI {
   }
 
   // ---------- floating combat text ----------
-  popup(worldPos, text, color) {
+  popup(worldPos, text, color, cls = '') {
     const el = document.createElement('div');
-    el.className = 'popup';
+    el.className = 'popup' + (cls ? ' ' + cls : '');
     el.textContent = text;
     el.style.color = color;
     $('popups').appendChild(el);
-    this.popups.push({ el, pos: worldPos.clone(), t: 0 });
+    // big popups (crits, ENRAGED!) linger a beat longer
+    this.popups.push({ el, pos: worldPos.clone(), t: 0, life: cls.includes('big') ? 1.5 : 1.1 });
   }
 
   // ---------- persistent world-tracking labels (boss skulls, HP bars) ----------
@@ -139,12 +180,13 @@ export class UI {
     const v = new THREE.Vector3();
     for (let i = this.popups.length - 1; i >= 0; i--) {
       const p = this.popups[i];
+      const life = p.life ?? 1.1;
       p.t += dt;
       p.pos.y += dt * 1.2;
       v.copy(p.pos).project(camera);
       p.el.style.transform = `translate(${(v.x * 0.5 + 0.5) * window.innerWidth}px, ${(-v.y * 0.5 + 0.5) * window.innerHeight}px)`;
-      p.el.style.opacity = Math.max(0, 1 - p.t / 1.1);
-      if (p.t > 1.1) { p.el.remove(); this.popups.splice(i, 1); }
+      p.el.style.opacity = Math.max(0, 1 - p.t / life);
+      if (p.t > life) { p.el.remove(); this.popups.splice(i, 1); }
     }
     for (const t of this.trackers.values()) {
       const pos = t.getPos();

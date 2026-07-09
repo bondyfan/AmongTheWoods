@@ -294,6 +294,67 @@ export function makeSheep() {
   return g;
 }
 
+// ---------- Landmarks (POIs) ----------
+// An ancient shrine: stone dais with a floating glowing crystal.
+export function makeShrine() {
+  const g = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.9, 0.5, 8), mat(0x8f8a7c));
+  base.position.y = 0.25;
+  g.add(base);
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + 0.4;
+    const pillar = box(0.35, 1.7, 0.35, 0x7c786c);
+    pillar.position.set(Math.cos(a) * 1.3, 1.3, Math.sin(a) * 1.3);
+    g.add(pillar);
+  }
+  const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.45),
+    new THREE.MeshLambertMaterial({ color: 0x7fd1ff, emissive: 0x2a6a9e, transparent: true, opacity: 0.9 }));
+  crystal.position.y = 1.7;
+  g.add(crystal);
+  g.userData.crystal = crystal;
+  return g;
+}
+
+// A looming rune monolith.
+export function makeMonolith() {
+  const g = new THREE.Group();
+  const slab = box(1.1, 4.2, 0.7, 0x4c5157);
+  slab.position.y = 2.1;
+  slab.rotation.y = 0.3;
+  g.add(slab);
+  for (const [y, w] of [[1.2, 0.5], [2.2, 0.4], [3.1, 0.55]]) {
+    const rune = box(w, 0.12, 0.06, 0x9adcff);
+    rune.position.set(0, y, 0.38);
+    rune.rotation.y = 0.3;
+    g.add(rune);
+  }
+  const foot = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.4, 0.4, 7), mat(0x666c75));
+  foot.position.y = 0.2;
+  g.add(foot);
+  return g;
+}
+
+// A half-buried crypt: stone walls, a dark doorway, guarded treasure.
+export function makeCrypt() {
+  const g = new THREE.Group();
+  const body = box(3.6, 2, 2.8, 0x8f8a7c);
+  body.position.y = 1;
+  g.add(body);
+  const roof = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 2.6, 1.4, 4), mat(0x6e7280));
+  roof.position.y = 2.7;
+  roof.rotation.y = Math.PI / 4;
+  g.add(roof);
+  const door = box(1, 1.4, 0.15, 0x1c1a18);
+  door.position.set(0, 0.7, 1.42);
+  g.add(door);
+  for (const dx of [-1.4, 1.4]) {
+    const skull = sphere(0.22, 0xf0ead8, 6);
+    skull.position.set(dx, 2.1, 1.3);
+    g.add(skull);
+  }
+  return g;
+}
+
 // flat ground cobweb: concentric rings + spokes, laid around spider packs
 export function makeCobweb(rng = Math.random) {
   const g = new THREE.Group();

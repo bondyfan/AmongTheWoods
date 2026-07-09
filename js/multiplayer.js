@@ -77,6 +77,7 @@ class RemotePlayer {
     this.moving = !!s.mv;
     if (s.atk && this.attackT <= 0) this.attackT = 0.25;
     this.dead = !!s.dead;
+    this.downed = !!s.dn; // co-op: down but revivable
     if (s.w !== this.weaponId) { this.weaponId = s.w; this._refreshWeapon(); }
 
     // partner's pet: a mirrored wolf trotting at their side
@@ -479,6 +480,8 @@ export class Multiplayer {
     this._snapT = 0;
     this._deadSince = 0;
     this._posHist = []; // my recent positions — lag-compensated hit validation
+    this.downedUntil = null; // co-op: I'm down, partner can revive me until then
+    this._campSynced = false;
 
     this.arena = {
       active: false, nextAt: 0, prevPos: null,
@@ -644,12 +647,30 @@ export class Multiplayer {
       hp: Math.round(p.hp), mhp: p.maxHp, lv: p.level,
       w: p.equipment.weapon, mv: (ctx.input.moveX || ctx.input.moveZ) ? 1 : 0,
       atk: p.attackT > 0 ? 1 : 0, dead: p.dead ? 1 : 0,
+      dn: (p.dead && this.downedUntil) ? 1 : 0,
       pet: (p.equipment.pet && !p.petDead) ? p.equipment.pet : 0,
     }, rate);
 
     this.remote?.update(dt);
     this.shadow?.update(dt, p);
     this.mobaShadow?.update(dt);
+
+    // downed: live countdown; nobody came → bleed out with the full penalty
+    const downedEl = document.getElementById('downed-hint');
+    if (this.downedUntil && p.dead) {
+      const left = Math.max(0, this.downedUntil - performance.now());
+      if (downedEl) {
+        downedEl.textContent = `☠️ DOWNED — your partner can revive you… ${Math.ceil(left / 1000)} s`;
+        downedEl.classList.remove('hidden');
+      }
+      if (left <= 0) this._bleedOut();
+    } else downedEl?.classList.add('hidden');
+
+    // a freshly joined guest gets the camp state once
+    if (this.mode === 'coop' && this.isHost && !this._campSynced && this.remote?.lastSeen) {
+      this._campSynced = true;
+      this.sendCampSync();
+    }
 
     // host: stream the world snapshot. Only entities near EITHER player are
     // sent — a full-map snapshot grows unbounded (stale pickups, far enemies)
@@ -686,7 +707,10 @@ export class Multiplayer {
     const el = document.getElementById('mp-status');
     if (!el) return;
     const r = this.remote;
-    let line = `${this.isHost ? 'P2' : 'P1'} Lv${r?.level ?? '?'} ❤️${r ? Math.max(0, Math.round(r.hp)) : '?'}`;
+    let line = `${this.isHost ? 'P2' : 'P1'} Lv${r?.level ?? '?'} ❤️${r ? Math.max(0, Math.round(r.hp)) : '?'}/${r?.maxHp ?? '?'}`;
+    if (r?.dead) line = (r.downed ? '☠️ PARTNER DOWN — go revive them! · ' : '💀 partner out · ') + line;
+    const frac = r ? Math.max(0, r.hp) / (r.maxHp || 100) : 1;
+    el.style.color = r?.dead ? '#ff6a5a' : frac > 0.5 ? '#cfe3b8' : frac > 0.25 ? '#ffd23a' : '#ff8a6a';
     if (this.mode === 'pvp' && !this.arena.active && this.meta?.nextArenaAt) {
       const s = Math.max(0, Math.ceil((this.meta.nextArenaAt - Date.now()) / 1000));
       line = `⚔️ Arena in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')} · ` + line;
@@ -830,10 +854,25 @@ export class Multiplayer {
   handleLocalDeath() {
     if (!this.active) return false;
     if (this.arena.active) { this._onArenaDeath(); return true; }
-    // out in the world: respawn at the spawn cottage — lose a level and HALF
-    // the carried meat spills onto the ground where you fell
     const { ctx } = this;
     const p = ctx.player;
+    if (this.mode === 'coop' && this.remote && !this.remote.dead) {
+      // DOWNED: the partner has 20 s to reach you and press E — a rescue
+      // costs you nothing; bleeding out costs the usual level + half loot
+      this.downedUntil = performance.now() + 20000;
+      p.mesh.rotation.z = Math.PI / 2;
+      ctx.ui.toast('☠️ You are DOWN! Your partner has 20 s to revive you (E)…', 'boss');
+      return true;
+    }
+    this._bleedOut();
+    return true;
+  }
+
+  // the un-rescued death: level lost, half of everything spilled, wake at camp
+  _bleedOut() {
+    const { ctx } = this;
+    const p = ctx.player;
+    this.downedUntil = null;
     ctx.markDeath?.(p.pos);
     const dropped = ctx.dropHalfMeat(p.pos.clone());
     p.loseLevel();
@@ -843,8 +882,36 @@ export class Multiplayer {
       if (!this.active) return;
       p.revive(1);
       p.pos.set(0, 0, 3);
+      p.mesh.rotation.z = 0;
     }, 3000);
+  }
+
+  // E near a downed partner revives them (they get half health, no penalty)
+  revivablePartner() {
+    return this.active && this.mode === 'coop' && this.remote?.dead && this.remote?.downed
+      && !this.ctx.player.dead
+      && Math.hypot(this.ctx.player.pos.x - this.remote.targetPos.x,
+                    this.ctx.player.pos.z - this.remote.targetPos.z) < 3.2;
+  }
+
+  tryRevivePartner() {
+    if (!this.revivablePartner()) return false;
+    WoodsNet.sendEvent({ type: 'revive' });
+    this.ctx.ui.toast('💚 You pull your partner back to their feet!', 'level');
+    audio.sfx('purchase', 0.5, 200);
     return true;
+  }
+
+  sendCampSync() {
+    if (!this.active || this.mode !== 'coop' || !this.ctx.camp) return;
+    const camp = this.ctx.camp;
+    WoodsNet.sendEvent({ type: 'camp', lv: camp.levels, st: camp.storage,
+      ...(camp.gravePos ? { gp: camp.gravePos } : {}) });
+  }
+
+  sendPing(x, z) {
+    if (!this.active) return;
+    WoodsNet.sendEvent({ type: 'ping', x: +x.toFixed(1), z: +z.toFixed(1) });
   }
 
   // co-op: forward kill credit to whoever landed the killing blow
@@ -949,6 +1016,18 @@ export class Multiplayer {
         break;
       }
       case 'berry': ctx.world.applyRemoteBerry?.(ev.k); break; // partner emptied a bush
+      case 'revive': { // partner picked me up — half health, NO penalty
+        if (this.downedUntil && p.dead) {
+          this.downedUntil = null;
+          p.revive(0.5);
+          p.mesh.rotation.z = 0;
+          ctx.ui.toast('💚 Your partner revived you!', 'level');
+          audio.sfx('evolve_ready', 0.5);
+        }
+        break;
+      }
+      case 'camp': ctx.onCampSync?.(ev.lv, ev.st, ev.gp); break; // shared base
+      case 'ping': ctx.showPing?.(ev.x, ev.z); break;
       case 'win': ctx.onCoopWin?.(); break;
 
       // ---------- MOBA ----------
@@ -983,6 +1062,7 @@ export class Multiplayer {
     this.shadow?.dispose(); this.shadow = null;
     this.mobaShadow?.dispose(); this.mobaShadow = null;
     document.getElementById('mp-status')?.classList.add('hidden');
+    document.getElementById('downed-hint')?.classList.add('hidden');
     WoodsNet.leave();
   }
 }

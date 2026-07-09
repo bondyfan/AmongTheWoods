@@ -53,7 +53,16 @@ const roomPath = (code) => "games/woods-" + code;
 export const WoodsNet = {
     role: null,        // 'host' | 'guest'
     code: null,
-    uid: "u" + Math.random().toString(36).slice(2, 10),
+    uid: (() => {
+        // persisted so a dropped guest can rejoin the same room with the code
+        let u = null;
+        try { u = localStorage.getItem("atw-uid"); } catch {}
+        if (!u) {
+            u = "u" + Math.random().toString(36).slice(2, 10);
+            try { localStorage.setItem("atw-uid", u); } catch {}
+        }
+        return u;
+    })(),
     partnerUid: null,
     _unsubs: [],
     _lastStateSend: 0,
@@ -89,7 +98,7 @@ export const WoodsNet = {
         const snap = await withTimeout(get(ref(db, roomPath(code) + "/meta")), DB_UNREACHABLE);
         if (!snap.exists()) throw new Error("Game " + code + " not found.");
         const meta = snap.val();
-        if (meta.guest) throw new Error("Game " + code + " is already full.");
+        if (meta.guest && meta.guest !== this.uid) throw new Error("Game " + code + " is already full.");
         this.role = "guest";
         this.code = code;
         this.partnerUid = meta.host;
