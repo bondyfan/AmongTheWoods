@@ -5,7 +5,7 @@
 
 import * as THREE from 'three';
 import { WORLD, XP_LEVELS, MAX_LEVEL, itemById, spellById, consumableById,
-         biomeIndexAt, MAX_SPELL_SLOTS } from './config.js';
+         biomeIndexAt, RESOURCES, MAX_SPELL_SLOTS } from './config.js';
 import { makeMan, makeAxe, makeBow, makePickaxe } from './models.js';
 import { audio } from './audio.js';
 
@@ -43,6 +43,7 @@ export class Player {
     // invItems = UNEQUIPPED copies in the backpack (duplicates allowed);
     // equipped pieces live only in `equipment`. 'fists' are innate.
     this.invItems = [];
+    this.invSlots = 10; // backpack stack slots (upgradeable in Supplies)
     this.equipment = { weapon: 'fists', head: null, chest: null, boots: null, charm: null, companion: null };
 
     // -- trainable stat tracks (0..10 each; pet 0..5) --
@@ -132,6 +133,19 @@ export class Player {
     else this.equipment[slot] = null;
     this.recompute();
     this.hooks.onEquipChange?.(slot);
+  }
+
+  // one backpack SLOT per stack: each resource kind, each consumable kind,
+  // each distinct piece of gear (equipped gear doesn't count — it's worn)
+  invCellCount() {
+    let cells = new Set(this.invItems).size;
+    for (const k of RESOURCES) if (this[k] > 0) cells++;
+    for (const c of ['salve', 'roast']) if ((this.consumables[c] ?? 0) > 0) cells++;
+    return cells;
+  }
+
+  invFullFor(id) {
+    return this.invCellCount() >= this.invSlots && !this.invItems.includes(id);
   }
 
   // remove ONE copy (equipped first if that's where it lives) — for drops
@@ -232,6 +246,13 @@ export class Player {
     if (this.maxHp > oldMax) this.hp += this.maxHp - oldMax;
     this.hp = Math.min(this.hp, this.maxHp);
     this.speed = 8.5 * speedMult;
+    // passive regeneration: everyone knits back slowly; gear can stack it up
+    let regen = 0.1;
+    for (const slot of ['head', 'chest', 'boots', 'charm']) {
+      const it = equipped(slot);
+      if (it?.stats?.regen) regen += it.stats.regen;
+    }
+    this.hpRegen = regen;
 
     // effective weapon = base weapon + training (range/power/swift tracks)
     const base = equipped('weapon')?.weapon || itemById('fists').weapon;
@@ -410,6 +431,7 @@ export class Player {
     this.hasteT = Math.max(0, this.hasteT - dt);
     this.rageT = Math.max(0, this.rageT - dt);
     this.roastT = Math.max(0, this.roastT - dt);
+    if (this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.hpRegen * dt);
     for (const id in this.spellCds) this.spellCds[id] = Math.max(0, this.spellCds[id] - dt);
 
     // poison ticks in whole numbers once a second so the popups stay readable

@@ -114,6 +114,15 @@ export const ITEM_ICONS = {
     <ellipse cx="14" cy="6.5" rx="2.5" ry="3.2" fill="${LEATHER}" stroke="${LEATHER_D}" stroke-width="1.3" transform="rotate(-12 14 6.5)"/>
     <ellipse cx="19" cy="6.5" rx="2.5" ry="3.2" fill="${LEATHER}" stroke="${LEATHER_D}" stroke-width="1.3" transform="rotate(12 19 6.5)"/>`),
   // ===== charms =====
+  copperRing: S(`
+    <circle cx="16" cy="18" r="8.5" fill="none" stroke="#c47a3a" stroke-width="4"/>
+    <circle cx="16" cy="18" r="8.5" fill="none" stroke="#8a4f1e" stroke-width="1" opacity="0.6"/>
+    <path d="M12.5 7h7l-1.6 3.4h-3.8z" fill="#6fd86f" stroke="#2a8a45" stroke-width="1.2" stroke-linejoin="round"/>`),
+  bloodAmulet: S(`
+    <path d="M7 5c3 5 7 8 9 8s6-3 9-8" fill="none" stroke="${LEATHER_D}" stroke-width="1.8"/>
+    <path d="M16 12c-3 4-4.6 6.6-4.6 9.2 0 3 2 5.2 4.6 5.2s4.6-2.2 4.6-5.2c0-2.6-1.6-5.2-4.6-9.2z"
+      fill="#c42828" stroke="#701212" stroke-width="1.5" stroke-linejoin="round"/>
+    <circle cx="14.4" cy="20" r="1.1" fill="#ff9a9a" opacity="0.85"/>`),
   wolfPendant: S(`
     <path d="M6 6c3 5 8 8 10 8s7-3 10-8" fill="none" stroke="${LEATHER_D}" stroke-width="1.8"/>
     <path d="M16 13c-2.4 0-4 1.6-4 3.6 0 3.6 2.4 8 4 10.4 1.6-2.4 4-6.8 4-10.4 0-2-1.6-3.6-4-3.6z"
@@ -123,6 +132,8 @@ export const ITEM_ICONS = {
     <path d="M7 5c3 5 7 8 9 8s6-3 9-8" fill="none" stroke="${LEATHER_D}" stroke-width="1.8"/>
     <path d="M16 12c-4 3-5 9-3 15 1.2-1 2-2.4 2.4-4 .4 1.2 1 2.2 1.8 3 .4-1.6 1-3.2 1-5 1 .8 1.6 2 1.8 3.4 2-5 .6-10-4-12.4z"
       fill="#c9b8ff" stroke="#6e4fa8" stroke-width="1.4" stroke-linejoin="round"/>`),
+  frostSphere: orb('#bfe6ff',
+    `<path d="M16 10v12M11 13l10 6M21 13l-10 6" stroke="#e6f7ff" stroke-width="1.3" opacity="0.9"/>`),
   // ===== consumables =====
   salve: S(`
     <path d="M12 4h8v3l-2 2v3c3 1.5 5 4.5 5 8 0 4.5-3.5 8-7 8s-7-3.5-7-8c0-3.5 2-6.5 5-8V9l-2-2z"
@@ -217,8 +228,19 @@ export const ITEM_ICONS = {
     <path d="M8 12C10 5 18 1 26 4c-1 2-2.5 3.6-4.5 4.8 2.2.6 4 1.8 5.5 3.7-7 3.5-15 1.5-19-.5z"
       fill="${IRON}" stroke="${IRON_D}" stroke-width="1.5" stroke-linejoin="round"/>
     <path d="M12 10.5l4-4" stroke="#ffffff" stroke-width="1.2" opacity="0.7"/>`),
+  huntSpear: S(`
+    <line x1="6" y1="28" x2="24" y2="6" stroke="${WOOD}" stroke-width="2.6" stroke-linecap="round"/>
+    <path d="M22 3c2.5-.8 5-.8 7 .3-.2 2.3-1.3 4.5-3.3 6.2L21.5 9z"
+      fill="${STONE}" stroke="${STONE_D}" stroke-width="1.4" stroke-linejoin="round"/>
+    <path d="M20 12l-2 2" stroke="${LEATHER_D}" stroke-width="2" stroke-linecap="round"/>`),
+  obsidianPick: S(`${HAFT}
+    <path d="M8 12C10 5 18 1 26 4c-1 2-2.5 3.6-4.5 4.8 2.2.6 4 1.8 5.5 3.7-7 3.5-15 1.5-19-.5z"
+      fill="#3a3440" stroke="#191521" stroke-width="1.5" stroke-linejoin="round"/>
+    <path d="M12 10.5l4-4" stroke="#b48cff" stroke-width="1.3" opacity="0.9"/>`),
   // -- weapons: ranged --
   huntingBow: bow(WOOD, WOOD_D),
+  recurveBow: bow('#8a5a1a', '#5c3a10', ARROW,
+    `<path d="M9 3c-2 0-3 1.5-2.6 3M9 29c-2 0-3-1.5-2.6-3" fill="none" stroke="#5c3a10" stroke-width="2" stroke-linecap="round"/>`),
   longbow: bow(LEATHER, LEATHER_D, ARROW),
   rapidBow: bow(WOOD, WOOD_D, ARROW,
     `<path d="M18 7c3-1.5 6-1.5 9 0M18 25c3 1.5 6 1.5 9 0" fill="none" stroke="#6fd8d0" stroke-width="1.8" stroke-linecap="round"/>`),
@@ -244,6 +266,14 @@ export const ITEM_ICONS = {
     <circle cx="12.5" cy="16" r="1.8" fill="#33373c"/>
     <circle cx="19.5" cy="16" r="1.8" fill="#33373c"/>
     <path d="M10 25l1.6-3 1.6 3 1.6-3 1.6 3 1.6-3 1.6 3 1.6-3 1.6 3" fill="none" stroke="#f0ead8" stroke-width="1.6"/>`),
+  boneHelm: S(`
+    <path d="M7 20c0-8 4-13 9-13s9 5 9 13l-2 4H9z" fill="#e8e0cc" stroke="#a89f88" stroke-width="1.6" stroke-linejoin="round"/>
+    <path d="M10 12l4 3M22 12l-4 3" stroke="#a89f88" stroke-width="1.4" stroke-linecap="round"/>
+    <path d="M9 24h14" stroke="#8a5f33" stroke-width="2" stroke-linecap="round"/>`),
+  ironHelm: S(`
+    <path d="M7 19c0-8 4-12 9-12s9 4 9 12l-1.5 5h-15z" fill="${IRON}" stroke="${IRON_D}" stroke-width="1.6" stroke-linejoin="round"/>
+    <rect x="14.6" y="14" width="2.8" height="9" fill="${IRON_D}"/>
+    <path d="M9 17h5M18 17h5" stroke="${IRON_D}" stroke-width="1.6" stroke-linecap="round"/>`),
   // -- chest --
   leatherArmor: S(`
     <path d="M10 5l6 2 6-2 5 5-3 4v13H8V14L5 10z"
@@ -262,12 +292,20 @@ export const ITEM_ICONS = {
     <circle cx="12" cy="15" r="1.2" fill="${IRON}"/><circle cx="20" cy="15" r="1.2" fill="${IRON}"/>
     <circle cx="12" cy="21" r="1.2" fill="${IRON}"/><circle cx="20" cy="21" r="1.2" fill="${IRON}"/>
     <path d="M8 18h16" stroke="#3f2a17" stroke-width="1.4" opacity="0.7"/>`),
+  ironChest: S(`
+    <path d="M10 5l6 2 6-2 5 5-3 4v13H8V14L5 10z"
+      fill="${IRON}" stroke="${IRON_D}" stroke-width="1.6" stroke-linejoin="round"/>
+    <path d="M16 7v20" stroke="${IRON_D}" stroke-width="1.3" opacity="0.6"/>
+    <circle cx="12" cy="14" r="1" fill="${IRON_D}"/><circle cx="20" cy="14" r="1" fill="${IRON_D}"/>
+    <circle cx="12" cy="21" r="1" fill="${IRON_D}"/><circle cx="20" cy="21" r="1" fill="${IRON_D}"/>`),
   // -- boots --
   swiftBoots: S(`
     <path d="M10 12h9v5c4 1 7 3 8 7 0 2-1 3-3 3H10c-1.5 0-2-1-2-2.5V14c0-1.5.8-2 2-2z"
       fill="${LEATHER}" stroke="${LEATHER_D}" stroke-width="1.6" stroke-linejoin="round"/>
     <path d="M8 15l11 3M8 19l12 2" stroke="#e3cfa9" stroke-width="1.8"/>`),
   huntersBoots: boot(LEATHER, LEATHER_D),
+  ironBoots: boot(IRON, IRON_D,
+    `<path d="M24 22c2 .6 3.6 1.8 4.4 3.6" fill="none" stroke="${IRON_D}" stroke-width="2.2" stroke-linecap="round"/>`),
   windBoots: boot('#8f9ba8', '#525f6e',
     `<path d="M20 6c3-2.5 7-3 10-2-1.5 2.5-4 4.5-7 5M19 11c2.6-2 6-2.6 8.6-1.8-1.3 2-3.4 3.6-5.8 4.2"
       fill="#e9f2fa" stroke="#8fb6d6" stroke-width="1.2" stroke-linejoin="round"/>`),
@@ -286,6 +324,30 @@ export const ITEM_ICONS = {
     <circle cx="18.8" cy="17.8" r="2" fill="#ffffff" opacity="0.7"/>
     <ellipse cx="16" cy="16.5" rx="14" ry="4.5" fill="none" stroke="#7fd1ff" stroke-width="1.6" opacity="0.8" transform="rotate(-18 16 16.5)"/>`),
 };
+
+// ===== resource icons (drawn, not emoji) =====
+export const RES_SVG = {
+  // Ethereal Essence: a glowing green vial — the arcane currency of the deep woods
+  essence: S(`
+    <path d="M13 3h6v3l-1.6 1.6v3.2c3.2 1.6 5.4 4.9 5.4 8.6 0 5-3.9 8.6-6.8 8.6h-0.2c-2.9 0-6.8-3.6-6.8-8.6 0-3.7 2.2-7 5.4-8.6V7.6L13 6z"
+      fill="#bfe8cc" stroke="#3d8a55" stroke-width="1.4" stroke-linejoin="round" opacity="0.55"/>
+    <path d="M10.6 17c-.4 1-.6 2.1-.6 3.4 0 4 3 6.8 5.6 6.8h.8c2.6 0 5.6-2.8 5.6-6.8 0-1.3-.2-2.4-.6-3.4z"
+      fill="#5fe07f" stroke="#2a8a45" stroke-width="1.2"/>
+    <circle cx="14" cy="21" r="1" fill="#d8ffe4"/>
+    <circle cx="18.4" cy="24" r="0.8" fill="#d8ffe4"/>
+    <rect x="12.2" y="2" width="7.6" height="2.4" rx="1.1" fill="#8a5a2b" stroke="#5f3d1c" stroke-width="1"/>`),
+  // a proper tanned hide instead of the brown square emoji
+  hide: S(`
+    <path d="M16 4c2.8 0 4.2 1.8 6.6 2s4.8 1.6 4.4 4.4c-.3 2.2 1.2 3.4 1 5.6-.2 2.4-2 3-2.2 5.2-.2 2.4 .6 4.8-1.8 6-2.2 1.1-3.6-.4-6-.2-1.4.1-2.6.1-4 0-2.4-.2-3.8 1.3-6 .2-2.4-1.2-1.6-3.6-1.8-6-.2-2.2-2-2.8-2.2-5.2-.2-2.2 1.3-3.4 1-5.6-.4-2.8 2-4.2 4.4-4.4S13.2 4 16 4z"
+      fill="#b5824a" stroke="#7c5426" stroke-width="1.5" stroke-linejoin="round"/>
+    <path d="M11 11c3 2 7 2 10 0M10 17c4 2.5 8 2.5 12 0M11.5 23c3 1.8 6 1.8 9 0"
+      fill="none" stroke="#8a5f33" stroke-width="1.1" opacity="0.6"/>`),
+};
+
+export function resIcon(key, fallback = '') {
+  const svg = RES_SVG[key];
+  return svg ? `<span class="item-icon">${svg}</span>` : fallback;
+}
 
 // Inline-HTML icon for an item; falls back to the emoji for anything
 // without a custom vector (spells, stat tracks, camp buildings…).

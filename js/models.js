@@ -371,6 +371,53 @@ export function makeCrypt() {
   return g;
 }
 
+// A wandering blacksmith: anvil, glowing forge brazier and the smith himself.
+// Weapons & gear can ONLY be forged here.
+export function makeBlacksmith() {
+  const g = new THREE.Group();
+  // anvil on a stump
+  const stump = cyl(0.42, 0.5, 0.5, 0x6b4a2d, 7);
+  stump.position.set(0.7, 0.25, 0);
+  const anvil = box(0.7, 0.24, 0.3, 0x4c5157);
+  anvil.position.set(0.7, 0.62, 0);
+  const horn = box(0.24, 0.14, 0.2, 0x4c5157);
+  horn.position.set(1.15, 0.6, 0);
+  // forge brazier with embers
+  const brazier = cyl(0.5, 0.36, 0.5, 0x5c6670, 7);
+  brazier.position.set(-0.9, 0.25, -0.4);
+  const embers = new THREE.Mesh(new THREE.SphereGeometry(0.32, 7, 5),
+    new THREE.MeshLambertMaterial({ color: 0xff8030, emissive: 0xa83010 }));
+  embers.position.set(-0.9, 0.55, -0.4);
+  // the smith: burly figure with a dark apron and a hammer
+  const smith = new THREE.Group();
+  const legs = box(0.42, 0.5, 0.26, 0x3a3230); legs.position.y = 0.25;
+  const torso = box(0.56, 0.62, 0.34, 0x6e4d2a); torso.position.y = 0.85;
+  const apron = box(0.5, 0.55, 0.06, 0x2c2622); apron.position.set(0, 0.8, -0.2);
+  const head = box(0.3, 0.3, 0.3, 0xd9a066); head.position.y = 1.35;
+  const beard = box(0.26, 0.16, 0.08, 0x5c4326); beard.position.set(0, 1.24, -0.17);
+  const armR = box(0.14, 0.5, 0.14, 0xd9a066); armR.position.set(0.35, 0.95, 0);
+  armR.rotation.z = -0.5;
+  const hammerHandle = box(0.05, 0.4, 0.05, 0x6b4a2d);
+  hammerHandle.position.set(0.55, 1.25, 0);
+  const hammerHead = box(0.16, 0.12, 0.24, 0x8f99a3);
+  hammerHead.position.set(0.55, 1.45, 0);
+  smith.add(legs, torso, apron, head, beard, armR, hammerHandle, hammerHead);
+  smith.position.set(0, 0, 0.5);
+  smith.rotation.y = Math.PI; // facing the anvil
+  g.add(stump, anvil, horn, brazier, embers, smith);
+  g.userData.embers = embers;
+  return g;
+}
+
+export function makeEssenceDrop() {
+  const g = new THREE.Group();
+  const drop = new THREE.Mesh(new THREE.OctahedronGeometry(0.18),
+    new THREE.MeshLambertMaterial({ color: 0x5fe07f, emissive: 0x1a7a35, transparent: true, opacity: 0.92 }));
+  drop.position.y = 0.3;
+  g.add(drop);
+  return g;
+}
+
 // flat ground cobweb: concentric rings + spokes, laid around spider packs
 export function makeCobweb(rng = Math.random) {
   const g = new THREE.Group();

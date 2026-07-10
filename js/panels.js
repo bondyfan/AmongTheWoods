@@ -6,7 +6,7 @@ import { SHOP_GROUPS, SLOTS, SLOT_LABELS, ENEMY_TYPES, ITEMS, SPELLS,
          MAX_SPELL_SLOTS, fmtResource, itemById, spellById, costFor } from './config.js';
 
 const NEED_NAMES = { tent: 'Hide Tent', cabin: 'Wooden Cabin', furnace: 'Stone Furnace' };
-import { itemIcon } from './icons.js';
+import { itemIcon, resIcon } from './icons.js';
 import { audio } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
@@ -28,7 +28,7 @@ export class Panels {
     $('bestiary-btn').addEventListener('click', () => this.toggle('bestiary'));
     $('settings-btn').addEventListener('click', () => this.toggle('settings'));
     $('help-btn').addEventListener('click', () => this.toggle('help'));
-    $('inv-btn').addEventListener('click', () => this.toggle('inventory'));
+    $('inv-btn').addEventListener('click', () => this.toggle('character')); // inventory lives in the Armory
     // ✕ closes just ITS panel (Escape still closes everything)
     document.querySelectorAll('.panel-close').forEach(btn =>
       btn.addEventListener('click', () => {
@@ -70,7 +70,7 @@ export class Panels {
   static PANEL_IDS = {
     shop: 'shop', character: 'character', bestiary: 'bestiary',
     settings: 'settings', base: 'basepanel', chest: 'chestpanel',
-    help: 'helppanel', inventory: 'invpanel',
+    help: 'helppanel',
   };
 
   get open() { return this.openSet.size ? [...this.openSet][this.openSet.size - 1] : null; }
@@ -98,17 +98,17 @@ export class Panels {
     if (this.openSet.has('bestiary')) this.renderBestiary();
     if (this.openSet.has('base')) this.renderBase();
     if (this.openSet.has('chest')) this.renderChest();
-    if (this.openSet.has('inventory')) this.renderInventory();
   }
 
   _resLine() {
     const p = this.player;
-    return `🍖 ${fmtResource(p.meat)}  🪵 ${fmtResource(p.wood)}  🪨 ${fmtResource(p.stone)}  🟫 ${fmtResource(p.hide)}  🔩 ${fmtResource(p.iron)}  🫐 ${fmtResource(p.berry)}`;
+    return RESOURCES.map(k => `${resIcon(k, RES_ICONS[k])} ${fmtResource(p[k])}`).join('  ');
   }
 
   _costStr(cost) {
     if (!cost) return 'free';
-    return Object.entries(cost).map(([k, v]) => `${fmtResource(v)} ${RES_ICONS[k] ?? k}`).join(' + ');
+    return Object.entries(cost).map(([k, v]) =>
+      `${fmtResource(v)} ${resIcon(k, RES_ICONS[k] ?? k)}`).join(' + ');
   }
 
   _affordable(cost) {
@@ -118,7 +118,7 @@ export class Panels {
   // ---------- shop ----------
   renderShop() {
     const p = this.player;
-    $('shop-res').textContent = this._resLine();
+    $('shop-res').innerHTML = this._resLine();
 
     // tabs (+ Base tab in MOBA, + Camp tab in survival)
     const groups = this.moba
@@ -158,6 +158,15 @@ export class Panels {
       return;
     }
 
+    if ((this.shopTab === 'weapons' || this.shopTab === 'armor')
+        && this.camp && !this.hooks.nearSmith?.()) {
+      const note = document.createElement('div');
+      note.className = 'level-band locked';
+      note.innerHTML = `<span class="lb-tier">⚒️ Blacksmith</span>
+        <span class="lb-note">weapons & gear are FORGED — find a wandering blacksmith (⚒ on the map) and press E</span>`;
+      wrap.appendChild(note);
+    }
+
     // sort by unlock level, then group under a level divider so the whole
     // progression reads top-to-bottom at a glance
     const entries = [...group.items()].sort((a, b) => a.level - b.level || a.name.localeCompare(b.name));
@@ -184,12 +193,17 @@ export class Panels {
       const card = document.createElement('div');
       card.className = 'card' + (owned ? ' owned' : (levelLocked || needMissing) ? ' locked' : affordable ? ' buyable' : ' expensive');
 
+      const forgeOnly = (this.shopTab === 'weapons' || this.shopTab === 'armor')
+        && this.camp && !this.hooks.nearSmith?.();
       let status;
       if (levelLocked) status = `<span class="tag">🔒 Lv ${entry.level}</span>`;
       else if (needMissing) status = `<span class="tag">🏕️ Needs ${NEED_NAMES[entry.needs] ?? entry.needs}</span>`;
+      else if (forgeOnly) status = (owned ? '<span class="tag ok">✔ Owned</span> ' : '') +
+        `<span class="tag">⚒️ Forge at a blacksmith — ${this._costStr(cost)}</span>`;
       else if (owned && isSpells) status = '<span class="tag ok">✔ Owned</span>';
       else status = (owned ? '<span class="tag ok">✔ Owned</span> ' : '') +
         `<button class="buy-btn" data-id="${entry.id}">Buy${owned ? ' another' : ''} — ${this._costStr(cost)}</button>`;
+      if (forgeOnly && !owned) card.classList.add('locked');
 
       const slotTag = isSpells ? '📖 spell' : SLOT_LABELS[entry.slot].toLowerCase();
       card.innerHTML = `
@@ -220,7 +234,23 @@ export class Panels {
         <div class="card-foot"><button class="buy-btn" data-id="${c.id}">Buy — ${this._costStr(c.cost)}</button></div>`;
       wrap.appendChild(card);
     }
-    wrap.querySelectorAll('.buy-btn').forEach(btn =>
+    // bag upgrade: +4 backpack slots a pop (up to 26)
+    const p2 = this.player;
+    const bags = Math.round((p2.invSlots - 10) / 4);
+    const bagCost = { hide: 8 + bags * 8, meat: 40 + bags * 40 };
+    const maxed = p2.invSlots >= 26;
+    const bag = document.createElement('div');
+    bag.className = 'card' + (maxed ? ' owned' : this._affordable(bagCost) ? ' buyable' : ' expensive');
+    bag.innerHTML = `
+      <div class="card-head"><span class="icon">🎒</span>
+        <span class="name">Bag Upgrade</span><span class="lv">${p2.invSlots} slots</span></div>
+      <div class="desc">Sew 4 extra slots onto your backpack (max 26).</div>
+      <div class="card-foot">${maxed ? '<span class="tag ok">✔ Maxed</span>'
+        : `<button class="buy-btn" data-bag="1">Buy — ${this._costStr(bagCost)}</button>`}</div>`;
+    wrap.appendChild(bag);
+    bag.querySelector('[data-bag]')?.addEventListener('click', () => this.hooks.onBuyBag?.(bagCost));
+
+    wrap.querySelectorAll('.buy-btn:not([data-bag])').forEach(btn =>
       btn.addEventListener('click', () => this.hooks.onBuyConsumable?.(btn.dataset.id)));
   }
 
@@ -332,9 +362,19 @@ export class Panels {
     if (p.orb) rows.push(['🔮 Orb', `${Math.round(p.orb.dmg)} dmg ×${p.orb.targets}`,
       s.power ? `+${s.power * 5}% Power training` : 'scales with Power training']);
 
+    // regen row
+    const regenParts = ['0.1 base'];
+    for (const slot of ['head', 'chest', 'boots', 'charm']) {
+      const it = itemById(p.equipment[slot]);
+      if (it?.stats?.regen) regenParts.push(`+${it.stats.regen} ${it.name}`);
+    }
+    rows.push(['💚 Regen', `${(Math.round(p.hpRegen * 10) / 10)}/s`, regenParts.join(' · ')]);
+
     $('char-stats').innerHTML = rows.map(([label, val, parts]) =>
       `<div class="stat-row"><span class="sr-label">${label}</span>
         <b>${val}</b><small>${parts}</small></div>`).join('');
+
+    this.renderInventory();
 
 
 
@@ -355,14 +395,15 @@ export class Panels {
     $('spellbook-note').textContent = `${p.spellSlots.length}/${MAX_SPELL_SLOTS} spell slots used — click a spell to slot/unslot it.`;
   }
 
-  // ---------- inventory panel (I): all carried stuff as WoW-style stacks ----------
+  // ---------- inventory: WoW-style slot grid inside the Armory ----------
+  // Equipped pieces live on the paper doll and do NOT take a slot here.
   renderInventory() {
     const p = this.player;
     const grid = $('inv-grid');
     grid.innerHTML = '';
     const cells = [];
     for (const key of RESOURCES) {
-      if (p[key] > 0) cells.push({ kind: 'res', id: key, icon: RES_ICONS[key], count: p[key],
+      if (p[key] > 0) cells.push({ kind: 'res', id: key, icon: resIcon(key, RES_ICONS[key]), count: p[key],
         title: key === 'berry' ? 'Berries — click to eat one (+7 ❤️), drag out to drop' : `${key} — drag out to drop 5` });
     }
     for (const c of CONSUMABLES) {
@@ -379,17 +420,24 @@ export class Panels {
       cells.push({ kind: 'item', id, itemRef: item, count: n > 1 ? n : 0,
         title: `${item.name} — ${item.desc} (click to equip · drag to hotkey or drop)` });
     }
-    if (!cells.length) grid.innerHTML = '<div class="empty-note">Empty pockets — go hunt something.</div>';
-    for (const cell of cells) {
+    $('inv-slots-label').textContent = `${cells.length}/${p.invSlots}`;
+    const total = Math.max(p.invSlots, cells.length);
+    for (let i = 0; i < total; i++) {
+      const cell = cells[i];
       const div = document.createElement('div');
-      div.className = 'inv-cell' + (cell.kind === 'item' ? ' gear' : '');
+      if (!cell) {
+        div.className = 'inv-cell empty-slot';
+        grid.appendChild(div);
+        continue;
+      }
+      div.className = 'inv-cell' + (cell.kind === 'item' ? ' gear' : '') +
+        (i >= p.invSlots ? ' overflow' : '');
       div.title = cell.title;
       div.innerHTML = `<span class="ic">${cell.itemRef ? itemIcon(cell.itemRef) : cell.icon}</span>` +
         (cell.count > 0 ? `<span class="cnt">${fmtResource(cell.count)}</span>` : '');
       this._wireInvCell(div, cell);
       grid.appendChild(div);
     }
-    $('inv-res-line').textContent = this._resLine();
   }
 
   // Inventory cell interactions: click to use/equip, DRAG to hotkey or drop.

@@ -83,20 +83,6 @@
     <div id="base-items" class="card-grid"></div>
   </div>
 
-  <!-- inventory (I) — everything you carry, WoW-style stacks -->
-  <div id="invpanel" class="panel hidden">
-    <div class="panel-head">
-      <h2>🎒 Inventory</h2>
-      <span id="inv-res-line" class="panel-res"></span>
-      <button class="panel-close">✕</button>
-    </div>
-    <div id="inv-body">
-      <div id="inv-grid"></div>
-      <p class="empty-note">Click gear to equip · click 🫐/🧪/🍗 to use · drag onto the 1–6 bar
-        to hotkey · drag out into the world to DROP it for a friend.</p>
-    </div>
-  </div>
-
   <!-- keybind legend (H) -->
   <div id="helppanel" class="panel hidden">
     <div class="panel-head">
@@ -158,10 +144,13 @@
         <div id="char-stats"></div>
       </div>
       <div id="armory-right">
+        <h3>Inventory <span id="inv-slots-label" class="slots-label"></span></h3>
+        <div id="inv-grid"></div>
+        <p class="empty-note">Click gear to equip · click 🫐/🧪/🍗 to use · drag onto the 1–6 bar
+          to hotkey · drag out into the world to DROP it. Equipped gear sits on the doll, not here.</p>
         <h3>Spellbook</h3>
         <div id="spellbook"></div>
         <p id="spellbook-note" class="empty-note"></p>
-        <p class="empty-note">Your loot lives in the <b>Inventory</b> — press <kbd>I</kbd>.</p>
       </div>
     </div>
   </div>

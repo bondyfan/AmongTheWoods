@@ -556,3 +556,7 @@ kbd {
 #character { left: 76%; }
 /* keep panels within reach when dragged */
 .panel { touch-action: none; }
+
+.inv-cell.empty-slot { opacity: 0.35; border-style: dashed; cursor: default; }
+.inv-cell.overflow { border-color: #e05050; }
+.slots-label { font-size: 12px; opacity: 0.65; font-weight: normal; margin-left: 8px; }

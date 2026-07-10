@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOBA,
          RESOURCES, RES_ICONS, HIDE_BEARING, VERDANT_HIDE_DROP, hideForHp, radiusOf, costFor,
          biomeIndexAt, progressAt, fmtResource, roundResource, itemById, spellById,
-         consumableById } from './config.js';
+         consumableById, essenceDropFor } from './config.js';
 import { makeAimArc, updateAimArc, makeRaft } from './models.js';
 import { Camp } from './camp.js';
 import { audio } from './audio.js';
@@ -109,8 +109,16 @@ const panels = new Panels({
   onDropConsumable: (id) => dropConsumable(id),
   onEatBerry: () => player.eatBerry(),
   onUseConsumable: (id) => player.useConsumable(id),
+  onBuyBag: (cost) => {
+    if (!Object.entries(cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
+    for (const [k, v] of Object.entries(cost)) player[k] = roundResource(player[k] - v);
+    player.invSlots = Math.min(26, player.invSlots + 4);
+    audio.sfx('upgrade', 0.5);
+    panels.refresh();
+  },
   mobaTeam: () => mobaSide,
   nearHome: () => nearHome(), // the home building only upgrades in person
+  nearSmith: () => nearSmith(), // weapons & gear can only be forged here
 });
 
 let world = new World(scene, game.seed);
@@ -145,7 +153,7 @@ panels.player = player;
 // and by the co-op 'grant' event from the host).
 const RES_POPUP = { meat: ['🍖', '#ff9d76'], wood: ['🪵', '#d8a468'],
                     stone: ['🪨', '#c8c8c0'], hide: ['🟫', '#c9986a'], iron: ['🔩', '#c8d0d8'],
-                    berry: ['🫐', '#c9a4ff'] };
+                    berry: ['🫐', '#c9a4ff'], essence: ['🧪', '#5fe07f'] };
 function grantPickup(kind, payload) {
   if (kind === 'item') {
     const item = itemById(payload);
@@ -225,6 +233,11 @@ const enemyMgr = new EnemyManager(scene, world, {
       pickups.spawn('hide', hideForHp(enemy.maxHp), enemy.pos, 1.1 * enemy.sizeMult);
     } else if (biomeIndexAt(enemy.pos.x, enemy.pos.z) === 0 || enemy.type === 'bat') {
       pickups.spawn('hide', Math.random() < 0.1 ? 1 : VERDANT_HIDE_DROP, enemy.pos, 0.9);
+    }
+    // deep-woods kills bleed Ethereal Essence — the arcane currency
+    if (!enemy.cfg.passive) {
+      const ess = essenceDropFor(biomeIndexAt(enemy.pos.x, enemy.pos.z));
+      if (ess > 0) pickups.spawn('essence', ess, enemy.pos, 0.8);
     }
     if (enemy.bossRank > 0) rollBossDrop(enemy);
   },
@@ -718,6 +731,7 @@ $id('mp-code-display').addEventListener('click', async () => {
 function buyItem(id) {
   const item = itemById(id);
   if (!item || player.level < item.level) return; // re-buying copies is fine
+  if (player.invFullFor(id)) { ui.toast('🎒 Inventory full — drop or use something first.', ''); audio.sfx('error', 0.5); return; }
   if (item.needs && camp && !camp.has(item.needs)) return; // era gate (survival)
   const cost = costFor(item.cost, game.kind === 'moba');
   if (!Object.entries(cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
@@ -864,6 +878,9 @@ function nearPoi() {
   if (game.kind !== 'survival') return null;
   return world.poisNear?.(player.pos.x, player.pos.z, 4).find(p => !p.claimed) ?? null;
 }
+function nearSmith() {
+  return game.kind === 'survival' && !!world.smithNear?.(player.pos.x, player.pos.z, 4.5);
+}
 function nearTreasure() {
   return game.kind === 'survival' && player.treasureAt
     && Math.hypot(player.pos.x - player.treasureAt.x, player.pos.z - player.treasureAt.z) < 5;
@@ -931,13 +948,18 @@ input.onKey('KeyE', () => {
   if (mp?.tryRevivePartner?.()) return; // co-op: helping a downed friend wins
   if (nearChest()) panels.toggle('chest');
   else if (nearHome()) panels.toggle('base');
+  else if (nearSmith()) { // the forge: weapons & gear only sell HERE
+    panels.shopTab = 'weapons';
+    if (!panels.openSet.has('shop')) panels.toggle('shop');
+    else panels.renderShop();
+  }
   else if (nearPoi()) claimPoi(nearPoi());
   else if (nearTreasure()) digTreasure();
 });
 
 // H — the keybind legend; I — inventory; F / G — field consumables
 input.onKey('KeyH', () => { if (inPlay()) panels.toggle('help'); });
-input.onKey('KeyI', () => { if (inPlay()) panels.toggle('inventory'); });
+input.onKey('KeyI', () => { if (inPlay()) panels.toggle('character'); }); // inventory lives in the Armory
 input.onKey('KeyF', () => {
   if (!inPlay() || game.paused) return;
   if (!player.useConsumable('salve') && player.consumables.salve <= 0) {
@@ -1237,6 +1259,7 @@ function step() {
         : mp?.revivablePartner?.() ? '💚 Your partner is DOWN — press <kbd>E</kbd> to revive!'
         : nearChest() ? '📦 Storage chest — press <kbd>E</kbd> to open'
         : nearHome() ? '🏠 Your home — press <kbd>E</kbd> to build &amp; upgrade'
+        : nearSmith() ? '⚒️ Blacksmith — press <kbd>E</kbd> to forge weapons &amp; gear'
         : poi ? POI_HINTS[poi.type]
         : nearTreasure() ? '💰 This is the spot — press <kbd>E</kbd> to dig' : null;
       if (hint) { hintEl.innerHTML = hint; hintEl.classList.remove('hidden'); }

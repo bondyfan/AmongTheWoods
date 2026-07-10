@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import { WORLD, BIOMES, biomeAt, radiusOf } from './config.js';
 import { makeTree, makeRock, makeGrassTuft, makeFlower, makeMushroom, makeBush,
          makeLog, makeBoulder, makeBridge, makeCampfire, makeStalagmite,
-         makeBerryBush, makeShrine, makeMonolith, makeCrypt } from './models.js';
+         makeBerryBush, makeShrine, makeMonolith, makeCrypt, makeBlacksmith } from './models.js';
 import { audio } from './audio.js';
 
 const CHUNK = 40;
@@ -78,9 +78,11 @@ export class World {
     this._berryEaten = new Map(); // bush key -> world time it was harvested
     this.pois = [];              // landmarks: shrines / monoliths / crypts
     this.onPoiSpawned = null;    // main hooks this to post crypt guards
+    this.smiths = [];            // wandering blacksmiths — forge gear at them
     this._genRings();
     this._genLakes();
     this._genPois();
+    this._genSmiths();
     this._buildGround();
     this._buildRingRivers();
     this._buildCave();
@@ -118,6 +120,7 @@ export class World {
     this._genRings();
     this._genLakes();
     this._genPois();
+    this._genSmiths();
     this._buildGround();
     this._buildRingRivers();
     this._buildCave();
@@ -257,6 +260,32 @@ export class World {
 
   poisNear(x, z, radius) {
     return this.pois.filter(p => Math.hypot(p.x - x, p.z - z) < radius);
+  }
+
+  // Blacksmiths camp in ~300 m grid cells (roughly as common as a sheep
+  // herd) — weapons & gear can only be forged at one.
+  _genSmiths() {
+    const rng = mulberry32(this.seed ^ 0x51117);
+    this.smiths = [];
+    const CELL = 300;
+    let id = 1;
+    const cells = Math.ceil(WORLD.radius / CELL);
+    for (let gx = -cells; gx <= cells; gx++) {
+      for (let gz = -cells; gz <= cells; gz++) {
+        if (rng() > 0.35) continue;
+        const x = gx * CELL + 40 + rng() * (CELL - 80);
+        const z = gz * CELL + 40 + rng() * (CELL - 80);
+        const r = radiusOf(x, z);
+        if (r < 70 || r > WORLD.radius - 60) continue;
+        if (this.rings.some(w => Math.abs(r - w.r) < 18)) continue;
+        if (this.lakesNear(x, z).some(l => Math.hypot(x - l.x, z - l.z) < l.r + 6)) continue;
+        this.smiths.push({ id: id++, x, z, obstacleAdded: false });
+      }
+    }
+  }
+
+  smithNear(x, z, radius) {
+    return this.smiths.find(sm => Math.hypot(sm.x - x, sm.z - z) < radius) ?? null;
   }
 
   _regionLakes(rx, rz) {
@@ -741,6 +770,20 @@ export class World {
         if (!ripe) mesh.userData.berries.forEach(m => m.visible = false);
         bushes.push({ id: this.nextTreeId++, key: bkey, mesh, x, z,
                       radius: 0.75, alive: true, berries: ripe, kind: 'bush' });
+      }
+    }
+
+    // -- blacksmith camps in this chunk --
+    for (const sm of this.smiths) {
+      if (sm.x < cxw || sm.x >= cxw + CHUNK || sm.z < czw || sm.z >= czw + CHUNK) continue;
+      const mesh = makeBlacksmith();
+      mesh.position.set(sm.x, this.heightAt(sm.x, sm.z), sm.z);
+      mesh.rotation.y = (sm.id * 1.7) % (Math.PI * 2);
+      group.add(mesh);
+      sm.mesh = mesh;
+      if (!sm.obstacleAdded) {
+        sm.obstacleAdded = true;
+        this.obstacles.push({ x: sm.x, z: sm.z, r: 1.4 });
       }
     }
 

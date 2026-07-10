@@ -205,6 +205,17 @@ export class Minimap {
       }
     }
 
+    // blacksmiths — once discovered, an orange anvil marks the camp
+    for (const sm of this.world.smiths ?? []) {
+      if (!this._isDiscovered(sm.x, sm.z)) continue;
+      const p = toC(sm.x, sm.z);
+      if (p.x < 0 || p.x > W || p.y < 0 || p.y > H) continue;
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.fillStyle = '#ffa528';
+      ctx.fillText('⚒', p.x, p.y + 4);
+    }
+
     // landmarks — only once their cell has been explored
     for (const poi of this.world.pois ?? []) {
       if (!this._isDiscovered(poi.x, poi.z)) continue;
@@ -287,8 +298,13 @@ export class Minimap {
     ctx.textAlign = 'center';
     ctx.font = '13px sans-serif';
     ctx.fillText('🏠', W / 2, H / 2 + 4);
-    // discovered landmarks + the active treasure map
+    // discovered landmarks + blacksmiths + the active treasure map
     ctx.font = '11px sans-serif';
+    for (const sm of this.world.smiths ?? []) {
+      if (!this._isDiscovered(sm.x, sm.z)) continue;
+      ctx.fillStyle = '#ffa528';
+      ctx.fillText('⚒', (sm.x + WORLD.radius) * scale, (sm.z + WORLD.radius) * scale + 4);
+    }
     for (const poi of this.world.pois ?? []) {
       if (!this._isDiscovered(poi.x, poi.z)) continue;
       ctx.globalAlpha = poi.claimed ? 0.35 : 1;

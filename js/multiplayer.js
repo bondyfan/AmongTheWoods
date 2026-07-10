@@ -20,7 +20,8 @@ import { WoodsNet } from './net.js';
 import { ARENA, ARENA_RETURN_DELAY, arenaReward, ENEMY_TYPES, BOSS_RANKS,
          MOBA_BUILDINGS, roundResource, itemById } from './config.js';
 import { makeMan, makeAxe, makeBow, makePickaxe, makeEnemyMesh, makeMeatDrop, makeWoodDrop,
-         makeStoneDrop, makeHideDrop, makeIronDrop, makeBerryDrop, makeSalveDrop, makeRoastDrop, makeItemDrop,
+         makeStoneDrop, makeHideDrop, makeIronDrop, makeBerryDrop, makeSalveDrop, makeRoastDrop,
+         makeEssenceDrop, makeItemDrop,
          makeEnemyShot, makeWolf, makeMobaTower, makeMobaBase,
          makeTeamFlag, TEAM_COLORS, mat } from './models.js';
 import { audio } from './audio.js';
@@ -209,7 +210,7 @@ class ShadowWorld {
       if (!s) {
         const makers = { meat: makeMeatDrop, wood: makeWoodDrop, stone: makeStoneDrop,
                          hide: makeHideDrop, iron: makeIronDrop, berry: makeBerryDrop,
-                         salve: makeSalveDrop, roast: makeRoastDrop, item: makeItemDrop };
+                         salve: makeSalveDrop, roast: makeRoastDrop, essence: makeEssenceDrop, item: makeItemDrop };
         const mesh = (makers[p.k] || makeItemDrop)();
         mesh.position.set(p.x, this.world.heightAt(p.x, p.z) + 0.45, p.z);
         this.scene.add(mesh);

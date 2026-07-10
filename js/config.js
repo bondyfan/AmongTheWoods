@@ -83,8 +83,15 @@ export function progressAt(x, z) {
 }
 
 // ---- resources ----
-export const RESOURCES = ['meat', 'wood', 'stone', 'hide', 'iron', 'berry'];
-export const RES_ICONS = { meat: '🍖', wood: '🪵', stone: '🪨', hide: '🟫', iron: '🔩', berry: '🫐' };
+export const RESOURCES = ['meat', 'wood', 'stone', 'hide', 'iron', 'berry', 'essence'];
+export const RES_ICONS = { meat: '🍖', wood: '🪵', stone: '🪨', hide: '🟫', iron: '🔩', berry: '🫐', essence: '🧪' };
+// Ethereal Essence drops from creatures of the Dark Forest and beyond —
+// deeper rings drop it more often and in bigger gulps.
+export const essenceDropFor = (biomeIndex) => {
+  if (biomeIndex < 1) return 0;
+  if (Math.random() >= 0.12 + (biomeIndex - 1) * 0.09) return 0;
+  return 1 + Math.floor((biomeIndex - 1) / 2);
+};
 // resources come in tenths (hide scraps); ×10/÷10 keeps whole numbers exact
 export const roundResource = (value) => Math.round((Number(value) || 0) * 10) / 10;
 export const fmtResource = (value) => {
@@ -94,7 +101,7 @@ export const fmtResource = (value) => {
 
 // hide drops only from animals that realistically have one
 export const HIDE_BEARING = new Set(['wolf', 'boar', 'elk', 'bear', 'icewolf', 'wendigo', 'yeti']);
-export const hideForHp = (hp) => Math.max(1, Math.round(hp / 80));
+export const hideForHp = (hp) => Math.max(1, Math.round(hp / 240)); // hp tripled, hides didn't
 export const VERDANT_HIDE_DROP = 0.1;
 
 // ---- Enemies. Spiders are the weak starter enemy; the animals get bigger
@@ -112,46 +119,46 @@ export const ENEMY_TYPES = {
              hp: 40,  dmg: 0,  speed: 1.8, range: 0,   attackCd: 1.0, xp: 4,  hitR: 0.6, aggro: 0,
              passive: true, herd: [10, 20], guardian: 'wolf' },
   rat:     { name: 'Giant Rat', icon: '🐀',
-             hp: 12,  dmg: 4,  speed: 7.2, range: 1.2, attackCd: 0.9, xp: 5,  meat: 1, hitR: 0.5,  aggro: 13 },
+             hp: 36,  dmg: 4,  speed: 7.2, range: 1.2, attackCd: 0.9, xp: 5,  meat: 1, hitR: 0.5,  aggro: 13 },
   spider:  { name: 'Forest Spider', icon: '🕷️',
-             hp: 20,  dmg: 6,  speed: 6.0, range: 1.3, attackCd: 1.0, xp: 8,  meat: 1, hitR: 0.7,  aggro: 13 },
+             hp: 60,  dmg: 6,  speed: 6.0, range: 1.3, attackCd: 1.0, xp: 8,  meat: 1, hitR: 0.7,  aggro: 13 },
   snake:   { name: 'Grass Snake', icon: '🐍',
-             hp: 16,  dmg: 8,  speed: 6.8, range: 1.5, attackCd: 1.3, xp: 10, meat: 1, hitR: 0.6,  aggro: 12 },
+             hp: 48,  dmg: 8,  speed: 6.8, range: 1.5, attackCd: 1.3, xp: 10, meat: 1, hitR: 0.6,  aggro: 12 },
   // -- Dark Forest --
   wolf:    { name: 'Black Wolf', icon: '🐺',
-             hp: 45,  dmg: 10, speed: 8.0, range: 1.6, attackCd: 1.0, xp: 15, meat: 2, hitR: 0.8,  aggro: 16, behavior: 'pack' },
+             hp: 135,  dmg: 10, speed: 8.0, range: 1.6, attackCd: 1.0, xp: 15, meat: 2, hitR: 0.8,  aggro: 16, behavior: 'pack' },
   venomspider: { name: 'Venom Spider', icon: '☣️',
-             hp: 55,  dmg: 11, meleeDmg: 7, speed: 6.0, range: 1.4, attackCd: 1.1, xp: 20, meat: 2, hitR: 0.8, aggro: 18,
+             hp: 165,  dmg: 11, meleeDmg: 7, speed: 6.0, range: 1.4, attackCd: 1.1, xp: 20, meat: 2, hitR: 0.8, aggro: 18,
              ranged: true, shootRange: 8.5, spellCd: 2.5, projectileSpeed: 15, shotColor: 0x8aff3a, behavior: 'kite' },
   bat:     { name: 'Cave Bat', icon: '🦇',
-             hp: 18,  dmg: 6,  speed: 9.5, range: 1.4, attackCd: 1.1, xp: 12, meat: 1, hitR: 0.6,  aggro: 18, flying: true },
+             hp: 54,  dmg: 6,  speed: 9.5, range: 1.4, attackCd: 1.1, xp: 12, meat: 1, hitR: 0.6,  aggro: 18, flying: true },
   // -- Haunted Forest --
   zombie:  { name: 'Zombie', icon: '🧟',
-             hp: 90,  dmg: 14, speed: 4.6, range: 1.7, attackCd: 1.3, xp: 28, meat: 2, hitR: 0.85, aggro: 19,
+             hp: 270,  dmg: 14, speed: 4.6, range: 1.7, attackCd: 1.3, xp: 28, meat: 2, hitR: 0.85, aggro: 19,
              poison: { dps: 2, dur: 4 } }, // rotting claws fester — Haunted Forest hazard
   // -- Highlands --
   boar:    { name: 'Wild Boar', icon: '🐗',
-             hp: 80,  dmg: 16, speed: 7.5, range: 1.7, attackCd: 1.1, xp: 25, meat: 3, hitR: 0.9,  aggro: 14 },
+             hp: 240,  dmg: 16, speed: 7.5, range: 1.7, attackCd: 1.1, xp: 25, meat: 3, hitR: 0.9,  aggro: 14 },
   elk:     { name: 'Mad Elk', icon: '🦌',
-             hp: 110, dmg: 20, speed: 7.2, range: 1.9, attackCd: 1.4, xp: 32, meat: 4, hitR: 1.0,  aggro: 14 },
+             hp: 330, dmg: 20, speed: 7.2, range: 1.9, attackCd: 1.4, xp: 32, meat: 4, hitR: 1.0,  aggro: 14 },
   stormsnake: { name: 'Storm Serpent', icon: '⚡',
-             hp: 70,  dmg: 8,  meleeDmg: 9, speed: 7.0, range: 1.5, attackCd: 1.2, xp: 28, meat: 3, hitR: 0.6, aggro: 18,
+             hp: 210,  dmg: 8,  meleeDmg: 9, speed: 7.0, range: 1.5, attackCd: 1.2, xp: 28, meat: 3, hitR: 0.6, aggro: 18,
              ranged: true, shootRange: 10, spellCd: 3.0, projectileSpeed: 30, shotColor: 0xffe94a, stun: 1.2 },
   // -- Snowfall Woods --
   icewolf: { name: 'Ice Wolf', icon: '❄️',
-             hp: 120, dmg: 18, speed: 8.6, range: 1.6, attackCd: 0.9, xp: 35, meat: 4, hitR: 0.8,  aggro: 17, behavior: 'pack' },
+             hp: 360, dmg: 18, speed: 8.6, range: 1.6, attackCd: 0.9, xp: 35, meat: 4, hitR: 0.8,  aggro: 17, behavior: 'pack' },
   icespider: { name: 'Frost Spider', icon: '🕸️',
-             hp: 100, dmg: 16, meleeDmg: 10, speed: 6.2, range: 1.4, attackCd: 1.1, xp: 30, meat: 3, hitR: 0.8, aggro: 18,
+             hp: 300, dmg: 16, meleeDmg: 10, speed: 6.2, range: 1.4, attackCd: 1.1, xp: 30, meat: 3, hitR: 0.8, aggro: 18,
              ranged: true, shootRange: 9, spellCd: 2.2, projectileSpeed: 17, shotColor: 0x8ae0ff, behavior: 'kite' },
   bear:    { name: 'Grizzly Bear', icon: '🐻',
-             hp: 180, dmg: 26, speed: 5.5, range: 2.1, attackCd: 1.5, xp: 45, meat: 5, hitR: 1.2,  aggro: 16, behavior: 'heavy' },
+             hp: 540, dmg: 26, speed: 5.5, range: 2.1, attackCd: 1.5, xp: 45, meat: 5, hitR: 1.2,  aggro: 16, behavior: 'heavy' },
   // -- Frozen Peak --
   wendigo: { name: 'Wendigo', icon: '👹',
-             hp: 220, dmg: 30, speed: 8.4, range: 2.0, attackCd: 1.2, xp: 55, meat: 6, hitR: 0.9,  aggro: 20 },
+             hp: 660, dmg: 30, speed: 8.4, range: 2.0, attackCd: 1.2, xp: 55, meat: 6, hitR: 0.9,  aggro: 20 },
   yeti:    { name: 'Yeti', icon: '🏔️',
-             hp: 350, dmg: 40, speed: 5.0, range: 2.5, attackCd: 1.7, xp: 70, meat: 8, hitR: 1.5,  aggro: 18, behavior: 'heavy' },
+             hp: 1050, dmg: 40, speed: 5.0, range: 2.5, attackCd: 1.7, xp: 70, meat: 8, hitR: 1.5,  aggro: 18, behavior: 'heavy' },
   icegolem: { name: 'Ice Golem', icon: '🗿',
-             hp: 400, dmg: 45, meleeDmg: 30, speed: 3.6, range: 2.2, attackCd: 1.8, xp: 80, meat: 9, hitR: 1.4, aggro: 18,
+             hp: 1200, dmg: 45, meleeDmg: 30, speed: 3.6, range: 2.2, attackCd: 1.8, xp: 80, meat: 9, hitR: 1.4, aggro: 18,
              ranged: true, shootRange: 10, spellCd: 4.0, projectileSpeed: 13, shotColor: 0xbfe8ff, stun: 0.8 },
 };
 
@@ -169,7 +176,7 @@ export const BOSS_RANKS = [
 
 // Meat dropped by a killed unit, scaled by its (max) HP: 1 meat up to 30 HP,
 // then +1 per additional 30 HP. Tougher enemies (and bosses) pay out more.
-export const meatForHp = (hp) => Math.max(1, Math.ceil(hp / 30));
+export const meatForHp = (hp) => Math.max(1, Math.ceil(hp / 90)); // hp tripled, meat didn't
 
 // Boss "pack mothers" carry NAMES — picked per creature family at spawn.
 export const BOSS_NAMES = {
@@ -228,6 +235,12 @@ export const ITEMS = [
   { id: 'ironPick',   slot: 'weapon', level: 6, icon: '⚒️', name: 'Iron Pickaxe',  cost: { wood: 15, iron: 8 }, needs: 'furnace',
     weapon: { kind: 'melee', dmg: 55, cd: 0.5, range: 1.8, chop: 0.5, mine: 2.5, tier: 2, pick: true },
     desc: 'Bites deep into stone — rocks crack in two swings. Damage 55.' },
+  { id: 'obsidianPick', slot: 'weapon', level: 9, icon: '⛏️', name: 'Obsidian Pickaxe', cost: { iron: 18, stone: 30, essence: 6 }, needs: 'keep',
+    weapon: { kind: 'melee', dmg: 100, cd: 0.48, range: 1.9, chop: 1, mine: 4, tier: 3, pick: true },
+    desc: 'Volcanic glass edge — rocks SHATTER in one swing. Damage 100.' },
+  { id: 'huntSpear',  slot: 'weapon', level: 5, icon: '🔱', name: 'Hunting Spear', cost: { wood: 20, stone: 8, hide: 3 },
+    weapon: { kind: 'melee', dmg: 52, cd: 0.55, range: 2.6, chop: 0, mine: 0, tier: 1 },
+    desc: 'Long reach keeps claws away: damage 52 at 2.6 m.' },
   // -- weapons: ranged (invented with the Wooden Cabin era; train Range to extend) --
   { id: 'huntingBow', slot: 'weapon', level: 4, icon: '🏹', name: 'Hunting Bow',   cost: { wood: 25, hide: 4 }, needs: 'cabin',
     weapon: { kind: 'bow', dmg: 16, cd: 0.75, range: 3.5, pierce: false, tier: 1 },
@@ -235,6 +248,9 @@ export const ITEMS = [
   { id: 'longbow',    slot: 'weapon', level: 6, icon: '🎯', name: 'Longbow',       cost: { wood: 40, hide: 8, iron: 4 }, needs: 'furnace',
     weapon: { kind: 'bow', dmg: 32, cd: 0.62, range: 7, pierce: false, tier: 2 },
     desc: 'Iron-tipped arrows, damage 32, reach 7 m.' },
+  { id: 'recurveBow', slot: 'weapon', level: 7, icon: '🏹', name: 'Recurve Bow',   cost: { wood: 45, hide: 10, iron: 6 }, needs: 'furnace',
+    weapon: { kind: 'bow', dmg: 26, cd: 0.48, range: 8.5, pierce: false, tier: 2 },
+    desc: 'Snappy recurve limbs: fast 26-damage arrows, reach 8.5 m.' },
   { id: 'rapidBow',   slot: 'weapon', level: 8, icon: '🌀', name: 'Windstorm Bow', cost: { wood: 45, iron: 14, hide: 10 }, needs: 'furnace',
     weapon: { kind: 'bow', dmg: 30, cd: 0.35, range: 10, pierce: true, tier: 3 },
     desc: 'Very fast piercing arrows, reach 10 m.' },
@@ -248,44 +264,61 @@ export const ITEMS = [
   // -- head (crafted from hides at the tent) --
   { id: 'leatherCap', slot: 'head', level: 3, icon: '🧢', name: 'Hide Cap',      cost: { hide: 4, meat: 10 }, needs: 'tent', stats: { hp: 25 },
     desc: '+25 max health.' },
-  { id: 'furHood',    slot: 'head', level: 6, icon: '🎩', name: 'Fur Hood',      cost: { hide: 10, meat: 25 }, needs: 'tent', stats: { hp: 60 },
-    desc: '+60 max health.' },
-  { id: 'bearHelm',   slot: 'head', level: 9, icon: '⛑️', name: 'Bearskull Helm', cost: { hide: 18, iron: 8, meat: 40 }, needs: 'furnace', stats: { hp: 110 },
-    desc: '+110 max health.' },
+  { id: 'boneHelm',   slot: 'head', level: 5, icon: '🦴', name: 'Bone Helm',     cost: { hide: 6, meat: 20 }, needs: 'tent', stats: { hp: 45, regen: 0.2 },
+    desc: '+45 max health, +0.2 ❤️/s regeneration.' },
+  { id: 'furHood',    slot: 'head', level: 6, icon: '🎩', name: 'Fur Hood',      cost: { hide: 10, meat: 25 }, needs: 'tent', stats: { hp: 60, regen: 0.3 },
+    desc: '+60 max health, +0.3 ❤️/s regeneration.' },
+  { id: 'ironHelm',   slot: 'head', level: 7, icon: '🪖', name: 'Iron Helm',     cost: { iron: 10, hide: 6 }, needs: 'furnace', stats: { hp: 85 },
+    desc: '+85 max health.' },
+  { id: 'bearHelm',   slot: 'head', level: 9, icon: '⛑️', name: 'Bearskull Helm', cost: { hide: 18, iron: 8, meat: 40 }, needs: 'furnace', stats: { hp: 110, regen: 0.6 },
+    desc: '+110 max health, +0.6 ❤️/s regeneration.' },
   // -- chest (you start NAKED with a leaf — clothing is crafted from hides) --
   { id: 'leatherArmor', slot: 'chest', level: 3, icon: '🦺', name: 'Hide Tunic',     cost: { hide: 7, meat: 15 }, needs: 'tent', stats: { hp: 50 },
     desc: '+50 max health. Finally, actual clothes.' },
-  { id: 'furCoat',      slot: 'chest', level: 6, icon: '🧥', name: 'Fur Coat',       cost: { hide: 14, meat: 30 }, needs: 'tent', stats: { hp: 100 },
-    desc: '+100 max health.' },
-  { id: 'bearHide',     slot: 'chest', level: 9, icon: '🛡️', name: 'Bearhide Plate', cost: { hide: 24, iron: 12, meat: 45 }, needs: 'furnace', stats: { hp: 170 },
-    desc: '+170 max health.' },
+  { id: 'furCoat',      slot: 'chest', level: 6, icon: '🧥', name: 'Fur Coat',       cost: { hide: 14, meat: 30 }, needs: 'tent', stats: { hp: 100, regen: 0.4 },
+    desc: '+100 max health, +0.4 ❤️/s regeneration.' },
+  { id: 'ironChest',    slot: 'chest', level: 7, icon: '🥋', name: 'Iron Cuirass',   cost: { iron: 14, hide: 8 }, needs: 'furnace', stats: { hp: 135 },
+    desc: '+135 max health.' },
+  { id: 'bearHide',     slot: 'chest', level: 9, icon: '🛡️', name: 'Bearhide Plate', cost: { hide: 24, iron: 12, meat: 45 }, needs: 'furnace', stats: { hp: 170, regen: 0.8 },
+    desc: '+170 max health, +0.8 ❤️/s regeneration.' },
   // -- boots --
   { id: 'swiftBoots',   slot: 'boots', level: 3, icon: '👢', name: 'Hide Wraps',     cost: { hide: 5, meat: 10 }, needs: 'tent', stats: { speed: 0.20 },
     desc: '+20% movement speed.' },
   { id: 'huntersBoots', slot: 'boots', level: 6, icon: '🥾', name: "Hunter's Boots", cost: { hide: 10, meat: 25 }, needs: 'tent', stats: { speed: 0.35 },
     desc: '+35% movement speed.' },
-  { id: 'windBoots',    slot: 'boots', level: 9, icon: '💨', name: 'Windwalkers',    cost: { hide: 14, iron: 8, meat: 40 }, needs: 'furnace', stats: { speed: 0.50 },
-    desc: '+50% movement speed.' },
+  { id: 'ironBoots',    slot: 'boots', level: 7, icon: '🥾', name: 'Iron-Shod Boots', cost: { iron: 8, hide: 6 }, needs: 'furnace', stats: { speed: 0.28, hp: 35 },
+    desc: '+28% movement speed, +35 max health.' },
+  { id: 'windBoots',    slot: 'boots', level: 9, icon: '💨', name: 'Windwalkers',    cost: { hide: 14, iron: 8, meat: 40 }, needs: 'furnace', stats: { speed: 0.50, regen: 0.5 },
+    desc: '+50% movement speed, +0.5 ❤️/s regeneration.' },
   // -- charms (mid-game trinkets — ONE charm slot, pick your bonus) --
   { id: 'wolfPendant', slot: 'charm', level: 5, icon: '🦷', name: 'Wolf-Fang Pendant',
     cost: { hide: 8, meat: 30 }, needs: 'tent', stats: { dmgPct: 0.10 },
     desc: '+10% weapon damage.' },
   { id: 'hawkAmulet', slot: 'charm', level: 7, icon: '🪶', name: 'Hawk-Feather Amulet',
-    cost: { hide: 12, iron: 4, meat: 40 }, needs: 'cabin', stats: { aspd: 0.10 },
-    desc: '+10% attack speed.' },
+    cost: { hide: 12, iron: 4, meat: 40 }, needs: 'cabin', stats: { aspd: 0.10, regen: 0.3 },
+    desc: '+10% attack speed, +0.3 ❤️/s regeneration.' },
+  { id: 'copperRing', slot: 'charm', level: 3, icon: '💍', name: 'Copper Ring',
+    cost: { stone: 8, meat: 15 }, stats: { regen: 0.3 },
+    desc: '+0.3 ❤️/s regeneration — wounds close on their own.' },
+  { id: 'bloodAmulet', slot: 'charm', level: 9, icon: '🩸', name: 'Bloodstone Amulet',
+    cost: { hide: 15, iron: 10, essence: 10 }, needs: 'furnace', stats: { regen: 1.2, hp: 40 },
+    desc: '+1.2 ❤️/s regeneration, +40 max health.' },
   // -- pet (companion) --
-  { id: 'tamedWolf', slot: 'companion', level: 4, icon: '🐺', name: 'Tamed Wolf', cost: { meat: 165 }, pet: { dmg: 14 },
+  { id: 'tamedWolf', slot: 'companion', level: 4, icon: '🐺', name: 'Tamed Wolf', cost: { meat: 165, essence: 3 }, pet: { dmg: 14 },
     desc: 'A loyal wolf fights by your side (100 HP — train it up in Training).' },
-  { id: 'alphaWolf', slot: 'companion', level: 8, icon: '👑', name: 'Alpha Wolf', cost: { meat: 360 }, pet: { dmg: 32 },
+  { id: 'alphaWolf', slot: 'companion', level: 8, icon: '👑', name: 'Alpha Wolf', cost: { meat: 360, essence: 8 }, pet: { dmg: 32 },
     desc: 'A huge alpha. Bites for 32.' },
   // -- orb (guardian sphere — iron-age wonder) --
-  { id: 'guardianSphere', slot: 'companion', level: 5,  icon: '🔮', name: 'Guardian Sphere', cost: { meat: 50, stone: 30, iron: 6 }, needs: 'furnace',
+  { id: 'guardianSphere', slot: 'companion', level: 5,  icon: '🔮', name: 'Guardian Sphere', cost: { meat: 50, stone: 30, iron: 6, essence: 4 }, needs: 'furnace',
     orb: { count: 1, targets: 1, dmg: 12 },
     desc: 'Orbits you and fires bolts at enemies.' },
-  { id: 'twinSphere',     slot: 'companion', level: 8,  icon: '✨', name: 'Twin-bolt Sphere', cost: { meat: 90, iron: 14, stone: 40 }, needs: 'furnace',
+  { id: 'twinSphere',     slot: 'companion', level: 8,  icon: '✨', name: 'Twin-bolt Sphere', cost: { meat: 90, iron: 14, stone: 40, essence: 8 }, needs: 'furnace',
     orb: { count: 1, targets: 2, dmg: 14 },
     desc: 'Fires two bolts at once (14 dmg each).' },
-  { id: 'duoSphere',      slot: 'companion', level: 10, icon: '🌐', name: 'Gemini Spheres',  cost: { meat: 130, iron: 24, stone: 60 }, needs: 'furnace',
+  { id: 'frostSphere',    slot: 'companion', level: 7,  icon: '❄️', name: 'Frost Sphere',   cost: { meat: 80, stone: 35, essence: 6 }, needs: 'furnace',
+    orb: { count: 1, targets: 1, dmg: 22 },
+    desc: 'A cold-burning orb: single heavy bolts for 22 damage.' },
+  { id: 'duoSphere',      slot: 'companion', level: 10, icon: '🌐', name: 'Gemini Spheres',  cost: { meat: 130, iron: 24, stone: 60, essence: 12 }, needs: 'furnace',
     orb: { count: 2, targets: 2, dmg: 14 },
     desc: 'TWO spheres, each firing twin bolts.' },
 ];
@@ -316,19 +349,19 @@ export function costFor(cost, mobaMode) {
 // cast with keys 1-6. cd in seconds. ----
 export const MAX_SPELL_SLOTS = 6;
 export const SPELLS = [
-  { id: 'haste',     level: 4,  icon: '⚡', name: 'Haste',       cost: { meat: 40 }, cd: 90,
+  { id: 'haste',     level: 4,  icon: '⚡', name: 'Haste',       cost: { meat: 40, essence: 2 }, cd: 90,
     desc: 'Double attack speed for 10 s.' },
-  { id: 'powerDash', level: 5,  icon: '💨', name: 'Power Dash',  cost: { meat: 45 }, cd: 25,
+  { id: 'powerDash', level: 5,  icon: '💨', name: 'Power Dash',  cost: { meat: 45, essence: 3 }, cd: 25,
     desc: 'Dash forward, dealing 40 damage to everything in your path.' },
-  { id: 'heal',      level: 6,  icon: '💚', name: 'Mend Wounds', cost: { meat: 50 }, cd: 60,
+  { id: 'heal',      level: 6,  icon: '💚', name: 'Mend Wounds', cost: { meat: 50, essence: 4 }, cd: 60,
     desc: 'Instantly restore 50 health.' },
-  { id: 'stunDash',  level: 7,  icon: '🌪️', name: 'Stun Dash',   cost: { meat: 70 }, cd: 35,
+  { id: 'stunDash',  level: 7,  icon: '🌪️', name: 'Stun Dash',   cost: { meat: 70, essence: 5 }, cd: 35,
     desc: 'Dash that damages (30) and stuns enemies for 3 s.' },
-  { id: 'shockwave', level: 8,  icon: '💥', name: 'Shockwave',   cost: { meat: 85 }, cd: 45,
+  { id: 'shockwave', level: 8,  icon: '💥', name: 'Shockwave',   cost: { meat: 85, essence: 6 }, cd: 45,
     desc: 'Blast all nearby enemies: 25 damage + knockback.' },
-  { id: 'frostNova', level: 9,  icon: '❄️', name: 'Frost Nova',  cost: { meat: 100 }, cd: 50,
+  { id: 'frostNova', level: 9,  icon: '❄️', name: 'Frost Nova',  cost: { meat: 100, essence: 8 }, cd: 50,
     desc: 'Freeze all nearby enemies for 4 s.' },
-  { id: 'rage',      level: 10, icon: '😡', name: 'Rage',        cost: { meat: 120 }, cd: 90,
+  { id: 'rage',      level: 10, icon: '😡', name: 'Rage',        cost: { meat: 120, essence: 10 }, cd: 90,
     desc: '+50% damage for 12 s.' },
 ];
 
@@ -342,19 +375,19 @@ const trainCost = (base) => (t) =>
 export const STAT_TRACKS = [
   { id: 'range', icon: '📏', name: 'Range Training', max: 10,
     desc: '+2 m bow range, +0.1 m melee reach per level. Level 10 reaches across the whole screen.',
-    cost: (t) => ({ meat: trainCost(25)(t), ...(t >= 3 ? { wood: 10 * (t - 2) } : {}) }) },
+    cost: (t) => ({ meat: trainCost(25)(t), ...(t >= 3 ? { wood: 10 * (t - 2), essence: 2 * (t - 2) } : {}) }) },
   { id: 'power', icon: '💪', name: 'Power Training', max: 10,
     desc: '+5% weapon damage per level.',
-    cost: (t) => ({ meat: trainCost(28)(t), ...(t >= 3 ? { wood: 12 * (t - 2) } : {}) }) },
+    cost: (t) => ({ meat: trainCost(28)(t), ...(t >= 3 ? { wood: 12 * (t - 2), essence: 2 * (t - 2) } : {}) }) },
   { id: 'swift', icon: '🤺', name: 'Swift Hands', max: 10,
     desc: '+4% attack speed per level.',
-    cost: (t) => ({ meat: trainCost(26)(t), ...(t >= 3 ? { wood: 11 * (t - 2) } : {}) }) },
+    cost: (t) => ({ meat: trainCost(26)(t), ...(t >= 3 ? { wood: 11 * (t - 2), essence: 2 * (t - 2) } : {}) }) },
   { id: 'pet', icon: '🐾', name: 'Pet Training', max: 5,
     desc: '+100 pet health and +25% pet damage per level (100 HP base, up to 600 + level bonus).',
-    cost: (t) => ({ meat: 40 * t * t, hide: 4 * t }) },
+    cost: (t) => ({ meat: 40 * t * t, hide: 4 * t, ...(t >= 3 ? { essence: 3 * (t - 2) } : {}) }) },
   { id: 'gather', icon: '🧺', name: 'Gathering', max: 5,
     desc: '+15% wood and stone from every felled tree and cracked rock per level.',
-    cost: (t) => ({ meat: 22 * t * t, wood: 8 * t }) },
+    cost: (t) => ({ meat: 22 * t * t, wood: 8 * t, ...(t >= 3 ? { essence: 2 * (t - 2) } : {}) }) },
 ];
 
 // ==========================================================================
