@@ -23,27 +23,28 @@ export const BIOMES = [
     grass: 0x6fa04c, flowers: true, mushrooms: false,
     enemies: ['rat', 'spider', 'snake'], packs: null, treeDensity: 1.0, denseForests: true,
     critters: ['rabbit', 'rabbit', 'rabbit', 'sheep'] },
-  { name: 'Dark Forest',    rMax: 1200, ground: 0x3d5c2f, ground2: 0x33502a, dirt: 0x5c4a30,
-    fog: 0x93a986, sky: 0x8fa8b8,
+  { name: 'Dark Forest',    rMax: 1200, ground: 0x2c4a24, ground2: 0x24401f, dirt: 0x4a3a24,
+    fog: 0x5f7a58, sky: 0x5c7488, darkness: 0.45,
     foliage: [0x1e4a22, 0x27552a, 0x1a3f2e], trunk: 0x4c3520,
     trees: { pine: 0.55, leafy: 0.25, birch: 0, dead: 0.2 }, snowy: false,
     grass: 0x44663a, flowers: false, mushrooms: true,
     enemies: ['spider', 'snake', 'wolf', 'venomspider', 'bat'], packs: { skulls: [0.8, 0.2, 0] }, treeDensity: 1.3, denseForests: true,
-    critters: ['rabbit', 'rabbit', 'rabbit', 'sheep'] },
-  { name: 'Haunted Forest', rMax: 2000, ground: 0x414b38, ground2: 0x39432f, dirt: 0x544a52,
-    fog: 0x8a86a0, sky: 0x9a92b0,
+    spiderHaunt: true, webField: true, critters: ['rabbit', 'rabbit'] },
+  { name: 'Haunted Forest', rMax: 2000, ground: 0x3a3a44, ground2: 0x32323c, dirt: 0x4c4258,
+    fog: 0x585470, sky: 0x565064, darkness: 0.7,
     foliage: [0x2a3a28, 0x1e2e20, 0x3a3448], trunk: 0x3a3230,
     trees: { pine: 0.3, leafy: 0.1, birch: 0, dead: 0.6 }, snowy: false,
     grass: 0x5c6650, flowers: false, mushrooms: true,
-    enemies: ['zombie', 'bat', 'venomspider', 'wolf'], packs: { skulls: [0.6, 0.3, 0.1] }, treeDensity: 1.1, denseForests: true },
-  { name: 'Murky Swamp',    rMax: 2900, ground: 0x4a5a3a, ground2: 0x40503a, dirt: 0x3d4a3a,
-    fog: 0xa3b096, sky: 0xa8b4a0,
+    enemies: ['zombie', 'bat', 'venomspider', 'wolf'], packs: { skulls: [0.6, 0.3, 0.1] }, treeDensity: 1.1, denseForests: true,
+    spiderHaunt: true },
+  { name: 'Murky Swamp',    rMax: 2900, ground: 0x565c30, ground2: 0x4a5230, dirt: 0x3a3c28,
+    fog: 0x8a9678, sky: 0x93a08c,
     foliage: [0x3a5a30, 0x2e4a2a, 0x4a6438], trunk: 0x453a28,
     trees: { pine: 0.2, leafy: 0.5, birch: 0, dead: 0.3 }, snowy: false,
     grass: 0x60704a, flowers: false, mushrooms: true,
     enemies: ['snake', 'venomspider', 'stormsnake', 'boar'], packs: { skulls: [0.5, 0.4, 0.1] }, treeDensity: 0.9, denseForests: true },
-  { name: 'Highlands',      rMax: 3800, ground: 0x7a7a55, ground2: 0x8b845e, dirt: 0x97815a,
-    fog: 0xb9b9a2, sky: 0x9db4c4,
+  { name: 'Highlands',      rMax: 3800, ground: 0x9a8a50, ground2: 0xa89658, dirt: 0xa8874f,
+    fog: 0xc9c0a0, sky: 0x9db4c4,
     foliage: [0x5c6e33, 0x6d7d3a, 0x4e5e2c], trunk: 0x5c4a33,
     trees: { pine: 0.5, leafy: 0.1, birch: 0.1, dead: 0.3 }, snowy: false,
     grass: 0x8f9060, flowers: false, mushrooms: false,
@@ -55,8 +56,8 @@ export const BIOMES = [
     trees: { pine: 0.8, leafy: 0, birch: 0, dead: 0.2 }, snowy: true,
     grass: 0xc2d2dc, flowers: false, mushrooms: false,
     enemies: ['icewolf', 'icespider', 'bear', 'stormsnake'], packs: { skulls: [0.3, 0.5, 0.2] }, treeDensity: 0.85 },
-  { name: 'Jungle',         rMax: 5100, ground: 0x3f7a2e, ground2: 0x4a8a36, dirt: 0x6b5a33,
-    fog: 0xa8c890, sky: 0x9cc4d8,
+  { name: 'Jungle',         rMax: 5100, ground: 0x2f8a28, ground2: 0x3a9c32, dirt: 0x7a6030,
+    fog: 0x8ac878, sky: 0x8cc8e0,
     foliage: [0x1f6b2a, 0x2d8a34, 0x39a03e], trunk: 0x5a4426,
     trees: { pine: 0.1, leafy: 0.7, birch: 0.2, dead: 0 }, snowy: false,
     grass: 0x4f8f3a, flowers: true, mushrooms: true,
@@ -101,7 +102,7 @@ export const fmtResource = (value) => {
 
 // hide drops only from animals that realistically have one
 export const HIDE_BEARING = new Set(['wolf', 'boar', 'elk', 'bear', 'icewolf', 'wendigo', 'yeti']);
-export const hideForHp = (hp) => Math.max(1, Math.round(hp / 240)); // hp tripled, hides didn't
+export const hideForHp = (hp) => Math.max(1, Math.round(hp / 430)); // hp x5.4 total, hides didn't
 export const VERDANT_HIDE_DROP = 0.1;
 
 // ---- Enemies. Spiders are the weak starter enemy; the animals get bigger
@@ -113,52 +114,52 @@ export const VERDANT_HIDE_DROP = 0.1;
 export const ENEMY_TYPES = {
   // -- Verdant Forest --
   rabbit: { name: 'Rabbit', icon: '🐇',
-             hp: 1,   dmg: 0,  speed: 5.9, range: 0,   attackCd: 1.0, xp: 1,  meat: 1, hitR: 0.35, aggro: 0,
+             hp: 1,   dmg: 0,  speed: 7.5, range: 0,   attackCd: 1.0, xp: 1,  meat: 1, hitR: 0.35, aggro: 0,
              passive: true, herd: [3, 10] },
   sheep:  { name: 'Sheep', icon: '🐑',
-             hp: 40,  dmg: 0,  speed: 1.8, range: 0,   attackCd: 1.0, xp: 4,  hitR: 0.6, aggro: 0,
+             hp: 40,  dmg: 0,  speed: 3.5, range: 0,   attackCd: 1.0, xp: 4,  hitR: 0.6, aggro: 0,
              passive: true, herd: [10, 20], guardian: 'wolf' },
   rat:     { name: 'Giant Rat', icon: '🐀',
-             hp: 36,  dmg: 4,  speed: 7.2, range: 1.2, attackCd: 0.9, xp: 5,  meat: 1, hitR: 0.5,  aggro: 13 },
+             hp: 65,  dmg: 4,  speed: 5, range: 1.2, attackCd: 0.9, xp: 5,  meat: 1, hitR: 0.5,  aggro: 13 },
   spider:  { name: 'Forest Spider', icon: '🕷️',
-             hp: 60,  dmg: 6,  speed: 6.0, range: 1.3, attackCd: 1.0, xp: 8,  meat: 1, hitR: 0.7,  aggro: 13 },
+             hp: 110,  dmg: 6,  speed: 6, range: 1.3, attackCd: 1.0, xp: 8,  meat: 1, hitR: 0.7,  aggro: 13 },
   snake:   { name: 'Grass Snake', icon: '🐍',
-             hp: 48,  dmg: 8,  speed: 6.8, range: 1.5, attackCd: 1.3, xp: 10, meat: 1, hitR: 0.6,  aggro: 12 },
+             hp: 85,  dmg: 8,  speed: 4.5, range: 1.5, attackCd: 1.3, xp: 10, meat: 1, hitR: 0.6,  aggro: 12 },
   // -- Dark Forest --
   wolf:    { name: 'Black Wolf', icon: '🐺',
-             hp: 135,  dmg: 10, speed: 8.0, range: 1.6, attackCd: 1.0, xp: 15, meat: 2, hitR: 0.8,  aggro: 16, behavior: 'pack' },
+             hp: 245,  dmg: 10, speed: 9.5, range: 1.6, attackCd: 1.0, xp: 15, meat: 2, hitR: 0.8,  aggro: 16, behavior: 'pack' },
   venomspider: { name: 'Venom Spider', icon: '☣️',
-             hp: 165,  dmg: 11, meleeDmg: 7, speed: 6.0, range: 1.4, attackCd: 1.1, xp: 20, meat: 2, hitR: 0.8, aggro: 18,
+             hp: 300,  dmg: 11, meleeDmg: 7, speed: 6.5, range: 1.4, attackCd: 1.1, xp: 20, meat: 2, hitR: 0.8, aggro: 18,
              ranged: true, shootRange: 8.5, spellCd: 2.5, projectileSpeed: 15, shotColor: 0x8aff3a, behavior: 'kite' },
   bat:     { name: 'Cave Bat', icon: '🦇',
-             hp: 54,  dmg: 6,  speed: 9.5, range: 1.4, attackCd: 1.1, xp: 12, meat: 1, hitR: 0.6,  aggro: 18, flying: true },
+             hp: 95,  dmg: 6,  speed: 11, range: 1.4, attackCd: 1.1, xp: 12, meat: 1, hitR: 0.6,  aggro: 18, flying: true },
   // -- Haunted Forest --
   zombie:  { name: 'Zombie', icon: '🧟',
-             hp: 270,  dmg: 14, speed: 4.6, range: 1.7, attackCd: 1.3, xp: 28, meat: 2, hitR: 0.85, aggro: 19,
+             hp: 485,  dmg: 14, speed: 4, range: 1.7, attackCd: 1.3, xp: 28, meat: 2, hitR: 0.85, aggro: 19,
              poison: { dps: 2, dur: 4 } }, // rotting claws fester — Haunted Forest hazard
   // -- Highlands --
   boar:    { name: 'Wild Boar', icon: '🐗',
-             hp: 240,  dmg: 16, speed: 7.5, range: 1.7, attackCd: 1.1, xp: 25, meat: 3, hitR: 0.9,  aggro: 14 },
+             hp: 430,  dmg: 16, speed: 8, range: 1.7, attackCd: 1.1, xp: 25, meat: 3, hitR: 0.9,  aggro: 14 },
   elk:     { name: 'Mad Elk', icon: '🦌',
-             hp: 330, dmg: 20, speed: 7.2, range: 1.9, attackCd: 1.4, xp: 32, meat: 4, hitR: 1.0,  aggro: 14 },
+             hp: 595, dmg: 20, speed: 10.5, range: 1.9, attackCd: 1.4, xp: 32, meat: 4, hitR: 1.0,  aggro: 14 },
   stormsnake: { name: 'Storm Serpent', icon: '⚡',
-             hp: 210,  dmg: 8,  meleeDmg: 9, speed: 7.0, range: 1.5, attackCd: 1.2, xp: 28, meat: 3, hitR: 0.6, aggro: 18,
+             hp: 380,  dmg: 8,  meleeDmg: 9, speed: 5.5, range: 1.5, attackCd: 1.2, xp: 28, meat: 3, hitR: 0.6, aggro: 18,
              ranged: true, shootRange: 10, spellCd: 3.0, projectileSpeed: 30, shotColor: 0xffe94a, stun: 1.2 },
   // -- Snowfall Woods --
   icewolf: { name: 'Ice Wolf', icon: '❄️',
-             hp: 360, dmg: 18, speed: 8.6, range: 1.6, attackCd: 0.9, xp: 35, meat: 4, hitR: 0.8,  aggro: 17, behavior: 'pack' },
+             hp: 650, dmg: 18, speed: 10, range: 1.6, attackCd: 0.9, xp: 35, meat: 4, hitR: 0.8,  aggro: 17, behavior: 'pack' },
   icespider: { name: 'Frost Spider', icon: '🕸️',
-             hp: 300, dmg: 16, meleeDmg: 10, speed: 6.2, range: 1.4, attackCd: 1.1, xp: 30, meat: 3, hitR: 0.8, aggro: 18,
+             hp: 540, dmg: 16, meleeDmg: 10, speed: 7, range: 1.4, attackCd: 1.1, xp: 30, meat: 3, hitR: 0.8, aggro: 18,
              ranged: true, shootRange: 9, spellCd: 2.2, projectileSpeed: 17, shotColor: 0x8ae0ff, behavior: 'kite' },
   bear:    { name: 'Grizzly Bear', icon: '🐻',
-             hp: 540, dmg: 26, speed: 5.5, range: 2.1, attackCd: 1.5, xp: 45, meat: 5, hitR: 1.2,  aggro: 16, behavior: 'heavy' },
+             hp: 970, dmg: 26, speed: 8.5, range: 2.1, attackCd: 1.5, xp: 45, meat: 5, hitR: 1.2,  aggro: 16, behavior: 'heavy' },
   // -- Frozen Peak --
   wendigo: { name: 'Wendigo', icon: '👹',
-             hp: 660, dmg: 30, speed: 8.4, range: 2.0, attackCd: 1.2, xp: 55, meat: 6, hitR: 0.9,  aggro: 20 },
+             hp: 1190, dmg: 30, speed: 11, range: 2.0, attackCd: 1.2, xp: 55, meat: 6, hitR: 0.9,  aggro: 20 },
   yeti:    { name: 'Yeti', icon: '🏔️',
-             hp: 1050, dmg: 40, speed: 5.0, range: 2.5, attackCd: 1.7, xp: 70, meat: 8, hitR: 1.5,  aggro: 18, behavior: 'heavy' },
+             hp: 1890, dmg: 40, speed: 9, range: 2.5, attackCd: 1.7, xp: 70, meat: 8, hitR: 1.5,  aggro: 18, behavior: 'heavy' },
   icegolem: { name: 'Ice Golem', icon: '🗿',
-             hp: 1200, dmg: 45, meleeDmg: 30, speed: 3.6, range: 2.2, attackCd: 1.8, xp: 80, meat: 9, hitR: 1.4, aggro: 18,
+             hp: 2160, dmg: 45, meleeDmg: 30, speed: 4, range: 2.2, attackCd: 1.8, xp: 80, meat: 9, hitR: 1.4, aggro: 18,
              ranged: true, shootRange: 10, spellCd: 4.0, projectileSpeed: 13, shotColor: 0xbfe8ff, stun: 0.8 },
 };
 
@@ -176,7 +177,7 @@ export const BOSS_RANKS = [
 
 // Meat dropped by a killed unit, scaled by its (max) HP: 1 meat up to 30 HP,
 // then +1 per additional 30 HP. Tougher enemies (and bosses) pay out more.
-export const meatForHp = (hp) => Math.max(1, Math.ceil(hp / 90)); // hp tripled, meat didn't
+export const meatForHp = (hp) => Math.max(1, Math.ceil(hp / 160)); // hp x5.4 total, meat didn't
 
 // Boss "pack mothers" carry NAMES — picked per creature family at spawn.
 export const BOSS_NAMES = {
@@ -282,14 +283,14 @@ export const ITEMS = [
   { id: 'bearHide',     slot: 'chest', level: 9, icon: '🛡️', name: 'Bearhide Plate', cost: { hide: 24, iron: 12, meat: 45 }, needs: 'furnace', stats: { hp: 170, regen: 0.8 },
     desc: '+170 max health, +0.8 ❤️/s regeneration.' },
   // -- boots --
-  { id: 'swiftBoots',   slot: 'boots', level: 3, icon: '👢', name: 'Hide Wraps',     cost: { hide: 5, meat: 10 }, needs: 'tent', stats: { speed: 0.20 },
-    desc: '+20% movement speed.' },
-  { id: 'huntersBoots', slot: 'boots', level: 6, icon: '🥾', name: "Hunter's Boots", cost: { hide: 10, meat: 25 }, needs: 'tent', stats: { speed: 0.35 },
-    desc: '+35% movement speed.' },
-  { id: 'ironBoots',    slot: 'boots', level: 7, icon: '🥾', name: 'Iron-Shod Boots', cost: { iron: 8, hide: 6 }, needs: 'furnace', stats: { speed: 0.28, hp: 35 },
-    desc: '+28% movement speed, +35 max health.' },
-  { id: 'windBoots',    slot: 'boots', level: 9, icon: '💨', name: 'Windwalkers',    cost: { hide: 14, iron: 8, meat: 40 }, needs: 'furnace', stats: { speed: 0.50, regen: 0.5 },
-    desc: '+50% movement speed, +0.5 ❤️/s regeneration.' },
+  { id: 'swiftBoots',   slot: 'boots', level: 3, icon: '👢', name: 'Hide Wraps',     cost: { hide: 5, meat: 10 }, needs: 'tent', stats: { speed: 1.5 },
+    desc: '+1.5 movement speed.' },
+  { id: 'huntersBoots', slot: 'boots', level: 6, icon: '🥾', name: "Hunter's Boots", cost: { hide: 10, meat: 25 }, needs: 'tent', stats: { speed: 2.5 },
+    desc: '+2.5 movement speed.' },
+  { id: 'ironBoots',    slot: 'boots', level: 7, icon: '🥾', name: 'Iron-Shod Boots', cost: { iron: 8, hide: 6 }, needs: 'furnace', stats: { speed: 3, hp: 35 },
+    desc: '+3 movement speed, +35 max health.' },
+  { id: 'windBoots',    slot: 'boots', level: 9, icon: '💨', name: 'Windwalkers',    cost: { hide: 14, iron: 8, meat: 40 }, needs: 'furnace', stats: { speed: 4.5, regen: 0.5 },
+    desc: '+4.5 movement speed, +0.5 ❤️/s regeneration.' },
   // -- charms (mid-game trinkets — ONE charm slot, pick your bonus) --
   { id: 'wolfPendant', slot: 'charm', level: 5, icon: '🦷', name: 'Wolf-Fang Pendant',
     cost: { hide: 8, meat: 30 }, needs: 'tent', stats: { dmgPct: 0.10 },
@@ -328,7 +329,7 @@ export const itemById = (id) => ITEMS.find(i => i.id === id);
 // ---- Consumables: cheap repeatable meat sinks, used with F / G in the field.
 export const CONSUMABLES = [
   { id: 'salve', icon: '🧪', name: 'Healing Salve', key: 'F', cost: { berry: 5 },
-    heal: 100, desc: 'Brewed from 5 berries. Drink with F: restores 100 health.' },
+    heal: 100, desc: 'Brewed from 5 blueberries. Drink with F: restores 100 health.' },
   { id: 'roast', icon: '🍗', name: 'Roasted Meat', key: 'G', cost: { meat: 10 },
     heal: 15, speedDur: 30, desc: 'Eat with G: +15 health and +10% speed for 30 s.' },
 ];
@@ -499,9 +500,9 @@ export const MOBA = {
 
 // creep stats per tier (den levels unlock stronger mixes); forge multiplies
 export const CREEP_TYPES = {
-  wolf: { hp: 60,  dmg: 9,  speed: 6.5, range: 1.6, cd: 1.0, xp: 8,  meat: 1, hitR: 0.8 },
-  boar: { hp: 110, dmg: 15, speed: 6.0, range: 1.7, cd: 1.2, xp: 14, meat: 2, hitR: 0.9 },
-  bear: { hp: 220, dmg: 24, speed: 5.0, range: 2.0, cd: 1.5, xp: 22, meat: 3, hitR: 1.2 },
+  wolf: { hp: 60,  dmg: 9,  speed: 3.9, range: 1.6, cd: 1.0, xp: 8,  meat: 1, hitR: 0.8 },
+  boar: { hp: 110, dmg: 15, speed: 3.6, range: 1.7, cd: 1.2, xp: 14, meat: 2, hitR: 0.9 },
+  bear: { hp: 220, dmg: 24, speed: 3.0, range: 2.0, cd: 1.5, xp: 22, meat: 3, hitR: 1.2 },
 };
 // wave composition by den level (1..5)
 export const DEN_WAVES = [

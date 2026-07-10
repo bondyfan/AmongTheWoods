@@ -48,7 +48,7 @@ class PetWolf {
 
     const to = new THREE.Vector3().subVectors(dest, this.pos);
     const dist = to.length();
-    const speed = 9.5;
+    const speed = 5.6;
     if (dist > (target ? 1.2 : 0.4)) {
       this.pos.addScaledVector(to, Math.min(1, (speed * dt) / dist));
       this.walkT += dt * speed;

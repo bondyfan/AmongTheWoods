@@ -73,6 +73,7 @@ export class MobaWorld extends World {
   _genLakes() { this.lakes = []; }   // no lakes (keeps lanes reliable)
   _genPois() { this.pois = []; }     // no survival landmarks either
   _genSmiths() { this.smiths = []; }
+  _genPaths() { this.pathPts = []; this._pathBuckets = new Map(); }
   lakesNear() { return []; }
   _buildRingRivers() {}
   _buildCave() {}                    // no starting cave either

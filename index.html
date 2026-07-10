@@ -14,6 +14,8 @@
 
   <!-- damage vignette -->
   <div id="vignette"></div>
+  <!-- biome gloom: dark screen edges in the Dark/Haunted forests -->
+  <div id="biome-gloom"></div>
   <div id="lowhp" class="hidden"></div>
   <div id="gold-flash"></div>
 
@@ -49,7 +51,6 @@
       <button id="shop-btn">🛠 Upgrades <kbd>U</kbd></button>
       <button id="char-btn">🧍 Character <kbd>C</kbd></button>
       <button id="bestiary-btn">📕 Bestiary <kbd>N</kbd></button>
-      <button id="inv-btn">🎒 Inventory <kbd>I</kbd></button>
       <button id="settings-btn">⚙️ Settings</button>
       <button id="help-btn">❓ Controls <kbd>H</kbd></button>
     </div>
@@ -190,6 +191,12 @@
         <span style="flex:1"><b>Music volume</b></span>
         <input type="range" id="set-music" min="0" max="100" step="5" style="width:140px">
       </label>
+      <label class="setting-row" id="admin-row" style="display:none">
+        <input type="checkbox" id="set-admin">
+        <span><b>🛠 Admin mode</b> <small>(singleplayer only)</small><br>
+          <small>Edit any stat in the Character panel and spawn items into
+          the inventory — for testing.</small></span>
+      </label>
       <div class="setting-row" id="mpcode-row">
         <span><b>Multiplayer code:</b> <span id="set-mpcode" style="font-family:monospace;font-size:18px;letter-spacing:2px">—</span><br>
           <small>Share this code so a friend can join your running game.</small></span>
@@ -202,6 +209,8 @@
     <div class="panel-head">
       <h2>World Map</h2>
       <span class="panel-res">Only what you have discovered is drawn.</span>
+      <button id="bigmap-zoomin" class="map-zoom-btn" title="Zoom in">+</button>
+      <button id="bigmap-zoomout" class="map-zoom-btn" title="Zoom out">−</button>
       <button class="panel-close">✕</button>
     </div>
     <div id="bigmap-body"><canvas id="bigmap-canvas" width="620" height="620"></canvas></div>

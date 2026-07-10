@@ -236,16 +236,16 @@ export class Player {
   recompute() {
     const equipped = (slot) => itemById(this.equipment[slot]);
     const oldMax = this.maxHp || 100;
-    let hp = 100 + (this.level - 1) * 10 + (this.shrineBonus || 0), speedMult = 1;
+    let hp = 100 + (this.level - 1) * 10 + (this.shrineBonus || 0), speedAdd = 0;
     for (const slot of ['head', 'chest', 'boots']) {
       const it = equipped(slot);
       if (it?.stats?.hp) hp += it.stats.hp;
-      if (it?.stats?.speed) speedMult += it.stats.speed;
+      if (it?.stats?.speed) speedAdd += it.stats.speed;
     }
     this.maxHp = hp + (this.campBonus || 0);
     if (this.maxHp > oldMax) this.hp += this.maxHp - oldMax;
     this.hp = Math.min(this.hp, this.maxHp);
-    this.speed = 8.5 * speedMult;
+    this.speed = 5.5 + speedAdd;
     // passive regeneration: everyone knits back slowly; gear can stack it up
     let regen = 0.1;
     for (const slot of ['head', 'chest', 'boots', 'charm']) {
@@ -279,6 +279,18 @@ export class Player {
       : null;
     const orbBase = comp?.orb;
     this.orb = orbBase ? { ...orbBase, dmg: orbBase.dmg * (1 + 0.05 * s.power) } : null;
+
+    // admin mode (singleplayer testing): direct stat overrides win over
+    // everything derived above
+    const ov = this.adminOverrides;
+    if (ov) {
+      if (ov.speed != null) this.speed = ov.speed;
+      if (ov.maxHp != null) { this.maxHp = ov.maxHp; this.hp = Math.min(this.hp, this.maxHp); }
+      if (ov.regen != null) this.hpRegen = ov.regen;
+      if (ov.attack != null) this.weapon.dmg = ov.attack;
+      if (ov.aspd != null) this.weapon.cd = 1 / Math.max(0.1, ov.aspd);
+      if (ov.range != null) { this.weapon.range = ov.range; this.attackRange = ov.range; }
+    }
 
     this._refreshWeaponMeshes();
     this._refreshOutfit();
@@ -403,7 +415,7 @@ export class Player {
     this.berry = Math.round((this.berry - 1) * 10) / 10;
     this.hp = Math.min(this.maxHp, this.hp + 7);
     this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2), '🫐 +7 ❤️', '#c9a4ff');
-    audio.sfx('purchase', 0.3, 300);
+    audio.sfx('eat_food', 0.55, 300);
     return true;
   }
 
@@ -417,7 +429,7 @@ export class Player {
     if (c.speedDur) this.roastT = c.speedDur;
     this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
       `${c.icon} +${c.heal} ❤️${c.speedDur ? ' +🏃' : ''}`, '#7fe07f');
-    audio.sfx('purchase', 0.4, 250);
+    audio.sfx('eat_food', 0.6, 250);
     return true;
   }
 

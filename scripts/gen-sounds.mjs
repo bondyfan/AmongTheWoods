@@ -31,6 +31,8 @@ const SOUNDS = [
   ['sheep_death',   'Sheep dying: short pained bleat baa cut off, falling over, no music', 1.0],
   ['mine_hit',      'Pickaxe striking solid rock: sharp metallic clink with stony impact and tiny debris, single hit, short, no music', 0.6],
   ['rock_crack',    'Boulder cracking apart: heavy stone crack and crumbling rubble collapse, short, no music', 1.1],
+  ['smith_forge',   'Blacksmith forging: rhythmic hammer strikes on anvil with metal ring and fire crackle, workshop ambience, loopable, no music, no voice', 4.0],
+  ['eat_food',      'Eating food: quick bite crunch and chewing gulp, cartoonish, very short, no music, no voice', 0.8],
 ];
 
 const exists = async (p) => { try { await access(p); return true; } catch { return false; } };

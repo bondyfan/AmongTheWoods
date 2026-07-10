@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import { WORLD, BIOMES, biomeAt, radiusOf } from './config.js';
 import { makeTree, makeRock, makeGrassTuft, makeFlower, makeMushroom, makeBush,
          makeLog, makeBoulder, makeBridge, makeCampfire, makeStalagmite,
-         makeBerryBush, makeShrine, makeMonolith, makeCrypt, makeBlacksmith } from './models.js';
+         makeBerryBush, makeShrine, makeMonolith, makeCrypt, makeBlacksmith, makeCobweb } from './models.js';
 import { audio } from './audio.js';
 
 const CHUNK = 40;
@@ -83,6 +83,7 @@ export class World {
     this._genLakes();
     this._genPois();
     this._genSmiths();
+    this._genPaths();
     this._buildGround();
     this._buildRingRivers();
     this._buildCave();
@@ -121,6 +122,7 @@ export class World {
     this._genLakes();
     this._genPois();
     this._genSmiths();
+    this._genPaths();
     this._buildGround();
     this._buildRingRivers();
     this._buildCave();
@@ -222,6 +224,78 @@ export class World {
       }
       return { r, type, gaps };
     });
+  }
+
+  // ---- winding field paths: from the base out through a gate of every
+  // ring, gate to gate, so following the trail always leads you deeper ----
+  _genPaths() {
+    this.pathPts = [];
+    this._pathBuckets = new Map();
+    if (!this.rings?.length) return;
+    const rng = mulberry32(this.seed ^ 0xf1e1d);
+    // gates store a as atan2(x, z) → world pos is (r sin a, r cos a)
+    let cur = { x: 0, z: 26 };
+    let curA = Math.atan2(cur.x, cur.z);
+    const pts = [{ x: cur.x, z: cur.z }];
+    for (const ring of this.rings) {
+      if (!ring.gaps.length) break;
+      let gate = ring.gaps[0];
+      for (const g of ring.gaps) if (angDiff(g.a, curA) < angDiff(gate.a, curA)) gate = g;
+      const gx = Math.sin(gate.a) * ring.r, gz = Math.cos(gate.a) * ring.r;
+      const dist = Math.hypot(gx - cur.x, gz - cur.z);
+      const n = Math.max(4, Math.ceil(dist / 22));
+      // perpendicular for the meander offset
+      const px = -(gz - cur.z) / dist, pz = (gx - cur.x) / dist;
+      const waves = 2 + Math.floor(rng() * 3), phase = rng() * Math.PI * 2;
+      const amp = Math.min(60, dist * (0.05 + rng() * 0.05));
+      for (let i = 1; i <= n; i++) {
+        const t = i / n;
+        // meander fades near both endpoints so gates are hit dead-on
+        const fade = Math.sin(t * Math.PI);
+        const off = Math.sin(t * Math.PI * waves + phase) * amp * fade
+          + (valueNoise(t * 900, 0, 60, this.seed + 777) - 0.5) * 26 * fade;
+        pts.push({ x: cur.x + (gx - cur.x) * t + px * off,
+                   z: cur.z + (gz - cur.z) * t + pz * off });
+      }
+      cur = { x: gx, z: gz };
+      curA = gate.a;
+      // step just past the gate so the path re-emerges on the far side
+      const outX = Math.sin(gate.a) * (ring.r + 30), outZ = Math.cos(gate.a) * (ring.r + 30);
+      pts.push({ x: outX, z: outZ });
+      cur = { x: outX, z: outZ };
+    }
+    this.pathPts = pts;
+    // bucket segments on an 80 m grid so pathDistance stays cheap per vertex
+    const CELLB = 80;
+    const key = (cx, cz) => cx + ',' + cz;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], b = pts[i + 1];
+      const x0 = Math.floor((Math.min(a.x, b.x) - 8) / CELLB), x1 = Math.floor((Math.max(a.x, b.x) + 8) / CELLB);
+      const z0 = Math.floor((Math.min(a.z, b.z) - 8) / CELLB), z1 = Math.floor((Math.max(a.z, b.z) + 8) / CELLB);
+      for (let cx = x0; cx <= x1; cx++) for (let cz = z0; cz <= z1; cz++) {
+        const k = key(cx, cz);
+        if (!this._pathBuckets.has(k)) this._pathBuckets.set(k, []);
+        this._pathBuckets.get(k).push(i);
+      }
+    }
+    this._pathCellB = CELLB;
+  }
+
+  pathDistance(x, z) {
+    if (!this._pathBuckets?.size) return Infinity;
+    const segs = this._pathBuckets.get(
+      Math.floor(x / this._pathCellB) + ',' + Math.floor(z / this._pathCellB));
+    if (!segs) return Infinity;
+    let best = Infinity;
+    for (const i of segs) {
+      const a = this.pathPts[i], b = this.pathPts[i + 1];
+      const dx = b.x - a.x, dz = b.z - a.z;
+      const len2 = dx * dx + dz * dz || 1;
+      let t = ((x - a.x) * dx + (z - a.z) * dz) / len2;
+      t = Math.max(0, Math.min(1, t));
+      best = Math.min(best, Math.hypot(x - (a.x + dx * t), z - (a.z + dz * t)));
+    }
+    return best;
   }
 
   // ---- lakes are generated lazily per region cell (the world is huge) ----
@@ -510,6 +584,13 @@ export class World {
       }
     }
 
+    // trodden field path: packed pale sand, wide and unmistakable
+    const pd = this.pathDistance(x, z);
+    if (pd < 5.2) {
+      const trail = new THREE.Color(0xd8b878);
+      out.lerp(trail, pd < 3.6 ? 0.95 : 0.95 * (1 - (pd - 3.6) / 1.6));
+    }
+
     // the cave floor is dark rock
     if (r < WORLD.caveR + 2.5) out.lerp(new THREE.Color(0x2a2a26), Math.min(1, (WORLD.caveR + 2.5 - r) / 3));
 
@@ -533,7 +614,10 @@ export class World {
 
   // vertex-colored terrain tile for one chunk (finer mesh where cliffs are)
   _groundTile(cxw, czw) {
-    const segs = this._mountainK(cxw + CHUNK / 2, czw + CHUNK / 2) > 0 ? 20 : 10;
+    // finer mesh where cliffs are AND where the trail passes (a 4 m vertex
+    // grid would render a 5 m path as ragged blotches)
+    const segs = (this._mountainK(cxw + CHUNK / 2, czw + CHUNK / 2) > 0
+      || this.pathDistance(cxw + CHUNK / 2, czw + CHUNK / 2) < 34) ? 20 : 10;
     const geo = new THREE.PlaneGeometry(CHUNK, CHUNK, segs, segs);
     geo.rotateX(-Math.PI / 2);
     geo.translate(cxw + CHUNK / 2, 0, czw + CHUNK / 2);
@@ -579,6 +663,19 @@ export class World {
     return obj;
   }
 
+  // 60% slow inside any static web field (Dark Forest ground webs)
+  webSlowAt(x, z) {
+    const cx = Math.floor(x / CHUNK), cz = Math.floor(z / CHUNK);
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+      const chunk = this.chunks.get(this._chunkKey(cx + dx, cz + dz));
+      if (!chunk?.webs?.length) continue;
+      for (const w of chunk.webs) {
+        if (Math.hypot(x - w.x, z - w.z) < w.r) return 0.4;
+      }
+    }
+    return 1;
+  }
+
   isWater(x, z) {
     for (const lake of this.lakesNear(x, z)) {
       const d = Math.hypot(x - lake.x, z - lake.z);
@@ -599,6 +696,7 @@ export class World {
   }
 
   _genChunk(cx, cz) {
+    if (!Number.isFinite(cx) || !Number.isFinite(cz)) return;
     const key = this._chunkKey(cx, cz);
     if (this.chunks.has(key)) return;
     const group = new THREE.Group();
@@ -639,6 +737,7 @@ export class World {
       if (r > WORLD.radius - 3 || r < 14) return false;               // world edge + cave
       if (x > -13 && x < 16 && z > 8 && z < 24) return false;         // camp building spots
       if (this.rings.some(w => Math.abs(r - w.r) < 5)) return false;  // ring bands
+      if (this.pathDistance(x, z) < 4.5) return false;                // keep trails clear
       if (chunkLakes.some(l => {
         const d = Math.hypot(x - l.x, z - l.z);
         return d < l.r + 1.2 && !(l.island && d < l.island.r);
@@ -655,7 +754,7 @@ export class World {
       const f = valueNoise(cxw + CHUNK / 2, czw + CHUNK / 2, 240, this.seed + 133);
       if (f > 0.68) {
         const k = Math.min(1, (f - 0.68) / 0.1);
-        count = Math.min(64, Math.round(count * (2 + k * k * 3.5)));
+        count = Math.min(110, Math.round(count * (3.5 + k * k * 6)));
         denseWood = true; // thick woods grow TALL trees, not saplings
       }
     }
@@ -703,6 +802,24 @@ export class World {
         group.add(obj);
       }
     };
+    // spider-web fields: clusters of big sticky webs over ~30% of the biome
+    const chunkWebs = [];
+    if (biome.webField) {
+      const wf = valueNoise(cxw + CHUNK / 2, czw + CHUNK / 2, 130, this.seed + 555);
+      if (wf > 0.42) {
+        const n = Math.round((6 + rng() * 8) * Math.min(1, (wf - 0.42) / 0.3 + 0.4));
+        for (let i = 0; i < n; i++) {
+          const x = cxw + rng() * CHUNK, z = czw + rng() * CHUNK;
+          if (!inBounds(x, z)) continue;
+          const web = makeCobweb(rng);
+          web.position.set(x, this.heightAt(x, z) + 0.07, z);
+          web.rotation.y = rng() * Math.PI * 2;
+          group.add(web);
+          chunkWebs.push({ x, z, r: web.userData.radius ?? 2.5 });
+        }
+      }
+    }
+
     scatter(22 + Math.floor(rng() * 12), () => makeGrassTuft(biome.grass, rng));
     scatter(2 + Math.floor(rng() * 3), () => makeBush(biome.foliage[0], rng));
     scatter(1 + Math.floor(rng() * 2), () => makeRock(rng));
@@ -803,7 +920,7 @@ export class World {
     }
 
     this.scene.add(group);
-    this.chunks.set(key, { group, trees, rocks, bushes });
+    this.chunks.set(key, { group, trees, rocks, webs: chunkWebs, bushes });
   }
 
   update(dt, playerPos) {

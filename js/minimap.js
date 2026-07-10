@@ -275,6 +275,13 @@ export class Minimap {
     ctx.strokeStyle = '#000'; ctx.stroke();
   }
 
+  // Big-map zoom: 1 = whole world; each step halves the visible span and
+  // centers the view on the player (clamped to the world square).
+  bigZoomBy(delta) {
+    this.bigZoom = Math.max(1, Math.min(8, (this.bigZoom ?? 1) * (delta > 0 ? 2 : 0.5)));
+    return this.bigZoom;
+  }
+
   // The BIG map (M / minimap click): everything discovered so far, scaled to
   // fit — the undiscovered world stays black.
   drawBig(canvas, player, partner = null) {
@@ -282,59 +289,64 @@ export class Minimap {
     const W = canvas.width, H = canvas.height;
     ctx.fillStyle = '#0a0f08';
     ctx.fillRect(0, 0, W, H);
-    const scale = W / this.span;
-    for (let rz = 0; rz < this.rows; rz++) {
-      for (let cx = 0; cx < this.cols; cx++) {
+    const zoom = this.bigZoom ?? 1;
+    const vspan = this.span / zoom;
+    const clamp = (v) => Math.max(-WORLD.radius, Math.min(WORLD.radius - vspan, v));
+    const ox = zoom === 1 ? -WORLD.radius : clamp(player.pos.x - vspan / 2);
+    const oz = zoom === 1 ? -WORLD.radius : clamp(player.pos.z - vspan / 2);
+    const scale = W / vspan;
+    const toX = (wx) => (wx - ox) * scale;
+    const toY = (wz) => (wz - oz) * scale;
+    const c0x = Math.max(0, Math.floor((ox + WORLD.radius) / CELL));
+    const c0z = Math.max(0, Math.floor((oz + WORLD.radius) / CELL));
+    const cN = Math.ceil(vspan / CELL) + 1;
+    for (let rz = c0z; rz < Math.min(this.rows, c0z + cN); rz++) {
+      for (let cx = c0x; cx < Math.min(this.cols, c0x + cN); cx++) {
         if (!this.discovered[rz * this.cols + cx]) continue;
         const wx = (cx + 0.5) * CELL - WORLD.radius;
         const wz = (rz + 0.5) * CELL - WORLD.radius;
         if (radiusOf(wx, wz) > WORLD.radius) continue;
         const biome = biomeAt(wx, wz);
         ctx.fillStyle = '#' + biome.ground.toString(16).padStart(6, '0');
-        ctx.fillRect(cx * CELL * scale, rz * CELL * scale,
+        ctx.fillRect(toX(wx - CELL / 2), toY(wz - CELL / 2),
           Math.max(1.5, CELL * scale + 0.5), Math.max(1.5, CELL * scale + 0.5));
       }
     }
+    const inView = (wx, wz) => wx >= ox && wx <= ox + vspan && wz >= oz && wz <= oz + vspan;
     ctx.textAlign = 'center';
     ctx.font = '13px sans-serif';
-    ctx.fillText('🏠', W / 2, H / 2 + 4);
+    if (inView(0, 0)) ctx.fillText('🏠', toX(0), toY(0) + 4);
     // discovered landmarks + blacksmiths + the active treasure map
     ctx.font = '11px sans-serif';
     for (const sm of this.world.smiths ?? []) {
-      if (!this._isDiscovered(sm.x, sm.z)) continue;
+      if (!this._isDiscovered(sm.x, sm.z) || !inView(sm.x, sm.z)) continue;
       ctx.fillStyle = '#ffa528';
-      ctx.fillText('⚒', (sm.x + WORLD.radius) * scale, (sm.z + WORLD.radius) * scale + 4);
+      ctx.fillText('⚒', toX(sm.x), toY(sm.z) + 4);
     }
     for (const poi of this.world.pois ?? []) {
-      if (!this._isDiscovered(poi.x, poi.z)) continue;
+      if (!this._isDiscovered(poi.x, poi.z) || !inView(poi.x, poi.z)) continue;
       ctx.globalAlpha = poi.claimed ? 0.35 : 1;
       ctx.fillStyle = poi.type === 'shrine' ? '#7fd1ff' : poi.type === 'crypt' ? '#f0ead8' : '#c9b8ff';
       ctx.fillText(poi.type === 'shrine' ? '✦' : poi.type === 'crypt' ? '☗' : '▲',
-        (poi.x + WORLD.radius) * scale, (poi.z + WORLD.radius) * scale + 4);
+        toX(poi.x), toY(poi.z) + 4);
       ctx.globalAlpha = 1;
     }
-    if (this.treasureAt) {
+    if (this.treasureAt && inView(this.treasureAt.x, this.treasureAt.z)) {
       ctx.font = 'bold 13px sans-serif';
       ctx.fillStyle = '#ff5030';
-      ctx.fillText('✖', (this.treasureAt.x + WORLD.radius) * scale, (this.treasureAt.z + WORLD.radius) * scale + 5);
+      ctx.fillText('✖', toX(this.treasureAt.x), toY(this.treasureAt.z) + 5);
       ctx.font = '11px sans-serif';
     }
-    if (this.deathAt) {
-      const dx = (this.deathAt.x + WORLD.radius) * scale;
-      const dy = (this.deathAt.z + WORLD.radius) * scale;
+    if (this.deathAt && inView(this.deathAt.x, this.deathAt.z)) {
       ctx.font = '15px sans-serif';
-      ctx.fillText('⚰️', dx, dy + 5);
+      ctx.fillText('⚰️', toX(this.deathAt.x), toY(this.deathAt.z) + 5);
     }
-    if (partner?.mesh?.visible) {
-      const px = (partner.pos.x + WORLD.radius) * scale;
-      const py = (partner.pos.z + WORLD.radius) * scale;
+    if (partner?.mesh?.visible && inView(partner.pos.x, partner.pos.z)) {
       ctx.fillStyle = '#5fa8e0';
-      ctx.beginPath(); ctx.arc(px, py, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(toX(partner.pos.x), toY(partner.pos.z), 4, 0, Math.PI * 2); ctx.fill();
     }
-    const px = (player.pos.x + WORLD.radius) * scale;
-    const py = (player.pos.z + WORLD.radius) * scale;
     ctx.fillStyle = '#ffffff';
-    ctx.beginPath(); ctx.arc(px, py, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(toX(player.pos.x), toY(player.pos.z), 4, 0, Math.PI * 2); ctx.fill();
     ctx.strokeStyle = '#000'; ctx.stroke();
   }
 }

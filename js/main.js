@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOBA,
          RESOURCES, RES_ICONS, HIDE_BEARING, VERDANT_HIDE_DROP, hideForHp, radiusOf, costFor,
          biomeIndexAt, progressAt, fmtResource, roundResource, itemById, spellById,
-         consumableById, essenceDropFor } from './config.js';
+         consumableById, essenceDropFor, MAX_LEVEL } from './config.js';
 import { makeAimArc, updateAimArc, makeRaft } from './models.js';
 import { Camp } from './camp.js';
 import { audio } from './audio.js';
@@ -96,7 +96,18 @@ const panels = new Panels({
   onBuyItem: buyItem,
   onBuySpell: buySpell,
   onBuyStat: buyStat,
-  onEquip: (id) => { player.equip(id); panels.refresh(); },
+  onEquip: (id) => {
+    const item = itemById(id);
+    if (item && item.level > player.level) {
+      ui.toast(`🔒 ${item.name} needs level ${item.level}`, 'error');
+      audio.sfx('error', 0.4);
+      return;
+    }
+    player.equip(id);
+    audio.sfx('click', 0.5);
+    panels.refresh();
+  },
+  onToast: (msg) => ui.toast(msg, 'error'),
   onUnequip: (slot) => { player.unequip(slot); panels.refresh(); },
   onToggleSpell: (id) => { player.toggleSpellSlot(id); panels.refresh(); },
   onBuild: (id, lane) => buildBase(id, lane),
@@ -119,6 +130,35 @@ const panels = new Panels({
   mobaTeam: () => mobaSide,
   nearHome: () => nearHome(), // the home building only upgrades in person
   nearSmith: () => nearSmith(), // weapons & gear can only be forged here
+  // -- admin mode (singleplayer testing) --
+  isAdmin: () => !!game.adminMode,
+  adminValues: () => ({ level: player.level, ...(player.adminOverrides ?? {}) }),
+  onAdminStat: (key, val) => {
+    if (key === 'level') {
+      if (val != null) player.level = Math.max(1, Math.min(MAX_LEVEL, Math.round(val)));
+    } else {
+      player.adminOverrides ??= {};
+      if (val == null) delete player.adminOverrides[key];
+      else player.adminOverrides[key] = val;
+    }
+    player.recompute();
+    panels.refresh();
+  },
+  onAdminAddItem: (id) => {
+    if (id.startsWith('c:')) {
+      const cid = id.slice(2);
+      player.consumables[cid] = (player.consumables[cid] ?? 0) + 1;
+    } else {
+      player.invItems.push(id);
+    }
+    audio.sfx('special', 0.4);
+    panels.refresh();
+  },
+  onAdminAddRes: () => {
+    for (const k of RESOURCES) player[k] = roundResource(player[k] + 100);
+    audio.sfx('kill_gold', 0.4);
+    panels.refresh();
+  },
 });
 
 let world = new World(scene, game.seed);
@@ -588,9 +628,21 @@ const settings = Object.assign(
     localStorage.setItem('atw-settings', JSON.stringify(settings));
   });
 
-  // show the room code so a friend can join the running game
+  // show the room code so a friend can join the running game; admin mode
+  // is offered only in singleplayer (it would wreck a shared session)
   $id('settings-btn').addEventListener('click', () => {
     $id('set-mpcode').textContent = (mp?.active && mpCode) ? mpCode : '— (not in a multiplayer game)';
+    $id('admin-row').style.display = (game.kind === 'survival' && !mp?.active) ? '' : 'none';
+    $id('set-admin').checked = !!game.adminMode;
+  });
+  $id('set-admin').addEventListener('change', () => {
+    game.adminMode = $id('set-admin').checked;
+    if (!game.adminMode && player.adminOverrides) {
+      player.adminOverrides = null; // back to honest stats
+      player.recompute();
+    }
+    panels.refresh();
+    ui.toast(game.adminMode ? '🛠 Admin mode ON' : 'Admin mode off', 'level');
   });
 }
 
@@ -952,6 +1004,7 @@ input.onKey('KeyE', () => {
     panels.shopTab = 'weapons';
     if (!panels.openSet.has('shop')) panels.toggle('shop');
     else panels.renderShop();
+    audio.loopStart('smith_forge', 0.5);
   }
   else if (nearPoi()) claimPoi(nearPoi());
   else if (nearTreasure()) digTreasure();
@@ -1024,6 +1077,12 @@ input.onKey('KeyP', () => {
   audio.sfx('click', 0.4);
 });
 $id('bigmap').querySelector('.panel-close').addEventListener('click', () => toggleBigMap(false));
+for (const [btnId, d] of [['bigmap-zoomin', 1], ['bigmap-zoomout', -1]]) {
+  $id(btnId).addEventListener('click', () => {
+    minimap.bigZoomBy?.(d);
+    minimap.drawBig($id('bigmap-canvas'), player, mp?.mode === 'coop' ? mp.remote : null);
+  });
+}
 $id('respawn-cave').addEventListener('click', () => reviveAt('cave'));
 $id('respawn-grave').addEventListener('click', () => reviveAt('grave'));
 for (let i = 0; i < 6; i++) {
@@ -1130,6 +1189,10 @@ function updateAtmosphere(dt) {
     if (note) ui.toast(note, 'boss');
   }
   envSpeedMult = BIOMES[game.biomeIndex].name === 'Murky Swamp' ? 0.82 : 1;
+  $id('biome-gloom').style.opacity = BIOMES[game.biomeIndex].darkness ?? 0;
+  envSpeedMult *= Math.min(
+    enemyMgr?.webSlowAt?.(player.pos.x, player.pos.z) ?? 1,
+    world.webSlowAt?.(player.pos.x, player.pos.z) ?? 1);
   const biome = BIOMES[game.biomeIndex];
 
   // the cave is dark; light floods in as you walk toward the mouth
@@ -1264,6 +1327,9 @@ function step() {
         : nearTreasure() ? '💰 This is the spot — press <kbd>E</kbd> to dig' : null;
       if (hint) { hintEl.innerHTML = hint; hintEl.classList.remove('hidden'); }
       else hintEl.classList.add('hidden');
+
+      // the anvil rings only while the forge shop is open at the smith
+      if (!panels.openSet.has('shop') || !nearSmith()) audio.loopStop('smith_forge');
 
       // fallen-pet resurrection hint (at home or at the graveyard)
       const petHint = $id('pet-hint');

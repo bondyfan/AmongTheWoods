@@ -9,7 +9,7 @@ import { audio } from './audio.js';
 
 let nextEnemyId = 1;
 let nextGroupId = 1; // herds of passive critters (rabbits) share a group
-const SPAWN_DENSITY = 1.66; // dense, dangerous woods
+const SPAWN_DENSITY = 2.16; // dense, dangerous woods (+30% again)
 const MAX_ALIVE_HARD = 140; // hard cap on simultaneously live units
 // give up a chase after this long without reaching the target, then jog home
 const LEASH_TIME = 7;
@@ -105,10 +105,6 @@ export class EnemyManager {
     if (bossRank > 0 && !e.bossName) e.bossName = bossNameFor(type, e.id);
     this.scene.add(e.mesh);
     this.list.push(e);
-    if (!this.discovered.has(type)) {
-      this.discovered.add(type);
-      this.hooks.onDiscover(type);
-    }
     if (bossRank > 0) this.hooks.onBossSpawn(e);
     this.hooks.onSpawn(e);
     return e;
@@ -180,6 +176,21 @@ export class EnemyManager {
       const count = rank > 0 ? BOSS_RANKS[rank - 1].packSize : 5 + Math.floor(Math.random() * 6);
       for (let i = 0; i < count; i++) pool.push({ type, groupId: gid });
       if (rank > 0) pool.push({ type, bossRank: rank, groupId: gid });
+    }
+
+    // spider-haunted woods: almost every zone hides a spider (or bat) nest,
+    // usually with a brood mother — these packs drape the ground in webs
+    if (biome.spiderHaunt && Math.random() < 0.85) {
+      const nest = biome.enemies.filter(t => /spider|bat/i.test(t));
+      if (nest.length) {
+        const type = pick(nest);
+        let rank = Math.random() < 0.6 ? 1 : 0;
+        if (rank && Math.random() < 0.25) rank = 2;
+        const gid = nextGroupId++;
+        const count = rank > 0 ? BOSS_RANKS[rank - 1].packSize : 5 + Math.floor(Math.random() * 6);
+        for (let i = 0; i < count; i++) pool.push({ type, groupId: gid });
+        if (rank > 0) pool.push({ type, bossRank: rank, groupId: gid });
+      }
     }
 
     if (biome.critters && Math.random() < 0.55) {
@@ -290,16 +301,26 @@ export class EnemyManager {
 
   // spider packs leave their hunting ground draped in cobwebs for a while
   _spawnWebs(center) {
-    const n = 6 + Math.floor(Math.random() * 5);
+    const n = 10 + Math.floor(Math.random() * 7);
     for (let i = 0; i < n; i++) {
-      const a = Math.random() * Math.PI * 2, r = Math.random() * 13;
+      const a = Math.random() * Math.PI * 2, r = Math.random() * 15;
       const x = center.x + Math.cos(a) * r, z = center.z + Math.sin(a) * r;
       const web = makeCobweb();
       web.position.set(x, this.world.heightAt(x, z) + 0.07, z);
       web.rotation.y = Math.random() * Math.PI * 2;
       this.scene.add(web);
-      this.webs.push({ mesh: web, t: 120 });
+      // webs are sticky: anything walking through one is slowed hard
+      this.webs.push({ mesh: web, t: 120, x, z, r: web.userData.radius ?? 2.5 });
     }
+  }
+
+  // 60% movement slow while standing in a cobweb
+  webSlowAt(x, z) {
+    for (const w of this.webs) {
+      const d = Math.hypot(x - w.x, z - w.z);
+      if (d < w.r) return 0.4;
+    }
+    return 1;
   }
 
   // While a boss lives, her children keep arriving from ALL directions.
@@ -384,6 +405,51 @@ export class EnemyManager {
 
     this._bossReinforcements(dt, targets);
 
+    // bestiary: a creature counts as discovered only once you've SEEN it up
+    // close (12 m) — not when it spawns somewhere off-screen
+    this.discoverT = (this.discoverT ?? 0) - dt;
+    if (this.discoverT <= 0) {
+      this.discoverT = 0.5;
+      for (const e of this.list) {
+        if (e.dead || this.discovered.has(e.type)) continue;
+        for (const t of targets) {
+          if (t.dead || t.isPet || !t.pos) continue;
+          if (Math.hypot(e.pos.x - t.pos.x, e.pos.z - t.pos.z) < 12) {
+            this.discovered.add(e.type);
+            this.hooks.onDiscover(e.type);
+            break;
+          }
+        }
+      }
+    }
+
+    // canopy ambush: in thick woods a spider may rappel out of the trees
+    // right on top of you — the denser the stand, the likelier the drop
+    this.treeDropT = (this.treeDropT ?? 4) - dt;
+    if (this.treeDropT <= 0) {
+      this.treeDropT = 2.5;
+      for (const t of targets) {
+        if (t.dead || t.isPet || !t.pos || this.world.isTargetSafe?.(t.pos)) continue;
+        const trees = this.world.treesNear?.({ x: t.pos.x, z: t.pos.z }, 11) ?? [];
+        const tall = trees.filter(tr => tr.alive && tr.size > 0);
+        if (tall.length < 4) continue;                    // needs a real thicket
+        if (Math.random() > 0.10 + tall.length * 0.012) continue;
+        if (this.world.time < (this._lastTreeDrop ?? 0) + 16) continue;
+        const nearby = this.alive().filter(e =>
+          /spider/i.test(e.type) && Math.hypot(e.pos.x - t.pos.x, e.pos.z - t.pos.z) < 25);
+        if (nearby.length >= 4) continue;                 // don't stack an army
+        this._lastTreeDrop = this.world.time;
+        const biome = biomeAt(t.pos.x, t.pos.z);
+        const type = biome.enemies.find(ty => /spider/i.test(ty)) ?? 'spider';
+        const tree = tall[Math.floor(Math.random() * tall.length)];
+        const e = this._spawn(type, tree.x, tree.z, progressAt(t.pos.x, t.pos.z));
+        e.dropT = 1;           // 1 s descent, then it attacks
+        e.ambush = true;       // no boss fanfare
+        e.mesh.position.y += 7;
+        this.hooks.popup?.(e.mesh.position.clone(), '🕷️!', '#c9ffa4');
+      }
+    }
+
     // cobwebs slowly fade and vanish
     for (let i = this.webs.length - 1; i >= 0; i--) {
       const w = this.webs[i];
@@ -424,6 +490,16 @@ export class EnemyManager {
           this.scene.remove(e.mesh);
           this.list.splice(i, 1);
         }
+        continue;
+      }
+
+      // canopy ambusher still descending on its silk thread (1 s)
+      if (e.dropT > 0) {
+        e.dropT -= dt;
+        const ground = this.world.heightAt(e.pos.x, e.pos.z);
+        e.mesh.position.set(e.pos.x, ground + Math.max(0, e.dropT) * 7, e.pos.z);
+        e.mesh.rotation.y += dt * 2;
+        if (e.dropT <= 0) e.aggroed = true; // hits the ground furious
         continue;
       }
 

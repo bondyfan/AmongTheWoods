@@ -28,7 +28,6 @@ export class Panels {
     $('bestiary-btn').addEventListener('click', () => this.toggle('bestiary'));
     $('settings-btn').addEventListener('click', () => this.toggle('settings'));
     $('help-btn').addEventListener('click', () => this.toggle('help'));
-    $('inv-btn').addEventListener('click', () => this.toggle('character')); // inventory lives in the Armory
     // ✕ closes just ITS panel (Escape still closes everything)
     document.querySelectorAll('.panel-close').forEach(btn =>
       btn.addEventListener('click', () => {
@@ -313,6 +312,7 @@ export class Panels {
         const item = id ? itemById(id) : null;
         const div = document.createElement('div');
         div.className = 'doll-slot' + (item ? ' filled' : '');
+        div.dataset.slot = slot;
         div.title = item ? `${item.name} — ${item.desc} (click to unequip)` : SLOT_LABELS[slot];
         div.innerHTML = `<span class="ds-icon">${item ? itemIcon(item) : ''}</span>
           <span class="ds-label">${SLOT_LABELS[slot]}</span>`;
@@ -348,9 +348,9 @@ export class Panels {
     if (p.shrineBonus) hpParts.push(`+${p.shrineBonus} shrines`);
     rows.push(['❤️ Max health', p.maxHp, hpParts.join(' · ')]);
 
-    const spParts = ['8.5 base'];
+    const spParts = ['5.5 base'];
     const boots = itemById(p.equipment.boots);
-    if (boots?.stats?.speed) spParts.push(`+${Math.round(boots.stats.speed * 100)}% ${boots.name}`);
+    if (boots?.stats?.speed) spParts.push(`+${boots.stats.speed} ${boots.name}`);
     rows.push(['🏃 Speed', (Math.round(p.speed * 10) / 10), spParts.join(' · ')]);
 
     const rgParts = [`${base.range} m ${itemById(p.equipment.weapon)?.name ?? 'fists'}`];
@@ -373,6 +373,22 @@ export class Panels {
     $('char-stats').innerHTML = rows.map(([label, val, parts]) =>
       `<div class="stat-row"><span class="sr-label">${label}</span>
         <b>${val}</b><small>${parts}</small></div>`).join('');
+
+    // admin mode: type a value to override any stat (blank = back to normal)
+    if (this.hooks.isAdmin?.()) {
+      const ov = this.hooks.adminValues?.() ?? {};
+      const fields = [['level', 'Level'], ['attack', 'Attack'], ['aspd', 'Attacks/s'],
+        ['maxHp', 'Max HP'], ['speed', 'Speed'], ['range', 'Range m'], ['regen', 'Regen/s']];
+      const box = document.createElement('div');
+      box.className = 'admin-box';
+      box.innerHTML = '<h4>🛠 Admin overrides <small>blank = default</small></h4>' +
+        fields.map(([k, l]) => `<label class="admin-field">${l}
+          <input type="number" step="any" data-adm="${k}" value="${ov[k] ?? ''}" placeholder="—"></label>`).join('');
+      $('char-stats').appendChild(box);
+      box.querySelectorAll('input').forEach(inp => inp.addEventListener('change', () => {
+        this.hooks.onAdminStat?.(inp.dataset.adm, inp.value === '' ? null : +inp.value);
+      }));
+    }
 
     this.renderInventory();
 
@@ -404,7 +420,7 @@ export class Panels {
     const cells = [];
     for (const key of RESOURCES) {
       if (p[key] > 0) cells.push({ kind: 'res', id: key, icon: resIcon(key, RES_ICONS[key]), count: p[key],
-        title: key === 'berry' ? 'Berries — click to eat one (+7 ❤️), drag out to drop' : `${key} — drag out to drop 5` });
+        title: key === 'berry' ? 'Blueberries — click to eat one (+7 ❤️), drag out to drop' : `${key} — drag out to drop 5` });
     }
     for (const c of CONSUMABLES) {
       const n = p.consumables?.[c.id] ?? 0;
@@ -438,6 +454,25 @@ export class Panels {
       this._wireInvCell(div, cell);
       grid.appendChild(div);
     }
+
+    // admin mode: conjure any item / a pile of resources out of thin air
+    const oldBox = $('inv-admin'); if (oldBox) oldBox.remove();
+    if (this.hooks.isAdmin?.()) {
+      const box = document.createElement('div');
+      box.id = 'inv-admin';
+      box.className = 'admin-box';
+      const opts = ITEMS.map(i => `<option value="${i.id}">${i.name} (Lv${i.level})</option>`).join('') +
+        CONSUMABLES.map(c => `<option value="c:${c.id}">${c.name} (consumable)</option>`).join('');
+      box.innerHTML = `<h4>🛠 Add item</h4>
+        <select id="adm-item">${opts}</select>
+        <button class="buy-btn" id="adm-add">+ Add</button>
+        <button class="buy-btn" id="adm-res">+100 all resources</button>`;
+      grid.parentElement.insertBefore(box, grid.nextSibling);
+      box.querySelector('#adm-add').addEventListener('click', () =>
+        this.hooks.onAdminAddItem?.(box.querySelector('#adm-item').value));
+      box.querySelector('#adm-res').addEventListener('click', () =>
+        this.hooks.onAdminAddRes?.());
+    }
   }
 
   // Inventory cell interactions: click to use/equip, DRAG to hotkey or drop.
@@ -467,6 +502,18 @@ export class Panels {
       const barSlot = under?.closest?.('.spell-slot');
       if (barSlot && cell.kind === 'item') {
         this.hooks.onAssignSlot?.(Number(barSlot.dataset.slot), cell.id);
+        this.refresh();
+        return;
+      }
+      // dropped on a paper-doll slot → equip (must be the matching slot)
+      const dollSlot = under?.closest?.('.doll-slot');
+      if (dollSlot && cell.kind === 'item') {
+        const item = itemById(cell.id);
+        if (item && dollSlot.dataset.slot && item.slot !== dollSlot.dataset.slot) {
+          this.hooks.onToast?.(`${item.name} goes into the ${SLOT_LABELS[item.slot] ?? item.slot} slot`);
+        } else {
+          this.hooks.onEquip(cell.id);
+        }
         this.refresh();
         return;
       }
@@ -567,7 +614,7 @@ export class Panels {
   renderBase() {
     const camp = this.camp;
     if (!camp) return;
-    $('base-res').textContent = this._resLine();
+    $('base-res').innerHTML = this._resLine();
     const wrap = $('base-items');
     wrap.innerHTML = '';
     const era = document.createElement('div');
@@ -585,7 +632,7 @@ export class Panels {
   renderChest() {
     const camp = this.camp;
     if (!camp) return;
-    $('chest-res').textContent = this._resLine();
+    $('chest-res').innerHTML = this._resLine();
     const wrap = $('chest-items');
     wrap.innerHTML = '';
     const chest = document.createElement('div');
@@ -593,7 +640,7 @@ export class Panels {
     chest.style.gridColumn = '1 / -1';
     chest.innerHTML = `<div class="card-head"><span class="icon">${itemIcon({ id: 'chest' })}</span>
       <span class="name">Stored</span>
-      <span class="lv">🍖 ${fmtResource(camp.storage.meat)} · 🪵 ${fmtResource(camp.storage.wood)} · 🪨 ${fmtResource(camp.storage.stone)} · 🟫 ${fmtResource(camp.storage.hide)} · 🔩 ${fmtResource(camp.storage.iron)} · 🫐 ${fmtResource(camp.storage.berry)}</span></div>
+      <span class="lv">🍖 ${fmtResource(camp.storage.meat)} · 🪵 ${fmtResource(camp.storage.wood)} · 🪨 ${fmtResource(camp.storage.stone)} · ${resIcon('hide', '🟫')} ${fmtResource(camp.storage.hide)} · 🔩 ${fmtResource(camp.storage.iron)} · 🫐 ${fmtResource(camp.storage.berry)}</span></div>
       <div class="desc">Whatever is stored here survives your death.</div>
       <div class="card-foot">
         <button class="buy-btn" data-chest="deposit">Deposit all</button>

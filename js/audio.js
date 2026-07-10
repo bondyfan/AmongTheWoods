@@ -55,6 +55,24 @@ class AudioManager {
     if (this.music) { this.music.pause(); this.music = null; this.musicName = null; }
   }
 
+  // -------- ambient SFX loops (e.g. the blacksmith hammering while his
+  // shop is open); one loop per name, start is idempotent --------
+  loopStart(name, volume = 0.5) {
+    if (this.muted) return;
+    this._loops ??= new Map();
+    if (this._loops.has(name)) return;
+    const a = new Audio(SFX_PATH + name + '.mp3');
+    a.loop = true;
+    a.volume = Math.min(1, volume * this.sfxVolume);
+    a.play().catch(() => {});
+    this._loops.set(name, a);
+  }
+
+  loopStop(name) {
+    const a = this._loops?.get(name);
+    if (a) { a.pause(); this._loops.delete(name); }
+  }
+
   toggleMute() {
     this.muted = !this.muted;
     if (this.music) this.music.volume = this.muted ? 0 : this.musicVolume;
