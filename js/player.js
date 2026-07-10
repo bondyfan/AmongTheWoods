@@ -494,9 +494,17 @@ export class Player {
       this.walkT += dt * 20;
     } else {
       let mx = input.moveX, mz = input.moveZ;
-      // optional mouse-directed movement (settings): W runs toward the cursor,
-      // S backs away, A/D strafe — all relative to the aim direction
-      if (ctx.mouseMove && (mx !== 0 || mz !== 0)) {
+      // RPG third-person mode: WoW-style tank controls — A/D TURN the
+      // character, W drives forward, S backs up; the camera hangs behind
+      if (ctx.rpgView) {
+        if (mx !== 0) {
+          const yaw = Math.atan2(this.facing.x, this.facing.z) - mx * 2.8 * dt;
+          this.facing.set(Math.sin(yaw), 0, Math.cos(yaw));
+        }
+        const drive = -mz; // W = 1, S = -1
+        mx = this.facing.x * drive;
+        mz = this.facing.z * drive;
+      } else if (ctx.mouseMove && (mx !== 0 || mz !== 0)) {
         const fx = aimPoint.x - this.pos.x, fz = aimPoint.z - this.pos.z;
         const fl = Math.hypot(fx, fz);
         if (fl > 0.01) {
@@ -534,10 +542,12 @@ export class Player {
       }
     }
 
-    // -- aim: face the mouse point --
-    this.facing.set(aimPoint.x - this.pos.x, 0, aimPoint.z - this.pos.z);
-    if (this.facing.lengthSq() < 0.01) this.facing.set(0, 0, -1);
-    this.facing.normalize();
+    // -- aim: face the mouse point (RPG mode faces where the keys steer) --
+    if (!ctx.rpgView) {
+      this.facing.set(aimPoint.x - this.pos.x, 0, aimPoint.z - this.pos.z);
+      if (this.facing.lengthSq() < 0.01) this.facing.set(0, 0, -1);
+      this.facing.normalize();
+    }
     this.mesh.position.set(this.pos.x, this._updateVertical(dt, world), this.pos.z);
     // local +z toward the aim point, so arm swings (toward +z) punch forward
     this.mesh.rotation.y = Math.atan2(this.facing.x, this.facing.z);

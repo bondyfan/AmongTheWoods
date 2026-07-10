@@ -67,9 +67,8 @@ const autoQuality = {
       sun.castShadow = false;
       scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
     } else if (this.stage === 3) {
-      world.viewRadius = 2;
-      scene.fog.far = 90;
-      camera.far = 200;
+      applyViewMode(); // stage-aware: shorter fog + view radius for the mode
+      camera.far = game.rpgView ? 260 : 200;
       camera.updateProjectionMatrix();
     }
     ui.toast('⚙️ Graphics lowered automatically for smoother FPS', 'info');
@@ -700,6 +699,21 @@ const settings = Object.assign(
     if (mute.checked !== audio.muted) audio.toggleMute();
   });
 
+  // RPG third-person view: camera, fog and view distance all switch together
+  const rpgBox = $id('set-rpgview');
+  settings.rpgView ??= false;
+  rpgBox.checked = settings.rpgView;
+  applyViewMode();
+  rpgBox.addEventListener('change', () => {
+    settings.rpgView = rpgBox.checked;
+    localStorage.setItem('atw-settings', JSON.stringify(settings));
+    applyViewMode();
+    ui.toast(settings.rpgView
+      ? '🎮 RPG view — A/D turn, W/S move, attacks hit what you face'
+      : '🗺️ Top-down view', 'level');
+    audio.sfx('click', 0.4);
+  });
+
   // volume sliders (persisted); music slider maps 100% → volume 0.7
   const sfxSlider = $id('set-sfx'), musicSlider = $id('set-music');
   settings.sfxVol ??= 100;
@@ -1305,10 +1319,16 @@ function updateWaves(dt) {
 }
 
 function updateAim() {
-  // normal free cursor: the aim point is exactly where the mouse hits the
-  // ground, and the player simply faces it (no clamping — cursor goes anywhere)
-  raycaster.setFromCamera(new THREE.Vector2(input.mouse.x, input.mouse.y), camera);
-  raycaster.ray.intersectPlane(groundPlane, aimPoint);
+  if (game.rpgView) {
+    // third person: you strike what's in FRONT of you — aim rides the facing
+    aimPoint.set(player.pos.x + player.facing.x * player.attackRange,
+      0, player.pos.z + player.facing.z * player.attackRange);
+  } else {
+    // normal free cursor: the aim point is exactly where the mouse hits the
+    // ground, and the player simply faces it (no clamping)
+    raycaster.setFromCamera(new THREE.Vector2(input.mouse.x, input.mouse.y), camera);
+    raycaster.ray.intersectPlane(groundPlane, aimPoint);
+  }
 
   // range arc: a short, ground-hugging slice of the weapon's reach circle in
   // the facing dir. The bow gets a narrower, thinner slice (its range is huge).
@@ -1383,6 +1403,22 @@ function updateAtmosphere(dt) {
 
 // ---------- camera ----------
 let shakeT = 0; // brief tremble on boss entrances
+// switching view modes retunes the whole render pipeline: the third-person
+// camera needs to SEE further (fog, far plane, more chunks) but the wider
+// fov + fog wall keep the draw load in check
+function applyViewMode() {
+  const rpg = !!settings.rpgView;
+  game.rpgView = rpg;
+  scene.fog.near = rpg ? 45 : 35;
+  scene.fog.far = rpg ? (autoQuality.stage >= 3 ? 150 : 195) : (autoQuality.stage >= 3 ? 90 : 110);
+  camera.far = rpg ? 340 : 300;
+  camera.fov = rpg ? 60 : 50;
+  camera.updateProjectionMatrix();
+  world.viewRadius = autoQuality.stage >= 3 ? (rpg ? 3 : 2) : (rpg ? 4 : 3);
+}
+
+const camSmooth = new THREE.Vector3();
+let camInit = false;
 function updateCamera(dt = 0) {
   const py = player.mesh.position.y;
   let sx = 0, sz = 0;
@@ -1392,8 +1428,23 @@ function updateCamera(dt = 0) {
     sx = (Math.random() - 0.5) * k;
     sz = (Math.random() - 0.5) * k;
   }
-  camera.position.set(player.pos.x + sx, py + 26, player.pos.z + 14 + sz);
-  camera.lookAt(player.pos.x + sx, py, player.pos.z - 2 + sz);
+  if (game.rpgView) {
+    // MMORPG chase camera: behind the character, slightly above, smoothed;
+    // never dips under the terrain
+    const dist = 8.6, height = 3.4;
+    const tx = player.pos.x - player.facing.x * dist;
+    const tz = player.pos.z - player.facing.z * dist;
+    const groundY = world.heightAt(tx, tz);
+    const ty = Math.max(py + height, groundY + 1.6);
+    if (!camInit) { camSmooth.set(tx, ty, tz); camInit = true; }
+    camSmooth.lerp(new THREE.Vector3(tx, ty, tz), Math.min(1, dt * 6));
+    camera.position.set(camSmooth.x + sx, camSmooth.y, camSmooth.z + sz);
+    camera.lookAt(player.pos.x + player.facing.x * 3 + sx, py + 1.8, player.pos.z + player.facing.z * 3 + sz);
+  } else {
+    camInit = false;
+    camera.position.set(player.pos.x + sx, py + 26, player.pos.z + 14 + sz);
+    camera.lookAt(player.pos.x + sx, py, player.pos.z - 2 + sz);
+  }
   sun.position.set(player.pos.x + 18, 35, player.pos.z + 12);
   sun.target.position.set(player.pos.x, 0, player.pos.z);
 }
@@ -1424,6 +1475,7 @@ function step() {
       mouseMove: settings.mouseMove,
       boat: game.kind === 'survival' && camp?.has('boat'),
       boatPlacing: boatPlaceT > 0,
+      rpgView: game.rpgView,
       envSpeedMult,
     });
 
