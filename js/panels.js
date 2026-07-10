@@ -118,7 +118,22 @@ export class Panels {
       return;
     }
 
-    for (const entry of group.items()) {
+    // sort by unlock level, then group under a level divider so the whole
+    // progression reads top-to-bottom at a glance
+    const entries = [...group.items()].sort((a, b) => a.level - b.level || a.name.localeCompare(b.name));
+    let curLevel = null;
+    for (const entry of entries) {
+      if (entry.level !== curLevel) {
+        curLevel = entry.level;
+        const reached = p.level >= curLevel;
+        const div = document.createElement('div');
+        div.className = 'level-band' + (reached ? '' : ' locked');
+        div.innerHTML = `<span class="lb-tier">Lv ${curLevel}</span>` +
+          (reached ? '<span class="lb-note">unlocked</span>'
+                   : `<span class="lb-note">reach level ${curLevel}</span>`);
+        wrap.appendChild(div);
+      }
+
       const owned = isSpells ? p.spellsOwned.has(entry.id) : p.hasItem(entry.id);
       const levelLocked = p.level < entry.level;
       // era gating: some gear needs a camp building (survival only)
@@ -130,15 +145,15 @@ export class Panels {
       card.className = 'card' + (owned ? ' owned' : (levelLocked || needMissing) ? ' locked' : affordable ? ' buyable' : ' expensive');
 
       let status;
-      if (owned) status = '<span class="tag ok">Owned</span>';
-      else if (levelLocked) status = `<span class="tag">Unlocks at Lv ${entry.level}</span>`;
-      else if (needMissing) status = `<span class="tag">Requires ${NEED_NAMES[entry.needs] ?? entry.needs} (Camp)</span>`;
+      if (owned) status = '<span class="tag ok">✔ Owned</span>';
+      else if (levelLocked) status = `<span class="tag">🔒 Lv ${entry.level}</span>`;
+      else if (needMissing) status = `<span class="tag">🏕️ Needs ${NEED_NAMES[entry.needs] ?? entry.needs}</span>`;
       else status = `<button class="buy-btn" data-id="${entry.id}">Buy — ${this._costStr(cost)}</button>`;
 
       const slotTag = isSpells ? '📖 spell' : SLOT_LABELS[entry.slot].toLowerCase();
       card.innerHTML = `
         <div class="card-head"><span class="icon">${itemIcon(entry)}</span>
-          <span class="name">${entry.name}</span><span class="lv">Lv ${entry.level} · ${slotTag}</span></div>
+          <span class="name">${entry.name}</span><span class="lv">${slotTag}</span></div>
         <div class="desc">${entry.desc}</div>
         <div class="card-foot">${status}</div>`;
       wrap.appendChild(card);

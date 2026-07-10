@@ -509,7 +509,7 @@ export const MOBA_AI_TIMELINE = [
 // Shop groups (tabs).
 export const SHOP_GROUPS = [
   { key: 'weapons',  label: '⚔️ Weapons',   items: () => ITEMS.filter(i => i.slot === 'weapon' && !i.free) },
-  { key: 'armor',    label: '🛡️ Clothing',  items: () => ITEMS.filter(i => ['head', 'chest', 'boots'].includes(i.slot)) },
+  { key: 'armor',    label: '🛡️ Gear',      items: () => ITEMS.filter(i => ['head', 'chest', 'boots', 'charm'].includes(i.slot)) },
   { key: 'friends',  label: '🐾 Companions', items: () => ITEMS.filter(i => ['pet', 'orb'].includes(i.slot)) },
   { key: 'spells',   label: '📖 Spells',    items: () => SPELLS },
   { key: 'training', label: '📈 Training',  items: () => STAT_TRACKS },

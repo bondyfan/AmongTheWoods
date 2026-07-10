@@ -480,3 +480,21 @@ kbd {
 .help-row kbd { min-width: 64px; text-align: center; }
 
 #downed-hint { bottom: 220px; border-color: #e05050; color: #ffb0a0; font-size: 17px; }
+
+/* ---------- shop: level-grouped dividers ---------- */
+.level-band {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; gap: 12px;
+  margin: 10px 0 2px; padding: 3px 4px;
+  border-bottom: 1px solid rgba(232, 201, 106, 0.35);
+}
+.level-band:first-child { margin-top: 0; }
+.level-band .lb-tier {
+  font-weight: 800; font-size: 15px; letter-spacing: 0.5px; color: #e8c96a;
+  background: rgba(232, 201, 106, 0.14); border: 1px solid rgba(232, 201, 106, 0.4);
+  border-radius: 7px; padding: 3px 12px; white-space: nowrap;
+}
+.level-band .lb-note { font-size: 12px; opacity: 0.6; text-transform: uppercase; letter-spacing: 0.6px; }
+.level-band.locked { border-bottom-color: rgba(255,255,255,0.14); }
+.level-band.locked .lb-tier { color: #9aa0a6; background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.18); }
+.level-band.locked .lb-note { color: #d88; opacity: 0.8; }
