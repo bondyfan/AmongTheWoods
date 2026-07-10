@@ -314,13 +314,14 @@ export class World {
     const rng = mulberry32(this.seed ^ 0xca4e);
     const R = WORLD.caveR;
     const OPEN_HALF = 0.62; // radians of clear opening around the +z direction
+    const group = new THREE.Group();
     for (let a = OPEN_HALF; a < Math.PI * 2 - OPEN_HALF; a += 1.7 / R) {
       const bx = Math.sin(a) * R, bz = Math.cos(a) * R; // a=0 → +z (the opening)
       const scale = 1.4 + rng() * 0.8;
       const b = makeBoulder(scale, 0x5c584e, rng);
       b.position.set(bx, this.heightAt(bx, bz) + 0.3, bz);
-      this._addStatic(b);
-      this.obstacles.push({ x: bx, z: bz, r: scale * 0.85 }); // matches the rock
+      group.add(b);
+      this.obstacles.push({ x: bx, z: bz, r: scale * 0.85, home: true }); // matches the rock
     }
     for (let i = 0; i < 3; i++) {
       const a = Math.PI * 0.6 + rng() * Math.PI * 0.8; // back of the cave
@@ -328,12 +329,120 @@ export class World {
       const sx = Math.sin(a) * d, sz = Math.cos(a) * d;
       const s = makeStalagmite(rng);
       s.position.set(sx, this.heightAt(sx, sz), sz);
-      this._addStatic(s);
+      group.add(s);
     }
+    this._homeGroup = this._addStatic(group);
     // a small campfire just outside the cave mouth — home
     const fire = makeCampfire();
     fire.position.set(2, this.heightAt(2, 14), 14);
     this._addStatic(fire);
+  }
+
+  // The CENTER structure is your home. Level 0 is the starting cave; every
+  // era REPLACES it with a bigger walk-in building of the same footprint —
+  // a ring of walls with the same door gap toward +z, open to the sky so the
+  // top-down camera can see you inside.
+  buildHome(level) {
+    if (this._homeGroup) {
+      this.scene.remove(this._homeGroup);
+      this._statics = this._statics.filter(m => m !== this._homeGroup);
+      this._homeGroup = null;
+    }
+    this.obstacles = this.obstacles.filter(o => !o.home);
+    this.homeLevel = level;
+    if (level <= 0) { this._buildCave(); return; }
+
+    const group = new THREE.Group();
+    const R = WORLD.caveR;
+    const OPEN_HALF = 0.55;
+    const y0 = this.heightAt(0, 0);
+
+    // interior floor: hides > planks > flagstones > keep stone
+    const floorColor = [0, 0xa8845c, 0x9c6b38, 0x8f8a7c, 0x646b76][level];
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(R + 1.4, 28),
+      new THREE.MeshLambertMaterial({ color: floorColor }));
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.set(0, y0 + 0.08, 0);
+    floor.receiveShadow = true;
+    group.add(floor);
+
+    // wall ring with the door gap toward +z (rotation.y = a makes the
+    // segment's local X tangential at that angle)
+    const wallH = [0, 3.0, 3.2, 3.6, 4.8][level];
+    for (let a = OPEN_HALF; a < Math.PI * 2 - OPEN_HALF; a += 2.0 / R) {
+      const x = Math.sin(a) * R, z = Math.cos(a) * R;
+      const seg = this._homeWallSegment(level, wallH);
+      seg.position.set(x, this.heightAt(x, z), z);
+      seg.rotation.y = a;
+      group.add(seg);
+      this.obstacles.push({ x, z, r: 1.35, home: true });
+    }
+
+    // door posts on both sides of the entrance (+ a banner for the keep)
+    for (const side of [-1, 1]) {
+      const a = side * (OPEN_HALF + 0.06);
+      const x = Math.sin(a) * R, z = Math.cos(a) * R;
+      const post = level === 1
+        ? new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, wallH + 0.7, 6),
+            new THREE.MeshLambertMaterial({ color: 0x6b4a2d }))
+        : new THREE.Mesh(new THREE.BoxGeometry(0.7, wallH + 0.6, 0.7),
+            new THREE.MeshLambertMaterial({ color: level >= 4 ? 0x565e6a : level >= 3 ? 0x6e6a60 : 0x5c4326 }));
+      post.castShadow = true;
+      post.position.set(x, this.heightAt(x, z) + (wallH + 0.6) / 2, z);
+      group.add(post);
+    }
+    if (level >= 4) { // the keep flies its colors above the gate
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 2, 5),
+        new THREE.MeshLambertMaterial({ color: 0x4c3520 }));
+      const px = Math.sin(OPEN_HALF + 0.06) * R, pz = Math.cos(OPEN_HALF + 0.06) * R;
+      pole.position.set(px, this.heightAt(px, pz) + wallH + 1.4, pz);
+      const flag = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.7, 0.06),
+        new THREE.MeshLambertMaterial({ color: 0xb53a3a }));
+      flag.position.set(px + 0.6, this.heightAt(px, pz) + wallH + 1.7, pz);
+      group.add(pole, flag);
+    }
+
+    this.scene.add(group);
+    this._statics.push(group);
+    this._homeGroup = group;
+  }
+
+  // one tangential wall piece per era: hide panel / log courses / masonry /
+  // battlemented keep wall
+  _homeWallSegment(level, h) {
+    const g = new THREE.Group();
+    const lam = (c) => new THREE.MeshLambertMaterial({ color: c });
+    const boxMesh = (w, hh, d, c, y = hh / 2) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, hh, d), lam(c));
+      m.castShadow = true;
+      m.position.y = y;
+      return m;
+    };
+    if (level === 1) { // hide tent: leaning tan panels with a support pole
+      const panel = boxMesh(2.4, h, 0.26, 0xb5824a);
+      panel.rotation.x = -0.14; // top leans toward the center, tent-like
+      const seam = boxMesh(0.14, h, 0.3, 0x8a5f33);
+      seam.rotation.x = -0.14;
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, h + 0.35, 5), lam(0x6b4a2d));
+      pole.castShadow = true;
+      pole.position.set(1.1, (h + 0.35) / 2, 0.15);
+      g.add(panel, seam, pole);
+    } else if (level === 2) { // timber cabin: stacked log courses
+      for (let i = 0; i < 4; i++) {
+        const log = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 2.5, 7), lam(i % 2 ? 0x8a6238 : 0x7a5630));
+        log.castShadow = true;
+        log.rotation.z = Math.PI / 2;
+        log.position.y = 0.36 + i * 0.7;
+        g.add(log);
+      }
+    } else if (level === 3) { // stone house: masonry with a darker top course
+      g.add(boxMesh(2.3, h, 0.62, 0x8f8a7c));
+      g.add(boxMesh(2.3, 0.34, 0.68, 0x6e6a60, h + 0.17));
+    } else { // keep: tall wall + merlon battlement
+      g.add(boxMesh(2.3, h, 0.72, 0x6e7280));
+      g.add(boxMesh(0.95, 0.6, 0.74, 0x5c6670, h + 0.3));
+    }
+    return g;
   }
 
   // Ground tone at a world position: biome rings blended at the edges, dirt

@@ -783,8 +783,8 @@ updateZoomButtons();
 // press E to open the build & upgrade menu.
 function nearHome() {
   if (game.kind !== 'survival' || !camp) return false;
-  if (radiusOf(player.pos.x, player.pos.z) < WORLD.caveR + 4) return true; // in/at the cave
-  return Math.hypot(player.pos.x - (-9), player.pos.z - 13) < 6;           // at the home building
+  // your home IS the center structure (cave → tent → … → keep)
+  return radiusOf(player.pos.x, player.pos.z) < WORLD.caveR + 5;
 }
 // E is contextual: revive partner > chest > home > landmark > treasure dig
 function nearChest() {
@@ -1042,7 +1042,9 @@ function updateAtmosphere(dt) {
 
   // the cave is dark; light floods in as you walk toward the mouth
   const r = radiusOf(player.pos.x, player.pos.z);
-  const caveK = Math.max(0, Math.min(1, (WORLD.caveR + 6 - r) / (WORLD.caveR + 3)));
+  // the cave is pitch dark — but once a home is BUILT over it, it's lit
+  const caveK = (camp?.levels.home ?? 0) > 0 ? 0
+    : Math.max(0, Math.min(1, (WORLD.caveR + 6 - r) / (WORLD.caveR + 3)));
   hemi.intensity = 0.9 - 0.62 * caveK;
   sun.intensity = 1.4 * (1 - 0.8 * caveK);
   // the camera sits ~30 m away — keep the fog behind the hero so the cave

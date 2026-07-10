@@ -5,19 +5,18 @@
 // watches over home. Built things appear physically at fixed camp spots.
 
 import { CAMP_BUILDINGS, ERAS, RESOURCES, fmtResource, roundResource } from './config.js';
-import { makeTent, makeCottage, makeStoneHouse, makeKeep, makeFurnace, makeChest,
-         makeBoatRack, makeMobaTower, makeGraveyard } from './models.js';
+import { makeFurnace, makeChest, makeBoatRack, makeMobaTower, makeGraveyard } from './models.js';
 import { audio } from './audio.js';
 
 const SPOTS = {
-  home:    { x: -9, z: 13 },
+  // 'home' has no spot — it IS the center structure (world.buildHome)
   chest:   { x: 6,  z: 16 },
   furnace: { x: 11, z: 11 },
   boat:    { x: 0,  z: 21 },
   tower:   { x: 13, z: 17 },
   // 'grave' has no fixed spot — it is built wherever the player stands
 };
-const HOME_HEAL_RADIUS = 6;
+const HOME_HEAL_RADIUS = 10; // inside your home building (the center)
 const HOME_HEAL_PER_SEC = 12;
 
 export class Camp {
@@ -92,17 +91,14 @@ export class Camp {
       ?? (id === 'grave'
         ? { x: Math.round(this.player.pos.x), z: Math.round(this.player.pos.z) }
         : SPOTS[id]);
-    let mesh;
+    // your HOME is the center structure itself — the cave transforms into a
+    // walk-in tent/cabin/stone house/keep of the same footprint
     if (id === 'home') {
-      // every era is a genuinely DIFFERENT building:
-      // tent -> timber cabin -> stone house -> medieval keep
-      const lvl = this.levels.home;
-      mesh = lvl === 1 ? makeTent()
-        : lvl === 2 ? makeCottage()
-        : lvl === 3 ? makeStoneHouse()
-        : makeKeep();
-      mesh.rotation.y = 0.4;
-    } else if (id === 'chest') mesh = makeChest();
+      this.world.buildHome(this.levels.home);
+      return;
+    }
+    let mesh;
+    if (id === 'chest') mesh = makeChest();
     else if (id === 'furnace') mesh = makeFurnace();
     else if (id === 'boat') mesh = makeBoatRack();
     else if (id === 'grave') { mesh = makeGraveyard(); this.gravePos = { x: spot.x, z: spot.z }; }
@@ -143,7 +139,7 @@ export class Camp {
   // ---- per-frame: furnace smelting + guard tower ----
   update(dt, enemyMgr, projectiles) {
     this.healPopupT = Math.max(0, this.healPopupT - dt);
-    const d = Math.hypot(this.player.pos.x - SPOTS.home.x, this.player.pos.z - SPOTS.home.z);
+    const d = Math.hypot(this.player.pos.x, this.player.pos.z); // home = center
     if (this.levels.home >= 1 && !this.player.dead
         && d < HOME_HEAL_RADIUS && this.player.hp < this.player.maxHp) {
       this.player.hp = Math.min(this.player.maxHp, this.player.hp + HOME_HEAL_PER_SEC * dt);

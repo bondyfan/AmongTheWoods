@@ -369,7 +369,7 @@ export const CAMP_BUILDINGS = [
     names: ['Hide Tent', 'Wooden Cabin', 'Stone House', 'Medieval Keep'],
     levels: [
       { level: 2, cost: { hide: 6, wood: 10 },
-        desc: 'Age 2 — a hide tent by the cave mouth. Unlocks hide clothing. +20 max health.' },
+        desc: 'Age 2 — your cave becomes a hide tent. Unlocks hide clothing. +20 max health.' },
       { level: 4, cost: { wood: 60, stone: 10 },
         desc: 'Age 3 — a timber cabin. Unlocks bows. +60 max health, loot magnet reaches further.' },
       { level: 7, cost: { stone: 80, wood: 30, iron: 6 },
