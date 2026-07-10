@@ -45,6 +45,37 @@ sun.shadow.camera.top = 40; sun.shadow.camera.bottom = -40;
 sun.shadow.camera.far = 120;
 scene.add(sun, sun.target);
 
+// ---------- adaptive quality: weak laptops get smoother frames ----------
+// Watches the real frame rate and steps quality DOWN (never up mid-session):
+// 1) render at 1.25x pixel ratio  2) 1x + soft shadows off  3) shorter view
+const autoQuality = {
+  stage: 0, t: 0, frames: 0, low: 0,
+  tick(dt) {
+    this.frames++; this.t += dt;
+    if (this.t < 4) return;               // judge in 4 s windows
+    const fps = this.frames / this.t;
+    this.t = 0; this.frames = 0;
+    if (fps >= 38) { this.low = 0; return; }
+    if (++this.low < 2 || this.stage >= 3) return; // two bad windows in a row
+    this.low = 0;
+    this.stage++;
+    if (this.stage === 1) {
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
+    } else if (this.stage === 2) {
+      renderer.setPixelRatio(1);
+      renderer.shadowMap.enabled = false;
+      sun.castShadow = false;
+      scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
+    } else if (this.stage === 3) {
+      world.viewRadius = 2;
+      scene.fog.far = 90;
+      camera.far = 200;
+      camera.updateProjectionMatrix();
+    }
+    ui.toast('⚙️ Graphics lowered automatically for smoother FPS', 'info');
+  },
+};
+
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
@@ -1149,6 +1180,27 @@ scene.add(aimArc);
 const raft = makeRaft();
 raft.visible = false;
 scene.add(raft);
+let wasOnWater = false, boatPlaceT = 0, waveT = 0, lastWaveX = 0, lastWaveZ = 0;
+const waves = [];
+const waveGeo = new THREE.RingGeometry(0.5, 0.62, 20);
+function spawnWave(x, z) {
+  const m = new THREE.Mesh(waveGeo,
+    new THREE.MeshBasicMaterial({ color: 0xdfeeff, transparent: true, opacity: 0.55 }));
+  m.rotation.x = -Math.PI / 2;
+  m.position.set(x, world.heightAt(x, z) + 0.28, z);
+  scene.add(m);
+  waves.push({ m, t: 0 });
+}
+function updateWaves(dt) {
+  for (let i = waves.length - 1; i >= 0; i--) {
+    const w = waves[i];
+    w.t += dt;
+    const k = w.t / 1.2;
+    w.m.scale.setScalar(1 + k * 2.6);
+    w.m.material.opacity = 0.55 * Math.max(0, 1 - k);
+    if (k >= 1) { scene.remove(w.m); w.m.material.dispose(); waves.splice(i, 1); }
+  }
+}
 
 function updateAim() {
   // normal free cursor: the aim point is exactly where the mouse hits the
@@ -1257,6 +1309,7 @@ function tick() {
 // the shared world for the partner — enemies, snapshots, everything).
 function step() {
   const dt = Math.min(clock.getDelta(), 0.05);
+  if (!document.hidden) autoQuality.tick(dt);
 
   if (game.mode === 'play' && !game.paused) {
     game.time += dt;
@@ -1268,6 +1321,7 @@ function step() {
       mobaBounds: game.kind === 'moba' ? MOBA.half : null,
       mouseMove: settings.mouseMove,
       boat: game.kind === 'survival' && camp?.has('boat'),
+      boatPlacing: boatPlaceT > 0,
       envSpeedMult,
     });
 
@@ -1307,13 +1361,32 @@ function step() {
       updateAtmosphere(dt);
       updatePings(dt);
 
-      // raft under the hero while paddling
+      // raft under the hero while paddling — stepping onto water first means
+      // 2 s of setting the raft down (no moving), then a slow paddle with a
+      // simple wake of expanding wave rings
       const onWater = camp?.has('boat') && world.isWater(player.pos.x, player.pos.z);
+      if (onWater && !wasOnWater) {
+        boatPlaceT = 2;
+        audio.sfx('tower_build', 0.5);
+      }
+      wasOnWater = !!onWater;
+      if (boatPlaceT > 0) boatPlaceT -= dt;
       raft.visible = !!onWater;
       if (onWater) {
-        raft.position.set(player.pos.x, player.mesh.position.y + 0.12, player.pos.z);
+        const k = boatPlaceT > 0 ? 1 - boatPlaceT / 2 : 1; // raft settles in
+        raft.position.set(player.pos.x, player.mesh.position.y + 0.12 + (1 - k) * 1.6, player.pos.z);
         raft.rotation.y = player.mesh.rotation.y;
+        raft.scale.setScalar(0.4 + 0.6 * k);
+        // wake rings while actually moving
+        waveT -= dt;
+        if (boatPlaceT <= 0 && waveT <= 0
+            && (Math.abs(player.pos.x - lastWaveX) > 0.6 || Math.abs(player.pos.z - lastWaveZ) > 0.6)) {
+          waveT = 0.35;
+          lastWaveX = player.pos.x; lastWaveZ = player.pos.z;
+          spawnWave(player.pos.x, player.pos.z);
+        }
       }
+      updateWaves(dt);
 
       // contextual E hint: revive > chest > home > landmark > treasure
       const hintEl = $id('home-hint');

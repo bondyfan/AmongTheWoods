@@ -205,15 +205,18 @@ export class Minimap {
       }
     }
 
-    // blacksmiths — once discovered, an orange anvil marks the camp
+    // blacksmiths — once discovered, an orange badge marks the camp
     for (const sm of this.world.smiths ?? []) {
       if (!this._isDiscovered(sm.x, sm.z)) continue;
       const p = toC(sm.x, sm.z);
       if (p.x < 0 || p.x > W || p.y < 0 || p.y > H) continue;
-      ctx.textAlign = 'center';
-      ctx.font = 'bold 11px sans-serif';
       ctx.fillStyle = '#ffa528';
-      ctx.fillText('⚒', p.x, p.y + 4);
+      ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#3a2a10'; ctx.lineWidth = 1; ctx.stroke();
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 8px sans-serif';
+      ctx.fillStyle = '#2a1c08';
+      ctx.fillText('⚒', p.x, p.y + 3);
     }
 
     // landmarks — only once their cell has been explored
@@ -320,8 +323,14 @@ export class Minimap {
     ctx.font = '11px sans-serif';
     for (const sm of this.world.smiths ?? []) {
       if (!this._isDiscovered(sm.x, sm.z) || !inView(sm.x, sm.z)) continue;
+      const bx = toX(sm.x), by = toY(sm.z);
       ctx.fillStyle = '#ffa528';
-      ctx.fillText('⚒', toX(sm.x), toY(sm.z) + 4);
+      ctx.beginPath(); ctx.arc(bx, by, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#3a2a10'; ctx.lineWidth = 1; ctx.stroke();
+      ctx.font = 'bold 9px sans-serif';
+      ctx.fillStyle = '#2a1c08';
+      ctx.fillText('⚒', bx, by + 3);
+      ctx.font = '11px sans-serif';
     }
     for (const poi of this.world.pois ?? []) {
       if (!this._isDiscovered(poi.x, poi.z) || !inView(poi.x, poi.z)) continue;

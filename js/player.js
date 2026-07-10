@@ -245,9 +245,12 @@ export class Player {
     this.maxHp = hp + (this.campBonus || 0);
     if (this.maxHp > oldMax) this.hp += this.maxHp - oldMax;
     this.hp = Math.min(this.hp, this.maxHp);
-    this.speed = 5.5 + speedAdd;
+    // every level grants +10 hp, +0.1 speed, +0.1 regen and +0.1 attacks/s —
+    // and losing a level on death takes all of it back (it's all derived here)
+    const lvl = this.level - 1;
+    this.speed = 5.5 + 0.1 * lvl + speedAdd;
     // passive regeneration: everyone knits back slowly; gear can stack it up
-    let regen = 0.1;
+    let regen = 0.1 + 0.1 * lvl;
     for (const slot of ['head', 'chest', 'boots', 'charm']) {
       const it = equipped(slot);
       if (it?.stats?.regen) regen += it.stats.regen;
@@ -257,10 +260,11 @@ export class Player {
     // effective weapon = base weapon + training (range/power/swift tracks)
     const base = equipped('weapon')?.weapon || itemById('fists').weapon;
     const s = this.stats;
+    const lvlCd = (cd) => 1 / (1 / cd + 0.1 * lvl); // +0.1 attacks/s per level
     this.weapon = {
       ...base,
       dmg: base.dmg * (1 + 0.05 * s.power),
-      cd: base.cd * (1 - 0.04 * s.swift),
+      cd: lvlCd(base.cd * (1 - 0.04 * s.swift)),
       range: base.range + (base.kind === 'bow' ? 2.0 : 0.1) * s.range,
     };
     this.gatherMult = 1 + 0.15 * s.gather; // Gathering training: fatter yields
@@ -498,14 +502,14 @@ export class Player {
           mz = dZ * fwd + dX * strafe;
         }
       }
-      moving = mx !== 0 || mz !== 0;
+      moving = (mx !== 0 || mz !== 0) && !ctx.boatPlacing; // raft being set up
       if (moving) {
         const len = Math.hypot(mx, mz);
         mx /= len; mz /= len;
         // paddling is a touch slower than running; roast buff speeds you up;
         // the swamp (ctx.envSpeedMult) drags at your boots
         const onWater = ctx.boat && world.isWater?.(this.pos.x, this.pos.z);
-        const speed = this.speed * (onWater ? 0.85 : 1)
+        const speed = this.speed * (onWater ? 0.4 : 1)
           * (this.roastT > 0 ? 1.1 : 1) * (ctx.envSpeedMult ?? 1);
         // cliffs are walls: block any step that climbs too steeply (walking
         // DOWN or falling off is always allowed); sliding along one is fine
@@ -591,6 +595,7 @@ export class Player {
   loseLevel() {
     if (this.level > 1) this.level--;
     this.xp = XP_LEVELS[this.level];
+    this.recompute(); // the level's hp/speed/regen/attack-speed go with it
   }
 
   _inArc(tx, tz, maxDist, extraR = 0) {

@@ -216,8 +216,10 @@ export class Panels {
       const card = document.createElement('div');
       card.className = 'card' + (owned ? ' owned' : (levelLocked || needMissing) ? ' locked' : affordable ? ' buyable' : ' expensive');
 
+      // the Bone Club is primitive enough to lash together at home —
+      // everything else needs a blacksmith's forge
       const forgeOnly = (this.shopTab === 'weapons' || this.shopTab === 'armor')
-        && this.camp && !this.hooks.nearSmith?.();
+        && this.camp && entry.id !== 'club' && !this.hooks.nearSmith?.();
       let status;
       // one level ahead you can already see the price and start saving;
       // deeper unlocks keep their cost a mystery
@@ -362,6 +364,7 @@ export class Panels {
     rows.push(['⚔️ Attack', Math.round(p.weapon.dmg), dmgParts.join(' · ')]);
 
     const asParts = [`${base.cd.toFixed(2)}s ${itemById(p.equipment.weapon)?.name ?? 'fists'}`];
+    if (p.level > 1) asParts.push(`+${((p.level - 1) * 0.1).toFixed(1)}/s level`);
     if (s.swift) asParts.push(`+${s.swift * 4}% training`);
     if (charm?.stats?.aspd) asParts.push(`+${Math.round(charm.stats.aspd * 100)}% ${charm.name}`);
     rows.push(['⚡ Attacks/s', (1 / p.weapon.cd).toFixed(2), asParts.join(' · ')]);
@@ -377,6 +380,7 @@ export class Panels {
     rows.push(['❤️ Max health', p.maxHp, hpParts.join(' · ')]);
 
     const spParts = ['5.5 base'];
+    if (p.level > 1) spParts.push(`+${((p.level - 1) * 0.1).toFixed(1)} level`);
     const boots = itemById(p.equipment.boots);
     if (boots?.stats?.speed) spParts.push(`+${boots.stats.speed} ${boots.name}`);
     rows.push(['🏃 Speed', (Math.round(p.speed * 10) / 10), spParts.join(' · ')]);
@@ -392,6 +396,7 @@ export class Panels {
 
     // regen row
     const regenParts = ['0.1 base'];
+    if (p.level > 1) regenParts.push(`+${((p.level - 1) * 0.1).toFixed(1)} level`);
     for (const slot of ['head', 'chest', 'boots', 'charm']) {
       const it = itemById(p.equipment[slot]);
       if (it?.stats?.regen) regenParts.push(`+${it.stats.regen} ${it.name}`);

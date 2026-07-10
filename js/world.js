@@ -178,7 +178,8 @@ export class World {
 
   // Terrain height — detail bumps + long rolling hills + occasional mountain
   // massifs with rugged tops; flattened around the cave & camp.
-  heightAt(x, z) {
+  // raw terrain height, before lake basins are carved out
+  _terrainH(x, z) {
     let h = valueNoise(x, z, 30, this.seed) * 1.9
           + valueNoise(x, z, 10, this.seed + 7) * 0.55
           - 1.2;
@@ -196,6 +197,25 @@ export class World {
       h += m;
     }
     if (r < 28) h *= Math.max(0.1, (r - 10) / 18);
+    return h;
+  }
+
+  // lakes carve a flat basin: without this a hill next to (or under) a lake
+  // buries the water plane under the terrain
+  heightAt(x, z) {
+    let h = this._terrainH(x, z);
+    for (const lake of this.lakesNear(x, z)) {
+      const d = Math.hypot(x - lake.x, z - lake.z);
+      const R = lake.r + 14;
+      if (d >= R) continue;
+      lake.bed ??= this._terrainH(lake.x, lake.z) - 0.6;
+      if (d <= lake.r) {
+        h = lake.bed;
+      } else {
+        const t = (d - lake.r) / 14, k = t * t * (3 - 2 * t);
+        h = lake.bed * (1 - k) + h * k;
+      }
+    }
     return h;
   }
 
@@ -936,13 +956,14 @@ export class World {
       }
     }
     const pcx = Math.floor(playerPos.x / CHUNK), pcz = Math.floor(playerPos.z / CHUNK);
-    for (let dx = -VIEW_RADIUS; dx <= VIEW_RADIUS; dx++)
-      for (let dz = -VIEW_RADIUS; dz <= VIEW_RADIUS; dz++)
+    const vr = this.viewRadius ?? VIEW_RADIUS; // adaptive quality can shrink it
+    for (let dx = -vr; dx <= vr; dx++)
+      for (let dz = -vr; dz <= vr; dz++)
         this._genChunk(pcx + dx, pcz + dz);
 
     for (const [key, chunk] of this.chunks) {
       const [cx, cz] = key.split(',').map(Number);
-      if (Math.abs(cx - pcx) > VIEW_RADIUS + 1 || Math.abs(cz - pcz) > VIEW_RADIUS + 1) {
+      if (Math.abs(cx - pcx) > (this.viewRadius ?? VIEW_RADIUS) + 1 || Math.abs(cz - pcz) > (this.viewRadius ?? VIEW_RADIUS) + 1) {
         this.scene.remove(chunk.group);
         this.chunks.delete(key);
       }

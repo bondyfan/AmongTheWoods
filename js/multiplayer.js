@@ -585,6 +585,7 @@ export class Multiplayer {
       }
       // a partner joined my room (first time or mid-game)
       if (this.isHost && m.guest && m.guest !== WoodsNet.partnerUid) {
+        if (this.active && this.mode === 'moba') return; // 1v1 seats don't refill
         WoodsNet.setPartner(m.guest);
         if (!this.active) this._begin(m);
         else this._attachPartner();
@@ -678,6 +679,7 @@ export class Multiplayer {
       if (s) { this.remote.setState(s); return; }
       // their state node vanished → they disconnected
       if (this.isHost && this.mode === 'coop' && this.remote?.lastSeen) this._partnerAway();
+      else if (this.mode === 'moba' && this.remote?.lastSeen) this._partnerLeft();
     });
     WoodsNet.onEvent((ev) => this._onEvent(ev));
 
@@ -695,6 +697,16 @@ export class Multiplayer {
 
   _partnerLeft() {
     if (!this.active) return;
+    // MOBA is 1v1: an opponent who vanishes forfeits. Disposing without
+    // ending used to strip every shadow unit (bases included) and leave a
+    // frozen, broken map behind.
+    if (this.mode === 'moba') {
+      const end = this.ctx.endMoba;
+      this.ctx.ui.toast('👋 Your opponent left — victory by forfeit!', 'level');
+      this.dispose();
+      end?.(true);
+      return;
+    }
     this.ctx.ui.toast('👋 Your partner left — continuing solo.', 'boss');
     this.dispose();
   }
