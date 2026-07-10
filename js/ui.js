@@ -50,7 +50,7 @@ export class UI {
     $('biome-name').textContent = biomeName;
 
     const weapon = itemById(player.equipment.weapon);
-    $('weapon-display').innerHTML = `${itemIcon(weapon)} ${weapon.name} <kbd>Q</kbd>`;
+    $('weapon-display').innerHTML = `${itemIcon(weapon)} ${weapon.name}`;
 
     // critical health: pulsing bar + red screen edges
     const critHp = !player.dead && player.hp > 0 && player.hp < player.maxHp * 0.2;

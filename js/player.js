@@ -98,13 +98,11 @@ export class Player {
   }
 
   // a bought/looted item lands in the BACKPACK (duplicates stack)
-  ownItem(id, autoEquip = true) {
-    const item = itemById(id);
-    if (!item) return false;
+  // new gear ALWAYS lands in the bag — equipping is a deliberate act in the
+  // Character modal (click it or drag it onto the paper doll)
+  ownItem(id) {
+    if (!itemById(id)) return false;
     this.invItems.push(id);
-    if (autoEquip && (!this.equipment[item.slot] || this.equipment[item.slot] === 'fists')) {
-      this.equip(id);
-    }
     return true;
   }
 
@@ -168,19 +166,6 @@ export class Player {
   }
 
   // Q — cycle through carried weapons (equipped + backpack, deduped).
-  cycleWeapon() {
-    const carried = [this.equipment.weapon, ...this.invItems]
-      .filter(id => itemById(id)?.slot === 'weapon');
-    const weapons = ['fists', ...new Set(carried.filter(id => id !== 'fists'))];
-    if (weapons.length < 2) return;
-    const idx = weapons.indexOf(this.equipment.weapon);
-    const next = weapons[(idx + 1) % weapons.length];
-    this.equip(next);
-    audio.sfx('click', 0.4);
-    this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.4),
-      `${itemById(next).icon} ${itemById(next).name}`, '#ffe9a8');
-  }
-
   // ---------- spells ----------
   ownSpell(id) {
     if (this.spellsOwned.has(id)) return false;

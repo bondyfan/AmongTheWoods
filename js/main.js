@@ -279,7 +279,7 @@ function grantPickup(kind, payload) {
   if (kind === 'item') {
     const item = itemById(payload);
     player.ownItem(payload);
-    ui.toast(`🎁 Loot: ${item.icon} ${item.name}!`, 'level');
+    ui.toast(`🎁 Loot: ${item.icon} ${item.name} — in your bag (equip in Character, C).`, 'level');
     panels.refresh();
   } else if (kind === 'salve' || kind === 'roast') {
     player.consumables[kind] = (player.consumables[kind] ?? 0) + payload;
@@ -924,6 +924,7 @@ function buyItem(id) {
   if (!Object.entries(cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
   for (const [k, v] of Object.entries(cost)) player[k] = roundResource(player[k] - v);
   player.ownItem(id);
+  ui.toast(`🎒 ${item.name} is in your bag — equip it in Character (C).`, 'level');
   audio.sfx('purchase', 0.5);
   panels.refresh();
   panels.flashCard(item.name);
@@ -1024,7 +1025,6 @@ function openBasePanel() {
 $id('base-btn').addEventListener('click', () => inPlay() && openBasePanel());
 input.onKey('KeyC', () => inPlay() && panels.toggle('character'));
 input.onKey('KeyN', () => inPlay() && panels.toggle('bestiary'));
-input.onKey('KeyQ', () => inPlay() && !game.paused && player.cycleWeapon());
 // M / minimap click → the big world map (mute moved to Settings)
 let bigmapOpen = false;
 let bigmapT = 0;

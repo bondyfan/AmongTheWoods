@@ -56,6 +56,72 @@ const LAKE_REGION = 220; // deterministic lakes are generated per region cell
 const BERRY_REGROW = 600; // seconds until a harvested bush bears fruit again
 const TERRACE_STEP = 5;   // mountain plateau height — cliffs between them
 
+// ---- procedural ground detail textures (medium/high graphics) ----
+// Multi-octave mottling + speckle + grass-blade strokes drawn once into a
+// canvas; MirroredRepeatWrapping makes any content tile without visible
+// borders. The map MULTIPLIES the biome vertex colors, so one neutral
+// grayscale texture works from Verdant grass to Frozen Peak snow.
+const _detailTex = {};
+function groundDetailTexture(level) {
+  if (_detailTex[level]) return _detailTex[level];
+  const size = level === 2 ? 512 : 256;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = size;
+  const g = cv.getContext('2d');
+  g.fillStyle = 'rgb(232,232,230)';
+  g.fillRect(0, 0, size, size);
+  const rnd = mulberry32(0xbeef ^ level);
+  // large soft mottling
+  for (let i = 0; i < size * 2.2; i++) {
+    const r = 6 + rnd() * 26;
+    const v = 200 + Math.floor(rnd() * 55);
+    g.fillStyle = `rgba(${v},${v},${v - 4},${0.10 + rnd() * 0.12})`;
+    g.beginPath();
+    g.arc(rnd() * size, rnd() * size, r, 0, Math.PI * 2);
+    g.fill();
+  }
+  // fine grain
+  for (let i = 0; i < size * 22; i++) {
+    const v = 185 + Math.floor(rnd() * 70);
+    g.fillStyle = `rgba(${v},${v},${v},${0.16 + rnd() * 0.2})`;
+    const px = rnd() * size, py = rnd() * size;
+    g.fillRect(px, py, 1 + rnd() * 1.6, 1 + rnd() * 1.6);
+  }
+  // grass-blade strokes (high adds more, longer, with slight curvature)
+  const blades = level === 2 ? size * 5 : size * 2;
+  for (let i = 0; i < blades; i++) {
+    const x = rnd() * size, y = rnd() * size;
+    const len = (level === 2 ? 4 : 3) + rnd() * (level === 2 ? 7 : 4);
+    const a = rnd() * Math.PI;
+    const v = 190 + Math.floor(rnd() * 60);
+    g.strokeStyle = `rgba(${v},${v + 6},${v - 8},${0.22 + rnd() * 0.2})`;
+    g.lineWidth = 0.8 + rnd() * 0.7;
+    g.beginPath();
+    g.moveTo(x, y);
+    g.quadraticCurveTo(x + Math.cos(a) * len * 0.5 + (rnd() - 0.5) * 2,
+      y + Math.sin(a) * len * 0.5, x + Math.cos(a) * len, y + Math.sin(a) * len);
+    g.stroke();
+  }
+  if (level === 2) {
+    // tiny pebbles with a hint of shadow
+    for (let i = 0; i < size; i++) {
+      const x = rnd() * size, y = rnd() * size, r = 0.8 + rnd() * 1.8;
+      g.fillStyle = 'rgba(120,118,110,0.28)';
+      g.beginPath(); g.arc(x + 0.6, y + 0.7, r, 0, Math.PI * 2); g.fill();
+      const v = 205 + Math.floor(rnd() * 40);
+      g.fillStyle = `rgba(${v},${v},${v - 6},0.5)`;
+      g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+    }
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.wrapS = tex.wrapT = THREE.MirroredRepeatWrapping;
+  tex.repeat.set(level === 2 ? 7 : 5, level === 2 ? 7 : 5);
+  tex.anisotropy = 4;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  _detailTex[level] = tex;
+  return tex;
+}
+
 export class World {
   constructor(scene, seed = 1337) {
     this.scene = scene;
@@ -644,12 +710,11 @@ export class World {
 
   // vertex-colored terrain tile for one chunk (finer mesh where cliffs are)
   _groundTile(cxw, czw) {
-    // finer mesh where cliffs are AND where the trail passes (a 4 m vertex
-    // grid would render a 5 m path as ragged blotches); the graphics setting
-    // scales the whole grid up for medium/high texture detail
-    const dk = [1, 1.4, 2][this.groundDetail ?? 0];
-    const segs = Math.round(((this._mountainK(cxw + CHUNK / 2, czw + CHUNK / 2) > 0
-      || this.pathDistance(cxw + CHUNK / 2, czw + CHUNK / 2) < 34) ? 20 : 10) * dk);
+    // ONE grid density for every tile of a detail level. Mixing densities
+    // (finer near cliffs/paths) left T-junctions on shared edges — vertices
+    // of the coarse tile interpolated across gaps the fine tile shaded
+    // per-vertex, and every border showed as a seam line.
+    const segs = [14, 20, 28][this.groundDetail ?? 0];
     const geo = new THREE.PlaneGeometry(CHUNK, CHUNK, segs, segs);
     geo.rotateX(-Math.PI / 2);
     geo.translate(cxw + CHUNK / 2, 0, czw + CHUNK / 2);
@@ -689,7 +754,13 @@ export class World {
       const l = Math.hypot(nx, 1, nz);
       nrm.setXYZ(i, nx / l, 1 / l, nz / l);
     }
-    const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
+    const mat = { vertexColors: true };
+    if ((this.groundDetail ?? 0) > 0) {
+      // medium/high: a real tiling detail texture over the vertex colors
+      mat.map = groundDetailTexture(this.groundDetail);
+      mat.color = new THREE.Color(1.12, 1.12, 1.12); // the map's mean is ~0.9
+    }
+    const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial(mat));
     mesh.receiveShadow = true;
     return mesh;
   }

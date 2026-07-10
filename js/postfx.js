@@ -50,6 +50,11 @@ export class PostFX {
     this.renderer = renderer;
     const w = renderer.domElement.width, h = renderer.domElement.height;
     this.rtScene = new THREE.WebGLRenderTarget(w, h, { samples: 4 });
+    // CRITICAL: without this the scene lands in the target in LINEAR space,
+    // the composite writes it raw to the sRGB canvas and the whole image
+    // comes out crushed-dark. Tagged sRGB, the offscreen render matches a
+    // direct-to-canvas render exactly; bloom then only ADDS light.
+    this.rtScene.texture.colorSpace = THREE.SRGBColorSpace;
     this.rtA = new THREE.WebGLRenderTarget(w >> 2, h >> 2);
     this.rtB = new THREE.WebGLRenderTarget(w >> 2, h >> 2);
 
@@ -62,11 +67,11 @@ export class PostFX {
       vertexShader: QUAD_VERT, fragmentShader: frag, uniforms, depthTest: false, depthWrite: false,
     });
     this.brightMat = mat(BRIGHT_FRAG, {
-      tDiffuse: { value: null }, threshold: { value: 0.72 } });
+      tDiffuse: { value: null }, threshold: { value: 0.78 } });
     this.blurMat = mat(BLUR_FRAG, {
       tDiffuse: { value: null }, dir: { value: new THREE.Vector2() } });
     this.compositeMat = mat(COMPOSITE_FRAG, {
-      tScene: { value: null }, tBloom: { value: null }, strength: { value: 0.85 } });
+      tScene: { value: null }, tBloom: { value: null }, strength: { value: 0.55 } });
   }
 
   setSize(w, h) {
