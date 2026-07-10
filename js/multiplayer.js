@@ -197,6 +197,7 @@ class ShadowWorld {
       }
       s.target.set(e.x, 0, e.z);
       s.hp = e.hp; s.maxHp = e.m;
+      if (e.a) s.pendingAtk = true; // host says it just attacked — voice it
     }
     for (const [id, s] of this.enemies) {
       if (!liveIds.has(id)) this._killShadow(id, s);
@@ -218,6 +219,7 @@ class ShadowWorld {
         this.pickups.set(p.i, s);
       }
       s.x = p.x; s.z = p.z;
+      s.locked = !!p.o; // my own drop — hands off for a few seconds
     }
     for (const [id, s] of this.pickups) {
       if (!pickIds.has(id)) { this.scene.remove(s.mesh); this.pickups.delete(id); this.pendingCollect.delete(id); }
@@ -258,9 +260,14 @@ class ShadowWorld {
     this.enemies.delete(id);
     this.ui.removeTracker('shp' + id);
     this.ui.removeTracker('sboss' + id);
-    s.dying = 0.0001;
-    this.dyingMeshes.push(s);
-    audio.sfx('death', 0.3, 60);
+    // low hp = a real death; full hp = the host just culled it out of range
+    if (s.hp <= s.maxHp * 0.35) {
+      s.dying = 0.0001;
+      this.dyingMeshes.push(s);
+      audio.creature(s.type, 'death', 0.45, 30);
+    } else {
+      this.scene.remove(s.mesh);
+    }
   }
 
   // ---- EnemyManager-compatible interface for the guest's combat code ----
@@ -292,6 +299,11 @@ class ShadowWorld {
       (ud.segments || []).forEach((seg, si) => { seg.position.x = Math.sin(s.walkT * 2.4 + si * 1.1) * 0.13; });
       const flyY = s.cfg.flying ? 1.5 : 0;
       s.mesh.position.set(s.pos.x, this.world.heightAt(s.pos.x, s.pos.z) + flyY, s.pos.z);
+      if (s.pendingAtk) {
+        s.pendingAtk = false;
+        const d = Math.hypot(localPlayer.pos.x - s.pos.x, localPlayer.pos.z - s.pos.z);
+        if (d < 45) audio.creature(s.type, 'attack', Math.max(0.15, 0.5 - d / 120), 120);
+      }
     }
 
     // death animations for removed shadows
@@ -308,7 +320,7 @@ class ShadowWorld {
       s.t += dt;
       s.mesh.position.y = this.world.heightAt(s.x, s.z) + 0.45 + Math.sin(s.t * 3) * 0.12;
       s.mesh.rotation.y += dt * 1.2;
-      if (!this.pendingCollect.has(s.id) && !localPlayer.dead) {
+      if (!this.pendingCollect.has(s.id) && !localPlayer.dead && !s.locked) {
         const d = Math.hypot(localPlayer.pos.x - s.x, localPlayer.pos.z - s.z);
         if (d < 3.0) {
           this.pendingCollect.add(s.id);
@@ -979,9 +991,10 @@ export class Multiplayer {
   }
 
   // guest → host: "spawn this dropped stack/item on the ground for everyone"
-  sendDrop(kind, payload, x, z) {
+  sendDrop(kind, payload, x, z, ownerLock = false) {
     if (!this.active || this.mode !== 'coop') return;
-    WoodsNet.sendEvent({ type: 'drop', k: kind, p: payload, x: +x.toFixed(1), z: +z.toFixed(1) });
+    WoodsNet.sendEvent({ type: 'drop', k: kind, p: payload, x: +x.toFixed(1), z: +z.toFixed(1),
+      ...(ownerLock ? { lk: 1 } : {}) });
   }
 
   // co-op: forward kill credit to whoever landed the killing blow
@@ -1068,6 +1081,8 @@ export class Multiplayer {
         break;
       }
       case 'collect': { // co-op host: partner wants pickup #id
+        const cand = ctx.pickups.list.find(x => x.id === ev.id);
+        if (cand && cand.lockT > 0 && cand.lockId === 'partner') break; // still theirs-locked
         const pk = ctx.pickups.removeById(ev.id);
         if (pk) this.onRemoteCollect(pk);
         break;
@@ -1099,7 +1114,8 @@ export class Multiplayer {
       case 'camp': ctx.onCampSync?.(ev.lv, ev.st, ev.gp); break; // shared base
       case 'ping': ctx.showPing?.(ev.x, ev.z); break;
       case 'drop': // partner dropped loot — the host materializes it
-        if (this.isHost) ctx.pickups.spawn(ev.k, ev.p, { x: ev.x, z: ev.z }, 0.5);
+        if (this.isHost) ctx.pickups.spawn(ev.k, ev.p, { x: ev.x, z: ev.z }, 0.5,
+          ev.lk ? { id: 'partner', t: 10 } : null);
         break;
       case 'win': ctx.onCoopWin?.(); break;
 

@@ -21,8 +21,9 @@ export class Pickups {
     this.magnetMult = 1; // camp cabin perk widens the loot magnet
   }
 
-  // kind: 'meat'|'wood'|'stone'|'hide'|'iron'|'item'; payload: amount (or itemId)
-  spawn(kind, payload, pos, scatter = 0.8) {
+  // kind: 'meat'|'wood'|'stone'|'hide'|'iron'|'item'; payload: amount (or itemId).
+  // lock = {id, t}: the player who dropped it can't take it back for t seconds.
+  spawn(kind, payload, pos, scatter = 0.8, lock = null) {
     if (kind !== 'item') payload = roundResource(payload);
     const makers = { meat: makeMeatDrop, wood: makeWoodDrop, stone: makeStoneDrop,
                      hide: makeHideDrop, iron: makeIronDrop, berry: makeBerryDrop,
@@ -35,6 +36,7 @@ export class Pickups {
     this.list.push({
       id: nextPickupId++, kind, payload, mesh,
       x, z, t: Math.random() * 6, magnet: false,
+      lockId: lock?.id ?? null, lockT: lock?.t ?? 0,
     });
   }
 
@@ -43,11 +45,13 @@ export class Pickups {
     for (let i = this.list.length - 1; i >= 0; i--) {
       const p = this.list[i];
       p.t += dt;
+      if (p.lockT > 0) p.lockT -= dt;
 
-      // nearest living target
+      // nearest living target (the dropper is locked out for a while)
       let target = null, dist = Infinity;
       for (const t of targets) {
         if (t.dead) continue;
+        if (p.lockT > 0 && t.id === p.lockId) continue;
         const d = Math.hypot(t.pos.x - p.mesh.position.x, t.pos.z - p.mesh.position.z);
         if (d < dist) { dist = d; target = t; }
       }
@@ -81,6 +85,7 @@ export class Pickups {
     return this.list.map(p => ({
       i: p.id, k: p.kind, pl: p.payload,
       x: +p.mesh.position.x.toFixed(1), z: +p.mesh.position.z.toFixed(1),
+      ...(p.lockT > 0 && p.lockId === 'partner' ? { o: 1 } : {}),
     }));
   }
 

@@ -132,6 +132,8 @@
   <div id="character" class="panel hidden">
     <div class="panel-head">
       <h2>Armory</h2>
+      <button id="toggle-doll" class="section-toggle on" title="Show/hide character">🧍 Character</button>
+      <button id="toggle-inv" class="section-toggle on" title="Show/hide inventory">🎒 Inventory</button>
       <button class="panel-close">✕</button>
     </div>
     <div id="character-body">
@@ -225,6 +227,15 @@
   </div>
 
   <!-- main menu -->
+  <!-- boot loading screen: assets preload before the menu unlocks -->
+  <div id="loading">
+    <div class="loading-inner">
+      <h1>Among The Woods</h1>
+      <div id="loading-bar"><div id="loading-fill"></div></div>
+      <div id="loading-label">Loading… 0%</div>
+    </div>
+  </div>
+
   <div id="menu">
     <div class="menu-inner">
       <h1>Among<br>The Woods</h1>

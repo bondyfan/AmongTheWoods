@@ -626,6 +626,175 @@ export function makeIceGolem() {
   return humanoid({ fur: 0xaabfcc, face: 0x6d8494, eyes: 0x66eaff, width: 1.25, height: 0.95 });
 }
 
+// ---------- humanoids: bandits, tribes & other two-legged trouble ----------
+
+function bowProp(color = 0x6b4a2d) {
+  const g = new THREE.Group();
+  const stave = box(0.06, 0.9, 0.06, color);
+  stave.rotation.z = 0.15;
+  g.add(stave);
+  const string = box(0.015, 0.84, 0.015, 0xd8d0c0);
+  string.position.x = 0.1;
+  g.add(string);
+  return g;
+}
+
+export function makeBandit() {
+  const g = humanoid({ fur: 0x4a4038, face: 0xc9a980, eyes: 0xffd24a, width: 0.72, height: 0.88 });
+  const hood = box(0.6, 0.26, 0.56, 0x2e2a24);
+  hood.position.y = 0.3;
+  g.userData.head.add(hood);
+  const bow = bowProp();
+  bow.position.set(0, -0.6, -0.15);
+  g.userData.arms[0].add(bow);
+  return g;
+}
+
+export function makeBanditBrute() {
+  const g = humanoid({ fur: 0x5a4a38, face: 0xc9a980, eyes: 0xff8844, width: 1.05, height: 1.0 });
+  const pauldron = box(0.5, 0.22, 0.5, 0x3a332c);
+  pauldron.position.set(0.5, 1.85, 0);
+  g.add(pauldron);
+  const club = box(0.16, 0.85, 0.16, 0x6b4a2d);
+  club.position.set(0, -0.75, 0);
+  club.rotation.z = 0.35;
+  g.userData.arms[1].add(club);
+  return g;
+}
+
+export function makeTribesman() {
+  const g = humanoid({ fur: 0x8a5a38, face: 0xa06a3c, eyes: 0xffe07f, width: 0.72, height: 0.92 });
+  // war paint + feather
+  const paint = box(0.36, 0.06, 0.07, 0xd83c2e);
+  paint.position.set(0, 0.12, -0.26);
+  g.userData.head.add(paint);
+  const feather = box(0.05, 0.3, 0.05, 0xe8d84a);
+  feather.position.set(0.15, 0.35, 0.1);
+  feather.rotation.z = -0.3;
+  g.userData.head.add(feather);
+  const spear = box(0.06, 1.5, 0.06, 0x8a6b42);
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.24, 5), mat(0xb8b4a8));
+  tip.position.y = 0.85;
+  spear.add(tip);
+  spear.position.set(0, -0.55, 0);
+  g.userData.arms[1].add(spear);
+  return g;
+}
+
+export function makeShaman() {
+  const g = humanoid({ fur: 0x3c3a4c, face: 0x8a9a6a, eyes: 0xb26fff, width: 0.75, height: 0.9 });
+  const robe = box(0.85, 0.7, 0.55, 0x4a3c5c);
+  robe.position.y = 0.62;
+  g.add(robe);
+  const orb = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 6),
+    new THREE.MeshBasicMaterial({ color: 0xb26fff }));
+  orb.position.set(0, -0.85, 0);
+  g.userData.arms[0].add(orb);
+  return g;
+}
+
+export function makePoacher() {
+  const g = humanoid({ fur: 0x4c5a3a, face: 0xc9a980, eyes: 0xcfe8a4, width: 0.75, height: 0.92 });
+  const hat = box(0.62, 0.12, 0.6, 0x3a4230);
+  hat.position.y = 0.3;
+  g.userData.head.add(hat);
+  const bow = bowProp(0x4c4234);
+  bow.position.set(0, -0.6, -0.15);
+  g.userData.arms[0].add(bow);
+  return g;
+}
+
+// ---------- new beasts ----------
+
+export function makeThornling() {
+  const g = humanoid({ fur: 0x3d6b2e, face: 0x2a4a20, eyes: 0xc9ff5f, width: 0.55, height: 0.6 });
+  for (const [x, y, r] of [[-0.2, 1.5, 0.5], [0.22, 1.55, -0.4], [0, 1.7, 0]]) {
+    const leaf = box(0.08, 0.34, 0.08, 0x5f9f3f);
+    leaf.position.set(x, y * 0.6, 0);
+    leaf.rotation.z = r;
+    g.add(leaf);
+  }
+  return g;
+}
+
+export function makeTreant() {
+  const g = humanoid({ fur: 0x5a4426, face: 0x3a2c18, eyes: 0xc9ff5f, width: 1.15, height: 1.1 });
+  const crown = new THREE.Mesh(new THREE.SphereGeometry(0.55, 7, 6), mat(0x2d6a2d));
+  crown.position.y = 0.45;
+  g.userData.head.add(crown);
+  for (const side of [-1, 1]) { // barky twig fingers
+    const twig = box(0.07, 0.35, 0.07, 0x4a3820);
+    twig.position.set(0, -0.95, 0);
+    twig.rotation.z = side * 0.4;
+    g.userData.arms[side === -1 ? 0 : 1].add(twig);
+  }
+  return g;
+}
+
+export function makeBogCrawler() {
+  const g = new THREE.Group();
+  const body = box(0.95, 0.4, 0.75, 0x5a6440);
+  body.position.y = 0.45;
+  g.add(body);
+  const shell = new THREE.Mesh(new THREE.SphereGeometry(0.5, 7, 5), mat(0x46503a));
+  shell.scale.y = 0.55;
+  shell.position.y = 0.7;
+  g.add(shell);
+  const eyeMat = new THREE.MeshBasicMaterial({ color: 0xd8ff7f });
+  const legs = [];
+  for (let i = 0; i < 6; i++) {
+    const side = i % 2 === 0 ? -1 : 1;
+    const leg = box(0.1, 0.45, 0.1, 0x4a5434);
+    leg.position.set(side * 0.55, 0.35, -0.25 + Math.floor(i / 2) * 0.28);
+    leg.rotation.z = side * 0.5;
+    g.add(leg);
+    legs.push(leg);
+  }
+  for (const side of [-1, 1]) {
+    const claw = box(0.22, 0.18, 0.3, 0x5a6440);
+    claw.position.set(side * 0.45, 0.4, -0.55);
+    g.add(claw);
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 5), eyeMat);
+    eye.position.set(side * 0.16, 0.62, -0.38);
+    g.add(eye);
+  }
+  g.userData = { legs, spider: true };
+  return g;
+}
+
+export function makeHarpy() {
+  const g = humanoid({ fur: 0x7a6448, face: 0xc9a980, eyes: 0xffcc44, width: 0.6, height: 0.7 });
+  const wings = [];
+  for (const side of [-1, 1]) {
+    const wing = new THREE.Group();
+    const membrane = box(0.85, 0.05, 0.4, 0x8a7458);
+    membrane.position.x = side * 0.45;
+    wing.add(membrane);
+    wing.position.set(side * 0.4, 1.35 * 0.7 + 0.35, 0.1);
+    g.add(wing);
+    wings.push(wing);
+  }
+  g.userData.wings = wings;
+  return g;
+}
+
+export function makeFrostWisp() {
+  const g = new THREE.Group();
+  const core = new THREE.Mesh(new THREE.SphereGeometry(0.34, 9, 7),
+    new THREE.MeshBasicMaterial({ color: 0x9fe8ff }));
+  core.position.y = 0.9;
+  g.add(core);
+  const shardMat = mat(0xcfeaff);
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2;
+    const shard = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.32, 4), shardMat);
+    shard.position.set(Math.cos(a) * 0.55, 0.9 + Math.sin(i * 2.1) * 0.15, Math.sin(a) * 0.55);
+    shard.rotation.z = a;
+    g.add(shard);
+  }
+  return g;
+}
+
 export function makeEnemyMesh(type) {
   switch (type) {
     case 'rabbit': return makeRabbit();
@@ -646,6 +815,16 @@ export function makeEnemyMesh(type) {
     case 'wendigo': return makeWendigo();
     case 'yeti': return makeYeti();
     case 'icegolem': return makeIceGolem();
+    case 'bandit': return makeBandit();
+    case 'banditBrute': return makeBanditBrute();
+    case 'tribesman': return makeTribesman();
+    case 'shaman': return makeShaman();
+    case 'poacher': return makePoacher();
+    case 'thornling': return makeThornling();
+    case 'treant': return makeTreant();
+    case 'bogCrawler': return makeBogCrawler();
+    case 'harpy': return makeHarpy();
+    case 'frostWisp': return makeFrostWisp();
   }
 }
 

@@ -762,6 +762,7 @@ export class World {
       const x = cxw + rng() * CHUNK;
       const z = czw + rng() * CHUNK;
       if (!inBounds(x, z)) continue;
+      if (radiusOf(x, z) < 100) continue; // open meadow around the base
       const size = denseWood
         ? (rng() < 0.12 ? 0 : rng() < 0.5 ? 1 : 2)
         : (rng() < 0.45 ? 0 : rng() < 0.75 ? 1 : 2);

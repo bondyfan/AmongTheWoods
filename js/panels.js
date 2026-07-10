@@ -36,6 +36,17 @@ export class Panels {
         if (name) this.toggle(name);
       }));
     this._makeDraggable();
+    // armory sections can collapse — hide one half and the modal slims down
+    for (const [btn, sec] of [['toggle-doll', 'armory-left'], ['toggle-inv', 'armory-right']]) {
+      $(btn).addEventListener('click', () => {
+        const other = btn === 'toggle-doll' ? 'toggle-inv' : 'toggle-doll';
+        if ($(btn).classList.contains('on') && !$(other).classList.contains('on')) return; // keep one
+        $(btn).classList.toggle('on');
+        $(sec).style.display = $(btn).classList.contains('on') ? '' : 'none';
+        $('character').classList.toggle('slim',
+          !$('toggle-doll').classList.contains('on') || !$('toggle-inv').classList.contains('on'));
+      });
+    }
   }
 
   // drag any panel by its header so several can sit side by side
@@ -86,9 +97,22 @@ export class Panels {
     for (const [key, id] of Object.entries(Panels.PANEL_IDS)) {
       $(id).classList.toggle('hidden', !this.openSet.has(key));
     }
+    this._arrange();
     this.refresh();
     if (this.openSet.has('shop')) $('shop-btn').classList.remove('pulse');
     this.hooks.onPauseChange(this.openSet.size > 0);
+  }
+
+  // open panels fan out from the center of the screen so heads stay visible
+  _arrange() {
+    const open = [...this.openSet];
+    open.forEach((key, i) => {
+      const el = $(Panels.PANEL_IDS[key]);
+      const off = i - (open.length - 1) / 2;
+      el.style.transform = 'translate(-50%, -50%)';
+      el.style.left = `calc(50% + ${Math.round(off * 90)}px)`;
+      el.style.top = `calc(50% + ${Math.round(off * 44)}px)`;
+    });
   }
 
   refresh() {
@@ -195,7 +219,11 @@ export class Panels {
       const forgeOnly = (this.shopTab === 'weapons' || this.shopTab === 'armor')
         && this.camp && !this.hooks.nearSmith?.();
       let status;
-      if (levelLocked) status = `<span class="tag">🔒 Lv ${entry.level}</span>`;
+      // one level ahead you can already see the price and start saving;
+      // deeper unlocks keep their cost a mystery
+      if (levelLocked) status = entry.level === p.level + 1
+        ? `<span class="tag">🔒 Lv ${entry.level} — ${this._costStr(cost)}</span>`
+        : `<span class="tag">🔒 Lv ${entry.level}</span>`;
       else if (needMissing) status = `<span class="tag">🏕️ Needs ${NEED_NAMES[entry.needs] ?? entry.needs}</span>`;
       else if (forgeOnly) status = (owned ? '<span class="tag ok">✔ Owned</span> ' : '') +
         `<span class="tag">⚒️ Forge at a blacksmith — ${this._costStr(cost)}</span>`;

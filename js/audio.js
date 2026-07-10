@@ -14,6 +14,29 @@ class AudioManager {
     this.lastPlayed = new Map(); // throttle per-sfx
   }
 
+  // Preload every SFX + music track up front (loading screen) so the first
+  // wolf bite doesn't stutter — and so a co-op guest has them from second one.
+  async preloadAll(onProgress) {
+    const SFX = ['attack_melee', 'attack_ranged', 'base_hit', 'bat_attack', 'bat_death',
+      'beast_attack', 'beast_death', 'click', 'death', 'defeat', 'eat_food', 'error',
+      'evolve', 'evolve_ready', 'hit', 'human_attack', 'human_death', 'kill_gold', 'lane_unlock', 'mine_hit', 'purchase',
+      'rabbit_death', 'rat_attack', 'rat_death', 'rock_crack', 'sheep_death', 'smith_forge',
+      'snake_attack', 'snake_death', 'spawn', 'special', 'spider_attack', 'spider_death',
+      'tower_build', 'upgrade', 'victory', 'wolf_attack', 'wolf_death'];
+    const MUSIC = ['level1', 'level3', 'mainmenu'];
+    const urls = [...SFX.map(n => SFX_PATH + n + '.mp3'), ...MUSIC.map(n => MUSIC_PATH + n + '.mp3')];
+    let done = 0;
+    await Promise.all(urls.map(async (url) => {
+      // never let one stuck request hold the whole loading screen hostage
+      const timeout = new Promise(r => setTimeout(r, 6000));
+      try { await Promise.race([fetch(url, { cache: 'force-cache' }).then(r => r.blob?.()), timeout]); } catch {}
+      done++;
+      onProgress?.(done, urls.length);
+    }));
+    // warm the Audio cache for sfx (they now come from the HTTP cache)
+    for (const n of SFX) this._base(n);
+  }
+
   setSfxVolume(v) { this.sfxVolume = Math.max(0, Math.min(1, v)); }
 
   setMusicVolume(v) {
@@ -90,7 +113,10 @@ class AudioManager {
     if (type === 'bat') return 'bat';
     if (type === 'rabbit') return 'rabbit';
     if (type === 'sheep') return 'sheep';
-    return 'beast'; // boar, elk, bear, wendigo, yeti, golem, ...
+    if (/bandit|tribesman|shaman|poacher/i.test(type)) return 'human';
+    if (/harpy/i.test(type)) return 'bat';
+    if (/crawler/i.test(type)) return 'spider';
+    return 'beast'; // boar, elk, bear, wendigo, yeti, golem, treant, wisp, ...
   }
 
   // kind: 'attack' | 'death'. Reuses the sfx cache/clone/throttle machinery.

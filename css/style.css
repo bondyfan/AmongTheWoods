@@ -585,3 +585,23 @@ kbd {
 #inv-admin select { max-width: 200px; background: rgba(0,0,0,0.35); color: #ffe8c0;
   border: 1px solid rgba(255,180,60,0.4); border-radius: 6px; padding: 4px 6px; margin-right: 6px; }
 #inv-admin .buy-btn { margin-right: 6px; margin-top: 6px; }
+
+
+/* ---------- boot loading screen ---------- */
+#loading { position: fixed; inset: 0; z-index: 300; display: flex; align-items: center;
+  justify-content: center; background: #0d140a; transition: opacity 0.5s ease; }
+#loading.done { opacity: 0; pointer-events: none; }
+.loading-inner { text-align: center; color: #d9e8c4; }
+.loading-inner h1 { margin-bottom: 24px; letter-spacing: 3px; }
+#loading-bar { width: 320px; height: 14px; border-radius: 8px; overflow: hidden;
+  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); }
+#loading-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #5f9f3f, #8fce5f);
+  transition: width 0.15s ease; }
+#loading-label { margin-top: 10px; font-size: 13px; color: #9fb884; }
+
+
+/* ---------- armory section toggles + collapsed width ---------- */
+.section-toggle { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.25);
+  color: #9fb884; border-radius: 8px; padding: 5px 10px; font-size: 13px; cursor: pointer; }
+.section-toggle.on { color: #e8f0dc; border-color: #7fbf5f; background: rgba(127,191,95,0.12); }
+#character.slim { width: min(520px, 94vw); }

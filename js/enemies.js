@@ -178,6 +178,14 @@ export class EnemyManager {
       if (rank > 0) pool.push({ type, bossRank: rank, groupId: gid });
     }
 
+    // humanoids camp in small groups — rarer than beasts, never alone
+    if (biome.humanoids?.length && Math.random() < 0.35) {
+      const type = pick(biome.humanoids);
+      const gid = nextGroupId++;
+      const count = 2 + Math.floor(Math.random() * 4); // a camp of 2-5
+      for (let i = 0; i < count; i++) pool.push({ type, groupId: gid });
+    }
+
     // spider-haunted woods: almost every zone hides a spider (or bat) nest,
     // usually with a brood mother — these packs drape the ground in webs
     if (biome.spiderHaunt && Math.random() < 0.85) {
@@ -579,6 +587,7 @@ export class EnemyManager {
             this.slams.push({ t: 0.75, x: e.pos.x, z: e.pos.z, r: 4.5,
                               dmg: Math.round(e.meleeDmg * 1.3), mesh });
             audio.creature(e.type, 'attack', 0.5, 80);
+          e.atkAt = this.world.time;
           }
         }
         // below 30% health the mother fights like a cornered animal
@@ -587,6 +596,7 @@ export class EnemyManager {
           e.speed *= 1.25; e.meleeDmg *= 1.3; e.dmg *= 1.3;
           this.hooks.popup(e.mesh.position.clone().setY(e.mesh.position.y + 2), 'ENRAGED!', '#ff5030', 'big');
           audio.creature(e.type, 'attack', 0.55, 60);
+          e.atkAt = this.world.time;
         }
       }
 
@@ -694,6 +704,7 @@ export class EnemyManager {
         });
         audio.sfx('attack_ranged', 0.18, 200);
         audio.creature(e.type, 'attack', 0.32, 200);
+          e.atkAt = this.world.time;
       }
 
       // melee attack (everyone bites/claws up close, ranged types included).
@@ -710,6 +721,7 @@ export class EnemyManager {
               { id: e.id, pos: e.pos, range: e.range * 1.35, melee: true, poison: e.cfg.poison });
           }
           audio.creature(e.type, 'attack', 0.4, 110);
+          e.atkAt = this.world.time;
         }
       } else if (!e.cfg.passive && target && e.attackCd <= 0 && dist < e.range) {
         e.attackCd = e.cfg.attackCd;
@@ -721,6 +733,7 @@ export class EnemyManager {
           target.takeDamage(e.meleeDmg,
             { id: e.id, pos: e.pos, range: e.range, melee: true, poison: e.cfg.poison });
           audio.creature(e.type, 'attack', 0.3, 110);
+          e.atkAt = this.world.time;
         }
       }
 
@@ -771,6 +784,7 @@ export class EnemyManager {
       id: e.id, t: e.type, b: e.bossRank,
       x: +e.pos.x.toFixed(1), z: +e.pos.z.toFixed(1),
       hp: Math.round(e.hp), m: Math.round(e.maxHp),
+      ...(this.world.time - (e.atkAt ?? -9) < 0.3 ? { a: 1 } : {}),
       ...(e.bossRank > 0 && e.bossName ? { n: e.bossName } : {}),
     }));
   }

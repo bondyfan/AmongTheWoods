@@ -521,16 +521,21 @@ function healAtMobaBase(dt) {
 function dropHalfMeat(pos) {
   let totalDropped = 0;
   for (const res of RESOURCES) {
-    const dropped = Math.floor(player[res] * 5) / 10;
+    const dropped = Math.floor(player[res] / 2); // whole numbers only
     player[res] = 0;
     if (dropped <= 0) continue;
-    totalDropped = roundResource(totalDropped + dropped);
+    totalDropped += dropped;
     const piles = Math.min(3, Math.max(1, Math.round(dropped / 5)));
     let left = dropped;
     for (let i = 0; i < piles; i++) {
       const amount = i === piles - 1 ? left : Math.ceil(dropped / piles);
       left -= amount;
-      pickups.spawn(res, amount, pos, 1.6);
+      // in co-op the HOST owns pickups — routed there, everyone sees the spill
+      if (mp?.active && !mp.isHost) {
+        mp.sendDrop(res, amount, pos.x + (Math.random() - 0.5) * 3, pos.z + (Math.random() - 0.5) * 3);
+      } else {
+        pickups.spawn(res, amount, pos, 1.6);
+      }
     }
   }
   return totalDropped;
@@ -841,8 +846,8 @@ function dropResource(key) {
   player[key] = roundResource(player[key] - amt);
   const at = dropAt();
   // the HOST owns pickups in co-op — a guest asks the host to spawn it
-  if (mp?.active && !mp.isHost) mp.sendDrop(key, amt, at.x, at.z);
-  else pickups.spawn(key, amt, at, 0.6);
+  if (mp?.active && !mp.isHost) mp.sendDrop(key, amt, at.x, at.z, true);
+  else pickups.spawn(key, amt, at, 0.6, { id: player.id, t: 10 });
   audio.sfx('click', 0.4);
 }
 
@@ -853,8 +858,8 @@ function dropItem(id) {
     player.spellSlots = player.spellSlots.map(sid => (sid === id ? undefined : sid));
   }
   const at = dropAt();
-  if (mp?.active && !mp.isHost) mp.sendDrop('item', id, at.x, at.z);
-  else pickups.spawn('item', id, at, 0.4);
+  if (mp?.active && !mp.isHost) mp.sendDrop('item', id, at.x, at.z, true);
+  else pickups.spawn('item', id, at, 0.4, { id: player.id, t: 10 });
   audio.sfx('click', 0.4);
 }
 
@@ -862,8 +867,8 @@ function dropConsumable(id) {
   if ((player.consumables[id] ?? 0) <= 0) return;
   player.consumables[id]--;
   const at = dropAt();
-  if (mp?.active && !mp.isHost) mp.sendDrop(id, 1, at.x, at.z);
-  else pickups.spawn(id, 1, at, 0.5);
+  if (mp?.active && !mp.isHost) mp.sendDrop(id, 1, at.x, at.z, true);
+  else pickups.spawn(id, 1, at, 0.5, { id: player.id, t: 10 });
   audio.sfx('click', 0.4);
 }
 
@@ -1393,6 +1398,20 @@ function renderCharPreview(dt) {
 world.update(0, player.pos); // pre-generate the starting forest
 updateCamera();
 tick();
+
+// boot loading screen: preload every sound before the menu unlocks so
+// nothing stutters in — and a co-op guest hears wolves from second one
+{
+  const overlay = $id('loading');
+  audio.preloadAll((done, total) => {
+    const pct = Math.round((done / total) * 100);
+    $id('loading-fill').style.width = pct + '%';
+    $id('loading-label').textContent = `Loading… ${pct}%`;
+  }).then(() => {
+    overlay.classList.add('done');
+    setTimeout(() => overlay.remove(), 600);
+  });
+}
 
 // Web-Worker heartbeat: worker timers aren't visibility-throttled, so a
 // hidden multiplayer tab keeps simulating (~10 Hz) instead of freezing the
