@@ -238,8 +238,19 @@ export function bossNameFor(type, id) {
 }
 
 // Cumulative XP required to reach each level (index = level).
-export const XP_LEVELS = [0, 0, 40, 110, 220, 380, 600, 880, 1230, 1660, 2200];
-export const MAX_LEVEL = 10;
+export const XP_LEVELS = [0, 0, 40, 110, 220, 380, 600, 880, 1230, 1660, 2200,
+  2850, 3620, 4520, 5560]; // levels 11-14 continue the curve
+export const MAX_LEVEL = 14;
+
+// quest XP scale: fraction of the CURRENT level's xp-to-next a quest pays,
+// front-loaded hard (a lvl-1 quest levels you outright, endgame quests are
+// a nudge). Index by player level; past the table it stays at 1%.
+export const QUEST_XP_PCT = [0, 1.2, 1.0, 0.8, 0.6, 0.4, 0.2, 0.1, 0.08, 0.06, 0.05, 0.04, 0.03, 0.02, 0.01];
+export function questXpFor(level) {
+  const pct = QUEST_XP_PCT[Math.min(level, QUEST_XP_PCT.length - 1)] ?? 0.01;
+  const span = (XP_LEVELS[Math.min(level + 1, XP_LEVELS.length - 1)] ?? 0) - (XP_LEVELS[level] ?? 0);
+  return Math.max(1, Math.round(span * pct));
+}
 
 // ---- Equippable items (WoW-style slots). Bought in the shop or dropped by
 // pack bosses. Only ONE weapon is wielded at a time — Q cycles owned weapons. ----
@@ -369,6 +380,8 @@ export const CONSUMABLES = [
     heal: 100, desc: 'Brewed from 5 blueberries. Drink with F: restores 100 health.' },
   { id: 'roast', icon: '🍗', name: 'Roasted Meat', key: 'G', cost: { meat: 10 },
     heal: 15, speedDur: 30, desc: 'Eat with G: +15 health and +10% speed for 30 s.' },
+  { id: 'honey', icon: '🍯', name: 'Wild Honey', found: true,
+    heal: 45, desc: 'Raided from a beehive. Click it in the inventory: +45 health.' },
 ];
 export const consumableById = (id) => CONSUMABLES.find(c => c.id === id);
 
@@ -627,10 +640,7 @@ export function questFor(bi, idx) {
   const d = defs[idx];
   if (!d) return null;
   const q = { ...d, biome: bi, idx };
-  q.reward = { meat: (8 + idx * 3) * k, ...(idx >= 3 ? { hide: 2 * k } : {}),
-               ...(idx >= 5 && bi >= 1 ? { essence: 1 + bi } : {}),
-               ...(idx === 7 ? { iron: 3 + bi * 2 } : {}) };
-  q.xp = (12 + idx * 6) * k;
+  q.reward = {}; // quests pay XP ONLY — scaled to your level when you finish
   if (d.type === 'kill') {
     const c = ENEMY_TYPES[d.target];
     q.name = `${c.icon} Cull: ${c.name}`;

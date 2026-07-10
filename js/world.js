@@ -9,7 +9,9 @@ import * as THREE from 'three';
 import { WORLD, BIOMES, biomeAt, radiusOf } from './config.js';
 import { makeTree, makeRock, makeGrassTuft, makeFlower, makeMushroom, makeBush,
          makeLog, makeBoulder, makeBridge, makeCampfire, makeStalagmite,
-         makeBerryBush, makeShrine, makeMonolith, makeCrypt, makeBlacksmith, makeCobweb } from './models.js';
+         makeBerryBush, makeShrine, makeMonolith, makeCrypt, makeBlacksmith, makeCobweb,
+         makeFarm, makeTrader, makeBeehive, makeCocoon, makeGlade, makeGraveyardRuin,
+         makeCursedStatue } from './models.js';
 import { audio } from './audio.js';
 
 const CHUNK = 40;
@@ -416,6 +418,29 @@ export class World {
         });
       }
     }
+
+    // ring-SPECIFIC landmarks: each biome gets its own signature encounters
+    const place = (type, ring, count) => {
+      const rMin = ring === 0 ? 150 : BIOMES[ring - 1].rMax + 80;
+      const rMax = Math.min(BIOMES[ring].rMax - 80, WORLD.radius - 130);
+      if (rMax <= rMin) return;
+      for (let i = 0; i < count; i++) {
+        for (let tries = 0; tries < 12; tries++) {
+          const a = rng() * Math.PI * 2;
+          const r = rMin + rng() * (rMax - rMin);
+          const x = Math.sin(a) * r, z = Math.cos(a) * r;
+          if (this.rings.some(w => Math.abs(r - w.r) < 25)) continue;
+          if (this.lakesNear(x, z).some(l => Math.hypot(x - l.x, z - l.z) < l.r + 10)) continue;
+          if (this.pois.some(pp => Math.hypot(pp.x - x, pp.z - z) < 90)) continue;
+          this.pois.push({ id: id++, type, x, z, ring, claimed: false, guarded: false, mesh: null });
+          break;
+        }
+      }
+    };
+    place('farm', 0, 1);       // Verdant: an abandoned farmstead to restore
+    place('trader', 0, 2);     // Verdant: wandering merchants buying surplus
+    place('graveyard', 2, 2);  // Haunted: undead-wave defense events
+    place('statue', 2, 3);     // Haunted: cursed statues (boon + bane)
   }
 
   poisNear(x, z, radius) {
@@ -918,6 +943,39 @@ export class World {
         group.add(obj);
       }
     };
+    // biome-signature chunk props: beehives on Verdant trees, silk cocoons
+    // and firefly glades in the Dark Forest
+    const props = [];
+    if (biome.name === 'Verdant Forest' && rng() < 0.10) {
+      const x = cxw + 6 + rng() * (CHUNK - 12), z = czw + 6 + rng() * (CHUNK - 12);
+      if (inBounds(x, z) && radiusOf(x, z) > 110) {
+        const hive = makeBeehive();
+        hive.position.set(x, this.heightAt(x, z) + 1.7, z); // hangs at head height
+        group.add(hive);
+        props.push({ kind: 'hive', x, z, mesh: hive, used: false });
+      }
+    }
+    if (biome.name === 'Dark Forest') {
+      if (rng() < 0.18) {
+        const x = cxw + 6 + rng() * (CHUNK - 12), z = czw + 6 + rng() * (CHUNK - 12);
+        if (inBounds(x, z)) {
+          const c = makeCocoon(rng);
+          this._place(c, x, z);
+          group.add(c);
+          props.push({ kind: 'cocoon', x, z, mesh: c, used: false });
+        }
+      }
+      if (rng() < 0.08) {
+        const x = cxw + 8 + rng() * (CHUNK - 16), z = czw + 8 + rng() * (CHUNK - 16);
+        if (inBounds(x, z)) {
+          const gl = makeGlade(rng);
+          this._place(gl, x, z);
+          group.add(gl);
+          props.push({ kind: 'glade', x, z, mesh: gl, used: false });
+        }
+      }
+    }
+
     // spider-web fields: clusters of big sticky webs over ~30% of the biome
     const chunkWebs = [];
     if (biome.webField) {
@@ -1023,7 +1081,11 @@ export class World {
     // -- landmarks whose spot falls inside this chunk --
     for (const poi of this.pois) {
       if (poi.x < cxw || poi.x >= cxw + CHUNK || poi.z < czw || poi.z >= czw + CHUNK) continue;
-      const mesh = poi.type === 'shrine' ? makeShrine()
+      const mesh = poi.type === 'farm' ? makeFarm()
+        : poi.type === 'trader' ? makeTrader()
+        : poi.type === 'graveyard' ? makeGraveyardRuin()
+        : poi.type === 'statue' ? makeCursedStatue()
+        : poi.type === 'shrine' ? makeShrine()
         : poi.type === 'monolith' ? makeMonolith() : makeCrypt();
       mesh.position.set(poi.x, this.heightAt(poi.x, poi.z), poi.z);
       group.add(mesh);
@@ -1036,7 +1098,7 @@ export class World {
     }
 
     this.scene.add(group);
-    this.chunks.set(key, { group, trees, rocks, webs: chunkWebs, bushes });
+    this.chunks.set(key, { group, trees, rocks, webs: chunkWebs, bushes, props });
   }
 
   update(dt, playerPos) {
@@ -1109,6 +1171,17 @@ export class World {
   }
 
   treesNear(pos, radius) { return this._near(pos, radius, 'trees'); }
+  // nearest unused biome prop (hive/cocoon/glade) within reach
+  propNear(x, z, radius = 3) {
+    const cx = Math.floor(x / CHUNK), cz = Math.floor(z / CHUNK);
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+      const chunk = this.chunks.get(this._chunkKey(cx + dx, cz + dz));
+      for (const pr of chunk?.props ?? []) {
+        if (!pr.used && Math.hypot(pr.x - x, pr.z - z) < radius) return pr;
+      }
+    }
+    return null;
+  }
   rocksNear(pos, radius) { return this._near(pos, radius, 'rocks'); }
   bushesNear(pos, radius) { return this._near(pos, radius, 'bushes'); }
 

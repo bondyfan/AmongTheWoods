@@ -92,7 +92,7 @@ export class Moba {
     const y = yOff ?? (u.kind === 'tower' ? 5.4 : 1.9);
     this.ui.addTracker('mu' + u.id,
       () => u.mesh.parent && !u.dying ? u.mesh.position.clone().setY(u.mesh.position.y + y) : null,
-      `<div class="hpbar"${width ? ` style="width:${width}px"` : ''}><div class="hpbar-fill"></div></div>`, 'hpwrap',
+      `<div class="hpbar"${width ? ` style="width:${width}px"` : ''}><div class="hpbar-fill"></div></div><div class="unit-name">${u.cfg?.name ?? u.type}</div>`, 'hpwrap',
       (el) => {
         const pct = Math.max(0, u.hp / u.maxHp);
         const fill = el.firstChild.firstChild;

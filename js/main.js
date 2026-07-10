@@ -4,8 +4,8 @@ import * as THREE from 'three';
 import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOBA,
          RESOURCES, RES_ICONS, HIDE_BEARING, VERDANT_HIDE_DROP, hideForHp, radiusOf, costFor,
          biomeIndexAt, progressAt, fmtResource, roundResource, itemById, spellById,
-         consumableById, essenceDropFor, MAX_LEVEL, questFor } from './config.js';
-import { makeAimArc, updateAimArc, makeRaft, makeBlacksmith, makeHorse } from './models.js';
+         consumableById, essenceDropFor, MAX_LEVEL, questFor, questXpFor } from './config.js';
+import { makeAimArc, updateAimArc, makeRaft, makeBlacksmith, makeHorse, makeWisp } from './models.js';
 import { PostFX } from './postfx.js';
 import { Camp } from './camp.js';
 import { audio } from './audio.js';
@@ -244,6 +244,185 @@ panels.player = player;
 const RES_POPUP = { meat: ['🍖', '#ff9d76'], wood: ['🪵', '#d8a468'],
                     stone: ['🪨', '#c8c8c0'], hide: ['🟫', '#c9986a'], iron: ['🔩', '#c8d0d8'],
                     berry: ['🫐', '#c9a4ff'], wool: ['🧶', '#f2efe6'], essence: ['🧪', '#5fe07f'] };
+// ---------- wandering trader: sells your surplus for essence ----------
+const TRADE_RATES = [['wood', 20], ['stone', 20], ['hide', 10], ['meat', 30], ['wool', 12]];
+function tradeWith(poi) {
+  // hand over the biggest sellable stack for 1 essence
+  const deal = TRADE_RATES.filter(([k, n]) => player[k] >= n)
+    .sort((a, b) => player[b[0]] / b[1] - player[a[0]] / a[1])[0];
+  if (!deal) {
+    ui.toast(`🛒 The trader shrugs — bring ${TRADE_RATES.map(([k, n]) => `${n} ${k}`).join(' / ')} for 1 🧪 each.`, '');
+    audio.sfx('error', 0.4);
+    return;
+  }
+  player[deal[0]] = roundResource(player[deal[0]] - deal[1]);
+  player.essence = roundResource(player.essence + 1);
+  ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2.2), `-${deal[1]} ${deal[0]} → +1 🧪`, '#5fe07f');
+  audio.sfx('purchase', 0.5);
+  panels.refresh();
+}
+
+// ---------- graveyard defense: waves of the restless dead ----------
+let graveEvent = null; // { poi, wave, alive: Set }
+function startGraveyardEvent(poi) {
+  if (graveEvent) { ui.toast('☠️ One graveyard at a time…', ''); return; }
+  graveEvent = { poi, wave: 0, ids: new Set() };
+  ui.banner('— The dead stir… —');
+  audio.sfx('lane_unlock', 0.6);
+  spawnGraveWave();
+}
+function spawnGraveWave() {
+  const { poi } = graveEvent;
+  graveEvent.wave++;
+  const n = 3 + graveEvent.wave;
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const type = Math.random() < 0.75 ? 'zombie' : 'bat';
+    const e = enemyMgr._spawn(type, poi.x + Math.cos(a) * 7, poi.z + Math.sin(a) * 7,
+      progressAt(poi.x, poi.z));
+    e.aggroed = true;
+    graveEvent.ids.add(e.id);
+  }
+  ui.toast(`☠️ Wave ${graveEvent.wave}/3 — ${n} risen!`, 'boss');
+}
+function tickGraveEvent() {
+  if (!graveEvent) return;
+  const anyAlive = enemyMgr.list.some(e => graveEvent.ids.has(e.id) && !e.dying);
+  if (anyAlive) return;
+  if (graveEvent.wave < 3) { spawnGraveWave(); return; }
+  const poi = graveEvent.poi;
+  poi.claimed = true;
+  graveEvent = null;
+  const xp = questXpFor(player.level);
+  player.addXp(xp);
+  pickups.spawn('essence', 3 + poi.ring, { x: poi.x, z: poi.z }, 1.5);
+  ui.banner('— The graveyard rests —');
+  ui.toast(`⚰️ The dead rest again: +${xp} XP and a cache of essence.`, 'level');
+  audio.sfx('victory', 0.5);
+  minimap.redrawT = 0;
+}
+
+// ---------- will-o-wisps: follow the light… to fortune or teeth ----------
+let wisp = null; // { mesh, tx, tz, t }
+let wispCd = 50;
+function tickWisp(dt) {
+  const inHaunted = BIOMES[game.biomeIndex]?.name === 'Haunted Forest';
+  if (!wisp) {
+    if (!inHaunted) return;
+    wispCd -= dt;
+    if (wispCd > 0) return;
+    wispCd = 75 + Math.random() * 45;
+    const a = Math.random() * Math.PI * 2;
+    const sx = player.pos.x + Math.cos(a) * 30, sz = player.pos.z + Math.sin(a) * 30;
+    const b = Math.random() * Math.PI * 2;
+    wisp = { mesh: makeWisp(), tx: sx + Math.cos(b) * 65, tz: sz + Math.sin(b) * 65, t: 0 };
+    wisp.mesh.position.set(sx, world.heightAt(sx, sz), sz);
+    scene.add(wisp.mesh);
+    ui.toast('💫 A pale light flickers between the trees…', '');
+    return;
+  }
+  wisp.t += dt;
+  const m = wisp.mesh;
+  m.userData.core.material.opacity = 0.7 + Math.sin(wisp.t * 6) * 0.3;
+  const dx = wisp.tx - m.position.x, dz = wisp.tz - m.position.z;
+  const d = Math.hypot(dx, dz);
+  const pd = Math.hypot(player.pos.x - m.position.x, player.pos.z - m.position.z);
+  if (pd < 26 && d > 1.5) { // it drifts on only while you follow
+    m.position.x += (dx / d) * 4.5 * dt;
+    m.position.z += (dz / d) * 4.5 * dt;
+    m.position.y = world.heightAt(m.position.x, m.position.z);
+  }
+  if (d <= 1.5 && pd < 10) { // journey's end — fortune or ambush
+    scene.remove(m);
+    const at = { x: m.position.x, z: m.position.z };
+    if (Math.random() < 0.6) {
+      pickups.spawn('essence', 2, at, 1.2);
+      pickups.spawn('meat', 10, at, 1.4);
+      ui.toast('💫 The wisp fades over a forgotten cache!', 'level');
+      audio.sfx('kill_gold', 0.5);
+    } else {
+      for (let i = 0; i < 3; i++) {
+        const e = enemyMgr._spawn('zombie', at.x + (Math.random() - 0.5) * 4, at.z + (Math.random() - 0.5) * 4,
+          progressAt(at.x, at.z));
+        e.aggroed = true;
+      }
+      ui.toast('💀 The light was BAIT!', 'boss');
+      audio.sfx('lane_unlock', 0.6);
+    }
+    wisp = null;
+  } else if (pd > 60 || wisp.t > 90) { // lost interest / gave up
+    scene.remove(m);
+    wisp = null;
+  }
+}
+
+// ---------- chunk props: beehives, cocoons, firefly glades (E) ----------
+function usePropNear() {
+  const pr = world.propNear?.(player.pos.x, player.pos.z, 3);
+  if (!pr) return false;
+  pr.used = true;
+  pr.mesh.visible = pr.kind === 'glade'; // glade keeps its fireflies
+  if (pr.kind === 'hive') {
+    player.consumables.honey = (player.consumables.honey ?? 0) + 1 + (Math.random() < 0.4 ? 1 : 0);
+    ui.toast('🍯 You raid the hive — wild honey!', 'level');
+    if (Math.random() < 0.35) {
+      player.takeDamage(6, { silent: true });
+      player.poisonT = 3; player.poisonDps = 2;
+      ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2.2), '🐝 stung!', '#ffd24a');
+    }
+    audio.sfx('purchase', 0.5);
+  } else if (pr.kind === 'cocoon') {
+    if (Math.random() < 0.5) {
+      pickups.spawn('essence', 1, { x: pr.x, z: pr.z }, 0.8);
+      pickups.spawn('hide', 2, { x: pr.x, z: pr.z }, 0.9);
+      if (Math.random() < 0.12) {
+        const c = ITEMS.filter(i => !i.free && i.slot !== 'companion');
+        pickups.spawn('item', c[Math.floor(Math.random() * c.length)].id, { x: pr.x, z: pr.z }, 0.5);
+      }
+      ui.toast('🕸️ The cocoon splits — someone\'s last belongings.', 'level');
+      audio.sfx('kill_gold', 0.45);
+    } else {
+      for (let i = 0; i < 2 + (Math.random() < 0.5 ? 1 : 0); i++) {
+        const e = enemyMgr._spawn('spider', pr.x + (Math.random() - 0.5) * 3, pr.z + (Math.random() - 0.5) * 3,
+          progressAt(pr.x, pr.z));
+        e.aggroed = true;
+      }
+      ui.toast('🕷️ The cocoon was FULL!', 'boss');
+      audio.sfx('lane_unlock', 0.55);
+    }
+    pr.mesh.visible = false;
+  } else if (pr.kind === 'glade') {
+    player.essence = roundResource(player.essence + 2);
+    ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2.2), '+2 🧪', '#7fffd4');
+    ui.toast('🍄 The glowing mushroom hums with essence.', 'level');
+    audio.sfx('evolve_ready', 0.45);
+    pr.mesh.children[1].visible = false; // the cap is picked, fireflies remain
+    pr.mesh.children[0].visible = false;
+  }
+  panels.refresh();
+  return true;
+}
+
+// ---------- caged prisoners at humanoid camps ----------
+function freePrisoner(pr) {
+  pr.freed = true;
+  pr.mesh.userData.prisoner.visible = false; // he bolts for freedom
+  const xp = questXpFor(player.level);
+  player.addXp(xp);
+  player.essence = roundResource(player.essence + 2);
+  // in thanks he marks landmarks he saw from the cage onto your map
+  let revealed = 0;
+  for (const poi of world.pois) {
+    if (revealed >= 2 || poi.claimed) continue;
+    if (Math.hypot(poi.x - pr.x, poi.z - pr.z) < 500 && !minimap._isDiscovered(poi.x, poi.z)) {
+      minimap.reveal(poi.x, poi.z);
+      revealed++;
+    }
+  }
+  ui.toast(`🔓 The prisoner thanks you: +${xp} XP, +2 🧪${revealed ? ` — and marks ${revealed} landmark${revealed > 1 ? 's' : ''} on your map` : ''}.`, 'level');
+  audio.sfx('victory', 0.4);
+}
+
 // ---------- blacksmith quests: accept, track, auto-complete ----------
 function acceptQuest(bi, idx) {
   if (player.quest) return;
@@ -266,14 +445,14 @@ function questProgress(n = 1) {
   const q = player.quest;
   q.count += n;
   if (q.count < q.need) { panels.refresh(); return; }
-  // done — pay out on the spot
+  // done — quests pay XP ONLY, scaled to your level at completion
   player.questDone[q.biome] = (player.questDone[q.biome] ?? 0) + 1;
   player.questHistory.push({ name: q.name, biome: q.biome });
-  for (const [k, v] of Object.entries(q.reward)) player[k] = roundResource(player[k] + v);
-  player.addXp(q.xp);
+  const xp = questXpFor(player.level);
+  player.addXp(xp);
   player.quest = null;
   ui.banner('📜 Quest complete!');
-  ui.toast(`📜 ${q.name} — reward collected (+${q.xp} XP). The smith has more work for you.`, 'level');
+  ui.toast(`📜 ${q.name} — +${xp} XP. The smith has more work for you.`, 'level');
   audio.sfx('victory', 0.45);
   panels.refresh();
 }
@@ -403,8 +582,10 @@ const enemyMgr = new EnemyManager(scene, world, {
   onSpawn: (enemy) => {
     const ranged = enemy.cfg.ranged;
     const shotColor = ranged ? '#' + enemy.cfg.shotColor.toString(16).padStart(6, '0') : '';
+    const label = enemy.bossName ?? enemy.cfg.name;
     const html = '<div class="hpbar"><div class="hpbar-fill"></div></div>' +
-      (ranged ? `<div class="castbar"><div class="castbar-fill" style="background:${shotColor}"></div></div>` : '');
+      (ranged ? `<div class="castbar"><div class="castbar-fill" style="background:${shotColor}"></div></div>` : '') +
+      `<div class="unit-name">${label}</div>`;
     ui.addTracker('hp' + enemy.id,
       () => enemy.mesh.parent ? enemy.mesh.position.clone().setY(enemy.mesh.position.y + 1.5 * enemy.sizeMult + 0.5) : null,
       html, 'hpwrap' + (enemy.bossRank > 0 ? ' boss' : ''),
@@ -1114,10 +1295,32 @@ function claimPoi(poi) {
       return;
     }
   }
+  if (poi.type === 'trader') { tradeWith(poi); return; }         // repeatable
+  if (poi.type === 'graveyard') { startGraveyardEvent(poi); return; }
   poi.claimed = true;
   const ring = poi.ring;
   const at = { x: poi.x + 1.8, z: poi.z + 1.8 };
-  if (poi.type === 'shrine') {
+  if (poi.type === 'farm') {
+    // restoring the old farmstead makes it a small haven with a stocked larder
+    world.safeZones.push({ x: poi.x, z: poi.z, r: 14 });
+    pickups.spawn('wool', 6, at, 1.4);
+    pickups.spawn('berry', 10, at, 1.4);
+    pickups.spawn('meat', 12, at, 1.4);
+    ui.toast('🏚️ You patch up the old farm — a safe haven now, larder included.', 'level');
+    audio.sfx('tower_build', 0.5);
+  } else if (poi.type === 'statue') {
+    // a pact: pick your poison — every boon carries a bane (120 s)
+    const pacts = [
+      { boon: { dmg: 1.3, speed: -1.2, t: 120 }, label: '+30% damage, −1.2 speed' },
+      { boon: { speed: 2.5, dmg: 0.85, t: 120 }, label: '+2.5 speed, −15% damage' },
+      { boon: { regen: 2, speed: -0.8, dmg: 0.92, t: 120 }, label: '+2 regen/s, slower & weaker' },
+    ];
+    const pact = pacts[Math.floor(Math.random() * pacts.length)];
+    player.boon = pact.boon;
+    player.recompute();
+    ui.toast(`🗿 The statue whispers a pact: ${pact.label} for 120 s.`, 'boss');
+    audio.sfx('evolve_ready', 0.5);
+  } else if (poi.type === 'shrine') {
     player.shrineBonus += 10;
     player.recompute();
     player.hp = player.maxHp;
@@ -1176,6 +1379,10 @@ input.onKey('KeyE', () => {
     if (!panels.openSet.has('smith')) panels.toggle('smith');
     else panels.renderSmith();
     audio.loopStart('smith_forge', 0.5);
+  }
+  else if (usePropNear()) { /* hive/cocoon/glade handled */ }
+  else if (enemyMgr.prisonerNear?.(player.pos.x, player.pos.z, 3)) {
+    freePrisoner(enemyMgr.prisonerNear(player.pos.x, player.pos.z, 3));
   }
   else if (nearPoi()) claimPoi(nearPoi());
   else if (nearTreasure()) digTreasure();
@@ -1692,10 +1899,18 @@ function step() {
       updateWaves(dt);
 
       updateChannel(dt);
+      tickGraveEvent();
+      tickWisp(dt);
 
       // contextual E hint: revive > chest > home > landmark > treasure
       const hintEl = $id('home-hint');
       const poi = nearPoi();
+      const POI_HINTS2 = {
+        farm: '🏚️ An abandoned farm — press <kbd>E</kbd> to restore it (safe haven + supplies)',
+        trader: '🛒 Wandering trader — press <kbd>E</kbd> to sell surplus for essence',
+        graveyard: '⚰️ Restless graveyard — press <kbd>E</kbd> to face the dead (3 waves)',
+        statue: '🗿 Cursed statue — press <kbd>E</kbd> to strike a pact (boon + bane)',
+      };
       const POI_HINTS = {
         shrine: '✦ Ancient shrine — press <kbd>E</kbd> to receive its blessing',
         monolith: '▲ Rune monolith — press <kbd>E</kbd> to break the seal',
@@ -1709,7 +1924,13 @@ function step() {
         : nearWildHorse() ? '🐴 A wild horse — press <kbd>E</kbd> to saddle and ride it'
         : nearParkedHorse() ? '🐴 Your horse — press <kbd>E</kbd> to mount'
         : nearSmith() ? '⚒️ Blacksmith — press <kbd>E</kbd> for quests &amp; the forge'
-        : poi ? POI_HINTS[poi.type]
+        : world.propNear?.(player.pos.x, player.pos.z, 3) ? {
+            hive: '🍯 A humming beehive — press <kbd>E</kbd> to raid it (mind the bees)',
+            cocoon: '🕸️ A silk cocoon — press <kbd>E</kbd> to cut it open',
+            glade: '🍄 A glowing mushroom — press <kbd>E</kbd> to harvest it',
+          }[world.propNear(player.pos.x, player.pos.z, 3).kind]
+        : enemyMgr.prisonerNear?.(player.pos.x, player.pos.z, 3) ? '🔓 A caged prisoner — press <kbd>E</kbd> to free him'
+        : poi ? (POI_HINTS2[poi.type] ?? POI_HINTS[poi.type])
         : nearTreasure() ? '💰 This is the spot — press <kbd>E</kbd> to dig' : null;
       if (hint) { hintEl.innerHTML = hint; hintEl.classList.remove('hidden'); }
       else hintEl.classList.add('hidden');

@@ -47,7 +47,8 @@ export class Player {
     this.petMode = 'aggressive';      // 'aggressive' | 'defensive' | 'passive'
 
     // -- consumables (F/G), poison, camp era perks --
-    this.consumables = { salve: 0, roast: 0 };
+    this.consumables = { salve: 0, roast: 0, honey: 0 };
+    this.boon = null; // cursed-statue pact: { dmg, speed, regen, t } — bane included
     this.upgrades = {};   // one-time supply comforts: saddle/bedroll/lining/socks
     this.idleT = 0;       // seconds standing still (bedroll rest bonus)
     this.hurtT = 999;     // seconds since last damage taken
@@ -140,7 +141,7 @@ export class Player {
   invCellCount() {
     let cells = new Set(this.invItems).size;
     for (const k of RESOURCES) if (this[k] > 0) cells++;
-    for (const c of ['salve', 'roast']) if ((this.consumables[c] ?? 0) > 0) cells++;
+    for (const c of ['salve', 'roast', 'honey']) if ((this.consumables[c] ?? 0) > 0) cells++;
     return cells;
   }
 
@@ -270,6 +271,13 @@ export class Player {
       : null;
     const orbBase = comp?.orb;
     this.orb = orbBase ? { ...orbBase, dmg: orbBase.dmg * (1 + 0.05 * s.power) } : null;
+
+    // cursed-statue pact: a strong boon lashed to a bane, until it expires
+    if (this.boon) {
+      if (this.boon.dmg) this.weapon.dmg *= this.boon.dmg;
+      if (this.boon.speed) this.speed += this.boon.speed;
+      if (this.boon.regen) this.hpRegen = Math.max(0, this.hpRegen + this.boon.regen);
+    }
 
     // admin mode (singleplayer testing): direct stat overrides win over
     // everything derived above
@@ -436,6 +444,7 @@ export class Player {
     this.hasteT = Math.max(0, this.hasteT - dt);
     this.rageT = Math.max(0, this.rageT - dt);
     this.roastT = Math.max(0, this.roastT - dt);
+    if (this.boon && (this.boon.t -= dt) <= 0) { this.boon = null; this.recompute(); }
     this.hurtT += dt;
     // wool bedroll: a moment of stillness out of combat and wounds knit fast
     const rest = (this.upgrades.bedroll && this.idleT > 3 && this.hurtT > 5) ? 6 : 1;

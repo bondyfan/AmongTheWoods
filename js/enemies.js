@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { WORLD, ENEMY_TYPES, BOSS_RANKS, BIOMES, biomeAt, biomeIndexAt, progressAt,
          meatForHp, bossNameFor } from './config.js';
-import { makeEnemyMesh, makeCobweb, makeHumanCamp } from './models.js';
+import { makeEnemyMesh, makeCobweb, makeHumanCamp, makeCage } from './models.js';
 import { audio } from './audio.js';
 
 let nextEnemyId = 1;
@@ -334,6 +334,20 @@ export class EnemyManager {
     this.campSites ??= [];
     this.campSites.push(mesh);
     this.world.obstacles?.push({ x: at.x, z: at.z, r: kind === 'tribal' ? 1.8 : 1.9 });
+    // some camps keep a caged prisoner — free him for a reward (E)
+    if (Math.random() < 0.35) {
+      const cx = at.x + 3.2, cz = at.z + 1.5;
+      const cage = makeCage();
+      cage.position.set(cx, this.world.heightAt(cx, cz), cz);
+      this.scene.add(cage);
+      this.prisoners ??= [];
+      this.prisoners.push({ x: cx, z: cz, mesh: cage, freed: false });
+    }
+  }
+
+  prisonerNear(x, z, radius = 3) {
+    return (this.prisoners ?? []).find(pr => !pr.freed
+      && Math.hypot(pr.x - x, pr.z - z) < radius) ?? null;
   }
 
   // spider packs leave their hunting ground draped in cobwebs for a while

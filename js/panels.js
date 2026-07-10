@@ -1,7 +1,7 @@
 // ---- Modal panels: upgrade shop (grouped tabs), character sheet with
 // equipment slots, bestiary of discovered creatures ----
 
-import { SHOP_GROUPS, SMITH_GROUPS, SUPPLY_UPGRADES, questFor, QUESTS_PER_BIOME, BIOMES, SLOTS, SLOT_LABELS, ENEMY_TYPES, ITEMS, SPELLS,
+import { SHOP_GROUPS, SMITH_GROUPS, SUPPLY_UPGRADES, questFor, questXpFor, QUESTS_PER_BIOME, BIOMES, SLOTS, SLOT_LABELS, ENEMY_TYPES, ITEMS, SPELLS,
          STAT_TRACKS, MOBA_BUILDINGS, CAMP_BUILDINGS, RES_ICONS, RESOURCES, CONSUMABLES,
          MAX_SPELL_SLOTS, fmtResource, itemById, spellById, costFor } from './config.js';
 
@@ -299,10 +299,9 @@ export class Panels {
     const div = document.createElement('div');
     div.className = 'quest-card ' + state;
     const mark = state === 'done' ? '✅ ' : state === 'active' ? '⏳ ' : state === 'locked' ? '🔒 ' : '';
-    const rewardStr = this._costStr(q.reward) + ` + ${q.xp} XP`;
     div.innerHTML = `<h4>${mark}${q.name}</h4>
       <div class="q-desc">${q.desc}</div>
-      <div class="q-meta">Reward: ${rewardStr}</div>${extra}`;
+      <div class="q-meta">Reward: ${questXpFor(this.player.level)} XP (scales with your level)</div>${extra}`;
     return div;
   }
 
@@ -358,6 +357,7 @@ export class Panels {
     }
 
     for (const c of CONSUMABLES) {
+      if (c.found) continue; // found in the world, never sold
       const owned = this.player.consumables?.[c.id] ?? 0;
       const affordable = this._affordable(c.cost);
       const card = document.createElement('div');

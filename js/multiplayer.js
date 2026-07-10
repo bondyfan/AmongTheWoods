@@ -247,7 +247,7 @@ class ShadowWorld {
   _addBars(s) {
     this.ui.addTracker('shp' + s.id,
       () => s.mesh.parent && !s.dying ? s.mesh.position.clone().setY(s.mesh.position.y + 1.5 * s.sizeMult + 0.5) : null,
-      '<div class="hpbar"><div class="hpbar-fill"></div></div>', 'hpwrap',
+      `<div class="hpbar"><div class="hpbar-fill"></div></div><div class="unit-name">${s.cfg?.name ?? s.type}</div>`, 'hpwrap',
       (el) => {
         const pct = Math.max(0, s.hp / s.maxHp);
         const fill = el.firstChild.firstChild;
@@ -404,7 +404,7 @@ class MobaShadow {
         const y = s.kind === 'base' ? 3.5 : s.kind === 'tower' ? 5.4 : 1.9;
         this.ui.addTracker('mmu' + s.id,
           () => s.mesh.parent && !s.dying ? s.mesh.position.clone().setY(s.mesh.position.y + y) : null,
-          '<div class="hpbar"><div class="hpbar-fill"></div></div>', 'hpwrap',
+          `<div class="hpbar"><div class="hpbar-fill"></div></div><div class="unit-name">${s.cfg?.name ?? s.kind}</div>`, 'hpwrap',
           (el) => {
             const pct = Math.max(0, s.hp / s.maxHp);
             const fill = el.firstChild.firstChild;

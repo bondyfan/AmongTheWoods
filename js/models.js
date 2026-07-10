@@ -679,6 +679,183 @@ export function makeWoolDrop() {
   return g;
 }
 
+// ---------- biome landmark props (farm, trader, cocoon, graveyard...) ----------
+
+export function makeFarm(rng = Math.random) {
+  const g = new THREE.Group();
+  const barn = box(3.4, 2.0, 2.6, 0x8a4a30);
+  barn.position.y = 1.0;
+  barn.castShadow = true;
+  g.add(barn);
+  const roof = new THREE.Mesh(new THREE.ConeGeometry(2.7, 1.4, 4), mat(0x5c3a24));
+  roof.position.y = 2.7;
+  roof.rotation.y = Math.PI / 4;
+  g.add(roof);
+  const door = box(0.9, 1.3, 0.08, 0x3a2c18);
+  door.position.set(0, 0.65, -1.32);
+  g.add(door);
+  // little wheat patch beside the barn
+  for (let i = 0; i < 14; i++) {
+    const stalk = box(0.06, 0.6 + rng() * 0.3, 0.06, 0xd8b84a);
+    stalk.position.set(2.6 + rng() * 1.8, 0.35, -1 + rng() * 2.4);
+    g.add(stalk);
+  }
+  return g;
+}
+
+export function makeTrader(rng = Math.random) {
+  const g = new THREE.Group();
+  const man = humanoid({ fur: 0x6a4a8a, face: 0xc9a980, eyes: 0xffe07f, width: 0.72, height: 0.9 });
+  g.add(man);
+  // hand cart with goods
+  const cart = new THREE.Group();
+  const bed = box(1.6, 0.16, 1.0, 0x6b4a2d);
+  bed.position.y = 0.55;
+  cart.add(bed);
+  for (const side of [-1, 1]) {
+    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.1, 8), mat(0x4a3820));
+    wheel.rotation.z = Math.PI / 2;
+    wheel.position.set(side * 0.85, 0.34, 0);
+    cart.add(wheel);
+  }
+  for (let i = 0; i < 3; i++) {
+    const sack = sphere(0.22, [0xc9b48a, 0x8a9a6a, 0xb08c5a][i], 6);
+    sack.position.set(-0.4 + i * 0.4, 0.8, (rng() - 0.5) * 0.4);
+    sack.scale.y = 0.8;
+    cart.add(sack);
+  }
+  cart.position.set(1.5, 0, 0.3);
+  g.add(cart);
+  return g;
+}
+
+export function makeBeehive() {
+  const g = new THREE.Group();
+  const body = cyl(0.26, 0.34, 0.5, 0xd8b84a, 7);
+  body.position.y = 0.25;
+  g.add(body);
+  const band = cyl(0.35, 0.35, 0.08, 0xb08c3a, 7);
+  band.position.y = 0.22;
+  g.add(band);
+  const hole = new THREE.Mesh(new THREE.CircleGeometry(0.07, 6), new THREE.MeshBasicMaterial({ color: 0x2a1c08 }));
+  hole.position.set(0, 0.2, -0.33);
+  g.add(hole);
+  return g;
+}
+
+export function makeCocoon(rng = Math.random) {
+  const g = new THREE.Group();
+  const body = sphere(0.55, 0xe8e8e0, 7);
+  body.scale.y = 1.55;
+  body.position.y = 0.85;
+  g.add(body);
+  // silk strands wrapping it
+  for (let i = 0; i < 4; i++) {
+    const strand = box(1.15, 0.05, 0.05, 0xd8d8cc);
+    strand.position.y = 0.5 + i * 0.28;
+    strand.rotation.y = rng() * Math.PI;
+    g.add(strand);
+  }
+  return g;
+}
+
+export function makeGlade(rng = Math.random) {
+  const g = new THREE.Group();
+  // the prize: one big glowing mushroom
+  const stem = cyl(0.09, 0.13, 0.5, 0xcfe8d8, 6);
+  stem.position.y = 0.25;
+  g.add(stem);
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.34, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color: 0x7fffd4 }));
+  cap.position.y = 0.5;
+  g.add(cap);
+  // fireflies: tiny glowing dots hovering on thin stalks
+  for (let i = 0; i < 7; i++) {
+    const fly = new THREE.Mesh(new THREE.SphereGeometry(0.05, 5, 4),
+      new THREE.MeshBasicMaterial({ color: 0xc9ff7f }));
+    fly.position.set((rng() - 0.5) * 4, 0.8 + rng() * 1.4, (rng() - 0.5) * 4);
+    g.add(fly);
+  }
+  return g;
+}
+
+export function makeCage() {
+  const g = new THREE.Group();
+  const base = box(1.3, 0.1, 1.3, 0x4a3820);
+  base.position.y = 0.05;
+  g.add(base);
+  for (const [x, z] of [[-0.55, -0.55], [0.55, -0.55], [-0.55, 0.55], [0.55, 0.55]]) {
+    const bar = box(0.09, 1.5, 0.09, 0x5a4a38);
+    bar.position.set(x, 0.8, z);
+    g.add(bar);
+  }
+  for (let i = 0; i < 4; i++) {
+    const bar = box(0.07, 1.4, 0.07, 0x6b5a48);
+    bar.position.set(-0.55 + (i % 2) * 1.1 === 0 ? 0 : -0.18 + i * 0.12, 0.75, i < 2 ? -0.55 : 0.55);
+    bar.position.x = -0.18 + (i % 2) * 0.36;
+    g.add(bar);
+  }
+  const top = box(1.3, 0.1, 1.3, 0x4a3820);
+  top.position.y = 1.55;
+  g.add(top);
+  const man = humanoid({ fur: 0x7a6a58, face: 0xc9a980, eyes: 0x8a9a6a, width: 0.55, height: 0.62 });
+  man.position.y = 0.1;
+  g.add(man);
+  g.userData.prisoner = man;
+  return g;
+}
+
+export function makeGraveyardRuin(rng = Math.random) {
+  const g = new THREE.Group();
+  for (let i = 0; i < 7; i++) {
+    const stone = box(0.5, 0.8 + rng() * 0.4, 0.14, 0x8a8a84);
+    stone.position.set((rng() - 0.5) * 7, 0.45, (rng() - 0.5) * 7);
+    stone.rotation.y = (rng() - 0.5) * 0.7;
+    stone.rotation.z = (rng() - 0.5) * 0.25;
+    g.add(stone);
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.14, 8, 1, false, 0, Math.PI),
+      mat(0x8a8a84));
+    cap.rotation.z = Math.PI / 2;
+    cap.rotation.y = stone.rotation.y;
+    cap.position.set(stone.position.x, stone.position.y + 0.42, stone.position.z);
+    g.add(cap);
+  }
+  const arch = box(0.2, 2.4, 0.2, 0x5a5a52);
+  arch.position.set(-1.1, 1.2, -3.4);
+  g.add(arch);
+  const arch2 = arch.clone(); arch2.position.x = 1.1; g.add(arch2);
+  const lintel = box(2.6, 0.25, 0.25, 0x5a5a52);
+  lintel.position.set(0, 2.4, -3.4);
+  g.add(lintel);
+  return g;
+}
+
+export function makeWisp() {
+  const g = new THREE.Group();
+  const core = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6),
+    new THREE.MeshBasicMaterial({ color: 0xaef2ff, transparent: true, opacity: 0.9 }));
+  core.position.y = 1.4;
+  g.add(core);
+  const halo = new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 6),
+    new THREE.MeshBasicMaterial({ color: 0x7fd8ff, transparent: true, opacity: 0.25 }));
+  halo.position.y = 1.4;
+  g.add(halo);
+  g.userData.core = core;
+  return g;
+}
+
+export function makeCursedStatue() {
+  const g = new THREE.Group();
+  const plinth = box(1.2, 0.5, 1.2, 0x4c4258);
+  plinth.position.y = 0.25;
+  g.add(plinth);
+  const figure = humanoid({ fur: 0x5a5468, face: 0x6a6478, eyes: 0xb26fff, width: 0.8, height: 0.95 });
+  figure.position.y = 0.5;
+  figure.userData.arms.forEach(a => { a.rotation.x = -0.9; }); // pleading reach
+  g.add(figure);
+  return g;
+}
+
 // ---------- humanoid camp sites: a dwelling + campfire ----------
 // kind 'tribal' (tribesman/shaman) gets a teepee; everyone else a log hut.
 export function makeHumanCamp(kind = 'bandit', rng = Math.random) {
