@@ -6,6 +6,7 @@ import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOB
          biomeIndexAt, progressAt, fmtResource, roundResource, itemById, spellById,
          consumableById, essenceDropFor, MAX_LEVEL, questFor } from './config.js';
 import { makeAimArc, updateAimArc, makeRaft, makeBlacksmith } from './models.js';
+import { PostFX } from './postfx.js';
 import { Camp } from './camp.js';
 import { audio } from './audio.js';
 import { input } from './input.js';
@@ -28,6 +29,8 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.getElementById('game').appendChild(renderer.domElement);
+
+let postfx = null; // created on demand by applyGraphics (bloom)
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(BIOMES[0].fog, 35, 110);
@@ -79,6 +82,7 @@ window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  postfx?.setSize(renderer.domElement.width, renderer.domElement.height);
 });
 
 // ---------- game state ----------
@@ -709,10 +713,35 @@ const settings = Object.assign(
     localStorage.setItem('atw-settings', JSON.stringify(settings));
     applyViewMode();
     ui.toast(settings.rpgView
-      ? '🎮 RPG view — A/D turn, W/S move, attacks hit what you face'
+      ? '🎮 RPG view — A/D turn, right-drag to look, wheel zooms'
       : '🗺️ Top-down view', 'level');
     audio.sfx('click', 0.4);
   });
+
+  // graphics: bloom (default ON), ground texture detail, optional extras
+  settings.bloom ??= true;
+  settings.texDetail ??= 0;
+  settings.hiShadows ??= false;
+  settings.filmic ??= false;
+  $id('set-bloom').checked = settings.bloom;
+  $id('set-texdetail').value = String(settings.texDetail);
+  $id('set-hishadows').checked = settings.hiShadows;
+  $id('set-filmic').checked = settings.filmic;
+  applyGraphics();
+  const saveGfx = () => {
+    localStorage.setItem('atw-settings', JSON.stringify(settings));
+    applyGraphics();
+    audio.sfx('click', 0.4);
+  };
+  $id('set-bloom').addEventListener('change', () => { settings.bloom = $id('set-bloom').checked; saveGfx(); });
+  $id('set-texdetail').addEventListener('change', () => {
+    settings.texDetail = +$id('set-texdetail').value;
+    saveGfx();
+    world.regenChunks(); // ground tiles rebuild at the new detail
+    world.update(0, player.pos);
+  });
+  $id('set-hishadows').addEventListener('change', () => { settings.hiShadows = $id('set-hishadows').checked; saveGfx(); });
+  $id('set-filmic').addEventListener('change', () => { settings.filmic = $id('set-filmic').checked; saveGfx(); });
 
   // volume sliders (persisted); music slider maps 100% → volume 0.7
   const sfxSlider = $id('set-sfx'), musicSlider = $id('set-music');
@@ -1409,6 +1438,7 @@ let shakeT = 0; // brief tremble on boss entrances
 function applyViewMode() {
   const rpg = !!settings.rpgView;
   game.rpgView = rpg;
+  input.rpgMode = rpg;
   scene.fog.near = rpg ? 45 : 35;
   scene.fog.far = rpg ? (autoQuality.stage >= 3 ? 150 : 195) : (autoQuality.stage >= 3 ? 90 : 110);
   camera.far = rpg ? 340 : 300;
@@ -1417,8 +1447,26 @@ function applyViewMode() {
   world.viewRadius = autoQuality.stage >= 3 ? (rpg ? 3 : 2) : (rpg ? 4 : 3);
 }
 
+// graphics options: bloom pipeline, ground detail, shadow res, tone mapping
+function applyGraphics() {
+  world.groundDetail = settings.texDetail ?? 0;
+  if (settings.bloom && !postfx) postfx = new PostFX(renderer);
+  // high shadows: sharper map over a wider area
+  const size = settings.hiShadows ? 4096 : 2048;
+  if (sun.shadow.mapSize.x !== size) {
+    sun.shadow.mapSize.set(size, size);
+    sun.shadow.map?.dispose();
+    sun.shadow.map = null;
+  }
+  renderer.toneMapping = settings.filmic ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
+  renderer.toneMappingExposure = settings.filmic ? 1.12 : 1;
+  scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
+}
+
 const camSmooth = new THREE.Vector3();
 let camInit = false;
+let rpgPitch = 0.34; // radians above the horizontal; negative looks UP
+let rpgDist = 8.6;   // wheel-zoomed camera distance
 function updateCamera(dt = 0) {
   const py = player.mesh.position.y;
   let sx = 0, sz = 0;
@@ -1429,17 +1477,24 @@ function updateCamera(dt = 0) {
     sz = (Math.random() - 0.5) * k;
   }
   if (game.rpgView) {
-    // MMORPG chase camera: behind the character, slightly above, smoothed;
-    // never dips under the terrain
-    const dist = 8.6, height = 3.4;
-    const tx = player.pos.x - player.facing.x * dist;
-    const tz = player.pos.z - player.facing.z * dist;
+    // MMORPG chase camera: right-drag steers the character AND tilts the
+    // camera up/down; the wheel zooms; it never dips under the terrain
+    const drag = input.takeDrag();
+    if (drag.x && !player.dead) {
+      const yaw = Math.atan2(player.facing.x, player.facing.z) - drag.x * 0.0045;
+      player.facing.set(Math.sin(yaw), 0, Math.cos(yaw));
+    }
+    rpgPitch = Math.max(-0.5, Math.min(1.25, rpgPitch + drag.y * 0.004));
+    rpgDist = Math.max(3.5, Math.min(15, rpgDist + input.takeWheel() * 0.9));
+    const flat = Math.cos(rpgPitch) * rpgDist;
+    const tx = player.pos.x - player.facing.x * flat;
+    const tz = player.pos.z - player.facing.z * flat;
     const groundY = world.heightAt(tx, tz);
-    const ty = Math.max(py + height, groundY + 1.6);
+    const ty = Math.max(py + 1.7 + Math.sin(rpgPitch) * rpgDist, groundY + 1.2);
     if (!camInit) { camSmooth.set(tx, ty, tz); camInit = true; }
-    camSmooth.lerp(new THREE.Vector3(tx, ty, tz), Math.min(1, dt * 6));
+    camSmooth.lerp(new THREE.Vector3(tx, ty, tz), Math.min(1, dt * 8));
     camera.position.set(camSmooth.x + sx, camSmooth.y, camSmooth.z + sz);
-    camera.lookAt(player.pos.x + player.facing.x * 3 + sx, py + 1.8, player.pos.z + player.facing.z * 3 + sz);
+    camera.lookAt(player.pos.x + player.facing.x * 2 + sx, py + 1.7, player.pos.z + player.facing.z * 2 + sz);
   } else {
     camInit = false;
     camera.position.set(player.pos.x + sx, py + 26, player.pos.z + 14 + sz);
@@ -1603,7 +1658,8 @@ function step() {
   ui.updateOverlays(dt, camera);
   renderCharPreview(dt);
   renderSmithPreview(dt);
-  renderer.render(scene, camera);
+  if (settings.bloom && postfx) postfx.render(scene, camera);
+  else { renderer.setRenderTarget(null); renderer.render(scene, camera); }
 }
 
 // ---- armory paper-doll: a second small camera orbiting the actual player ----

@@ -3,6 +3,10 @@
 class Input {
   constructor() {
     this.keys = new Set();
+    this.rpgMode = false;   // right button steers instead of attacking
+    this.dragX = 0;         // accumulated right-drag, consumed per frame
+    this.dragY = 0;
+    this.wheelSteps = 0;    // accumulated wheel, consumed per frame
     this.mouse = { x: 0, y: 0, left: false, right: false }; // x,y = NDC; the
     // OS cursor is a normal free cursor — the player just faces wherever it is.
 
@@ -20,7 +24,16 @@ class Input {
     window.addEventListener('mousemove', (e) => {
       this.mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
       this.mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+      // RPG mode: hold right button and drag to steer/look (WoW style)
+      if (this.rpgMode && this.mouse.right) {
+        this.dragX += e.movementX || 0;
+        this.dragY += e.movementY || 0;
+      }
     });
+    window.addEventListener('wheel', (e) => {
+      if (e.target.closest?.('.panel')) return; // panels scroll normally
+      this.wheelSteps += Math.sign(e.deltaY);
+    }, { passive: true });
     window.addEventListener('mousedown', (e) => {
       if (e.target.closest('button, .panel, .spell-slot, #minimap')) return; // don't attack through UI
       if (e.button === 0) this.mouse.left = true;
@@ -43,9 +56,23 @@ class Input {
     return (this.keys.has('KeyS') || this.keys.has('ArrowDown') ? 1 : 0) -
            (this.keys.has('KeyW') || this.keys.has('ArrowUp') ? 1 : 0);
   }
-  // One attack input — the equipped weapon decides what it does.
+  // One attack input — the equipped weapon decides what it does. In RPG view
+  // the right button is the camera hand, not a weapon.
   get attack() {
-    return this.mouse.left || this.mouse.right || this.keys.has('Space') || this.keys.has('KeyF');
+    return this.mouse.left || (!this.rpgMode && this.mouse.right)
+      || this.keys.has('Space') || this.keys.has('KeyF');
+  }
+
+  takeDrag() {
+    const d = { x: this.dragX, y: this.dragY };
+    this.dragX = 0; this.dragY = 0;
+    return d;
+  }
+
+  takeWheel() {
+    const w = this.wheelSteps;
+    this.wheelSteps = 0;
+    return w;
   }
 }
 

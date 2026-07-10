@@ -617,6 +617,16 @@ export class World {
     // subtle per-vertex jitter so large flats never look uniform
     const j = (latticeHash(Math.round(x * 3), Math.round(z * 3), this.seed + 99) - 0.5) * 0.05;
     out.offsetHSL(0, 0, j);
+    // medium/high texture detail: extra fine-grained mottling + micro speckle
+    if (this.groundDetail >= 1) {
+      const fine = valueNoise(x, z, 2.2, this.seed + 141) - 0.5;
+      out.offsetHSL(0, fine * 0.06, fine * 0.05);
+    }
+    if (this.groundDetail >= 2) {
+      const speck = latticeHash(Math.round(x * 7), Math.round(z * 7), this.seed + 171);
+      if (speck > 0.93) out.offsetHSL(0, 0.04, 0.05);
+      else if (speck < 0.07) out.offsetHSL(0, -0.03, -0.045);
+    }
     return out;
   }
 
@@ -635,9 +645,11 @@ export class World {
   // vertex-colored terrain tile for one chunk (finer mesh where cliffs are)
   _groundTile(cxw, czw) {
     // finer mesh where cliffs are AND where the trail passes (a 4 m vertex
-    // grid would render a 5 m path as ragged blotches)
-    const segs = (this._mountainK(cxw + CHUNK / 2, czw + CHUNK / 2) > 0
-      || this.pathDistance(cxw + CHUNK / 2, czw + CHUNK / 2) < 34) ? 20 : 10;
+    // grid would render a 5 m path as ragged blotches); the graphics setting
+    // scales the whole grid up for medium/high texture detail
+    const dk = [1, 1.4, 2][this.groundDetail ?? 0];
+    const segs = Math.round(((this._mountainK(cxw + CHUNK / 2, czw + CHUNK / 2) > 0
+      || this.pathDistance(cxw + CHUNK / 2, czw + CHUNK / 2) < 34) ? 20 : 10) * dk);
     const geo = new THREE.PlaneGeometry(CHUNK, CHUNK, segs, segs);
     geo.rotateX(-Math.PI / 2);
     geo.translate(cxw + CHUNK / 2, 0, czw + CHUNK / 2);
@@ -662,18 +674,30 @@ export class World {
       colors[i * 3] = col.r; colors[i * 3 + 1] = col.g; colors[i * 3 + 2] = col.b;
     }
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    geo.computeVertexNormals();
-    // soften slope shading: valley walls facing away from the sun rendered
-    // almost black — squashing normals toward 'up' keeps terrain readable
+    // ANALYTIC normals from heightAt (central differences): per-tile
+    // computeVertexNormals only sees its own triangles, so every chunk edge
+    // shaded differently — visible seams across the whole world. The same
+    // height function on both sides of a border gives continuous lighting.
+    // (x/z squashed 0.4 toward 'up' so shaded valleys stay readable.)
+    geo.computeVertexNormals(); // allocates the attribute
     const nrm = geo.attributes.normal;
-    for (let i = 0; i < nrm.count; i++) {
-      const nx = nrm.getX(i) * 0.4, ny = nrm.getY(i), nz = nrm.getZ(i) * 0.4;
-      const l = Math.hypot(nx, ny, nz) || 1;
-      nrm.setXYZ(i, nx / l, ny / l, nz / l);
+    const E = 1.2;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), z = pos.getZ(i);
+      const nx = (this.heightAt(x - E, z) - this.heightAt(x + E, z)) / (2 * E) * 0.4;
+      const nz = (this.heightAt(x, z - E) - this.heightAt(x, z + E)) / (2 * E) * 0.4;
+      const l = Math.hypot(nx, 1, nz);
+      nrm.setXYZ(i, nx / l, 1 / l, nz / l);
     }
     const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
     mesh.receiveShadow = true;
     return mesh;
+  }
+
+  // graphics setting changed → rebuild loaded ground tiles at the new detail
+  regenChunks() {
+    for (const chunk of this.chunks.values()) this.scene.remove(chunk.group);
+    this.chunks.clear();
   }
 
   _chunkKey(cx, cz) { return cx + ',' + cz; }
