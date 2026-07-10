@@ -572,10 +572,61 @@ export const MOBA_AI_TIMELINE = [
 ];
 
 // Shop groups (tabs).
+// forgeable gear lives at the BLACKSMITH; only the primitive Bone Club can
+// be lashed together at home
+export const isForgeItem = (i) =>
+  ['weapon', 'head', 'chest', 'boots', 'charm'].includes(i.slot) && !i.free && i.id !== 'club';
+
 export const SHOP_GROUPS = [
-  { key: 'weapons',  label: '⚔️ Weapons',   items: () => ITEMS.filter(i => i.slot === 'weapon' && !i.free) },
-  { key: 'armor',    label: '🛡️ Gear',      items: () => ITEMS.filter(i => ['head', 'chest', 'boots', 'charm'].includes(i.slot)) },
+  { key: 'weapons',  label: '⚔️ Weapons',   items: () => ITEMS.filter(i => i.slot === 'weapon' && !i.free && !isForgeItem(i)) },
   { key: 'friends',  label: '🐾 Companions', items: () => ITEMS.filter(i => i.slot === 'companion') },
   { key: 'spells',   label: '📖 Spells',    items: () => SPELLS },
   { key: 'training', label: '📈 Training',  items: () => STAT_TRACKS },
 ];
+
+export const SMITH_GROUPS = [
+  { key: 'quests',  label: '📜 Quests' },
+  { key: 'weapons', label: '⚔️ Weapons', items: () => ITEMS.filter(i => i.slot === 'weapon' && !i.free) },
+  { key: 'gear',    label: '🛡️ Gear',    items: () => ITEMS.filter(i => ['head', 'chest', 'boots', 'charm'].includes(i.slot)) },
+];
+
+// ---- blacksmith quest lines: 8 sequential quests per biome, generated from
+// the biome's own enemy roster. One active quest at a time, strictly in order.
+export function questFor(bi, idx) {
+  const biome = BIOMES[bi];
+  const en = (k) => biome.enemies[k % biome.enemies.length];
+  const k = 1 + bi; // depth scales needs and rewards
+  const defs = [
+    { type: 'kill', target: en(0), need: 5 },
+    { type: 'gather', res: 'wood', need: 15 + bi * 5 },
+    { type: 'kill', target: en(1), need: 8 },
+    { type: 'gather', res: bi >= 1 ? 'essence' : 'berry', need: bi >= 1 ? 2 + bi : 8 },
+    { type: 'kill', target: en(2), need: 10 },
+    { type: 'gather', res: 'hide', need: 6 + bi * 3 },
+    { type: 'killAny', need: 15 },
+    { type: 'boss', need: 1 },
+  ];
+  const d = defs[idx];
+  if (!d) return null;
+  const q = { ...d, biome: bi, idx };
+  q.reward = { meat: (8 + idx * 3) * k, ...(idx >= 3 ? { hide: 2 * k } : {}),
+               ...(idx >= 5 && bi >= 1 ? { essence: 1 + bi } : {}),
+               ...(idx === 7 ? { iron: 3 + bi * 2 } : {}) };
+  q.xp = (12 + idx * 6) * k;
+  if (d.type === 'kill') {
+    const c = ENEMY_TYPES[d.target];
+    q.name = `${c.icon} Cull: ${c.name}`;
+    q.desc = `Slay ${d.need} ${c.name}s for the smith's stew pot.`;
+  } else if (d.type === 'gather') {
+    q.name = `${RES_ICONS[d.res]} Fetch: ${d.res}`;
+    q.desc = `Bring in ${d.need} ${d.res} — the forge devours materials.`;
+  } else if (d.type === 'killAny') {
+    q.name = '⚔️ Clear the woods';
+    q.desc = `Slay ${d.need} creatures of the ${biome.name}.`;
+  } else {
+    q.name = '💀 Slay a pack mother';
+    q.desc = `Bring down any skull-ranked boss in the ${biome.name}.`;
+  }
+  return q;
+}
+export const QUESTS_PER_BIOME = 8;

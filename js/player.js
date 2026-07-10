@@ -53,6 +53,10 @@ export class Player {
 
     // -- consumables (F/G), poison, camp era perks --
     this.consumables = { salve: 0, roast: 0 };
+    // blacksmith quest line: one active quest, per-biome completion counters
+    this.quest = null;        // { biome, idx, type, need, count, name, ... }
+    this.questDone = {};      // biomeIndex -> completed count (next idx to offer)
+    this.questHistory = [];   // [{ name, biome }]
     this.roastT = 0;                  // roasted-meat speed buff timer
     this.poisonT = 0;                 // zombie poison DoT
     this.poisonDps = 0;

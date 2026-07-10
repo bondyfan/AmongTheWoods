@@ -605,3 +605,27 @@ kbd {
   color: #9fb884; border-radius: 8px; padding: 5px 10px; font-size: 13px; cursor: pointer; }
 .section-toggle.on { color: #e8f0dc; border-color: #7fbf5f; background: rgba(127,191,95,0.12); }
 #character.slim { width: min(520px, 94vw); }
+
+
+/* ---------- blacksmith modal ---------- */
+#smith { width: min(880px, 94vw); }
+#smith-body { display: flex; gap: 18px; padding: 16px 20px; overflow-y: auto; }
+#smith-left { flex: 0 0 200px; text-align: center; }
+#smith-preview { border-radius: 12px; background: radial-gradient(#3a2c1c, #1c140c);
+  border: 1px solid rgba(255,165,40,0.35); }
+#smith-say { margin-top: 10px; font-size: 12px; color: #c9b48a; font-style: italic; }
+#smith-right { flex: 1; min-width: 0; }
+#smith-items { margin-top: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+#smith-items .quest-card, #smith-items .level-band { grid-column: 1 / -1; }
+.quest-card { border: 1px solid rgba(255,255,255,0.15); border-radius: 12px; padding: 10px 12px;
+  background: rgba(255,255,255,0.04); }
+.quest-card.active { border-color: #7fbf5f; background: rgba(127,191,95,0.08); }
+.quest-card.done { opacity: 0.55; }
+.quest-card.locked { opacity: 0.45; }
+.quest-card h4 { margin: 0 0 4px; font-size: 14px; }
+.quest-card .q-desc { font-size: 12px; color: #b8c4a8; }
+.quest-card .q-meta { font-size: 12px; color: #cfa95f; margin-top: 6px; }
+.quest-bar { height: 8px; border-radius: 5px; background: rgba(255,255,255,0.12);
+  overflow: hidden; margin-top: 6px; }
+.quest-bar div { height: 100%; background: linear-gradient(90deg, #5f9f3f, #8fce5f); }
+#char-quests .quest-card { margin-bottom: 8px; }

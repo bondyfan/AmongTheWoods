@@ -151,6 +151,8 @@
         <div id="inv-grid"></div>
         <p class="empty-note">Click gear to equip · click 🫐/🧪/🍗 to use · drag onto the 1–6 bar
           to hotkey · drag out into the world to DROP it. Equipped gear sits on the doll, not here.</p>
+        <h3>Quests</h3>
+        <div id="char-quests"></div>
         <h3>Spellbook</h3>
         <div id="spellbook"></div>
         <p id="spellbook-note" class="empty-note"></p>
@@ -202,6 +204,25 @@
       <div class="setting-row" id="mpcode-row">
         <span><b>Multiplayer code:</b> <span id="set-mpcode" style="font-family:monospace;font-size:18px;letter-spacing:2px">—</span><br>
           <small>Share this code so a friend can join your running game.</small></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- blacksmith: quests + forging (E at a smith camp) -->
+  <div id="smith" class="panel hidden">
+    <div class="panel-head">
+      <h2>⚒️ Blacksmith</h2>
+      <span class="panel-res" id="smith-res"></span>
+      <button class="panel-close">✕</button>
+    </div>
+    <div id="smith-body">
+      <div id="smith-left">
+        <canvas id="smith-preview" width="190" height="240"></canvas>
+        <div id="smith-say">“The forge is hot. Work for me, and it works for you.”</div>
+      </div>
+      <div id="smith-right">
+        <div class="tabs" id="smith-tabs"></div>
+        <div id="smith-items"></div>
       </div>
     </div>
   </div>

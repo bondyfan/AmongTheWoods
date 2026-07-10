@@ -1,7 +1,7 @@
 // ---- Modal panels: upgrade shop (grouped tabs), character sheet with
 // equipment slots, bestiary of discovered creatures ----
 
-import { SHOP_GROUPS, SLOTS, SLOT_LABELS, ENEMY_TYPES, ITEMS, SPELLS,
+import { SHOP_GROUPS, SMITH_GROUPS, questFor, QUESTS_PER_BIOME, BIOMES, SLOTS, SLOT_LABELS, ENEMY_TYPES, ITEMS, SPELLS,
          STAT_TRACKS, MOBA_BUILDINGS, CAMP_BUILDINGS, RES_ICONS, RESOURCES, CONSUMABLES,
          MAX_SPELL_SLOTS, fmtResource, itemById, spellById, costFor } from './config.js';
 
@@ -18,6 +18,7 @@ export class Panels {
     this.hooks = hooks;
     this.openSet = new Set();
     this.shopTab = SHOP_GROUPS[0].key;
+    this.smithTab = 'quests';
     this.player = null;
     this.moba = null; // set in MOBA mode → adds the Base tab
     this.camp = null; // set in survival → adds the Camp tab + era gating
@@ -78,7 +79,7 @@ export class Panels {
   // panels open INDEPENDENTLY — inventory + upgrades + armory can all be
   // up at once (that's how you drag loot around like in WoW)
   static PANEL_IDS = {
-    shop: 'shop', character: 'character', bestiary: 'bestiary',
+    shop: 'shop', character: 'character', bestiary: 'bestiary', smith: 'smith',
     settings: 'settings', base: 'basepanel', chest: 'chestpanel',
     help: 'helppanel',
   };
@@ -117,6 +118,7 @@ export class Panels {
 
   refresh() {
     if (this.openSet.has('shop')) this.renderShop();
+    if (this.openSet.has('smith')) this.renderSmith();
     if (this.openSet.has('character')) this.renderCharacter();
     if (this.openSet.has('bestiary')) this.renderBestiary();
     if (this.openSet.has('base')) this.renderBase();
@@ -181,15 +183,6 @@ export class Panels {
       return;
     }
 
-    if ((this.shopTab === 'weapons' || this.shopTab === 'armor')
-        && this.camp && !this.hooks.nearSmith?.()) {
-      const note = document.createElement('div');
-      note.className = 'level-band locked';
-      note.innerHTML = `<span class="lb-tier">⚒️ Blacksmith</span>
-        <span class="lb-note">weapons & gear are FORGED — find a wandering blacksmith (⚒ on the map) and press E</span>`;
-      wrap.appendChild(note);
-    }
-
     // sort by unlock level, then group under a level divider so the whole
     // progression reads top-to-bottom at a glance
     const entries = [...group.items()].sort((a, b) => a.level - b.level || a.name.localeCompare(b.name));
@@ -216,10 +209,6 @@ export class Panels {
       const card = document.createElement('div');
       card.className = 'card' + (owned ? ' owned' : (levelLocked || needMissing) ? ' locked' : affordable ? ' buyable' : ' expensive');
 
-      // the Bone Club is primitive enough to lash together at home —
-      // everything else needs a blacksmith's forge
-      const forgeOnly = (this.shopTab === 'weapons' || this.shopTab === 'armor')
-        && this.camp && entry.id !== 'club' && !this.hooks.nearSmith?.();
       let status;
       // one level ahead you can already see the price and start saving;
       // deeper unlocks keep their cost a mystery
@@ -227,12 +216,9 @@ export class Panels {
         ? `<span class="tag">🔒 Lv ${entry.level} — ${this._costStr(cost)}</span>`
         : `<span class="tag">🔒 Lv ${entry.level}</span>`;
       else if (needMissing) status = `<span class="tag">🏕️ Needs ${NEED_NAMES[entry.needs] ?? entry.needs}</span>`;
-      else if (forgeOnly) status = (owned ? '<span class="tag ok">✔ Owned</span> ' : '') +
-        `<span class="tag">⚒️ Forge at a blacksmith — ${this._costStr(cost)}</span>`;
       else if (owned && isSpells) status = '<span class="tag ok">✔ Owned</span>';
       else status = (owned ? '<span class="tag ok">✔ Owned</span> ' : '') +
         `<button class="buy-btn" data-id="${entry.id}">Buy${owned ? ' another' : ''} — ${this._costStr(cost)}</button>`;
-      if (forgeOnly && !owned) card.classList.add('locked');
 
       const slotTag = isSpells ? '📖 spell' : SLOT_LABELS[entry.slot].toLowerCase();
       card.innerHTML = `
@@ -247,6 +233,109 @@ export class Panels {
       btn.addEventListener('click', () =>
         isSpells ? this.hooks.onBuySpell(btn.dataset.id) : this.hooks.onBuyItem(btn.dataset.id));
     });
+  }
+
+  // ---------- blacksmith modal: quests + the forge's weapon/gear stock ----------
+  renderSmith() {
+    const p = this.player;
+    $('smith-res').innerHTML = this._resLine();
+    const tabs = $('smith-tabs');
+    tabs.innerHTML = '';
+    for (const group of SMITH_GROUPS) {
+      const b = document.createElement('button');
+      b.className = 'tab' + (group.key === this.smithTab ? ' active' : '');
+      b.textContent = group.label;
+      b.addEventListener('click', () => { this.smithTab = group.key; this.renderSmith(); });
+      tabs.appendChild(b);
+    }
+    const wrap = $('smith-items');
+    wrap.innerHTML = '';
+
+    if (this.smithTab === 'quests') {
+      this._renderSmithQuests(wrap);
+      return;
+    }
+
+    const group = SMITH_GROUPS.find(g => g.key === this.smithTab);
+    const entries = [...group.items()].sort((a, b) => a.level - b.level || a.name.localeCompare(b.name));
+    let curLevel = null;
+    for (const entry of entries) {
+      if (entry.level !== curLevel) {
+        curLevel = entry.level;
+        const reached = p.level >= curLevel;
+        const div = document.createElement('div');
+        div.className = 'level-band' + (reached ? '' : ' locked');
+        div.innerHTML = `<span class="lb-tier">Lv ${curLevel}</span>` +
+          (reached ? '<span class="lb-note">unlocked</span>'
+                   : `<span class="lb-note">reach level ${curLevel}</span>`);
+        wrap.appendChild(div);
+      }
+      const owned = p.hasItem(entry.id);
+      const levelLocked = p.level < entry.level;
+      const needMissing = entry.needs && this.camp && !this.camp.has(entry.needs);
+      const cost = costFor(entry.cost, false);
+      const affordable = cost && this._affordable(cost);
+      const card = document.createElement('div');
+      card.className = 'card' + (owned ? ' owned' : (levelLocked || needMissing) ? ' locked' : affordable ? ' buyable' : ' expensive');
+      let status;
+      if (levelLocked) status = entry.level === p.level + 1
+        ? `<span class="tag">🔒 Lv ${entry.level} — ${this._costStr(cost)}</span>`
+        : `<span class="tag">🔒 Lv ${entry.level}</span>`;
+      else if (needMissing) status = `<span class="tag">🏕️ Needs ${NEED_NAMES[entry.needs] ?? entry.needs}</span>`;
+      else status = (owned ? '<span class="tag ok">✔ Owned</span> ' : '') +
+        `<button class="buy-btn" data-id="${entry.id}">Forge${owned ? ' another' : ''} — ${this._costStr(cost)}</button>`;
+      card.innerHTML = `
+        <div class="card-head"><span class="icon">${itemIcon(entry)}</span>
+          <span class="name">${entry.name}</span><span class="lv">${SLOT_LABELS[entry.slot].toLowerCase()}</span></div>
+        <div class="desc">${entry.desc}</div>
+        <div class="card-foot">${status}</div>`;
+      wrap.appendChild(card);
+    }
+    wrap.querySelectorAll('.buy-btn').forEach(btn =>
+      btn.addEventListener('click', () => this.hooks.onBuyItem(btn.dataset.id)));
+  }
+
+  _questCard(q, state, extra = '') {
+    const div = document.createElement('div');
+    div.className = 'quest-card ' + state;
+    const mark = state === 'done' ? '✅ ' : state === 'active' ? '⏳ ' : state === 'locked' ? '🔒 ' : '';
+    const rewardStr = this._costStr(q.reward) + ` + ${q.xp} XP`;
+    div.innerHTML = `<h4>${mark}${q.name}</h4>
+      <div class="q-desc">${q.desc}</div>
+      <div class="q-meta">Reward: ${rewardStr}</div>${extra}`;
+    return div;
+  }
+
+  _renderSmithQuests(wrap) {
+    const p = this.player;
+    const bi = this.hooks.currentBiome?.() ?? 0;
+    const done = p.questDone[bi] ?? 0;
+    const head = document.createElement('div');
+    head.className = 'level-band';
+    head.innerHTML = `<span class="lb-tier">📜 ${done}/${QUESTS_PER_BIOME}</span>
+      <span class="lb-note">quest line of this biome — strictly in order, one at a time</span>`;
+    wrap.appendChild(head);
+    for (let i = 0; i < QUESTS_PER_BIOME; i++) {
+      const q = questFor(bi, i);
+      if (i < done) { wrap.appendChild(this._questCard(q, 'done')); continue; }
+      const isActive = p.quest && p.quest.biome === bi && p.quest.idx === i;
+      if (isActive) {
+        const pct = Math.min(100, Math.round((p.quest.count / p.quest.need) * 100));
+        wrap.appendChild(this._questCard(q, 'active',
+          `<div class="quest-bar"><div style="width:${pct}%"></div></div>
+           <div class="q-meta">${p.quest.count}/${p.quest.need}</div>`));
+      } else if (i === done) {
+        const busy = !!p.quest;
+        const card = this._questCard(q, '',
+          busy ? '<div class="q-meta">Finish (or abandon) your current quest first.</div>'
+               : '<div class="card-foot"><button class="buy-btn" data-quest="1">Accept</button></div>');
+        card.querySelector('[data-quest]')?.addEventListener('click', () =>
+          this.hooks.onAcceptQuest?.(bi, i));
+        wrap.appendChild(card);
+      } else {
+        wrap.appendChild(this._questCard(q, 'locked'));
+      }
+    }
   }
 
   // Consumables: repeatable purchases, used in the field with F / G.
@@ -424,6 +513,30 @@ export class Panels {
     }
 
     this.renderInventory();
+
+    // quests: the active one (with abandon) + completed history
+    const qWrap = $('char-quests');
+    qWrap.innerHTML = '';
+    if (p.quest) {
+      const q = p.quest;
+      const pct = Math.min(100, Math.round((q.count / q.need) * 100));
+      const card = this._questCard(q, 'active',
+        `<div class="quest-bar"><div style="width:${pct}%"></div></div>
+         <div class="q-meta">${q.count}/${q.need} · ${BIOMES[q.biome].name}</div>
+         <div class="card-foot"><button class="buy-btn" data-abandon="1">✖ Abandon quest</button></div>`);
+      card.querySelector('[data-abandon]').addEventListener('click', () => this.hooks.onAbandonQuest?.());
+      qWrap.appendChild(card);
+    } else {
+      qWrap.innerHTML = '<div class="empty-note">No active quest — visit a blacksmith (⚒ on the map).</div>';
+    }
+    if (p.questHistory.length) {
+      const hist = document.createElement('div');
+      hist.className = 'q-desc';
+      hist.style.marginTop = '6px';
+      hist.innerHTML = '<b>Completed:</b> ' +
+        p.questHistory.map(h => `✅ ${h.name}`).join(' · ');
+      qWrap.appendChild(hist);
+    }
 
 
 

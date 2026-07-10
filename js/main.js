@@ -4,8 +4,8 @@ import * as THREE from 'three';
 import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOBA,
          RESOURCES, RES_ICONS, HIDE_BEARING, VERDANT_HIDE_DROP, hideForHp, radiusOf, costFor,
          biomeIndexAt, progressAt, fmtResource, roundResource, itemById, spellById,
-         consumableById, essenceDropFor, MAX_LEVEL } from './config.js';
-import { makeAimArc, updateAimArc, makeRaft } from './models.js';
+         consumableById, essenceDropFor, MAX_LEVEL, questFor } from './config.js';
+import { makeAimArc, updateAimArc, makeRaft, makeBlacksmith } from './models.js';
 import { Camp } from './camp.js';
 import { audio } from './audio.js';
 import { input } from './input.js';
@@ -162,6 +162,9 @@ const panels = new Panels({
   nearHome: () => nearHome(), // the home building only upgrades in person
   nearSmith: () => nearSmith(), // weapons & gear can only be forged here
   // -- admin mode (singleplayer testing) --
+  onAcceptQuest: (bi, idx) => acceptQuest(bi, idx),
+  onAbandonQuest: () => abandonQuest(),
+  currentBiome: () => biomeIndexAt(player.pos.x, player.pos.z),
   isAdmin: () => !!game.adminMode,
   adminValues: () => ({ level: player.level, ...(player.adminOverrides ?? {}) }),
   onAdminStat: (key, val) => {
@@ -225,6 +228,50 @@ panels.player = player;
 const RES_POPUP = { meat: ['🍖', '#ff9d76'], wood: ['🪵', '#d8a468'],
                     stone: ['🪨', '#c8c8c0'], hide: ['🟫', '#c9986a'], iron: ['🔩', '#c8d0d8'],
                     berry: ['🫐', '#c9a4ff'], essence: ['🧪', '#5fe07f'] };
+// ---------- blacksmith quests: accept, track, auto-complete ----------
+function acceptQuest(bi, idx) {
+  if (player.quest) return;
+  if ((player.questDone[bi] ?? 0) !== idx) return; // strictly in order
+  player.quest = { ...questFor(bi, idx), count: 0 };
+  ui.toast(`📜 Quest accepted: ${player.quest.name}`, 'level');
+  audio.sfx('click', 0.5);
+  panels.refresh();
+}
+
+function abandonQuest() {
+  if (!player.quest) return;
+  ui.toast(`✖ Quest abandoned: ${player.quest.name}`, '');
+  player.quest = null;
+  audio.sfx('click', 0.4);
+  panels.refresh();
+}
+
+function questProgress(n = 1) {
+  const q = player.quest;
+  q.count += n;
+  if (q.count < q.need) { panels.refresh(); return; }
+  // done — pay out on the spot
+  player.questDone[q.biome] = (player.questDone[q.biome] ?? 0) + 1;
+  player.questHistory.push({ name: q.name, biome: q.biome });
+  for (const [k, v] of Object.entries(q.reward)) player[k] = roundResource(player[k] + v);
+  player.addXp(q.xp);
+  player.quest = null;
+  ui.banner('📜 Quest complete!');
+  ui.toast(`📜 ${q.name} — reward collected (+${q.xp} XP). The smith has more work for you.`, 'level');
+  audio.sfx('victory', 0.45);
+  panels.refresh();
+}
+
+function trackQuestKill(enemy) {
+  const q = player.quest;
+  if (!q) return;
+  if (q.type === 'kill' && enemy.type === q.target) questProgress();
+  else if (q.type === 'boss' && enemy.bossRank > 0
+           && biomeIndexAt(enemy.pos.x, enemy.pos.z) === q.biome) questProgress();
+  else if (q.type === 'killAny' && !enemy.cfg?.passive
+           && biomeIndexAt(enemy.pos.x, enemy.pos.z) === q.biome) questProgress();
+}
+
 function grantPickup(kind, payload) {
   if (kind === 'item') {
     const item = itemById(payload);
@@ -239,6 +286,7 @@ function grantPickup(kind, payload) {
     player[kind] = roundResource(player[kind] + payload);
     const [icon, color] = RES_POPUP[kind];
     ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2), `+${fmtResource(payload)} ${icon}`, color);
+    if (player.quest?.type === 'gather' && player.quest.res === kind) questProgress(payload);
   }
   pickupSfx[kind]?.();
 }
@@ -296,6 +344,7 @@ const enemyMgr = new EnemyManager(scene, world, {
       player.addXp(xp);
       ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2.3), `+${xp} XP`, '#c9a4ff');
     }
+    trackQuestKill(enemy);
     // meat falls to the ground and is magnet-collected (shared in co-op)
     const piles = Math.min(4, Math.max(1, Math.round(enemy.meat / 2)));
     let left = enemy.meat;
@@ -1047,10 +1096,9 @@ input.onKey('KeyE', () => {
   }
   if (nearChest()) panels.toggle('chest');
   else if (nearHome()) panels.toggle('base');
-  else if (nearSmith()) { // the forge: weapons & gear only sell HERE
-    panels.shopTab = 'weapons';
-    if (!panels.openSet.has('shop')) panels.toggle('shop');
-    else panels.renderShop();
+  else if (nearSmith()) { // the forge: quests + weapons & gear live HERE
+    if (!panels.openSet.has('smith')) panels.toggle('smith');
+    else panels.renderSmith();
     audio.loopStart('smith_forge', 0.5);
   }
   else if (nearPoi()) claimPoi(nearPoi());
@@ -1457,14 +1505,14 @@ function step() {
         : mp?.revivablePartner?.() ? '💚 Your partner is DOWN — press <kbd>E</kbd> to revive!'
         : nearChest() ? '📦 Storage chest — press <kbd>E</kbd> to open'
         : nearHome() ? '🏠 Your home — press <kbd>E</kbd> to build &amp; upgrade'
-        : nearSmith() ? '⚒️ Blacksmith — press <kbd>E</kbd> to forge weapons &amp; gear'
+        : nearSmith() ? '⚒️ Blacksmith — press <kbd>E</kbd> for quests &amp; the forge'
         : poi ? POI_HINTS[poi.type]
         : nearTreasure() ? '💰 This is the spot — press <kbd>E</kbd> to dig' : null;
       if (hint) { hintEl.innerHTML = hint; hintEl.classList.remove('hidden'); }
       else hintEl.classList.add('hidden');
 
-      // the anvil rings only while the forge shop is open at the smith
-      if (!panels.openSet.has('shop') || !nearSmith()) audio.loopStop('smith_forge');
+      // the anvil rings only while the smith modal is open at the smith
+      if (!panels.openSet.has('smith') || !nearSmith()) audio.loopStop('smith_forge');
 
       // fallen-pet resurrection hint (at home or at the graveyard)
       const petHint = $id('pet-hint');
@@ -1502,6 +1550,7 @@ function step() {
   updateCamera(dt);
   ui.updateOverlays(dt, camera);
   renderCharPreview(dt);
+  renderSmithPreview(dt);
   renderer.render(scene, camera);
 }
 
@@ -1523,6 +1572,33 @@ function renderCharPreview(dt) {
     player.pos.z + Math.cos(previewAngle) * 4.4);
   previewCam.lookAt(player.pos.x, player.mesh.position.y + 0.9, player.pos.z);
   previewRenderer.render(scene, previewCam);
+}
+
+// ---- blacksmith modal portrait: the smith model in his own little scene ----
+let smithPrev = null;
+function renderSmithPreview(dt) {
+  if (!panels.openSet?.has('smith') || game.mode !== 'play') return;
+  if (!smithPrev) {
+    const sscene = new THREE.Scene();
+    const model = makeBlacksmith();
+    sscene.add(model);
+    sscene.add(new THREE.HemisphereLight(0xffe8c8, 0x3a2c1c, 1.1));
+    const glow = new THREE.PointLight(0xff8a30, 1.4, 8);
+    glow.position.set(0.8, 1.4, 1.2);
+    sscene.add(glow);
+    const cam = new THREE.PerspectiveCamera(38, 190 / 240, 0.1, 30);
+    const r = new THREE.WebGLRenderer({ canvas: $id('smith-preview'), antialias: true, alpha: true });
+    r.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    smithPrev = { scene: sscene, model, cam, r, angle: 0.4 };
+  }
+  smithPrev.angle += dt * 0.35;
+  const a = Math.sin(smithPrev.angle) * 0.6; // sway, don't spin — he's working
+  smithPrev.cam.position.set(Math.sin(a) * 4.2, 2.2, Math.cos(a) * 4.2);
+  smithPrev.cam.lookAt(0, 1.0, 0);
+  // embers flicker
+  const ember = smithPrev.model.userData?.embers;
+  if (ember) ember.material.color.setHSL(0.06, 1, 0.45 + Math.sin(smithPrev.angle * 9) * 0.15);
+  smithPrev.r.render(smithPrev.scene, smithPrev.cam);
 }
 
 world.update(0, player.pos); // pre-generate the starting forest
