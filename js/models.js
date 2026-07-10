@@ -1394,6 +1394,7 @@ function pickTreeType(weights, rng) {
 // size: 0 small, 1 medium, 2 big. Returns { mesh, radius } — radius for collision.
 export function makeTree(size, biome, rng) {
   const g = new THREE.Group();
+  g.scale.y = 2; // trees tower — double height, same footprint
   const scale = [0.65, 1.0, 1.5][size] * (0.8 + rng() * 0.45);
   const foliageColor = biome.foliage[Math.floor(rng() * biome.foliage.length)];
   const type = pickTreeType(biome.trees, rng);

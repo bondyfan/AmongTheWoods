@@ -126,7 +126,11 @@ const ui = new UI({
 
 const panels = new Panels({
   // in multiplayer the world can't stop for one player's shopping trip
-  onPauseChange: (open) => { game.paused = open && !mp?.active; ui.setPaused(false); },
+  onPauseChange: (open) => {
+    game.paused = open && !mp?.active;
+    ui.setPaused(false);
+    if (open) document.exitPointerLock?.(); // panels need the cursor back
+  },
   onBuyItem: buyItem,
   onBuySpell: buySpell,
   onBuyStat: buyStat,
@@ -725,6 +729,23 @@ const settings = Object.assign(
     ui.toast(settings.rpgView
       ? '🎮 RPG view — A/D turn, right-drag to look, wheel zooms'
       : '🗺️ Top-down view', 'level');
+    audio.sfx('click', 0.4);
+  });
+
+  // free mouse-look (RPG only): pointer locks into the game and every mouse
+  // move steers; A/D strafe. Esc (or opening any panel) frees the cursor.
+  const lookBox = $id('set-mouselook');
+  settings.mouseLook ??= false;
+  lookBox.checked = settings.mouseLook;
+  input.mouseLook = settings.mouseLook;
+  lookBox.addEventListener('change', () => {
+    settings.mouseLook = lookBox.checked;
+    input.mouseLook = settings.mouseLook;
+    localStorage.setItem('atw-settings', JSON.stringify(settings));
+    if (!settings.mouseLook) document.exitPointerLock?.();
+    ui.toast(settings.mouseLook
+      ? '🖱️ Mouse-look ON — click the world to lock the cursor in'
+      : '🖱️ Mouse-look off', 'level');
     audio.sfx('click', 0.4);
   });
 
@@ -1484,6 +1505,14 @@ let shakeT = 0; // brief tremble on boss entrances
 // switching view modes retunes the whole render pipeline: the third-person
 // camera needs to SEE further (fog, far plane, more chunks) but the wider
 // fov + fog wall keep the draw load in check
+// free mouse-look: clicking the world (with no panel open) locks the pointer
+renderer.domElement.addEventListener('click', () => {
+  if (game.rpgView && settings.mouseLook && game.mode === 'play'
+      && !panels.openSet.size && !document.pointerLockElement) {
+    renderer.domElement.requestPointerLock?.();
+  }
+});
+
 function applyViewMode() {
   const rpg = !!settings.rpgView;
   game.rpgView = rpg;
@@ -1581,6 +1610,7 @@ function step() {
       boatPlacing: boatPlaceT > 0,
       rpgView: game.rpgView,
       mounted: player.mounted,
+      mouseLook: game.rpgView && settings.mouseLook && !!input.locked,
       envSpeedMult,
     });
 

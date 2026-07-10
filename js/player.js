@@ -485,13 +485,21 @@ export class Player {
       // RPG third-person mode: WoW-style tank controls — A/D TURN the
       // character, W drives forward, S backs up; the camera hangs behind
       if (ctx.rpgView) {
-        if (mx !== 0) {
-          const yaw = Math.atan2(this.facing.x, this.facing.z) - mx * 2.8 * dt;
-          this.facing.set(Math.sin(yaw), 0, Math.cos(yaw));
+        if (ctx.mouseLook) {
+          // mouse steers the character — A/D become pure strafing
+          const fwd = -mz, strafe = mx;
+          const dX = this.facing.x, dZ = this.facing.z;
+          mx = dX * fwd - dZ * strafe;
+          mz = dZ * fwd + dX * strafe;
+        } else {
+          if (mx !== 0) {
+            const yaw = Math.atan2(this.facing.x, this.facing.z) - mx * 2.8 * dt;
+            this.facing.set(Math.sin(yaw), 0, Math.cos(yaw));
+          }
+          const drive = -mz; // W = 1, S = -1
+          mx = this.facing.x * drive;
+          mz = this.facing.z * drive;
         }
-        const drive = -mz; // W = 1, S = -1
-        mx = this.facing.x * drive;
-        mz = this.facing.z * drive;
       } else if (ctx.mouseMove && (mx !== 0 || mz !== 0)) {
         const fx = aimPoint.x - this.pos.x, fz = aimPoint.z - this.pos.z;
         const fl = Math.hypot(fx, fz);

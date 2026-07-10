@@ -24,11 +24,15 @@ class Input {
     window.addEventListener('mousemove', (e) => {
       this.mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
       this.mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
-      // RPG mode: hold right button and drag to steer/look (WoW style)
-      if (this.rpgMode && this.mouse.right) {
+      // RPG mode: hold right button and drag to steer/look (WoW style).
+      // With mouse-look ON and the pointer locked, EVERY mouse move steers.
+      if (this.rpgMode && (this.mouse.right || (this.mouseLook && this.locked))) {
         this.dragX += e.movementX || 0;
         this.dragY += e.movementY || 0;
       }
+    });
+    document.addEventListener('pointerlockchange', () => {
+      this.locked = !!document.pointerLockElement;
     });
     window.addEventListener('wheel', (e) => {
       if (e.target.closest?.('.panel')) return; // panels scroll normally
