@@ -9,7 +9,7 @@ import { audio } from './audio.js';
 
 let nextEnemyId = 1;
 let nextGroupId = 1; // herds of passive critters (rabbits) share a group
-const SPAWN_DENSITY = 1.15;
+const SPAWN_DENSITY = 1.38; // ~20% more creatures in every zone
 const MAX_ALIVE_HARD = 140; // hard cap on simultaneously live units
 // give up a chase after this long without reaching the target, then jog home
 const LEASH_TIME = 7;

@@ -27,6 +27,10 @@ const SOUNDS = [
   ['rat_death',     'Giant rat dying: high pitched squeal fading, short, no music', 0.8],
   ['bat_attack',    'Bat attack: shrill high pitched screech swoop, short, no music', 0.7],
   ['bat_death',     'Bat dying: shrill fading screech squeal, short, no music', 0.8],
+  ['rabbit_death',  'Small rabbit dying: short soft high-pitched squeak and thump, very short, no music', 0.7],
+  ['sheep_death',   'Sheep dying: short pained bleat baa cut off, falling over, no music', 1.0],
+  ['mine_hit',      'Pickaxe striking solid rock: sharp metallic clink with stony impact and tiny debris, single hit, short, no music', 0.6],
+  ['rock_crack',    'Boulder cracking apart: heavy stone crack and crumbling rubble collapse, short, no music', 1.1],
 ];
 
 const exists = async (p) => { try { await access(p); return true; } catch { return false; } };

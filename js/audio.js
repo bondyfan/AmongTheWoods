@@ -70,6 +70,8 @@ class AudioManager {
     if (/wolf/i.test(type)) return 'wolf';
     if (type === 'rat') return 'rat';
     if (type === 'bat') return 'bat';
+    if (type === 'rabbit') return 'rabbit';
+    if (type === 'sheep') return 'sheep';
     return 'beast'; // boar, elk, bear, wendigo, yeti, golem, ...
   }
 

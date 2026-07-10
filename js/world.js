@@ -835,11 +835,11 @@ export class World {
   mineRock(rock, power, fromPos) {
     rock.hp -= power;
     rock.shake = 0.3;
-    audio.sfx('base_hit', 0.5);
+    audio.sfx('mine_hit', 0.55);
     if (rock.hp > 0) return 0;
     rock.alive = false;
     this.fallingTrees.push({ mesh: rock.mesh, t: 0, dirX: 0, dirZ: 0, kind: 'rock' });
-    audio.sfx('tower_build', 0.5);
+    audio.sfx('rock_crack', 0.6);
     return rock.stone;
   }
 }

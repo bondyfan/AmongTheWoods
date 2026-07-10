@@ -5,8 +5,8 @@
 // watches over home. Built things appear physically at fixed camp spots.
 
 import { CAMP_BUILDINGS, ERAS, RESOURCES, fmtResource, roundResource } from './config.js';
-import { makeTent, makeCottage, makeFurnace, makeChest, makeBoatRack,
-         makeMobaTower, makeGraveyard } from './models.js';
+import { makeTent, makeCottage, makeStoneHouse, makeKeep, makeFurnace, makeChest,
+         makeBoatRack, makeMobaTower, makeGraveyard } from './models.js';
 import { audio } from './audio.js';
 
 const SPOTS = {
@@ -94,15 +94,13 @@ export class Camp {
         : SPOTS[id]);
     let mesh;
     if (id === 'home') {
+      // every era is a genuinely DIFFERENT building:
+      // tent -> timber cabin -> stone house -> medieval keep
       const lvl = this.levels.home;
-      mesh = lvl === 1 ? makeTent() : makeCottage();
-      if (lvl >= 3) { // stone house / keep: recolor the walls
-        const wallColor = lvl === 4 ? 0x6e7280 : 0x8f8a7c;
-        mesh.traverse(o => { if (o.isMesh && o.material?.color?.getHex?.() === 0x6e4d2a) {
-          o.material = o.material.clone(); o.material.color.setHex(wallColor);
-        } });
-        if (lvl === 4) mesh.scale.setScalar(1.25); // the keep looms larger
-      }
+      mesh = lvl === 1 ? makeTent()
+        : lvl === 2 ? makeCottage()
+        : lvl === 3 ? makeStoneHouse()
+        : makeKeep();
       mesh.rotation.y = 0.4;
     } else if (id === 'chest') mesh = makeChest();
     else if (id === 'furnace') mesh = makeFurnace();

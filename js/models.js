@@ -775,6 +775,74 @@ export function makeCottage() {
   return g;
 }
 
+// Age 4 home: a proper stone house — thick masonry, slate roof, iron-braced
+// door. Visibly a different building from the timber cabin.
+export function makeStoneHouse() {
+  const g = new THREE.Group();
+  const walls = box(3.8, 2.4, 3.1, 0x8f8a7c);
+  walls.position.y = 1.2;
+  // corner quoins (darker stone blocks)
+  for (const [x, z] of [[-1.9, 1.55], [1.9, 1.55], [-1.9, -1.55], [1.9, -1.55]]) {
+    const q = box(0.35, 2.4, 0.35, 0x6e6a60);
+    q.position.set(x, 1.2, z);
+    g.add(q);
+  }
+  const roof = cone(3.3, 1.7, 0x4c5157, 4); // slate
+  roof.position.y = 3.45;
+  roof.rotation.y = Math.PI / 4;
+  const door = box(1, 1.5, 0.15, 0x2c1f12);
+  door.position.set(0.6, 0.75, 1.58);
+  const brace = box(1.06, 0.12, 0.17, 0x5c6670);
+  brace.position.set(0.6, 1.1, 1.58);
+  const window1 = box(0.7, 0.65, 0.12, 0xf3d98a);
+  window1.position.set(-1, 1.5, 1.58);
+  const window2 = window1.clone();
+  window2.position.set(1.2, 1.5, -1.58);
+  const chimney = box(0.55, 1.6, 0.55, 0x6e6a60);
+  chimney.position.set(-1.2, 3.4, -0.7);
+  g.add(walls, roof, door, brace, window1, window2, chimney);
+  return g;
+}
+
+// Age 5 home: a MEDIEVAL KEEP — squat stone tower with battlements, arrow
+// slits and a banner. The endgame base at a glance.
+export function makeKeep() {
+  const g = new THREE.Group();
+  const tower = box(3.4, 4.2, 3.4, 0x6e7280);
+  tower.position.y = 2.1;
+  g.add(tower);
+  // battlements (merlons around the top)
+  for (let i = 0; i < 4; i++) {
+    for (let j = -1; j <= 1; j++) {
+      const m1 = box(0.6, 0.55, 0.4, 0x5c6670);
+      const off = j * 1.25;
+      if (i === 0) m1.position.set(off, 4.55, 1.6);
+      else if (i === 1) m1.position.set(off, 4.55, -1.6);
+      else if (i === 2) m1.position.set(1.6, 4.55, off);
+      else m1.position.set(-1.6, 4.55, off);
+      g.add(m1);
+    }
+  }
+  const door = box(1.1, 1.7, 0.15, 0x2c1f12);
+  door.position.set(0, 0.85, 1.72);
+  const arch = box(1.4, 0.25, 0.16, 0x565e6a);
+  arch.position.set(0, 1.8, 1.72);
+  g.add(door, arch);
+  // arrow slits
+  for (const [x, y] of [[-0.9, 2.6], [0.9, 2.6], [0, 3.4]]) {
+    const slit = box(0.14, 0.6, 0.12, 0x1c1a18);
+    slit.position.set(x, y, 1.72);
+    g.add(slit);
+  }
+  // banner on a pole
+  const pole = cyl(0.05, 0.05, 1.6, 0x4c3520, 5);
+  pole.position.set(1.2, 5.3, 1.2);
+  const flag = box(0.75, 0.5, 0.05, 0xb53a3a);
+  flag.position.set(1.62, 5.7, 1.2);
+  g.add(pole, flag);
+  return g;
+}
+
 // ---------- MOBA buildings ----------
 export const TEAM_COLORS = { player: 0x3a6fb5, enemy: 0xb53a3a };
 
