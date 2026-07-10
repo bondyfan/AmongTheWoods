@@ -1009,12 +1009,17 @@ export class Multiplayer {
       ...(ownerLock ? { lk: 1 } : {}) });
   }
 
-  // co-op: forward kill credit to whoever landed the killing blow
-  onKillCredit(enemy) {
+  // co-op: kill XP is SHARED — the partner gets the full award if they're
+  // within 100 m of the kill (or if they landed the killing blow from afar)
+  shareKillXp(enemy) {
     if (!this.active || this.mode !== 'coop' || !this.isHost) return false;
-    if (enemy.lastHitBy === 'partner') {
+    const r = this.remote;
+    const partnerUp = r?.mesh?.visible && !r.dead;
+    const nearKill = partnerUp
+      && Math.hypot(r.pos.x - enemy.pos.x, r.pos.z - enemy.pos.z) < 100;
+    if (nearKill || enemy.lastHitBy === 'partner') {
       WoodsNet.sendEvent({ type: 'xpkill', xp: enemy.xp });
-      return true; // XP goes to the partner, not to me
+      return true;
     }
     return false;
   }
@@ -1102,7 +1107,8 @@ export class Multiplayer {
       case 'grant': // co-op guest: host confirmed my pickup
         ctx.grantPickup(ev.kind, ev.payload);
         break;
-      case 'xpkill': // co-op guest: my kill, my XP
+      case 'xpkill': // co-op guest: shared kill XP (within 100 m of the kill)
+        p.kills++;
         p.addXp(ev.xp);
         ctx.popup(p.mesh.position.clone().setY(p.mesh.position.y + 2.1), `+${ev.xp} XP`, '#c9a4ff');
         audio.sfx('kill_gold', 0.3, 100);

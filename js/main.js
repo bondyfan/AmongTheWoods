@@ -282,9 +282,13 @@ function discoverType(type) {
 const enemyMgr = new EnemyManager(scene, world, {
   popup: (pos, text, color, cls) => ui.popup(pos, text, color, cls),
   onKill: (enemy) => {
-    // co-op: XP goes to whoever landed the killing blow
-    const creditedToPartner = mp?.active && mp.onKillCredit(enemy);
-    if (!creditedToPartner) {
+    // kill XP is SHARED: every player within 100 m of the kill gets the full
+    // award (the partner is credited via shareKillXp); a killer sniping from
+    // beyond that still eats what they killed
+    const partnerGot = mp?.active && mp.shareKillXp?.(enemy);
+    const nearMe = !player.dead
+      && Math.hypot(player.pos.x - enemy.pos.x, player.pos.z - enemy.pos.z) < 100;
+    if (nearMe || (!partnerGot && enemy.lastHitBy !== 'partner')) {
       player.kills++;
       player.addXp(enemy.xp);
       ui.popup(enemy.mesh.position.clone().setY(enemy.mesh.position.y + 2.1), `+${enemy.xp} XP`, '#c9a4ff');
