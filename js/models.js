@@ -626,6 +626,65 @@ export function makeIceGolem() {
   return humanoid({ fur: 0xaabfcc, face: 0x6d8494, eyes: 0x66eaff, width: 1.25, height: 0.95 });
 }
 
+// ---------- humanoid camp sites: a dwelling + campfire ----------
+// kind 'tribal' (tribesman/shaman) gets a teepee; everyone else a log hut.
+export function makeHumanCamp(kind = 'bandit', rng = Math.random) {
+  const g = new THREE.Group();
+  if (kind === 'tribal') {
+    // hide teepee: cone with a smoke hole and painted stripe
+    const tent = new THREE.Mesh(new THREE.ConeGeometry(1.7, 3.0, 7), mat(0xa8865a));
+    tent.position.y = 1.5;
+    tent.castShadow = true;
+    g.add(tent);
+    const stripe = new THREE.Mesh(new THREE.ConeGeometry(1.72, 0.5, 7), mat(0x8a3c2e));
+    stripe.position.y = 1.1;
+    g.add(stripe);
+    for (const side of [-1, 1]) { // crossed lodge poles peeking out the top
+      const pole = box(0.07, 1.1, 0.07, 0x5a4426);
+      pole.position.set(side * 0.22, 3.15, 0);
+      pole.rotation.z = side * 0.35;
+      g.add(pole);
+    }
+  } else {
+    // squat log hut with a pitched plank roof
+    const walls = box(2.6, 1.5, 2.2, 0x6b4a2d);
+    walls.position.y = 0.75;
+    walls.castShadow = true;
+    g.add(walls);
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(2.2, 1.3, 4), mat(0x4a3820));
+    roof.position.y = 2.1;
+    roof.rotation.y = Math.PI / 4;
+    roof.castShadow = true;
+    g.add(roof);
+    const door = box(0.7, 1.0, 0.08, 0x3a2c18);
+    door.position.set(0, 0.5, -1.12);
+    g.add(door);
+  }
+  // campfire: stone ring, charred logs, ember glow
+  const fire = new THREE.Group();
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    const stone = box(0.22, 0.16, 0.2, 0x7a766b);
+    stone.position.set(Math.cos(a) * 0.5, 0.08, Math.sin(a) * 0.5);
+    stone.rotation.y = rng() * 2;
+    fire.add(stone);
+  }
+  for (const r of [0, 1.1, 2.2]) {
+    const log = box(0.6, 0.12, 0.12, 0x2e2018);
+    log.rotation.y = r;
+    log.position.y = 0.12;
+    fire.add(log);
+  }
+  const ember = new THREE.Mesh(new THREE.SphereGeometry(0.18, 6, 5),
+    new THREE.MeshBasicMaterial({ color: 0xff7a30 }));
+  ember.position.y = 0.16;
+  fire.add(ember);
+  fire.position.set(2.4, 0, 0.6);
+  g.add(fire);
+  g.userData.embers = ember;
+  return g;
+}
+
 // ---------- humanoids: bandits, tribes & other two-legged trouble ----------
 
 function bowProp(color = 0x6b4a2d) {

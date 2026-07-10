@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { WORLD, ENEMY_TYPES, BOSS_RANKS, BIOMES, biomeAt, biomeIndexAt, progressAt,
          meatForHp, bossNameFor } from './config.js';
-import { makeEnemyMesh, makeCobweb } from './models.js';
+import { makeEnemyMesh, makeCobweb, makeHumanCamp } from './models.js';
 import { audio } from './audio.js';
 
 let nextEnemyId = 1;
@@ -178,12 +178,13 @@ export class EnemyManager {
       if (rank > 0) pool.push({ type, bossRank: rank, groupId: gid });
     }
 
-    // humanoids camp in small groups — rarer than beasts, never alone
-    if (biome.humanoids?.length && Math.random() < 0.35) {
+    // humanoids are RARE — but where they do settle, they build a proper
+    // camp: a dwelling with a fire, and the whole band lives around it
+    if (biome.humanoids?.length && Math.random() < 0.12) {
       const type = pick(biome.humanoids);
       const gid = nextGroupId++;
-      const count = 2 + Math.floor(Math.random() * 4); // a camp of 2-5
-      for (let i = 0; i < count; i++) pool.push({ type, groupId: gid });
+      const count = 3 + Math.floor(Math.random() * 4); // a camp of 3-6
+      for (let i = 0; i < count; i++) pool.push({ type, groupId: gid, camp: true });
     }
 
     // spider-haunted woods: almost every zone hides a spider (or bat) nest,
@@ -239,8 +240,23 @@ export class EnemyManager {
     const remaining = [];
     for (const [, specs] of byGroup) {
       if (this.alive().length >= MAX_ALIVE_HARD) { remaining.push(...specs); continue; }
-      const at = tryPoint();
-      if (!at) { remaining.push(...specs); continue; }
+      // humanoid bands settle a permanent camp site: first visit builds the
+      // dwelling, and every re-materialization brings them home to it
+      const isCamp = specs.some(sp => sp.camp);
+      let at;
+      if (isCamp && zone.campAt) {
+        at = zone.campAt;
+        if (living.some(t => Math.hypot(t.pos.x - at.x, t.pos.z - at.z) < SPAWN_MIN_DIST)) {
+          remaining.push(...specs); continue; // someone is looking at the camp
+        }
+      } else {
+        at = tryPoint();
+        if (!at) { remaining.push(...specs); continue; }
+      }
+      if (isCamp && !zone.campAt) {
+        zone.campAt = at;
+        this._buildCampSite(at, specs[0].type);
+      }
       const ringR = 1.5 + Math.sqrt(specs.length) * 1.6;
       specs.forEach((spec, i) => {
         const a = (i / specs.length) * Math.PI * 2;
@@ -255,7 +271,7 @@ export class EnemyManager {
         e.zoneKey = key;
         e.groupId = spec.groupId || 0;
         // remembered when the unit melts back into the pool later
-        e._spec = { type: spec.type, bossRank: spec.bossRank || 0,
+        e._spec = { type: spec.type, bossRank: spec.bossRank || 0, camp: spec.camp,
                     groupId: spec.groupId, guardian: spec.guardian, announced: true };
         if (spec.bossRank && !spec.guardian && !spec.announced) audio.sfx('lane_unlock', 0.45);
       });
@@ -305,6 +321,19 @@ export class EnemyManager {
         if (zone.pool?.length) this._materializeZone(zone, key, cx, cz, targets);
       }
     }
+  }
+
+  // humanoid camp: dwelling + campfire, planted once and left standing
+  // (a raided camp stays as a landmark). Blocks movement like a boulder.
+  _buildCampSite(at, type) {
+    const kind = /tribesman|shaman/.test(type) ? 'tribal' : 'bandit';
+    const mesh = makeHumanCamp(kind);
+    mesh.position.set(at.x, this.world.heightAt(at.x, at.z), at.z);
+    mesh.rotation.y = Math.random() * Math.PI * 2;
+    this.scene.add(mesh);
+    this.campSites ??= [];
+    this.campSites.push(mesh);
+    this.world.obstacles?.push({ x: at.x, z: at.z, r: kind === 'tribal' ? 1.8 : 1.9 });
   }
 
   // spider packs leave their hunting ground draped in cobwebs for a while
