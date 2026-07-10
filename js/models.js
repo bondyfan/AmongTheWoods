@@ -414,6 +414,28 @@ export function makeBerryBush(rng = Math.random) {
   return g;
 }
 
+export function makeSalveDrop() {
+  const g = new THREE.Group();
+  const flask = cyl(0.1, 0.14, 0.26, 0x6fd86f, 6);
+  flask.position.y = 0.13;
+  const cork = cyl(0.05, 0.05, 0.08, 0x8a5a2b, 5);
+  cork.position.y = 0.3;
+  g.add(flask, cork);
+  return g;
+}
+
+export function makeRoastDrop() {
+  const g = new THREE.Group();
+  const meat = sphere(0.16, 0xb5682a, 6);
+  meat.position.y = 0.14;
+  meat.scale.set(1.3, 0.8, 1);
+  const bone = cyl(0.03, 0.03, 0.3, 0xf0ead8, 5);
+  bone.rotation.z = Math.PI / 2.4;
+  bone.position.set(0.18, 0.16, 0);
+  g.add(meat, bone);
+  return g;
+}
+
 export function makeBerryDrop() {
   const g = new THREE.Group();
   for (const [x, z] of [[-0.09, 0], [0.09, 0.04], [0, -0.09]]) {

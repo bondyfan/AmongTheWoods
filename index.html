@@ -31,13 +31,7 @@
       <div id="biome-name"></div>
       <div id="mp-status" class="hidden"></div>
     </div>
-    <div id="top-right">
-      <span id="meat">🍖 0</span>
-      <span id="wood">🪵 0</span>
-      <span id="stone">🪨 0</span>
-      <span id="hide">🟫 0</span>
-      <span id="iron">🔩 0</span>
-    </div>
+    <!-- resources live in the INVENTORY (I) now, not in a HUD strip -->
 
     <div id="weapon-display"></div>
     <div id="pet-display" class="hidden"></div>
@@ -55,6 +49,7 @@
       <button id="shop-btn">🛠 Upgrades <kbd>U</kbd></button>
       <button id="char-btn">🧍 Character <kbd>C</kbd></button>
       <button id="bestiary-btn">📕 Bestiary <kbd>N</kbd></button>
+      <button id="inv-btn">🎒 Inventory <kbd>I</kbd></button>
       <button id="settings-btn">⚙️ Settings</button>
       <button id="help-btn">❓ Controls <kbd>H</kbd></button>
     </div>
@@ -88,6 +83,20 @@
     <div id="base-items" class="card-grid"></div>
   </div>
 
+  <!-- inventory (I) — everything you carry, WoW-style stacks -->
+  <div id="invpanel" class="panel hidden">
+    <div class="panel-head">
+      <h2>🎒 Inventory</h2>
+      <span id="inv-res-line" class="panel-res"></span>
+      <button class="panel-close">✕</button>
+    </div>
+    <div id="inv-body">
+      <div id="inv-grid"></div>
+      <p class="empty-note">Click gear to equip · click 🫐/🧪/🍗 to use · drag onto the 1–6 bar
+        to hotkey · drag out into the world to DROP it for a friend.</p>
+    </div>
+  </div>
+
   <!-- keybind legend (H) -->
   <div id="helppanel" class="panel hidden">
     <div class="panel-head">
@@ -108,6 +117,7 @@
       <div class="help-col">
         <h3>World &amp; camp</h3>
         <div class="help-row"><kbd>E</kbd><span>interact: home / chest / shrines / revive</span></div>
+        <div class="help-row"><kbd>I</kbd><span>inventory (drag stacks to drop / hotkey)</span></div>
         <div class="help-row"><kbd>M</kbd><span>world map</span></div>
         <div class="help-row"><kbd>U</kbd><span>upgrades shop</span></div>
         <div class="help-row"><kbd>C</kbd><span>character &amp; equipment</span></div>
@@ -134,21 +144,24 @@
   <!-- character sheet -->
   <div id="character" class="panel hidden">
     <div class="panel-head">
-      <h2>Character</h2>
-      <span id="char-stats" class="panel-res"></span>
+      <h2>Armory</h2>
       <button class="panel-close">✕</button>
     </div>
     <div id="character-body">
-      <div>
-        <h3>Equipped</h3>
-        <div id="equip-slots"></div>
+      <div id="armory-left">
+        <div id="paper-doll">
+          <div id="doll-left" class="doll-col"></div>
+          <canvas id="char-preview" width="210" height="270"></canvas>
+          <div id="doll-right" class="doll-col"></div>
+        </div>
+        <h3>Stats</h3>
+        <div id="char-stats"></div>
       </div>
-      <div>
-        <h3>Pack</h3>
-        <div id="inventory"></div>
+      <div id="armory-right">
         <h3>Spellbook</h3>
         <div id="spellbook"></div>
         <p id="spellbook-note" class="empty-note"></p>
+        <p class="empty-note">Your loot lives in the <b>Inventory</b> — press <kbd>I</kbd>.</p>
       </div>
     </div>
   </div>

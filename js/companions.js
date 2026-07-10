@@ -57,26 +57,12 @@ class PetWolf {
 
     if (target && dist < 1.5 + target.hitR && this.biteCd <= 0) {
       this.biteCd = 0.9;
-      enemyMgr.damage(target, dmg, null);
+      // 'pet' threat id: enemies the wolf bites turn on the WOLF, not you
+      enemyMgr.damage(target, dmg, null, 'pet');
     }
 
-    // enemies bite back: anything angry within claw reach of the wolf chews
-    // on it at its own attack pace (skipped for shadow enemies — the co-op
-    // guest's pet is host-side safe)
-    for (const e of enemyMgr.alive()) {
-      if (!e.aggroed || e.stunT > 0 || e.meleeDmg === undefined) continue;
-      const d = Math.hypot(e.pos.x - this.pos.x, e.pos.z - this.pos.z);
-      if (d > (e.range ?? 1.4) + 0.5) continue;
-      e._petHitCd = (e._petHitCd ?? 0) - dt;
-      if (e._petHitCd <= 0) {
-        e._petHitCd = e.cfg.attackCd;
-        this.hp -= e.meleeDmg;
-        this.regenPause = 6;
-        hooks?.popup?.(this.mesh.position.clone().setY(this.mesh.position.y + 1.3),
-          Math.round(e.meleeDmg).toString(), '#ff9d76');
-        if (this.hp <= 0) { hooks?.onDeath?.(); return; }
-      }
-    }
+    // (no more magic contact damage — the wolf is a real combat target now:
+    // enemies chase and hit it through the same seam as players)
 
     // out of combat the wolf licks its wounds
     this.regenPause -= dt;
@@ -146,7 +132,8 @@ export class Companions {
 
   // Rebuild companions to match the player's pet/orb equipment.
   sync(player) {
-    const petId = player.petDead ? null : player.equipment.pet;
+    const compItem = player.equipment.companion;
+    const petId = (player.petDead || !player.pet) ? null : compItem;
     if (petId !== this.wolfItem) {
       if (this.wolf) {
         this.scene.remove(this.wolf.mesh);
@@ -166,7 +153,7 @@ export class Companions {
       }
     }
 
-    const orbId = player.equipment.orb;
+    const orbId = player.orb ? compItem : null;
     if (orbId !== this.orbItem) {
       for (const s of this.spheres) this.scene.remove(s.mesh);
       this.spheres = [];
@@ -186,6 +173,18 @@ export class Companions {
       });
     }
     if (player.orb) for (const s of this.spheres) s.update(dt, player, enemyMgr, projectiles, player.orb);
+  }
+
+  // the pet proxy routes enemy attacks here — the wolf takes REAL hits now
+  damagePet(dmg, player) {
+    const w = this.wolf;
+    if (!w) return;
+    w.hp -= dmg;
+    w.regenPause = 6;
+    this.hooks.popup?.(w.mesh.position.clone().setY(w.mesh.position.y + 1.3),
+      '-' + Math.round(dmg), '#ff9d76');
+    audio.sfx('hit', 0.25, 160);
+    if (w.hp <= 0) this._onWolfDeath(player);
   }
 
   _onWolfDeath(player) {

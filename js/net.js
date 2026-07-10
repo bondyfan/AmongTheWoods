@@ -88,7 +88,10 @@ export const WoodsNet = {
         if (!code) throw new Error("Could not allocate a game code, try again.");
         this.role = "host";
         this.code = code;
-        onDisconnect(ref(db, roomPath(code))).remove(); // host gone → room gone
+        // host gone → only the HOST SEAT empties; the room survives so the
+        // remaining player can take over and keep the code joinable
+        onDisconnect(ref(db, roomPath(code) + "/meta/host")).remove();
+        onDisconnect(ref(db, roomPath(code) + "/state/" + this.uid)).remove();
         return code;
     },
 
@@ -126,19 +129,34 @@ export const WoodsNet = {
         set(ref(db, roomPath(this.code) + "/state/" + this.uid), state);
     },
 
+    _partnerStateFn: null,
+    _partnerStateUnsub: null,
+    _subPartnerState() {
+        this._partnerStateUnsub?.();
+        this._partnerStateUnsub = onValue(ref(db, roomPath(this.code) + "/state/" + this.partnerUid),
+            (s) => this._partnerStateFn?.(s.exists() ? s.val() : null));
+    },
+
     onPartnerState(fn) {
-        const sub = () => {
-            const unsub = onValue(ref(db, roomPath(this.code) + "/state/" + this.partnerUid),
-                (s) => fn(s.exists() ? s.val() : null));
-            this._unsubs.push(unsub);
-        };
-        if (this.partnerUid) sub();
-        else this._pendingPartnerSub = sub; // host: partner unknown until join
+        this._partnerStateFn = fn;
+        if (this.partnerUid) this._subPartnerState();
     },
 
     setPartner(uid) {
         this.partnerUid = uid;
-        if (this._pendingPartnerSub) { this._pendingPartnerSub(); this._pendingPartnerSub = null; }
+        if (uid && this._partnerStateFn) this._subPartnerState();
+    },
+
+    // the old host vanished — the survivor claims the host seat and keeps
+    // the room code alive for the next joiner
+    async becomeHost() {
+        this.role = "host";
+        this.partnerUid = null;
+        this._partnerStateUnsub?.();
+        this._partnerStateUnsub = null;
+        await update(ref(db, roomPath(this.code) + "/meta"), { host: this.uid, guest: null });
+        onDisconnect(ref(db, roomPath(this.code) + "/meta/host")).remove();
+        onDisconnect(ref(db, roomPath(this.code) + "/state/" + this.uid)).remove();
     },
 
     // Events go into the PARTNER's inbox; each side consumes (and deletes) its own.
@@ -173,9 +191,22 @@ export const WoodsNet = {
     leave() {
         this._unsubs.forEach((u) => u());
         this._unsubs = [];
-        if (this.code) {
-            if (this.role === "host") remove(ref(db, roomPath(this.code)));
-            else remove(ref(db, roomPath(this.code) + "/state/" + this.uid));
+        this._partnerStateUnsub?.();
+        this._partnerStateUnsub = null;
+        const code = this.code;
+        if (code) {
+            remove(ref(db, roomPath(code) + "/state/" + this.uid));
+            if (this.role === "host") {
+                // hand the room over if a guest is still in it, else tear it down
+                get(ref(db, roomPath(code) + "/meta")).then((s) => {
+                    const m = s.exists() ? s.val() : null;
+                    if (m && m.guest && m.guest !== this.uid) {
+                        remove(ref(db, roomPath(code) + "/meta/host"));
+                    } else {
+                        remove(ref(db, roomPath(code)));
+                    }
+                }).catch(() => {});
+            }
         }
         this.role = null; this.code = null; this.partnerUid = null;
     },

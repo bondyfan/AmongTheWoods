@@ -199,13 +199,23 @@ export class World {
   _genRings() {
     const rng = mulberry32(this.seed ^ 0x5eed);
     const radii = BIOMES.slice(0, -1).map(b => b.rMax);
+    const MIN_SEP = Math.PI * 2 * 0.1; // gates at least 10% of the circle apart
     this.rings = radii.map((r, i) => {
       const type = i % 2 === 0 ? 'ridge' : 'river';
       const gaps = [];
-      const count = Math.max(2, Math.round(r / 250));
+      // 2–5 randomly placed exits per ring (huge outer rings get a few more
+      // so the trek along the wall never becomes a chore)
+      const count = Math.max(2 + Math.floor(rng() * 4), Math.round(r / 900));
       for (let g = 0; g < count; g++) {
+        let a = rng() * Math.PI * 2;
+        // keep exits spread out: re-roll while too close to an earlier gate
+        for (let tries = 0; tries < 20
+             && gaps.some(gap => angDiff(a, gap.a) < MIN_SEP); tries++) {
+          a = rng() * Math.PI * 2;
+        }
+        if (gaps.some(gap => angDiff(a, gap.a) < MIN_SEP)) continue;
         const width = (type === 'river' ? 9 : 15) + rng() * 8; // meters of opening
-        gaps.push({ a: rng() * Math.PI * 2, w: width / r });   // width in radians
+        gaps.push({ a, w: width / r });                         // width in radians
       }
       return { r, type, gaps };
     });

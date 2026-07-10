@@ -498,3 +498,61 @@ kbd {
 .level-band.locked { border-bottom-color: rgba(255,255,255,0.14); }
 .level-band.locked .lb-tier { color: #9aa0a6; background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.18); }
 .level-band.locked .lb-note { color: #d88; opacity: 0.8; }
+
+/* ---------- armory (WoW-style paper doll) ---------- */
+#character-body { display: flex; gap: 22px; overflow-y: auto; padding: 14px 18px; }
+#armory-left { flex: 0 0 380px; }
+#armory-right { flex: 1; min-width: 0; }
+#paper-doll { display: flex; gap: 10px; align-items: center; justify-content: center; }
+#char-preview {
+  width: 210px; height: 270px; border-radius: 12px;
+  background: radial-gradient(ellipse at center, rgba(160, 200, 140, 0.14), rgba(0,0,0,0.35));
+  border: 1px solid rgba(232, 201, 106, 0.3);
+}
+.doll-col { display: flex; flex-direction: column; gap: 10px; }
+.doll-slot {
+  width: 58px; height: 58px; border-radius: 10px; position: relative;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.16);
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.doll-slot.filled { border-color: #e8c96a; background: rgba(232, 201, 106, 0.1); }
+.doll-slot .ds-icon { font-size: 26px; line-height: 1; }
+.doll-slot .ds-icon .item-icon { width: 34px; height: 34px; vertical-align: middle; }
+.doll-slot .ds-label {
+  position: absolute; bottom: -7px; left: 50%; transform: translateX(-50%);
+  font-size: 9px; text-transform: uppercase; letter-spacing: 0.4px; opacity: 0.75;
+  background: #1b2417; padding: 0 5px; border-radius: 4px; white-space: nowrap;
+}
+.stat-row {
+  display: grid; grid-template-columns: 110px 60px 1fr; gap: 8px; align-items: baseline;
+  padding: 5px 2px; border-bottom: 1px solid rgba(255,255,255,0.07); font-size: 13.5px;
+}
+.stat-row b { color: #ffe9a8; font-size: 15px; }
+.stat-row small { opacity: 0.6; font-size: 11.5px; }
+
+/* stackable inventory grid */
+#inv-grid { display: grid; grid-template-columns: repeat(auto-fill, 56px); gap: 8px; }
+.inv-cell {
+  width: 56px; height: 56px; border-radius: 10px; position: relative; cursor: grab;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.16);
+  display: flex; align-items: center; justify-content: center; font-size: 24px;
+  user-select: none; touch-action: none;
+}
+.inv-cell.gear { border-color: rgba(232, 201, 106, 0.55); }
+.inv-cell .ic .item-icon { width: 32px; height: 32px; vertical-align: middle; }
+.inv-cell .cnt {
+  position: absolute; right: 3px; bottom: 1px; font-size: 12px; font-weight: 800;
+  color: #ffe9a8; text-shadow: 0 1px 2px rgba(0,0,0,0.9);
+}
+.inv-cell.drag-ghost {
+  position: fixed; z-index: 999; pointer-events: none; opacity: 0.85;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.5); background: #223018;
+}
+.spell-slot.equipped-slot { border-color: #7fbf5f; box-shadow: 0 0 8px rgba(127, 191, 95, 0.5); }
+
+/* ---------- standalone inventory + multi-panel layout ---------- */
+#inv-body { padding: 14px 18px; overflow-y: auto; }
+#invpanel { left: 18%; top: 46%; max-width: 420px; }
+#character { left: 76%; }
+/* keep panels within reach when dragged */
+.panel { touch-action: none; }

@@ -2,7 +2,7 @@
 // equipment slots, bestiary of discovered creatures ----
 
 import { SHOP_GROUPS, SLOTS, SLOT_LABELS, ENEMY_TYPES, ITEMS, SPELLS,
-         STAT_TRACKS, MOBA_BUILDINGS, CAMP_BUILDINGS, RES_ICONS, CONSUMABLES,
+         STAT_TRACKS, MOBA_BUILDINGS, CAMP_BUILDINGS, RES_ICONS, RESOURCES, CONSUMABLES,
          MAX_SPELL_SLOTS, fmtResource, itemById, spellById, costFor } from './config.js';
 
 const NEED_NAMES = { tent: 'Hide Tent', cabin: 'Wooden Cabin', furnace: 'Stone Furnace' };
@@ -16,7 +16,7 @@ export class Panels {
     // hooks: { onPauseChange(paused), onBuyItem(id), onBuySpell(id),
     //          onEquip(id), onUnequip(slot), onToggleSpell(id) }
     this.hooks = hooks;
-    this.open = null; // 'shop' | 'character' | 'bestiary'
+    this.openSet = new Set();
     this.shopTab = SHOP_GROUPS[0].key;
     this.player = null;
     this.moba = null; // set in MOBA mode → adds the Base tab
@@ -28,41 +28,82 @@ export class Panels {
     $('bestiary-btn').addEventListener('click', () => this.toggle('bestiary'));
     $('settings-btn').addEventListener('click', () => this.toggle('settings'));
     $('help-btn').addEventListener('click', () => this.toggle('help'));
+    $('inv-btn').addEventListener('click', () => this.toggle('inventory'));
+    // ✕ closes just ITS panel (Escape still closes everything)
     document.querySelectorAll('.panel-close').forEach(btn =>
-      btn.addEventListener('click', () => this.toggle(null)));
+      btn.addEventListener('click', () => {
+        const panelId = btn.closest('.panel').id;
+        const name = Object.entries(Panels.PANEL_IDS).find(([, id]) => id === panelId)?.[0];
+        if (name) this.toggle(name);
+      }));
+    this._makeDraggable();
   }
 
+  // drag any panel by its header so several can sit side by side
+  _makeDraggable() {
+    document.querySelectorAll('.panel').forEach(panel => {
+      const head = panel.querySelector('.panel-head');
+      if (!head) return;
+      head.style.cursor = 'move';
+      head.addEventListener('pointerdown', (e) => {
+        if (e.target.closest('button')) return;
+        const rect = panel.getBoundingClientRect();
+        const ox = e.clientX - rect.left, oy = e.clientY - rect.top;
+        panel.style.transform = 'none';
+        const move = (ev) => {
+          panel.style.left = Math.max(0, ev.clientX - ox) + 'px';
+          panel.style.top = Math.max(0, ev.clientY - oy) + 'px';
+        };
+        const up = () => {
+          window.removeEventListener('pointermove', move);
+          window.removeEventListener('pointerup', up);
+        };
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', up);
+        move(e);
+      });
+    });
+  }
+
+  // panels open INDEPENDENTLY — inventory + upgrades + armory can all be
+  // up at once (that's how you drag loot around like in WoW)
+  static PANEL_IDS = {
+    shop: 'shop', character: 'character', bestiary: 'bestiary',
+    settings: 'settings', base: 'basepanel', chest: 'chestpanel',
+    help: 'helppanel', inventory: 'invpanel',
+  };
+
+  get open() { return this.openSet.size ? [...this.openSet][this.openSet.size - 1] : null; }
+
   toggle(name) {
-    if (this.open === name) name = null;
-    this.open = name;
     audio.sfx('click', 0.4);
-    $('shop').classList.toggle('hidden', name !== 'shop');
-    $('character').classList.toggle('hidden', name !== 'character');
-    $('bestiary').classList.toggle('hidden', name !== 'bestiary');
-    $('settings').classList.toggle('hidden', name !== 'settings');
-    $('basepanel').classList.toggle('hidden', name !== 'base');
-    $('chestpanel').classList.toggle('hidden', name !== 'chest');
-    $('helppanel').classList.toggle('hidden', name !== 'help');
-    if (name === 'shop') this.renderShop();
-    if (name === 'character') this.renderCharacter();
-    if (name === 'bestiary') this.renderBestiary();
-    if (name === 'base') this.renderBase();
-    if (name === 'chest') this.renderChest();
-    if (name === 'shop') $('shop-btn').classList.remove('pulse');
-    this.hooks.onPauseChange(name !== null);
+    if (name === null) { // close everything (Escape)
+      this.openSet.clear();
+    } else if (this.openSet.has(name)) {
+      this.openSet.delete(name);
+    } else {
+      this.openSet.add(name);
+    }
+    for (const [key, id] of Object.entries(Panels.PANEL_IDS)) {
+      $(id).classList.toggle('hidden', !this.openSet.has(key));
+    }
+    this.refresh();
+    if (this.openSet.has('shop')) $('shop-btn').classList.remove('pulse');
+    this.hooks.onPauseChange(this.openSet.size > 0);
   }
 
   refresh() {
-    if (this.open === 'shop') this.renderShop();
-    if (this.open === 'character') this.renderCharacter();
-    if (this.open === 'bestiary') this.renderBestiary();
-    if (this.open === 'base') this.renderBase();
-    if (this.open === 'chest') this.renderChest();
+    if (this.openSet.has('shop')) this.renderShop();
+    if (this.openSet.has('character')) this.renderCharacter();
+    if (this.openSet.has('bestiary')) this.renderBestiary();
+    if (this.openSet.has('base')) this.renderBase();
+    if (this.openSet.has('chest')) this.renderChest();
+    if (this.openSet.has('inventory')) this.renderInventory();
   }
 
   _resLine() {
     const p = this.player;
-    return `🍖 ${fmtResource(p.meat)}  🪵 ${fmtResource(p.wood)}  🪨 ${fmtResource(p.stone)}  🟫 ${fmtResource(p.hide)}  🔩 ${fmtResource(p.iron)}`;
+    return `🍖 ${fmtResource(p.meat)}  🪵 ${fmtResource(p.wood)}  🪨 ${fmtResource(p.stone)}  🟫 ${fmtResource(p.hide)}  🔩 ${fmtResource(p.iron)}  🫐 ${fmtResource(p.berry)}`;
   }
 
   _costStr(cost) {
@@ -77,8 +118,7 @@ export class Panels {
   // ---------- shop ----------
   renderShop() {
     const p = this.player;
-    $('shop-res').textContent =
-      `🍖 ${fmtResource(p.meat)}  🪵 ${fmtResource(p.wood)}  🪨 ${fmtResource(p.stone)}  🟫 ${fmtResource(p.hide)}  🔩 ${fmtResource(p.iron)}`;
+    $('shop-res').textContent = this._resLine();
 
     // tabs (+ Base tab in MOBA, + Camp tab in survival)
     const groups = this.moba
@@ -145,10 +185,11 @@ export class Panels {
       card.className = 'card' + (owned ? ' owned' : (levelLocked || needMissing) ? ' locked' : affordable ? ' buyable' : ' expensive');
 
       let status;
-      if (owned) status = '<span class="tag ok">✔ Owned</span>';
-      else if (levelLocked) status = `<span class="tag">🔒 Lv ${entry.level}</span>`;
+      if (levelLocked) status = `<span class="tag">🔒 Lv ${entry.level}</span>`;
       else if (needMissing) status = `<span class="tag">🏕️ Needs ${NEED_NAMES[entry.needs] ?? entry.needs}</span>`;
-      else status = `<button class="buy-btn" data-id="${entry.id}">Buy — ${this._costStr(cost)}</button>`;
+      else if (owned && isSpells) status = '<span class="tag ok">✔ Owned</span>';
+      else status = (owned ? '<span class="tag ok">✔ Owned</span> ' : '') +
+        `<button class="buy-btn" data-id="${entry.id}">Buy${owned ? ' another' : ''} — ${this._costStr(cost)}</button>`;
 
       const slotTag = isSpells ? '📖 spell' : SLOT_LABELS[entry.slot].toLowerCase();
       card.innerHTML = `
@@ -228,46 +269,74 @@ export class Panels {
   }
 
   // ---------- character / equipment ----------
+  // WoW-style paper doll: your live character in the middle, equipment slots
+  // flanking it, a stat breakdown below, and a stackable inventory grid.
   renderCharacter() {
     const p = this.player;
 
-    // equipment slots
-    const slotsEl = $('equip-slots');
-    slotsEl.innerHTML = '';
-    for (const slot of SLOTS) {
-      const id = p.equipment[slot];
-      const item = id ? itemById(id) : null;
-      const div = document.createElement('div');
-      div.className = 'equip-slot' + (item ? ' filled' : '');
-      div.innerHTML = `
-        <span class="slot-label">${SLOT_LABELS[slot]}</span>
-        <span class="slot-item">${item ? `${itemIcon(item)} ${item.name}` : '<i>empty</i>'}</span>
-        ${item && !(slot === 'weapon' && id === 'fists')
-          ? `<button class="unequip-btn" data-slot="${slot}">✕</button>` : ''}`;
-      slotsEl.appendChild(div);
+    const DOLL = { left: ['weapon', 'head', 'chest'], right: ['boots', 'charm', 'companion'] };
+    for (const side of ['left', 'right']) {
+      const col = $('doll-' + side);
+      col.innerHTML = '';
+      for (const slot of DOLL[side]) {
+        const id = p.equipment[slot];
+        const item = id ? itemById(id) : null;
+        const div = document.createElement('div');
+        div.className = 'doll-slot' + (item ? ' filled' : '');
+        div.title = item ? `${item.name} — ${item.desc} (click to unequip)` : SLOT_LABELS[slot];
+        div.innerHTML = `<span class="ds-icon">${item ? itemIcon(item) : ''}</span>
+          <span class="ds-label">${SLOT_LABELS[slot]}</span>`;
+        if (item && !(slot === 'weapon' && id === 'fists')) {
+          div.addEventListener('click', () => this.hooks.onUnequip(slot));
+        }
+        col.appendChild(div);
+      }
     }
-    slotsEl.querySelectorAll('.unequip-btn').forEach(btn =>
-      btn.addEventListener('click', () => this.hooks.onUnequip(btn.dataset.slot)));
 
-    // stats summary
-    $('char-stats').innerHTML =
-      `❤️ ${Math.ceil(p.hp)}/${p.maxHp} &nbsp; 🏃 ${Math.round(p.speed * 10) / 10} &nbsp; ` +
-      (p.weapon.kind === 'bow' ? `🏹 ${p.weapon.dmg} dmg` : `⚔️ ${p.weapon.dmg} dmg`);
+    // ---- stat breakdown: value first, then base + every named modifier ----
+    const s = p.stats;
+    const rows = [];
+    const base = itemById(p.equipment.weapon)?.weapon ?? itemById('fists').weapon;
+    const charm = itemById(p.equipment.charm);
+    const dmgParts = [`${Math.round(base.dmg)} ${itemById(p.equipment.weapon)?.name ?? 'fists'}`];
+    if (s.power) dmgParts.push(`+${s.power * 5}% training`);
+    if (charm?.stats?.dmgPct) dmgParts.push(`+${Math.round(charm.stats.dmgPct * 100)}% ${charm.name}`);
+    rows.push(['⚔️ Attack', Math.round(p.weapon.dmg), dmgParts.join(' · ')]);
 
-    // inventory (owned, unequipped items)
-    const inv = $('inventory');
-    inv.innerHTML = '';
-    const unequipped = [...p.itemsOwned].filter(id => !Object.values(p.equipment).includes(id));
-    if (!unequipped.length) inv.innerHTML = '<div class="empty-note">Nothing in your pack — everything is equipped.</div>';
-    for (const id of unequipped) {
-      const item = itemById(id);
-      const div = document.createElement('button');
-      div.className = 'inv-item';
-      div.innerHTML = `${itemIcon(item)} <b>${item.name}</b> <span class="lv">${SLOT_LABELS[item.slot]}</span>`;
-      div.title = item.desc;
-      div.addEventListener('click', () => this.hooks.onEquip(id));
-      inv.appendChild(div);
+    const asParts = [`${base.cd.toFixed(2)}s ${itemById(p.equipment.weapon)?.name ?? 'fists'}`];
+    if (s.swift) asParts.push(`+${s.swift * 4}% training`);
+    if (charm?.stats?.aspd) asParts.push(`+${Math.round(charm.stats.aspd * 100)}% ${charm.name}`);
+    rows.push(['⚡ Attacks/s', (1 / p.weapon.cd).toFixed(2), asParts.join(' · ')]);
+
+    const hpParts = ['100 base'];
+    if (p.level > 1) hpParts.push(`+${(p.level - 1) * 10} level`);
+    for (const slot of ['head', 'chest', 'boots']) {
+      const it = itemById(p.equipment[slot]);
+      if (it?.stats?.hp) hpParts.push(`+${it.stats.hp} ${it.name}`);
     }
+    if (p.campBonus) hpParts.push(`+${p.campBonus} home`);
+    if (p.shrineBonus) hpParts.push(`+${p.shrineBonus} shrines`);
+    rows.push(['❤️ Max health', p.maxHp, hpParts.join(' · ')]);
+
+    const spParts = ['8.5 base'];
+    const boots = itemById(p.equipment.boots);
+    if (boots?.stats?.speed) spParts.push(`+${Math.round(boots.stats.speed * 100)}% ${boots.name}`);
+    rows.push(['🏃 Speed', (Math.round(p.speed * 10) / 10), spParts.join(' · ')]);
+
+    const rgParts = [`${base.range} m ${itemById(p.equipment.weapon)?.name ?? 'fists'}`];
+    if (s.range) rgParts.push(`+${((base.kind === 'bow' ? 2 : 0.1) * s.range).toFixed(1)} m training`);
+    rows.push(['🎯 Range', (Math.round(p.weapon.range * 10) / 10) + ' m', rgParts.join(' · ')]);
+
+    if (p.pet) rows.push(['🐺 Pet', `${Math.round(p.pet.dmg)} dmg · ${p.pet.maxHp} hp`,
+      `training T${s.pet} · your level ${p.level}`]);
+    if (p.orb) rows.push(['🔮 Orb', `${Math.round(p.orb.dmg)} dmg ×${p.orb.targets}`,
+      s.power ? `+${s.power * 5}% Power training` : 'scales with Power training']);
+
+    $('char-stats').innerHTML = rows.map(([label, val, parts]) =>
+      `<div class="stat-row"><span class="sr-label">${label}</span>
+        <b>${val}</b><small>${parts}</small></div>`).join('');
+
+
 
     // spellbook
     const book = $('spellbook');
@@ -284,6 +353,97 @@ export class Panels {
       book.appendChild(div);
     }
     $('spellbook-note').textContent = `${p.spellSlots.length}/${MAX_SPELL_SLOTS} spell slots used — click a spell to slot/unslot it.`;
+  }
+
+  // ---------- inventory panel (I): all carried stuff as WoW-style stacks ----------
+  renderInventory() {
+    const p = this.player;
+    const grid = $('inv-grid');
+    grid.innerHTML = '';
+    const cells = [];
+    for (const key of RESOURCES) {
+      if (p[key] > 0) cells.push({ kind: 'res', id: key, icon: RES_ICONS[key], count: p[key],
+        title: key === 'berry' ? 'Berries — click to eat one (+7 ❤️), drag out to drop' : `${key} — drag out to drop 5` });
+    }
+    for (const c of CONSUMABLES) {
+      const n = p.consumables?.[c.id] ?? 0;
+      if (n > 0) cells.push({ kind: 'consumable', id: c.id, itemRef: c, count: n,
+        title: `${c.name} — click to use (${c.desc}), drag out to drop one` });
+    }
+    // unequipped gear stacks by id (duplicates show a count)
+    const counts = {};
+    for (const id of p.invItems) counts[id] = (counts[id] || 0) + 1;
+    for (const [id, n] of Object.entries(counts)) {
+      const item = itemById(id);
+      if (!item) continue;
+      cells.push({ kind: 'item', id, itemRef: item, count: n > 1 ? n : 0,
+        title: `${item.name} — ${item.desc} (click to equip · drag to hotkey or drop)` });
+    }
+    if (!cells.length) grid.innerHTML = '<div class="empty-note">Empty pockets — go hunt something.</div>';
+    for (const cell of cells) {
+      const div = document.createElement('div');
+      div.className = 'inv-cell' + (cell.kind === 'item' ? ' gear' : '');
+      div.title = cell.title;
+      div.innerHTML = `<span class="ic">${cell.itemRef ? itemIcon(cell.itemRef) : cell.icon}</span>` +
+        (cell.count > 0 ? `<span class="cnt">${fmtResource(cell.count)}</span>` : '');
+      this._wireInvCell(div, cell);
+      grid.appendChild(div);
+    }
+    $('inv-res-line').textContent = this._resLine();
+  }
+
+  // Inventory cell interactions: click to use/equip, DRAG to hotkey or drop.
+  // Dragging out of every panel drops the stack/item on the ground; dragging
+  // onto an action-bar slot (1–6) hotkeys the item there.
+  _wireInvCell(div, cell) {
+    let ghost = null, dragging = false, sx = 0, sy = 0;
+
+    const onMove = (e) => {
+      if (!dragging && Math.hypot(e.clientX - sx, e.clientY - sy) > 8) {
+        dragging = true;
+        ghost = div.cloneNode(true);
+        ghost.className = 'inv-cell drag-ghost';
+        document.body.appendChild(ghost);
+      }
+      if (ghost) {
+        ghost.style.left = (e.clientX - 24) + 'px';
+        ghost.style.top = (e.clientY - 24) + 'px';
+      }
+    };
+    const onUp = (e) => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      ghost?.remove();
+      if (!dragging) { this._invClick(cell); return; }
+      const under = document.elementFromPoint(e.clientX, e.clientY);
+      const barSlot = under?.closest?.('.spell-slot');
+      if (barSlot && cell.kind === 'item') {
+        this.hooks.onAssignSlot?.(Number(barSlot.dataset.slot), cell.id);
+        this.refresh();
+        return;
+      }
+      // released outside every panel → drop it on the ground
+      if (!under?.closest?.('.panel')) {
+        if (cell.kind === 'res') this.hooks.onDropRes?.(cell.id);
+        else if (cell.kind === 'item') this.hooks.onDropItem?.(cell.id);
+        else if (cell.kind === 'consumable') this.hooks.onDropConsumable?.(cell.id);
+        this.refresh();
+      }
+    };
+    div.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      dragging = false; ghost = null;
+      sx = e.clientX; sy = e.clientY;
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    });
+  }
+
+  _invClick(cell) {
+    if (cell.kind === 'item') this.hooks.onEquip(cell.id);
+    else if (cell.kind === 'consumable') this.hooks.onUseConsumable?.(cell.id);
+    else if (cell.id === 'berry') this.hooks.onEatBerry?.();
+    this.refresh();
   }
 
   // MOBA base building: per-lane dens & towers, plus global upgrades.
@@ -385,7 +545,7 @@ export class Panels {
     chest.style.gridColumn = '1 / -1';
     chest.innerHTML = `<div class="card-head"><span class="icon">${itemIcon({ id: 'chest' })}</span>
       <span class="name">Stored</span>
-      <span class="lv">🍖 ${fmtResource(camp.storage.meat)} · 🪵 ${fmtResource(camp.storage.wood)} · 🪨 ${fmtResource(camp.storage.stone)} · 🟫 ${fmtResource(camp.storage.hide)} · 🔩 ${fmtResource(camp.storage.iron)}</span></div>
+      <span class="lv">🍖 ${fmtResource(camp.storage.meat)} · 🪵 ${fmtResource(camp.storage.wood)} · 🪨 ${fmtResource(camp.storage.stone)} · 🟫 ${fmtResource(camp.storage.hide)} · 🔩 ${fmtResource(camp.storage.iron)} · 🫐 ${fmtResource(camp.storage.berry)}</span></div>
       <div class="desc">Whatever is stored here survives your death.</div>
       <div class="card-foot">
         <button class="buy-btn" data-chest="deposit">Deposit all</button>

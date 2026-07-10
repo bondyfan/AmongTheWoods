@@ -9,7 +9,7 @@ import { audio } from './audio.js';
 
 let nextEnemyId = 1;
 let nextGroupId = 1; // herds of passive critters (rabbits) share a group
-const SPAWN_DENSITY = 1.38; // ~20% more creatures in every zone
+const SPAWN_DENSITY = 1.66; // dense, dangerous woods
 const MAX_ALIVE_HARD = 140; // hard cap on simultaneously live units
 // give up a chase after this long without reaching the target, then jog home
 const LEASH_TIME = 7;
@@ -65,6 +65,7 @@ class Enemy {
     this.spawnPos = { x, z }; // leash: where to run back to after a failed chase
     this.chaseT = 0;
     this.returning = false;
+    this.threatLog = []; // { src, dmg, t } — who hurt me, when, how much
     this.wanderDir = Math.random() * Math.PI * 2;
     this.wanderT = 0;
     this.walkT = Math.random() * 10;
@@ -331,11 +332,23 @@ export class EnemyManager {
     enemy.returning = false; // getting hit re-engages a leashed enemy
     enemy.chaseT = 0;
     enemy.flashT = 0.12;     // brief white-hot scale pop so hits READ
+    enemy.threatLog.push({ src: srcId, dmg, t: this.world.time });
     if (enemy.cfg.passive && !enemy.spooked) {
       // one hurt rabbit spooks the whole herd
       enemy.spooked = true;
       if (enemy.groupId) for (const o of this.list) {
         if (o.groupId === enemy.groupId) o.spooked = true;
+      }
+    }
+    // hurting ANY group member enrages its protectors (the herd's guardian
+    // wolf, the pack around a mother) — instantly, however far they stand
+    if (enemy.groupId) {
+      for (const o of this.list) {
+        if (o.dying || o === enemy || o.groupId !== enemy.groupId || o.cfg.passive) continue;
+        o.aggroed = true;
+        o.returning = false;
+        o.chaseT = 0;
+        o.threatLog.push({ src: srcId, dmg: dmg * 0.6, t: this.world.time });
       }
     }
     enemy.lastHitBy = srcId; // kill credit (co-op XP attribution)
@@ -416,16 +429,35 @@ export class EnemyManager {
 
       if (!e.cfg.flying) this.world.pushOutOfSafeZones?.(e.pos, e.hitR ?? 0.5);
 
-      // chase the nearest living target — but creatures never see across a
-      // biome border: a player past the ring is invisible to them
+      // pick a target: whoever dealt the most damage in the last 5 s owns
+      // this creature's attention (so a biting pet PULLS enemies off you);
+      // with no recent attacker it's the nearest visible target. Creatures
+      // never see across a biome border.
       const eBiome = biomeIndexAt(e.pos.x, e.pos.z);
+      const validTarget = (t) => t && !t.dead && t.pos
+        && !this.world.isTargetSafe?.(t.pos)
+        && biomeIndexAt(t.pos.x, t.pos.z) === eBiome;
       let target = null, dist = Infinity;
-      for (const t of targets) {
-        if (t.dead) continue;
-        if (this.world.isTargetSafe?.(t.pos)) continue;
-        if (biomeIndexAt(t.pos.x, t.pos.z) !== eBiome) continue;
-        const d = Math.hypot(t.pos.x - e.pos.x, t.pos.z - e.pos.z);
-        if (d < dist) { dist = d; target = t; }
+      if (e.threatLog.length) {
+        const now = this.world.time;
+        e.threatLog = e.threatLog.filter(en => now - en.t < 5);
+        const sums = {};
+        for (const en of e.threatLog) sums[en.src] = (sums[en.src] || 0) + en.dmg;
+        let bestSrc = null, bestDmg = 0;
+        for (const src in sums) if (sums[src] > bestDmg) { bestDmg = sums[src]; bestSrc = src; }
+        const tt = targets.find(t => t.id === bestSrc);
+        if (validTarget(tt)) {
+          target = tt;
+          dist = Math.hypot(tt.pos.x - e.pos.x, tt.pos.z - e.pos.z);
+          e.aggroed = true;
+        }
+      }
+      if (!target) {
+        for (const t of targets) {
+          if (!validTarget(t)) continue;
+          const d = Math.hypot(t.pos.x - e.pos.x, t.pos.z - e.pos.z);
+          if (d < dist) { dist = d; target = t; }
+        }
       }
       if (!target) e.aggroed = false;
       const toPlayer = target

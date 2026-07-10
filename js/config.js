@@ -83,8 +83,8 @@ export function progressAt(x, z) {
 }
 
 // ---- resources ----
-export const RESOURCES = ['meat', 'wood', 'stone', 'hide', 'iron'];
-export const RES_ICONS = { meat: '🍖', wood: '🪵', stone: '🪨', hide: '🟫', iron: '🔩' };
+export const RESOURCES = ['meat', 'wood', 'stone', 'hide', 'iron', 'berry'];
+export const RES_ICONS = { meat: '🍖', wood: '🪵', stone: '🪨', hide: '🟫', iron: '🔩', berry: '🫐' };
 // resources come in tenths (hide scraps); ×10/÷10 keeps whole numbers exact
 export const roundResource = (value) => Math.round((Number(value) || 0) * 10) / 10;
 export const fmtResource = (value) => {
@@ -198,8 +198,8 @@ export const MAX_LEVEL = 10;
 
 // ---- Equippable items (WoW-style slots). Bought in the shop or dropped by
 // pack bosses. Only ONE weapon is wielded at a time — Q cycles owned weapons. ----
-export const SLOTS = ['weapon', 'head', 'chest', 'boots', 'charm', 'pet', 'orb'];
-export const SLOT_LABELS = { weapon: 'Weapon', head: 'Head', chest: 'Chest', boots: 'Boots', charm: 'Charm', pet: 'Pet', orb: 'Orb' };
+export const SLOTS = ['weapon', 'head', 'chest', 'boots', 'charm', 'companion'];
+export const SLOT_LABELS = { weapon: 'Weapon', head: 'Head', chest: 'Chest', boots: 'Boots', charm: 'Charm', companion: 'Companion' };
 
 // Gear progresses through the ages. `needs` gates an item behind a camp
 // building (survival): 'tent' → Hide Tent, 'cabin' → Wooden Cabin,
@@ -209,9 +209,9 @@ export const ITEMS = [
   { id: 'fists',      slot: 'weapon', level: 1, icon: '🖐️', name: 'Bare Hands',   cost: null, free: true,
     weapon: { kind: 'melee', dmg: 12, cd: 0.45, range: 1.5, chop: 0, mine: 0, tier: 0 },
     desc: 'Punch things. Bare hands can\'t fell trees or mine — craft tools!' },
-  { id: 'club',       slot: 'weapon', level: 2, icon: '🏏', name: 'Wooden Club',   cost: { wood: 4 },
+  { id: 'club',       slot: 'weapon', level: 2, icon: '🦴', name: 'Bone Club',   cost: { meat: 10 },
     weapon: { kind: 'melee', dmg: 22, cd: 0.5, range: 1.7, chop: 0.5, mine: 0, tier: 1 },
-    desc: 'A crude stone-age club. Damage 22; fells trees, but SLOWLY.' },
+    desc: 'A heavy beast bone. Damage 22; fells trees, but SLOWLY.' },
   { id: 'stoneAxe',   slot: 'weapon', level: 3, icon: '🪓', name: 'Stone Axe',     cost: { wood: 12, stone: 10 },
     weapon: { kind: 'melee', dmg: 38, cd: 0.5, range: 1.8, chop: 2, mine: 0, tier: 1 },
     desc: 'Knapped stone on a haft. Damage 38, chops trees FAST.' },
@@ -274,18 +274,18 @@ export const ITEMS = [
     cost: { hide: 12, iron: 4, meat: 40 }, needs: 'cabin', stats: { aspd: 0.10 },
     desc: '+10% attack speed.' },
   // -- pet (companion) --
-  { id: 'tamedWolf', slot: 'pet', level: 4, icon: '🐺', name: 'Tamed Wolf', cost: { meat: 165 }, pet: { dmg: 14 },
+  { id: 'tamedWolf', slot: 'companion', level: 4, icon: '🐺', name: 'Tamed Wolf', cost: { meat: 165 }, pet: { dmg: 14 },
     desc: 'A loyal wolf fights by your side (100 HP — train it up in Training).' },
-  { id: 'alphaWolf', slot: 'pet', level: 8, icon: '👑', name: 'Alpha Wolf', cost: { meat: 360 }, pet: { dmg: 32 },
+  { id: 'alphaWolf', slot: 'companion', level: 8, icon: '👑', name: 'Alpha Wolf', cost: { meat: 360 }, pet: { dmg: 32 },
     desc: 'A huge alpha. Bites for 32.' },
   // -- orb (guardian sphere — iron-age wonder) --
-  { id: 'guardianSphere', slot: 'orb', level: 5,  icon: '🔮', name: 'Guardian Sphere', cost: { meat: 50, stone: 30, iron: 6 }, needs: 'furnace',
+  { id: 'guardianSphere', slot: 'companion', level: 5,  icon: '🔮', name: 'Guardian Sphere', cost: { meat: 50, stone: 30, iron: 6 }, needs: 'furnace',
     orb: { count: 1, targets: 1, dmg: 12 },
     desc: 'Orbits you and fires bolts at enemies.' },
-  { id: 'twinSphere',     slot: 'orb', level: 8,  icon: '✨', name: 'Twin-bolt Sphere', cost: { meat: 90, iron: 14, stone: 40 }, needs: 'furnace',
+  { id: 'twinSphere',     slot: 'companion', level: 8,  icon: '✨', name: 'Twin-bolt Sphere', cost: { meat: 90, iron: 14, stone: 40 }, needs: 'furnace',
     orb: { count: 1, targets: 2, dmg: 14 },
     desc: 'Fires two bolts at once (14 dmg each).' },
-  { id: 'duoSphere',      slot: 'orb', level: 10, icon: '🌐', name: 'Gemini Spheres',  cost: { meat: 130, iron: 24, stone: 60 }, needs: 'furnace',
+  { id: 'duoSphere',      slot: 'companion', level: 10, icon: '🌐', name: 'Gemini Spheres',  cost: { meat: 130, iron: 24, stone: 60 }, needs: 'furnace',
     orb: { count: 2, targets: 2, dmg: 14 },
     desc: 'TWO spheres, each firing twin bolts.' },
 ];
@@ -294,8 +294,8 @@ export const itemById = (id) => ITEMS.find(i => i.id === id);
 
 // ---- Consumables: cheap repeatable meat sinks, used with F / G in the field.
 export const CONSUMABLES = [
-  { id: 'salve', icon: '🧪', name: 'Healing Salve', key: 'F', cost: { meat: 20 },
-    heal: 40, desc: 'Drink with F: instantly restores 40 health.' },
+  { id: 'salve', icon: '🧪', name: 'Healing Salve', key: 'F', cost: { berry: 5 },
+    heal: 100, desc: 'Brewed from 5 berries. Drink with F: restores 100 health.' },
   { id: 'roast', icon: '🍗', name: 'Roasted Meat', key: 'G', cost: { meat: 10 },
     heal: 15, speedDur: 30, desc: 'Eat with G: +15 health and +10% speed for 30 s.' },
 ];
@@ -510,7 +510,7 @@ export const MOBA_AI_TIMELINE = [
 export const SHOP_GROUPS = [
   { key: 'weapons',  label: '⚔️ Weapons',   items: () => ITEMS.filter(i => i.slot === 'weapon' && !i.free) },
   { key: 'armor',    label: '🛡️ Gear',      items: () => ITEMS.filter(i => ['head', 'chest', 'boots', 'charm'].includes(i.slot)) },
-  { key: 'friends',  label: '🐾 Companions', items: () => ITEMS.filter(i => ['pet', 'orb'].includes(i.slot)) },
+  { key: 'friends',  label: '🐾 Companions', items: () => ITEMS.filter(i => i.slot === 'companion') },
   { key: 'spells',   label: '📖 Spells',    items: () => SPELLS },
   { key: 'training', label: '📈 Training',  items: () => STAT_TRACKS },
 ];

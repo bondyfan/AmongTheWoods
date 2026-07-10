@@ -24,6 +24,7 @@ export class Player {
     this.slashes = []; // short-lived melee swing arcs
     this.levelFx = []; // short-lived level-up burst pieces
 
+    this.id = 'local'; // threat-system identity (enemies track damage by source)
     this.pos = new THREE.Vector3(0, 0, 0);
     this.facing = new THREE.Vector3(0, 0, -1);
     this.hp = 100;
@@ -34,12 +35,15 @@ export class Player {
     this.stone = 0;
     this.hide = 0;
     this.iron = 0;
+    this.berry = 0;
     this.kills = 0;
     this.campBonus = 0; // extra max hp from the camp home building
 
     // -- items & equipment --
-    this.itemsOwned = new Set(['fists']);
-    this.equipment = { weapon: 'fists', head: null, chest: null, boots: null, charm: null, pet: null, orb: null };
+    // invItems = UNEQUIPPED copies in the backpack (duplicates allowed);
+    // equipped pieces live only in `equipment`. 'fists' are innate.
+    this.invItems = [];
+    this.equipment = { weapon: 'fists', head: null, chest: null, boots: null, charm: null, companion: null };
 
     // -- trainable stat tracks (0..10 each; pet 0..5) --
     this.stats = { range: 0, power: 0, swift: 0, pet: 0, gather: 0 };
@@ -81,12 +85,18 @@ export class Player {
   }
 
   // ---------- items ----------
-  hasItem(id) { return this.itemsOwned.has(id); }
+  // "owned" = equipped somewhere OR at least one copy in the backpack
+  hasItem(id) {
+    return id === 'fists'
+      || Object.values(this.equipment).includes(id)
+      || this.invItems.includes(id);
+  }
 
+  // a bought/looted item lands in the BACKPACK (duplicates stack)
   ownItem(id, autoEquip = true) {
-    if (this.itemsOwned.has(id)) return false;
-    this.itemsOwned.add(id);
     const item = itemById(id);
+    if (!item) return false;
+    this.invItems.push(id);
     if (autoEquip && (!this.equipment[item.slot] || this.equipment[item.slot] === 'fists')) {
       this.equip(id);
     }
@@ -95,22 +105,55 @@ export class Player {
 
   equip(id) {
     const item = itemById(id);
-    if (!item || !this.itemsOwned.has(id)) return;
+    if (!item) return;
+    if (id !== 'fists' && !this.invItems.includes(id)
+        && !Object.values(this.equipment).includes(id)) return;
+    if (item.level > this.level) { // dropped gear waits until you grow into it
+      this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
+        `${item.name} needs level ${item.level}`, '#ffcc66');
+      audio.sfx('error', 0.4);
+      return;
+    }
+    if (this.equipment[item.slot] === id) return; // already worn
+    // take one copy out of the backpack; the replaced piece goes back in
+    const idx = this.invItems.indexOf(id);
+    if (idx >= 0) this.invItems.splice(idx, 1);
+    const prev = this.equipment[item.slot];
+    if (prev && prev !== 'fists') this.invItems.push(prev);
     this.equipment[item.slot] = id;
     this.recompute();
     this.hooks.onEquipChange?.(item.slot);
   }
 
   unequip(slot) {
+    const prev = this.equipment[slot];
+    if (prev && prev !== 'fists') this.invItems.push(prev);
     if (slot === 'weapon') { this.equipment.weapon = 'fists'; }
     else this.equipment[slot] = null;
     this.recompute();
     this.hooks.onEquipChange?.(slot);
   }
 
-  // Q — cycle through owned weapons.
+  // remove ONE copy (equipped first if that's where it lives) — for drops
+  removeItem(id) {
+    const idx = this.invItems.indexOf(id);
+    if (idx >= 0) { this.invItems.splice(idx, 1); return true; }
+    for (const [slot, eid] of Object.entries(this.equipment)) {
+      if (eid === id) {
+        this.equipment[slot] = slot === 'weapon' ? 'fists' : null;
+        this.recompute();
+        this.hooks.onEquipChange?.(slot);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Q — cycle through carried weapons (equipped + backpack, deduped).
   cycleWeapon() {
-    const weapons = ['fists', ...[...this.itemsOwned].filter(id => id !== 'fists' && itemById(id)?.slot === 'weapon')];
+    const carried = [this.equipment.weapon, ...this.invItems]
+      .filter(id => itemById(id)?.slot === 'weapon');
+    const weapons = ['fists', ...new Set(carried.filter(id => id !== 'fists'))];
     if (weapons.length < 2) return;
     const idx = weapons.indexOf(this.equipment.weapon);
     const next = weapons[(idx + 1) % weapons.length];
@@ -179,7 +222,7 @@ export class Player {
   recompute() {
     const equipped = (slot) => itemById(this.equipment[slot]);
     const oldMax = this.maxHp || 100;
-    let hp = 100 + (this.shrineBonus || 0), speedMult = 1;
+    let hp = 100 + (this.level - 1) * 10 + (this.shrineBonus || 0), speedMult = 1;
     for (const slot of ['head', 'chest', 'boots']) {
       const it = equipped(slot);
       if (it?.stats?.hp) hp += it.stats.hp;
@@ -205,15 +248,15 @@ export class Player {
     if (charm?.stats?.dmgPct) this.weapon.dmg *= 1 + charm.stats.dmgPct;
     if (charm?.stats?.aspd) this.weapon.cd *= 1 - charm.stats.aspd;
     this.attackRange = this.weapon.range; // aim marker clamps to this
-    // pet: training (+100 hp, +25% dmg per tier) AND the owner's level
-    // (+50 hp per 2 levels, +3% dmg per level) so it stays relevant late
-    const petBase = equipped('pet')?.pet;
+    // ONE companion slot: a wolf (pet) or a sphere (orb), never both.
+    // Pets scale with training AND the owner's level; orbs with Power.
+    const comp = equipped('companion');
+    const petBase = comp?.pet;
     this.pet = petBase
       ? { dmg: petBase.dmg * (1 + 0.25 * s.pet) * (1 + 0.03 * this.level),
           maxHp: 100 + 100 * s.pet + 50 * Math.floor(this.level / 2) }
       : null;
-    // orbs scale with Power training like weapons do — no dead stat slots
-    const orbBase = equipped('orb')?.orb;
+    const orbBase = comp?.orb;
     this.orb = orbBase ? { ...orbBase, dmg: orbBase.dmg * (1 + 0.05 * s.power) } : null;
 
     this._refreshWeaponMeshes();
@@ -298,7 +341,7 @@ export class Player {
           const dmg = Math.round((fall - SAFE_FALL) * 6);
           this.hooks.popup?.(this.mesh.position.clone().setY(this.mesh.position.y + 2), `-${dmg} 🩸 fall`, '#ff6a5a');
           audio.sfx('hit', 0.5, 60);
-          this.takeDamage(dmg);
+          this.takeDamage(dmg, { silent: true });
         } else if (fall > 1.2) audio.sfx('base_hit', 0.25, 200);
       }
     } else {
@@ -314,6 +357,11 @@ export class Player {
   takeDamage(dmg, src = null) {
     if (this.dead) return;
     this.hp -= dmg;
+    // every hit shows its number — incoming damage floats red above you
+    if (!src?.silent) {
+      this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.1),
+        '-' + Math.round(dmg), '#ff5a4a');
+    }
     // rotting claws (zombies): a festering DoT — the Haunted Forest hazard
     if (src?.poison) {
       this.poisonT = src.poison.dur ?? 4;
@@ -327,6 +375,15 @@ export class Player {
       this.dead = true;
       this.hooks.onDeath();
     }
+  }
+
+  eatBerry() {
+    if (this.dead || this.berry < 1) return false;
+    this.berry = Math.round((this.berry - 1) * 10) / 10;
+    this.hp = Math.min(this.maxHp, this.hp + 7);
+    this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2), '🫐 +7 ❤️', '#c9a4ff');
+    audio.sfx('purchase', 0.3, 300);
+    return true;
   }
 
   // consumables bought in the Supplies tab, used in the field with F / G

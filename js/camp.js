@@ -26,7 +26,7 @@ export class Camp {
     this.player = player;
     this.hooks = hooks; // { popup, toast }
     this.levels = { home: 0, chest: 0, furnace: 0, boat: 0, tower: 0, grave: 0 };
-    this.storage = { meat: 0, wood: 0, stone: 0, hide: 0, iron: 0 };
+    this.storage = { meat: 0, wood: 0, stone: 0, hide: 0, iron: 0, berry: 0 };
     this.meshes = {};
     this.gravePos = null;
     this.smeltT = 20;
@@ -180,7 +180,7 @@ export class Camp {
         if (best) {
           this.towerCd = 1.2;
           projectiles.spawnBolt(t.position.clone().setY(t.position.y + 3.8), best, {
-            dmg: 25, onHit: () => enemyMgr.damage(best, 25, null),
+            dmg: 25, onHit: () => enemyMgr.damage(best, 25, null, 'tower'),
           });
           audio.sfx('attack_ranged', 0.2, 300);
         }

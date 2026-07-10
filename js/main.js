@@ -87,7 +87,7 @@ const combatMgr = () => {
 const ui = new UI({
   // the Single Player button starts whichever mode is selected in the menu
   onStart: () => (selectedMode === 'moba' ? startMobaSolo() : startGame()),
-  onCastSpell: (i) => { player.castSpell(i, { enemyMgr: combatMgr() }); ui.flashSpell(i); },
+  onCastSpell: (i) => useBarSlot(i),
 });
 
 const panels = new Panels({
@@ -103,6 +103,12 @@ const panels = new Panels({
   onCampBuild: (id) => campBuild(id),
   onBuyConsumable: (id) => buyConsumable(id),
   onChestChange: () => mp?.sendCampSync?.(),
+  onAssignSlot: (i, id) => { player.spellSlots[i] = id; audio.sfx('click', 0.4); },
+  onDropRes: (key) => dropResource(key),
+  onDropItem: (id) => dropItem(id),
+  onDropConsumable: (id) => dropConsumable(id),
+  onEatBerry: () => player.eatBerry(),
+  onUseConsumable: (id) => player.useConsumable(id),
   mobaTeam: () => mobaSide,
   nearHome: () => nearHome(), // the home building only upgrades in person
 });
@@ -138,19 +144,18 @@ panels.player = player;
 // Apply a pickup's contents to the LOCAL player (used by direct collection
 // and by the co-op 'grant' event from the host).
 const RES_POPUP = { meat: ['🍖', '#ff9d76'], wood: ['🪵', '#d8a468'],
-                    stone: ['🪨', '#c8c8c0'], hide: ['🟫', '#c9986a'], iron: ['🔩', '#c8d0d8'] };
+                    stone: ['🪨', '#c8c8c0'], hide: ['🟫', '#c9986a'], iron: ['🔩', '#c8d0d8'],
+                    berry: ['🫐', '#c9a4ff'] };
 function grantPickup(kind, payload) {
   if (kind === 'item') {
     const item = itemById(payload);
     player.ownItem(payload);
     ui.toast(`🎁 Loot: ${item.icon} ${item.name}!`, 'level');
     panels.refresh();
-  } else if (kind === 'berry') {
-    // berries are eaten on pickup: +10 health each
-    player.hp = Math.min(player.maxHp, player.hp + 10 * payload);
-    ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2), `+${Math.round(10 * payload)} ❤️`, '#ff7a7a');
-    audio.sfx('purchase', 0.35, 400);
-    return;
+  } else if (kind === 'salve' || kind === 'roast') {
+    player.consumables[kind] = (player.consumables[kind] ?? 0) + payload;
+    ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2),
+      `+${payload} ${consumableById(kind).icon}`, '#c9e8a4');
   } else {
     player[kind] = roundResource(player[kind] + payload);
     const [icon, color] = RES_POPUP[kind];
@@ -172,6 +177,21 @@ const spawnWoodLog = (pos) => {
   pickups.spawn('wood', 1, pos, 0.15);
 };
 world.onWoodLog = spawnWoodLog;
+
+// the pet is a REAL combat target: enemies chase and hit it through the
+// same seam as players, and its bites pull threat onto it
+const petProxy = {
+  id: 'pet', isPet: true, hitR: 0.5, sizeMult: 1, stunT: 0,
+  get pos() { return companions.wolf?.pos ?? null; },
+  get mesh() { return companions.wolf?.mesh ?? null; },
+  get dead() { return !companions.wolf || player.petDead; },
+  takeDamage: (dmg, src) => companions.damagePet(dmg, player),
+  applyStun: () => {},
+};
+// current combat target list for the local sim
+function combatTargets() {
+  return (companions.wolf && !player.petDead) ? [player, petProxy] : [player];
+}
 
 function discoverType(type) {
   panels.discover(type);
@@ -258,8 +278,10 @@ const minimap = new Minimap(document.getElementById('minimap'), world);
 function rollBossDrop(enemy) {
   const rank = BOSS_RANKS[enemy.bossRank - 1];
   if (Math.random() < rank.dropChance) {
+    // companions are never loot — you TAME a wolf, you don't skin one for it
     const candidates = ITEMS.filter(i =>
-      !i.free && !player.hasItem(i.id) && i.level <= player.level + 1);
+      !i.free && !player.hasItem(i.id) && i.level <= player.level + 1
+      && i.slot !== 'companion');
     if (!candidates.length) { pickups.spawn('meat', 5, enemy.pos, 1); return; }
     const item = candidates[Math.floor(Math.random() * candidates.length)];
     pickups.spawn('item', item.id, enemy.pos, 0.5);
@@ -315,7 +337,7 @@ function startPlaying() {
       pickups.spawn('hide', Math.round(3 * k), at, 1.2);
       if (bi >= 3) pickups.spawn('iron', 2 + bi, at, 1.2);
       if (Math.random() < 0.4 + bi * 0.06) {
-        const candidates = ITEMS.filter(i => !i.free);
+        const candidates = ITEMS.filter(i => !i.free && i.slot !== 'companion');
         pickups.spawn('item', candidates[Math.floor(Math.random() * candidates.length)].id, at, 0.6);
       }
     };
@@ -566,6 +588,7 @@ async function ensureMp() {
       scene, player, enemyMgr, pickups, projectiles, ui, panels, game, input,
       get world() { return world; }, // MOBA swaps the world object at begin
       get camp() { return camp; },
+      get petTarget() { return (companions.wolf && !player.petDead) ? petProxy : null; },
       popup: (pos, text, color, cls) => ui.popup(pos, text, color, cls),
       onDiscover: discoverType,
       grantPickup,
@@ -694,7 +717,7 @@ $id('mp-code-display').addEventListener('click', async () => {
 
 function buyItem(id) {
   const item = itemById(id);
-  if (!item || player.hasItem(id) || player.level < item.level) return;
+  if (!item || player.level < item.level) return; // re-buying copies is fine
   if (item.needs && camp && !camp.has(item.needs)) return; // era gate (survival)
   const cost = costFor(item.cost, game.kind === 'moba');
   if (!Object.entries(cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
@@ -739,6 +762,52 @@ function buyConsumable(id) {
   audio.sfx('purchase', 0.5);
   panels.refresh();
   panels.flashCard(c.name);
+}
+
+// ---- dropping things at your feet (so a co-op friend can grab them) ----
+function dropAt() {
+  return player.pos.clone().add(player.facing.clone().multiplyScalar(1.6));
+}
+
+function dropResource(key) {
+  const amt = Math.min(5, player[key]);
+  if (amt <= 0) return;
+  player[key] = roundResource(player[key] - amt);
+  const at = dropAt();
+  // the HOST owns pickups in co-op — a guest asks the host to spawn it
+  if (mp?.active && !mp.isHost) mp.sendDrop(key, amt, at.x, at.z);
+  else pickups.spawn(key, amt, at, 0.6);
+  audio.sfx('click', 0.4);
+}
+
+function dropItem(id) {
+  if (id === 'fists' || !player.removeItem(id)) return;
+  // clear the hotkey only when the LAST copy left your hands
+  if (!player.hasItem(id)) {
+    player.spellSlots = player.spellSlots.map(sid => (sid === id ? undefined : sid));
+  }
+  const at = dropAt();
+  if (mp?.active && !mp.isHost) mp.sendDrop('item', id, at.x, at.z);
+  else pickups.spawn('item', id, at, 0.4);
+  audio.sfx('click', 0.4);
+}
+
+function dropConsumable(id) {
+  if ((player.consumables[id] ?? 0) <= 0) return;
+  player.consumables[id]--;
+  const at = dropAt();
+  if (mp?.active && !mp.isHost) mp.sendDrop(id, 1, at.x, at.z);
+  else pickups.spawn(id, 1, at, 0.5);
+  audio.sfx('click', 0.4);
+}
+
+// action bar 1–6: spells cast, items EQUIP
+function useBarSlot(i) {
+  const id = player.spellSlots[i];
+  if (!id) return;
+  if (spellById(id)) player.castSpell(i, { enemyMgr: combatMgr() });
+  else if (itemById(id)) player.equip(id);
+  ui.flashSpell(i);
 }
 
 // ---------- keys ----------
@@ -828,7 +897,7 @@ function claimPoi(poi) {
   } else { // crypt
     pickups.spawn('meat', 15 + ring * 6, at, 1.7);
     pickups.spawn('hide', 3 + ring * 2, at, 1.4);
-    const candidates = ITEMS.filter(i => !i.free && !player.hasItem(i.id));
+    const candidates = ITEMS.filter(i => !i.free && i.slot !== 'companion' && !player.hasItem(i.id));
     if (candidates.length) {
       pickups.spawn('item', candidates[Math.floor(Math.random() * candidates.length)].id, at, 0.6);
     }
@@ -846,7 +915,7 @@ function digTreasure() {
   pickups.spawn('hide', 4 + ring * 2, t, 1.4);
   if (ring >= 2) pickups.spawn('iron', 3 + ring * 2, t, 1.2);
   if (Math.random() < 0.35) {
-    const candidates = ITEMS.filter(i => !i.free && !player.hasItem(i.id));
+    const candidates = ITEMS.filter(i => !i.free && i.slot !== 'companion' && !player.hasItem(i.id));
     if (candidates.length) {
       pickups.spawn('item', candidates[Math.floor(Math.random() * candidates.length)].id, t, 0.6);
     }
@@ -866,8 +935,9 @@ input.onKey('KeyE', () => {
   else if (nearTreasure()) digTreasure();
 });
 
-// H — the keybind legend; F / G — field consumables
+// H — the keybind legend; I — inventory; F / G — field consumables
 input.onKey('KeyH', () => { if (inPlay()) panels.toggle('help'); });
+input.onKey('KeyI', () => { if (inPlay()) panels.toggle('inventory'); });
 input.onKey('KeyF', () => {
   if (!inPlay() || game.paused) return;
   if (!player.useConsumable('salve') && player.consumables.salve <= 0) {
@@ -889,7 +959,7 @@ function nearGrave() {
 
 // resurrection costs 10% of everything invested in the pet (item + training)
 function petResurrectCost() {
-  const item = itemById(player.equipment.pet);
+  const item = itemById(player.equipment.companion);
   if (!item) return null;
   const total = { ...item.cost };
   const track = STAT_TRACKS.find(t => t.id === 'pet');
@@ -902,7 +972,8 @@ function petResurrectCost() {
 }
 
 function canResurrectPetHere() {
-  return game.kind === 'survival' && player.petDead && player.equipment.pet
+  return game.kind === 'survival' && player.petDead
+    && itemById(player.equipment.companion)?.pet
     && !player.dead && (nearHome() || nearGrave());
 }
 
@@ -925,7 +996,7 @@ const PET_MODE_LABEL = {
   passive: '💤 Passive — never attacks',
 };
 input.onKey('KeyP', () => {
-  if (!inPlay() || !player.equipment.pet) return;
+  if (!inPlay() || !itemById(player.equipment.companion)?.pet) return;
   player.petMode = PET_MODES[(PET_MODES.indexOf(player.petMode) + 1) % PET_MODES.length];
   ui.toast(`🐺 Pet mode: ${PET_MODE_LABEL[player.petMode]}`, 'level');
   audio.sfx('click', 0.4);
@@ -936,8 +1007,7 @@ $id('respawn-grave').addEventListener('click', () => reviveAt('grave'));
 for (let i = 0; i < 6; i++) {
   input.onKey('Digit' + (i + 1), () => {
     if (!inPlay() || game.paused) return;
-    player.castSpell(i, { enemyMgr: combatMgr() });
-    ui.flashSpell(i);
+    useBarSlot(i);
   });
 }
 input.onKey('Escape', () => {
@@ -1133,8 +1203,9 @@ function step() {
         mp.updateWorldSim(dt);
         mp.update(dt);
       } else {
-        enemyMgr.update(dt, [player], projectiles);
-        projectiles.update(dt, enemyMgr, [player]);
+        const targets = combatTargets();
+        enemyMgr.update(dt, targets, projectiles);
+        projectiles.update(dt, enemyMgr, targets);
         pickups.update(dt, [player]);
       }
       companions.update(dt, player, em, projectiles, world);
@@ -1206,7 +1277,28 @@ function step() {
 
   updateCamera(dt);
   ui.updateOverlays(dt, camera);
+  renderCharPreview(dt);
   renderer.render(scene, camera);
+}
+
+// ---- armory paper-doll: a second small camera orbiting the actual player ----
+let previewRenderer = null;
+const previewCam = new THREE.PerspectiveCamera(40, 210 / 270, 0.1, 60);
+let previewAngle = Math.PI;
+function renderCharPreview(dt) {
+  if (panels.open !== 'character' || game.mode !== 'play') return;
+  if (!previewRenderer) {
+    previewRenderer = new THREE.WebGLRenderer({
+      canvas: $id('char-preview'), antialias: true, alpha: true });
+    previewRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  }
+  previewAngle += dt * 0.5;
+  previewCam.position.set(
+    player.pos.x + Math.sin(previewAngle) * 4.4,
+    player.mesh.position.y + 2.1,
+    player.pos.z + Math.cos(previewAngle) * 4.4);
+  previewCam.lookAt(player.pos.x, player.mesh.position.y + 0.9, player.pos.z);
+  previewRenderer.render(scene, previewCam);
 }
 
 world.update(0, player.pos); // pre-generate the starting forest

@@ -45,11 +45,6 @@ export class UI {
     $('level-text').textContent = player.level >= MAX_LEVEL
       ? `Lv ${player.level} (MAX)`
       : `Lv ${player.level} — ${player.xp}/${XP_LEVELS[player.level + 1]} XP`;
-    $('meat').textContent = `🍖 ${fmtResource(player.meat)}`;
-    $('wood').textContent = `🪵 ${fmtResource(player.wood)}`;
-    $('stone').textContent = `🪨 ${fmtResource(player.stone)}`;
-    $('hide').textContent = `🟫 ${fmtResource(player.hide)}`;
-    $('iron').textContent = `🔩 ${fmtResource(player.iron)}`;
     $('progress-bar').style.width = (progressPct * 100) + '%';
     $('progress-text').textContent = `${Math.round(progressPct * WORLD.goalR)} m / ${WORLD.goalR} m from home`;
     $('biome-name').textContent = biomeName;
@@ -64,7 +59,7 @@ export class UI {
 
     // pet status line — the P/R controls are invisible without it
     const petEl = $('pet-display');
-    if (player.equipment.pet) {
+    if (itemById(player.equipment.companion)?.pet) {
       petEl.classList.remove('hidden');
       const MODES = { aggressive: '🗡️ Aggressive', defensive: '🛡️ Defensive', passive: '💤 Passive' };
       petEl.innerHTML = player.petDead
@@ -114,20 +109,26 @@ export class UI {
       const id = player.spellSlots[i];
       const iconEl = el.querySelector('.spell-icon');
       const cdEl = el.querySelector('.spell-cd');
-      if (!id) {
+      const spell = id ? spellById(id) : null;
+      const item = id && !spell ? itemById(id) : null;
+      if (!spell && !item) {
         el.classList.add('empty');
         iconEl.innerHTML = '';
         cdEl.style.height = '0%';
         el.title = '';
+        el.classList.remove('equipped-slot');
         continue;
       }
-      const spell = spellById(id);
       el.classList.remove('empty');
-      iconEl.innerHTML = itemIcon(spell);
-      el.title = `${spell.name} — ${spell.desc}`;
-      const cd = player.spellCds[id] || 0;
-      cdEl.style.height = (cd / spell.cd * 100) + '%';
-      el.classList.toggle('ready', cd <= 0);
+      iconEl.innerHTML = itemIcon(spell ?? item);
+      el.title = spell
+        ? `${spell.name} — ${spell.desc}`
+        : `${item.name} — press ${i + 1} to equip`;
+      const cd = spell ? (player.spellCds[id] || 0) : 0;
+      cdEl.style.height = spell ? (cd / spell.cd * 100) + '%' : '0%';
+      el.classList.toggle('ready', spell ? cd <= 0 : true);
+      // hotkeyed gear glows while it's the equipped piece
+      el.classList.toggle('equipped-slot', !!item && player.equipment[item.slot] === id);
     }
   }
 
