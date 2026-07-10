@@ -21,7 +21,7 @@ import { ARENA, ARENA_RETURN_DELAY, arenaReward, ENEMY_TYPES, BOSS_RANKS,
          MOBA_BUILDINGS, roundResource, itemById } from './config.js';
 import { makeMan, makeAxe, makeBow, makePickaxe, makeEnemyMesh, makeMeatDrop, makeWoodDrop,
          makeStoneDrop, makeHideDrop, makeIronDrop, makeBerryDrop, makeSalveDrop, makeRoastDrop,
-         makeEssenceDrop, makeItemDrop,
+         makeEssenceDrop, makeWoolDrop, makeItemDrop,
          makeEnemyShot, makeWolf, makeMobaTower, makeMobaBase,
          makeTeamFlag, TEAM_COLORS, mat } from './models.js';
 import { audio } from './audio.js';
@@ -211,7 +211,7 @@ class ShadowWorld {
       if (!s) {
         const makers = { meat: makeMeatDrop, wood: makeWoodDrop, stone: makeStoneDrop,
                          hide: makeHideDrop, iron: makeIronDrop, berry: makeBerryDrop,
-                         salve: makeSalveDrop, roast: makeRoastDrop, essence: makeEssenceDrop, item: makeItemDrop };
+                         salve: makeSalveDrop, roast: makeRoastDrop, essence: makeEssenceDrop, wool: makeWoolDrop, item: makeItemDrop };
         const mesh = (makers[p.k] || makeItemDrop)();
         mesh.position.set(p.x, this.world.heightAt(p.x, p.z) + 0.45, p.z);
         this.scene.add(mesh);
@@ -965,7 +965,7 @@ export class Multiplayer {
     const dropped = ctx.dropHalfMeat(p.pos.clone());
     p.loseLevel();
     p.mesh.rotation.z = Math.PI / 2; // lie down while "out"
-    ctx.ui.toast(`☠️ You fell… you wake at the cabin. Level lost (now ${p.level}); ${dropped} 🍖 spilled where you died.`, 'boss');
+    ctx.ui.toast(`☠️ You fell… you wake at the cabin. This level's XP progress is gone; ${dropped} 🍖 spilled where you died.`, 'boss');
     setTimeout(() => {
       if (!this.active) return;
       p.revive(1);

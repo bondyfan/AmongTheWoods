@@ -30,12 +30,7 @@ export class Player {
     this.hp = 100;
     this.xp = 0;
     this.level = 1;
-    this.meat = 0;
-    this.wood = 0;
-    this.stone = 0;
-    this.hide = 0;
-    this.iron = 0;
-    this.berry = 0;
+    for (const k of RESOURCES) this[k] = 0; // every resource starts at zero
     this.kills = 0;
     this.campBonus = 0; // extra max hp from the camp home building
 
@@ -53,6 +48,9 @@ export class Player {
 
     // -- consumables (F/G), poison, camp era perks --
     this.consumables = { salve: 0, roast: 0 };
+    this.upgrades = {};   // one-time supply comforts: saddle/bedroll/lining/socks
+    this.idleT = 0;       // seconds standing still (bedroll rest bonus)
+    this.hurtT = 999;     // seconds since last damage taken
     // blacksmith quest line: one active quest, per-biome completion counters
     this.quest = null;        // { biome, idx, type, need, count, name, ... }
     this.questDone = {};      // biomeIndex -> completed count (next idx to offer)
@@ -382,6 +380,8 @@ export class Player {
 
   takeDamage(dmg, src = null) {
     if (this.dead) return;
+    if (this.upgrades.lining) dmg *= 0.92; // quilted wool soaks a bit of everything
+    this.hurtT = 0;
     this.hp -= dmg;
     // every hit shows its number — incoming damage floats red above you
     if (!src?.silent) {
@@ -436,7 +436,10 @@ export class Player {
     this.hasteT = Math.max(0, this.hasteT - dt);
     this.rageT = Math.max(0, this.rageT - dt);
     this.roastT = Math.max(0, this.roastT - dt);
-    if (this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.hpRegen * dt);
+    this.hurtT += dt;
+    // wool bedroll: a moment of stillness out of combat and wounds knit fast
+    const rest = (this.upgrades.bedroll && this.idleT > 3 && this.hurtT > 5) ? 6 : 1;
+    if (this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.hpRegen * rest * dt);
     for (const id in this.spellCds) this.spellCds[id] = Math.max(0, this.spellCds[id] - dt);
 
     // poison ticks in whole numbers once a second so the popups stay readable
@@ -500,13 +503,14 @@ export class Player {
         }
       }
       moving = (mx !== 0 || mz !== 0) && !ctx.boatPlacing; // raft being set up
+      this.idleT = moving ? 0 : this.idleT + dt;
       if (moving) {
         const len = Math.hypot(mx, mz);
         mx /= len; mz /= len;
         // paddling is a touch slower than running; roast buff speeds you up;
         // the swamp (ctx.envSpeedMult) drags at your boots
         const onWater = ctx.boat && world.isWater?.(this.pos.x, this.pos.z);
-        const speed = this.speed * (onWater ? 0.4 : 1)
+        const speed = (this.speed + (ctx.mounted ? 9 : 0)) * (onWater ? 0.4 : 1)
           * (this.roastT > 0 ? 1.1 : 1) * (ctx.envSpeedMult ?? 1);
         // cliffs are walls: block any step that climbs too steeply (walking
         // DOWN or falling off is always allowed); sliding along one is fine
@@ -539,7 +543,7 @@ export class Player {
 
     // -- attack with the equipped weapon --
     this.attackCd -= dt;
-    if (input.attack && this.attackCd <= 0 && this.dashT <= 0) {
+    if (input.attack && this.attackCd <= 0 && this.dashT <= 0 && !ctx.mounted) {
       if (this.weapon.kind === 'bow') this._doShoot(projectiles);
       else this._doMelee(world, enemyMgr, ctx.pickups);
     }
@@ -591,10 +595,9 @@ export class Player {
 
   // Death penalty: drop one full level — back to the previous level with 0 XP
   // progress into it (at level 1 the XP bar just resets to zero).
+  // death wipes the CURRENT level's progress — the level itself stays
   loseLevel() {
-    if (this.level > 1) this.level--;
     this.xp = XP_LEVELS[this.level];
-    this.recompute(); // the level's hp/speed/regen/attack-speed go with it
   }
 
   _inArc(tx, tz, maxDist, extraR = 0) {

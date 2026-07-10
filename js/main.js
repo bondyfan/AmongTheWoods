@@ -5,7 +5,7 @@ import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOB
          RESOURCES, RES_ICONS, HIDE_BEARING, VERDANT_HIDE_DROP, hideForHp, radiusOf, costFor,
          biomeIndexAt, progressAt, fmtResource, roundResource, itemById, spellById,
          consumableById, essenceDropFor, MAX_LEVEL, questFor } from './config.js';
-import { makeAimArc, updateAimArc, makeRaft, makeBlacksmith } from './models.js';
+import { makeAimArc, updateAimArc, makeRaft, makeBlacksmith, makeHorse } from './models.js';
 import { PostFX } from './postfx.js';
 import { Camp } from './camp.js';
 import { audio } from './audio.js';
@@ -165,6 +165,15 @@ const panels = new Panels({
   nearHome: () => nearHome(), // the home building only upgrades in person
   nearSmith: () => nearSmith(), // weapons & gear can only be forged here
   // -- admin mode (singleplayer testing) --
+  onBuySupplyUpgrade: (id, cost) => {
+    if (player.upgrades[id]) return;
+    if (!Object.entries(cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
+    for (const [k, v] of Object.entries(cost)) player[k] = roundResource(player[k] - v);
+    player.upgrades[id] = true;
+    audio.sfx('upgrade', 0.5);
+    ui.toast('✔ Bought — it works from now on.', 'level');
+    panels.refresh();
+  },
   onAcceptQuest: (bi, idx) => acceptQuest(bi, idx),
   onAbandonQuest: () => abandonQuest(),
   currentBiome: () => biomeIndexAt(player.pos.x, player.pos.z),
@@ -230,7 +239,7 @@ panels.player = player;
 // and by the co-op 'grant' event from the host).
 const RES_POPUP = { meat: ['🍖', '#ff9d76'], wood: ['🪵', '#d8a468'],
                     stone: ['🪨', '#c8c8c0'], hide: ['🟫', '#c9986a'], iron: ['🔩', '#c8d0d8'],
-                    berry: ['🫐', '#c9a4ff'], essence: ['🧪', '#5fe07f'] };
+                    berry: ['🫐', '#c9a4ff'], wool: ['🧶', '#f2efe6'], essence: ['🧪', '#5fe07f'] };
 // ---------- blacksmith quests: accept, track, auto-complete ----------
 function acceptQuest(bi, idx) {
   if (player.quest) return;
@@ -359,6 +368,7 @@ const enemyMgr = new EnemyManager(scene, world, {
     // big animals always drop their full hide (even if they chased you back
     // into the Verdant Forest); small critters there — and bats — leave a
     // scrap, with an occasional whole pelt so Lv3 hide gear is reachable early
+    if (enemy.type === 'sheep') pickups.spawn('wool', 1 + (Math.random() < 0.5 ? 1 : 0), enemy.pos, 0.8);
     if (HIDE_BEARING.has(enemy.type)) {
       pickups.spawn('hide', hideForHp(enemy.maxHp), enemy.pos, 1.1 * enemy.sizeMult);
     } else if (biomeIndexAt(enemy.pos.x, enemy.pos.z) === 0 || enemy.type === 'bat') {
@@ -640,7 +650,7 @@ function survivalRespawn() {
   player.loseLevel();
   player.mesh.rotation.z = Math.PI / 2; // lie down while "out"
   audio.sfx('defeat', 0.5);
-  ui.toast(`☠️ You fell… Level lost (now ${player.level}); half your carried loot (${dropped}) spilled where you died. Chest storage is safe.`, 'boss');
+  ui.toast(`☠️ You fell… this level's XP progress is gone; half your carried loot (${dropped}) spilled where you died. Chest storage is safe.`, 'boss');
   setTimeout(() => {
     if (game.mode !== 'play') return;
     // with a graveyard built you choose where to wake up
@@ -1139,6 +1149,8 @@ input.onKey('KeyE', () => {
   }
   if (nearChest()) panels.toggle('chest');
   else if (nearHome()) panels.toggle('base');
+  else if (nearWildHorse()) tameHorse(nearWildHorse());
+  else if (nearParkedHorse()) { mountUp(); audio.sfx('click', 0.5); }
   else if (nearSmith()) { // the forge: quests + weapons & gear live HERE
     if (!panels.openSet.has('smith')) panels.toggle('smith');
     else panels.renderSmith();
@@ -1189,6 +1201,8 @@ function canResurrectPetHere() {
     && itemById(player.equipment.companion)?.pet
     && !player.dead && (nearHome() || nearGrave());
 }
+
+input.onKey('KeyX', () => { if (inPlay()) dismountHorse(); });
 
 input.onKey('KeyR', () => {
   if (!inPlay() || !canResurrectPetHere()) return;
@@ -1287,6 +1301,39 @@ const raft = makeRaft();
 raft.visible = false;
 scene.add(raft);
 let wasOnWater = false, boatPlaceT = 0, waveT = 0, lastWaveX = 0, lastWaveZ = 0;
+
+// ---- riding: saddle a wild horse (E), ride with +9 speed, X dismounts ----
+let horseMesh = null;     // the tamed horse's mesh (under you, or parked)
+let parkedAt = null;      // { x, z } while dismounted
+function nearWildHorse() {
+  if (!player.upgrades.saddle || player.mounted || game.kind !== 'survival') return null;
+  return enemyMgr.list.find(e => e.type === 'horse' && !e.dying
+    && Math.hypot(e.pos.x - player.pos.x, e.pos.z - player.pos.z) < 3.4) ?? null;
+}
+function nearParkedHorse() {
+  return !player.mounted && horseMesh && parkedAt
+    && Math.hypot(parkedAt.x - player.pos.x, parkedAt.z - player.pos.z) < 3.4;
+}
+function tameHorse(e) {
+  const i = enemyMgr.list.indexOf(e);
+  if (i >= 0) { scene.remove(e.mesh); enemyMgr.list.splice(i, 1); }
+  if (!horseMesh) { horseMesh = makeHorse(); scene.add(horseMesh); }
+  mountUp();
+  ui.toast('🐴 Saddled! +9 speed while riding — you cannot attack. X to dismount.', 'level');
+  audio.sfx('spawn', 0.5);
+}
+function mountUp() {
+  player.mounted = true;
+  parkedAt = null;
+  horseMesh.visible = true;
+}
+function dismountHorse() {
+  if (!player.mounted) return;
+  player.mounted = false;
+  parkedAt = { x: player.pos.x, z: player.pos.z };
+  horseMesh.position.set(parkedAt.x, world.heightAt(parkedAt.x, parkedAt.z), parkedAt.z);
+  audio.sfx('click', 0.4);
+}
 
 // ---- channeled actions (revive / pet resurrection): 2 s of standing still
 // with a pulsing green ring; moving or dying interrupts ----
@@ -1401,6 +1448,8 @@ function updateAtmosphere(dt) {
   envSpeedMult *= Math.min(
     enemyMgr?.webSlowAt?.(player.pos.x, player.pos.z) ?? 1,
     world.webSlowAt?.(player.pos.x, player.pos.z) ?? 1);
+  // thick wool socks: mud and webs only bite half as hard
+  if (player.upgrades.socks) envSpeedMult = 1 - (1 - envSpeedMult) * 0.5;
   const biome = BIOMES[game.biomeIndex];
 
   // the cave is dark; light floods in as you walk toward the mouth
@@ -1531,6 +1580,7 @@ function step() {
       boat: game.kind === 'survival' && camp?.has('boat'),
       boatPlacing: boatPlaceT > 0,
       rpgView: game.rpgView,
+      mounted: player.mounted,
       envSpeedMult,
     });
 
@@ -1569,6 +1619,20 @@ function step() {
         mp?.active && mp.mode === 'coop' ? mp.remote : null);
       updateAtmosphere(dt);
       updatePings(dt);
+
+      // the horse carries you: mesh rides under the player, legs trot
+      if (player.mounted && horseMesh) {
+        if (world.isWater(player.pos.x, player.pos.z)) dismountHorse();
+        else {
+          horseMesh.position.set(player.pos.x, world.heightAt(player.pos.x, player.pos.z), player.pos.z);
+          horseMesh.rotation.y = player.mesh.rotation.y + Math.PI;
+          player.mesh.position.y += 0.95; // sit in the saddle
+          const legs = horseMesh.userData.legs ?? [];
+          legs.forEach((leg, li) => {
+            leg.rotation.x = Math.sin(player.walkT * 1.6 + (li % 2) * Math.PI) * 0.55;
+          });
+        }
+      }
 
       // raft under the hero while paddling — stepping onto water first means
       // 2 s of setting the raft down (no moving), then a slow paddle with a
@@ -1612,6 +1676,8 @@ function step() {
         : mp?.revivablePartner?.() ? '💚 Your partner is DOWN — press <kbd>E</kbd> to revive!'
         : nearChest() ? '📦 Storage chest — press <kbd>E</kbd> to open'
         : nearHome() ? '🏠 Your home — press <kbd>E</kbd> to build &amp; upgrade'
+        : nearWildHorse() ? '🐴 A wild horse — press <kbd>E</kbd> to saddle and ride it'
+        : nearParkedHorse() ? '🐴 Your horse — press <kbd>E</kbd> to mount'
         : nearSmith() ? '⚒️ Blacksmith — press <kbd>E</kbd> for quests &amp; the forge'
         : poi ? POI_HINTS[poi.type]
         : nearTreasure() ? '💰 This is the spot — press <kbd>E</kbd> to dig' : null;

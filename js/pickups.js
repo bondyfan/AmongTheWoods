@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { makeMeatDrop, makeWoodDrop, makeItemDrop, makeStoneDrop, makeHideDrop, makeIronDrop,
-         makeBerryDrop, makeSalveDrop, makeRoastDrop, makeEssenceDrop } from './models.js';
+         makeBerryDrop, makeSalveDrop, makeRoastDrop, makeEssenceDrop, makeWoolDrop } from './models.js';
 import { roundResource } from './config.js';
 import { audio } from './audio.js';
 
@@ -27,7 +27,8 @@ export class Pickups {
     if (kind !== 'item') payload = roundResource(payload);
     const makers = { meat: makeMeatDrop, wood: makeWoodDrop, stone: makeStoneDrop,
                      hide: makeHideDrop, iron: makeIronDrop, berry: makeBerryDrop,
-                     salve: makeSalveDrop, roast: makeRoastDrop, essence: makeEssenceDrop, item: makeItemDrop };
+                     salve: makeSalveDrop, roast: makeRoastDrop, essence: makeEssenceDrop,
+                     wool: makeWoolDrop, item: makeItemDrop };
     const mesh = (makers[kind] || makeItemDrop)();
     const x = pos.x + (Math.random() - 0.5) * scatter * 2;
     const z = pos.z + (Math.random() - 0.5) * scatter * 2;

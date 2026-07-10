@@ -626,6 +626,59 @@ export function makeIceGolem() {
   return humanoid({ fur: 0xaabfcc, face: 0x6d8494, eyes: 0x66eaff, width: 1.25, height: 0.95 });
 }
 
+// wild horse: long-legged quadruped — saddle it and RIDE
+export function makeHorse(rng = Math.random) {
+  const g = new THREE.Group();
+  const coat = [0x6b4a2d, 0x4a3520, 0x8a7a66, 0x2e2a26][Math.floor(rng() * 4)];
+  const body = box(0.62, 0.62, 1.5, coat);
+  body.position.y = 1.05;
+  body.castShadow = true;
+  g.add(body);
+  const neck = box(0.32, 0.7, 0.34, coat);
+  neck.position.set(0, 1.55, -0.72);
+  neck.rotation.x = 0.5;
+  g.add(neck);
+  const head = box(0.3, 0.32, 0.62, coat);
+  head.position.set(0, 1.95, -1.02);
+  g.add(head);
+  const muzzle = box(0.22, 0.22, 0.24, 0x3a2c1c);
+  muzzle.position.set(0, -0.03, -0.4);
+  head.add(muzzle);
+  for (const side of [-1, 1]) {
+    const ear = box(0.08, 0.18, 0.06, coat);
+    ear.position.set(side * 0.1, 0.24, 0.1);
+    head.add(ear);
+  }
+  const mane = box(0.12, 0.5, 0.5, 0x2a2018);
+  mane.position.set(0, 1.75, -0.62);
+  mane.rotation.x = 0.5;
+  g.add(mane);
+  const tail = box(0.12, 0.55, 0.12, 0x2a2018);
+  tail.position.set(0, 1.15, 0.82);
+  tail.rotation.x = -0.5;
+  g.add(tail);
+  const legs = [];
+  for (const [lx, lz] of [[-0.24, -0.55], [0.24, -0.55], [-0.24, 0.55], [0.24, 0.55]]) {
+    const leg = box(0.16, 0.78, 0.18, coat);
+    leg.position.set(lx, 0.39, lz);
+    g.add(leg);
+    legs.push(leg);
+  }
+  g.userData = { legs, head };
+  return g;
+}
+
+// dropped tuft of wool: soft white puffs
+export function makeWoolDrop() {
+  const g = new THREE.Group();
+  for (const [x, y, z, r] of [[0, 0.14, 0, 0.16], [-0.12, 0.1, 0.06, 0.11], [0.12, 0.12, -0.05, 0.12], [0.02, 0.24, 0.04, 0.1]]) {
+    const puff = sphere(r, 0xf2efe6, 6);
+    puff.position.set(x, y, z);
+    g.add(puff);
+  }
+  return g;
+}
+
 // ---------- humanoid camp sites: a dwelling + campfire ----------
 // kind 'tribal' (tribesman/shaman) gets a teepee; everyone else a log hut.
 export function makeHumanCamp(kind = 'bandit', rng = Math.random) {
@@ -884,6 +937,7 @@ export function makeEnemyMesh(type) {
     case 'bogCrawler': return makeBogCrawler();
     case 'harpy': return makeHarpy();
     case 'frostWisp': return makeFrostWisp();
+    case 'horse': return makeHorse();
   }
 }
 

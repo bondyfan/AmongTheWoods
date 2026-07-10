@@ -36,39 +36,42 @@ export const BIOMES = [
     trees: { pine: 0.3, leafy: 0.1, birch: 0, dead: 0.6 }, snowy: false,
     grass: 0x5c6650, flowers: false, mushrooms: true,
     enemies: ['zombie', 'bat', 'venomspider', 'wolf', 'treant'], humanoids: ['shaman'], packs: { skulls: [0.6, 0.3, 0.1] }, treeDensity: 1.1, denseForests: true,
-    spiderHaunt: true },
+    spiderHaunt: true, critters: ['horse'] },
   { name: 'Murky Swamp',    rMax: 2900, ground: 0x565c30, ground2: 0x4a5230, dirt: 0x3a3c28,
     fog: 0x8a9678, sky: 0x93a08c,
     foliage: [0x3a5a30, 0x2e4a2a, 0x4a6438], trunk: 0x453a28,
     trees: { pine: 0.2, leafy: 0.5, birch: 0, dead: 0.3 }, snowy: false,
     grass: 0x60704a, flowers: false, mushrooms: true,
-    enemies: ['snake', 'venomspider', 'stormsnake', 'boar', 'bogCrawler'], humanoids: ['tribesman', 'shaman'], packs: { skulls: [0.5, 0.4, 0.1] }, treeDensity: 0.9, denseForests: true },
+    enemies: ['snake', 'venomspider', 'stormsnake', 'boar', 'bogCrawler'], humanoids: ['tribesman', 'shaman'], packs: { skulls: [0.5, 0.4, 0.1] }, treeDensity: 0.9, denseForests: true,
+    critters: ['horse'] },
   { name: 'Highlands',      rMax: 3800, ground: 0x9a8a50, ground2: 0xa89658, dirt: 0xa8874f,
     fog: 0xc9c0a0, sky: 0x9db4c4,
     foliage: [0x5c6e33, 0x6d7d3a, 0x4e5e2c], trunk: 0x5c4a33,
     trees: { pine: 0.5, leafy: 0.1, birch: 0.1, dead: 0.3 }, snowy: false,
     grass: 0x8f9060, flowers: false, mushrooms: false,
     enemies: ['wolf', 'boar', 'elk', 'venomspider', 'stormsnake', 'harpy'], humanoids: ['poacher'], packs: { skulls: [0.4, 0.4, 0.2] }, treeDensity: 0.7,
-    critters: ['rabbit', 'rabbit', 'rabbit', 'sheep'] },
+    critters: ['rabbit', 'rabbit', 'sheep', 'horse'] },
   { name: 'Snowfall Woods', rMax: 4700, ground: 0xdfe7ec, ground2: 0xd0dce4, dirt: 0xb4c4d1,
     fog: 0xe6edf2, sky: 0xc9d9e4,
     foliage: [0x3d6155, 0x4a6e60, 0x35564b], trunk: 0x4a3a30,
     trees: { pine: 0.8, leafy: 0, birch: 0, dead: 0.2 }, snowy: true,
     grass: 0xc2d2dc, flowers: false, mushrooms: false,
-    enemies: ['icewolf', 'icespider', 'bear', 'stormsnake', 'frostWisp'], humanoids: ['poacher'], packs: { skulls: [0.3, 0.5, 0.2] }, treeDensity: 0.85 },
+    enemies: ['icewolf', 'icespider', 'bear', 'stormsnake', 'frostWisp'], humanoids: ['poacher'], packs: { skulls: [0.3, 0.5, 0.2] }, treeDensity: 0.85,
+    critters: ['horse'] },
   { name: 'Jungle',         rMax: 5100, ground: 0x2f8a28, ground2: 0x3a9c32, dirt: 0x7a6030,
     fog: 0x8ac878, sky: 0x8cc8e0,
     foliage: [0x1f6b2a, 0x2d8a34, 0x39a03e], trunk: 0x5a4426,
     trees: { pine: 0.1, leafy: 0.7, birch: 0.2, dead: 0 }, snowy: false,
     grass: 0x4f8f3a, flowers: true, mushrooms: true,
     enemies: ['snake', 'venomspider', 'boar', 'stormsnake', 'bear', 'harpy', 'bogCrawler'], humanoids: ['tribesman'], packs: { skulls: [0.2, 0.5, 0.3] }, treeDensity: 1.6, denseForests: true,
-    critters: ['rabbit', 'rabbit', 'rabbit', 'sheep'] },
+    critters: ['rabbit', 'rabbit', 'sheep', 'horse'] },
   { name: 'Frozen Peak',    rMax: 99999, ground: 0xf2f6fa, ground2: 0xe4ecf3, dirt: 0xc9d6e1,
     fog: 0xf4f8fc, sky: 0xdfe9f2,
     foliage: [0x8fb0c0, 0x3d6155, 0xcfdfe8], trunk: 0x3d3229,
     trees: { pine: 0.7, leafy: 0, birch: 0, dead: 0.3 }, snowy: true,
     grass: 0xdde7ee, flowers: false, mushrooms: false,
-    enemies: ['icewolf', 'wendigo', 'yeti', 'icegolem', 'frostWisp'], packs: { skulls: [0, 0.5, 0.5] }, treeDensity: 0.5 },
+    enemies: ['icewolf', 'wendigo', 'yeti', 'icegolem', 'frostWisp'], packs: { skulls: [0, 0.5, 0.5] }, treeDensity: 0.5,
+    critters: ['horse'] },
 ];
 
 export function biomeIndexAt(x, z) {
@@ -84,8 +87,8 @@ export function progressAt(x, z) {
 }
 
 // ---- resources ----
-export const RESOURCES = ['meat', 'wood', 'stone', 'hide', 'iron', 'berry', 'essence'];
-export const RES_ICONS = { meat: '🍖', wood: '🪵', stone: '🪨', hide: '🟫', iron: '🔩', berry: '🫐', essence: '🧪' };
+export const RESOURCES = ['meat', 'wood', 'stone', 'hide', 'iron', 'berry', 'wool', 'essence'];
+export const RES_ICONS = { meat: '🍖', wood: '🪵', stone: '🪨', hide: '🟫', iron: '🔩', berry: '🫐', wool: '🧶', essence: '🧪' };
 // Ethereal Essence drops from creatures of the Dark Forest and beyond —
 // deeper rings drop it more often and in bigger gulps.
 export const essenceDropFor = (biomeIndex) => {
@@ -119,6 +122,9 @@ export const ENEMY_TYPES = {
   sheep:  { name: 'Sheep', icon: '🐑',
              hp: 40,  dmg: 0,  speed: 3.5, range: 0,   attackCd: 1.0, xp: 4,  hitR: 0.6, aggro: 0,
              passive: true, herd: [10, 20], guardian: 'wolf' },
+  horse:   { name: 'Wild Horse', icon: '🐴',
+             hp: 120, dmg: 0,  speed: 10.5, range: 0,  attackCd: 1.0, xp: 6,  meat: 2, hitR: 0.8, aggro: 0,
+             passive: true, herd: [4, 9] }, // saddle one (E) and RIDE it
   rat:     { name: 'Giant Rat', icon: '🐀',
              hp: 65,  dmg: 4,  speed: 5, range: 1.2, attackCd: 0.9, xp: 5,  meat: 1, hitR: 0.5,  aggro: 13 },
   spider:  { name: 'Forest Spider', icon: '🕷️',
@@ -576,6 +582,18 @@ export const MOBA_AI_TIMELINE = [
 // be lashed together at home
 export const isForgeItem = (i) =>
   ['weapon', 'head', 'chest', 'boots', 'charm'].includes(i.slot) && !i.free && i.id !== 'club';
+
+// one-time survival comforts sold in the Supplies tab (like the Bag Upgrade)
+export const SUPPLY_UPGRADES = [
+  { id: 'saddle',  icon: '🐴', name: 'Riding Saddle', cost: { hide: 12, iron: 4, meat: 30 },
+    desc: 'Saddle a wild horse (E next to one, 3rd biome onward). Riding: +9 speed, but you cannot attack. X to dismount.' },
+  { id: 'bedroll', icon: '🛏️', name: 'Wool Bedroll', cost: { wool: 8, hide: 4 },
+    desc: 'Stand still for a moment out of combat and you regenerate 6× faster.' },
+  { id: 'lining',  icon: '🧥', name: 'Quilted Wool Lining', cost: { wool: 14, hide: 8 },
+    desc: 'Wool padding under everything you wear: all damage taken −8%.' },
+  { id: 'socks',   icon: '🧦', name: 'Thick Wool Socks', cost: { wool: 10, meat: 20 },
+    desc: 'Swamp mud and spider webs slow you only HALF as much.' },
+];
 
 export const SHOP_GROUPS = [
   { key: 'weapons',  label: '⚔️ Weapons',   items: () => ITEMS.filter(i => i.slot === 'weapon' && !i.free && !isForgeItem(i)) },

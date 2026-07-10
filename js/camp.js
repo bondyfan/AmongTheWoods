@@ -26,7 +26,7 @@ export class Camp {
     this.player = player;
     this.hooks = hooks; // { popup, toast }
     this.levels = { home: 0, chest: 0, furnace: 0, boat: 0, tower: 0, grave: 0 };
-    this.storage = { meat: 0, wood: 0, stone: 0, hide: 0, iron: 0, berry: 0 };
+    this.storage = Object.fromEntries(RESOURCES.map(k => [k, 0])); // incl. wool/essence
     this.meshes = {};
     this.gravePos = null;
     this.smeltT = 20;

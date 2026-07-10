@@ -1,7 +1,7 @@
 // ---- Modal panels: upgrade shop (grouped tabs), character sheet with
 // equipment slots, bestiary of discovered creatures ----
 
-import { SHOP_GROUPS, SMITH_GROUPS, questFor, QUESTS_PER_BIOME, BIOMES, SLOTS, SLOT_LABELS, ENEMY_TYPES, ITEMS, SPELLS,
+import { SHOP_GROUPS, SMITH_GROUPS, SUPPLY_UPGRADES, questFor, QUESTS_PER_BIOME, BIOMES, SLOTS, SLOT_LABELS, ENEMY_TYPES, ITEMS, SPELLS,
          STAT_TRACKS, MOBA_BUILDINGS, CAMP_BUILDINGS, RES_ICONS, RESOURCES, CONSUMABLES,
          MAX_SPELL_SLOTS, fmtResource, itemById, spellById, costFor } from './config.js';
 
@@ -340,6 +340,23 @@ export class Panels {
 
   // Consumables: repeatable purchases, used in the field with F / G.
   _renderSupplies(wrap) {
+    // one-time comforts first: saddle + the three wool crafts
+    for (const u of SUPPLY_UPGRADES) {
+      const owned = !!this.player.upgrades?.[u.id];
+      const affordable = this._affordable(u.cost);
+      const card = document.createElement('div');
+      card.className = 'card' + (owned ? ' owned' : affordable ? ' buyable' : ' expensive');
+      card.innerHTML = `
+        <div class="card-head"><span class="icon">${u.icon}</span>
+          <span class="name">${u.name}</span><span class="lv">upgrade</span></div>
+        <div class="desc">${u.desc}</div>
+        <div class="card-foot">${owned ? '<span class="tag ok">✔ Owned</span>'
+          : `<button class="buy-btn" data-supply="${u.id}">Buy — ${this._costStr(u.cost)}</button>`}</div>`;
+      card.querySelector('[data-supply]')?.addEventListener('click', () =>
+        this.hooks.onBuySupplyUpgrade?.(u.id, u.cost));
+      wrap.appendChild(card);
+    }
+
     for (const c of CONSUMABLES) {
       const owned = this.player.consumables?.[c.id] ?? 0;
       const affordable = this._affordable(c.cost);
@@ -786,7 +803,7 @@ export class Panels {
     chest.style.gridColumn = '1 / -1';
     chest.innerHTML = `<div class="card-head"><span class="icon">${itemIcon({ id: 'chest' })}</span>
       <span class="name">Stored</span>
-      <span class="lv">🍖 ${fmtResource(camp.storage.meat)} · 🪵 ${fmtResource(camp.storage.wood)} · 🪨 ${fmtResource(camp.storage.stone)} · ${resIcon('hide', '🟫')} ${fmtResource(camp.storage.hide)} · 🔩 ${fmtResource(camp.storage.iron)} · 🫐 ${fmtResource(camp.storage.berry)}</span></div>
+      <span class="lv">${RESOURCES.map(k => `${resIcon(k, RES_ICONS[k])} ${fmtResource(camp.storage[k] ?? 0)}`).join(' · ')}</span></div>
       <div class="desc">Whatever is stored here survives your death.</div>
       <div class="card-foot">
         <button class="buy-btn" data-chest="deposit">Deposit all</button>
