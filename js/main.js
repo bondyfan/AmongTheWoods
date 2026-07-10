@@ -282,16 +282,19 @@ function discoverType(type) {
 const enemyMgr = new EnemyManager(scene, world, {
   popup: (pos, text, color, cls) => ui.popup(pos, text, color, cls),
   onKill: (enemy) => {
-    // kill XP is SHARED: every player within 100 m of the kill gets the full
-    // award (the partner is credited via shareKillXp); a killer sniping from
-    // beyond that still eats what they killed
-    const partnerGot = mp?.active && mp.shareKillXp?.(enemy);
+    // kill XP is SHARED: every player within 100 m of the kill is rewarded —
+    // 75% each when both share, the full amount when only one collects. The
+    // +XP counter pops above the CHARACTER, not the corpse.
+    const partnerGot = mp?.active && mp.partnerNearKill?.(enemy);
     const nearMe = !player.dead
       && Math.hypot(player.pos.x - enemy.pos.x, player.pos.z - enemy.pos.z) < 100;
-    if (nearMe || (!partnerGot && enemy.lastHitBy !== 'partner')) {
+    const meGot = nearMe || (!partnerGot && enemy.lastHitBy !== 'partner');
+    const xp = Math.max(1, Math.round(enemy.xp * (meGot && partnerGot ? 0.75 : 1)));
+    if (partnerGot) mp.sendKillXp(xp);
+    if (meGot) {
       player.kills++;
-      player.addXp(enemy.xp);
-      ui.popup(enemy.mesh.position.clone().setY(enemy.mesh.position.y + 2.1), `+${enemy.xp} XP`, '#c9a4ff');
+      player.addXp(xp);
+      ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2.3), `+${xp} XP`, '#c9a4ff');
     }
     // meat falls to the ground and is magnet-collected (shared in co-op)
     const piles = Math.min(4, Math.max(1, Math.round(enemy.meat / 2)));
@@ -1037,7 +1040,11 @@ function digTreasure() {
 
 input.onKey('KeyE', () => {
   if (!inPlay()) return;
-  if (mp?.tryRevivePartner?.()) return; // co-op: helping a downed friend wins
+  if (mp?.revivablePartner?.()) { // co-op: helping a downed friend wins
+    const t = mp.remote.targetPos;
+    startChannel(2, '💚 Reviving partner…', { x: t.x, z: t.z }, () => mp.tryRevivePartner());
+    return;
+  }
   if (nearChest()) panels.toggle('chest');
   else if (nearHome()) panels.toggle('base');
   else if (nearSmith()) { // the forge: weapons & gear only sell HERE
@@ -1096,12 +1103,16 @@ input.onKey('KeyR', () => {
   if (!inPlay() || !canResurrectPetHere()) return;
   const cost = petResurrectCost();
   if (!Object.entries(cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
-  for (const [k, v] of Object.entries(cost)) player[k] = roundResource(player[k] - v);
-  player.petDead = false;
-  companions.sync(player);
-  ui.toast('🐺 Your pet is back at your side!', 'level');
-  audio.sfx('spawn', 0.6);
-  panels.refresh();
+  startChannel(2, '🐺 Resurrecting pet…', { x: player.pos.x, z: player.pos.z }, () => {
+    if (!canResurrectPetHere()) return; // wandered off / pet state changed
+    if (!Object.entries(cost).every(([k, v]) => player[k] >= v)) return;
+    for (const [k, v] of Object.entries(cost)) player[k] = roundResource(player[k] - v);
+    player.petDead = false;
+    companions.sync(player);
+    ui.toast('🐺 Your pet is back at your side!', 'level');
+    audio.sfx('spawn', 0.6);
+    panels.refresh();
+  });
 });
 
 const PET_MODES = ['aggressive', 'defensive', 'passive'];
@@ -1185,6 +1196,45 @@ const raft = makeRaft();
 raft.visible = false;
 scene.add(raft);
 let wasOnWater = false, boatPlaceT = 0, waveT = 0, lastWaveX = 0, lastWaveZ = 0;
+
+// ---- channeled actions (revive / pet resurrection): 2 s of standing still
+// with a pulsing green ring; moving or dying interrupts ----
+let channel = null;
+function startChannel(dur, label, at, onDone) {
+  cancelChannel(true);
+  const fx = new THREE.Mesh(new THREE.RingGeometry(0.7, 0.92, 24),
+    new THREE.MeshBasicMaterial({ color: 0x7fff9f, transparent: true, opacity: 0.85 }));
+  fx.rotation.x = -Math.PI / 2;
+  fx.position.set(at.x, world.heightAt(at.x, at.z) + 0.15, at.z);
+  scene.add(fx);
+  channel = { t: 0, dur, label, sx: player.pos.x, sz: player.pos.z, fx, onDone };
+  audio.sfx('evolve_ready', 0.4);
+}
+function cancelChannel(silent = false) {
+  if (!channel) return;
+  scene.remove(channel.fx);
+  channel.fx.material.dispose();
+  channel = null;
+  if (!silent) { ui.toast('✋ Interrupted!', ''); audio.sfx('click', 0.35); }
+}
+function updateChannel(dt) {
+  if (!channel) return;
+  if (player.dead
+      || Math.hypot(player.pos.x - channel.sx, player.pos.z - channel.sz) > 0.8) {
+    cancelChannel();
+    return;
+  }
+  channel.t += dt;
+  const k = channel.t / channel.dur;
+  channel.fx.scale.setScalar(1 + k * 1.4 + Math.sin(k * Math.PI * 6) * 0.12);
+  channel.fx.material.opacity = 0.85 * (0.55 + 0.45 * Math.abs(Math.sin(k * 14)));
+  if (channel.t >= channel.dur) {
+    const done = channel.onDone;
+    cancelChannel(true);
+    audio.sfx('purchase', 0.5);
+    done();
+  }
+}
 const waves = [];
 const waveGeo = new THREE.RingGeometry(0.5, 0.62, 20);
 function spawnWave(x, z) {
@@ -1392,6 +1442,8 @@ function step() {
       }
       updateWaves(dt);
 
+      updateChannel(dt);
+
       // contextual E hint: revive > chest > home > landmark > treasure
       const hintEl = $id('home-hint');
       const poi = nearPoi();
@@ -1401,6 +1453,7 @@ function step() {
         crypt: '☗ Forgotten crypt — clear the keepers, then <kbd>E</kbd> to loot',
       };
       const hint = panels.open ? null
+        : channel ? `✨ ${channel.label} ${Math.min(99, Math.round((channel.t / channel.dur) * 100))}%`
         : mp?.revivablePartner?.() ? '💚 Your partner is DOWN — press <kbd>E</kbd> to revive!'
         : nearChest() ? '📦 Storage chest — press <kbd>E</kbd> to open'
         : nearHome() ? '🏠 Your home — press <kbd>E</kbd> to build &amp; upgrade'

@@ -1009,19 +1009,18 @@ export class Multiplayer {
       ...(ownerLock ? { lk: 1 } : {}) });
   }
 
-  // co-op: kill XP is SHARED — the partner gets the full award if they're
-  // within 100 m of the kill (or if they landed the killing blow from afar)
-  shareKillXp(enemy) {
+  // co-op: is the partner eligible for this kill's XP? (within 100 m of the
+  // kill, or they landed the killing blow from beyond it)
+  partnerNearKill(enemy) {
     if (!this.active || this.mode !== 'coop' || !this.isHost) return false;
     const r = this.remote;
     const partnerUp = r?.mesh?.visible && !r.dead;
-    const nearKill = partnerUp
-      && Math.hypot(r.pos.x - enemy.pos.x, r.pos.z - enemy.pos.z) < 100;
-    if (nearKill || enemy.lastHitBy === 'partner') {
-      WoodsNet.sendEvent({ type: 'xpkill', xp: enemy.xp });
-      return true;
-    }
-    return false;
+    return (partnerUp && Math.hypot(r.pos.x - enemy.pos.x, r.pos.z - enemy.pos.z) < 100)
+      || enemy.lastHitBy === 'partner';
+  }
+
+  sendKillXp(xp) {
+    WoodsNet.sendEvent({ type: 'xpkill', xp });
   }
 
   // co-op host: a pickup was magnet-collected by the partner's proxy
