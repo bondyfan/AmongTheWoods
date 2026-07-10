@@ -207,20 +207,27 @@ export const SLOT_LABELS = { weapon: 'Weapon', head: 'Head', chest: 'Chest', boo
 export const ITEMS = [
   // -- weapons: melee (chop = tree felling & rock mining power) --
   { id: 'fists',      slot: 'weapon', level: 1, icon: '🖐️', name: 'Bare Hands',   cost: null, free: true,
-    weapon: { kind: 'melee', dmg: 12, cd: 0.45, range: 1.5, chop: 0.5, tier: 0 },
-    desc: 'Punch things. Can slowly break small trees for wood (rocks need a real tool).' },
+    weapon: { kind: 'melee', dmg: 12, cd: 0.45, range: 1.5, chop: 0, mine: 0, tier: 0 },
+    desc: 'Punch things. Bare hands can\'t fell trees or mine — craft tools!' },
   { id: 'club',       slot: 'weapon', level: 2, icon: '🏏', name: 'Wooden Club',   cost: { wood: 4 },
-    weapon: { kind: 'melee', dmg: 22, cd: 0.5, range: 1.7, chop: 1, tier: 1 },
-    desc: 'A crude stone-age club. Damage 22, chops trees and mines rocks.' },
+    weapon: { kind: 'melee', dmg: 22, cd: 0.5, range: 1.7, chop: 0.5, mine: 0, tier: 1 },
+    desc: 'A crude stone-age club. Damage 22; fells trees, but SLOWLY.' },
   { id: 'stoneAxe',   slot: 'weapon', level: 3, icon: '🪓', name: 'Stone Axe',     cost: { wood: 12, stone: 10 },
-    weapon: { kind: 'melee', dmg: 38, cd: 0.5, range: 1.8, chop: 2, tier: 1 },
-    desc: 'Knapped stone on a haft. Damage 38, fast chopping & mining.' },
+    weapon: { kind: 'melee', dmg: 38, cd: 0.5, range: 1.8, chop: 2, mine: 0, tier: 1 },
+    desc: 'Knapped stone on a haft. Damage 38, chops trees FAST.' },
   { id: 'steelAxe',   slot: 'weapon', level: 6, icon: '⚒️', name: 'Iron Axe',      cost: { wood: 18, iron: 6 }, needs: 'furnace',
-    weapon: { kind: 'melee', dmg: 68, cd: 0.48, range: 1.9, chop: 3, tier: 2 },
-    desc: 'Smelted iron head. Damage 68, tears through wood and rock.' },
+    weapon: { kind: 'melee', dmg: 68, cd: 0.48, range: 1.9, chop: 3, mine: 0, tier: 2 },
+    desc: 'Smelted iron head. Damage 68, tears through any tree.' },
   { id: 'warAxe',     slot: 'weapon', level: 8, icon: '🔥', name: 'War Axe',       cost: { wood: 25, iron: 16, hide: 6 }, needs: 'furnace',
-    weapon: { kind: 'melee', dmg: 120, cd: 0.48, range: 2.0, chop: 4, tier: 3 },
+    weapon: { kind: 'melee', dmg: 120, cd: 0.48, range: 2.0, chop: 4, mine: 0, tier: 3 },
     desc: 'Iron-age battle axe. Damage 120.' },
+  // -- tools: pickaxes are the ONLY way to mine rock --
+  { id: 'bonePick',   slot: 'weapon', level: 3, icon: '⛏️', name: 'Bone Pickaxe',  cost: { wood: 10, hide: 2, meat: 8 },
+    weapon: { kind: 'melee', dmg: 20, cd: 0.55, range: 1.7, chop: 0, mine: 1, tier: 1, pick: true },
+    desc: 'Carved from a beast\'s bones. Mines rock (slowly); a clumsy weapon (20 dmg).' },
+  { id: 'ironPick',   slot: 'weapon', level: 6, icon: '⚒️', name: 'Iron Pickaxe',  cost: { wood: 15, iron: 8 }, needs: 'furnace',
+    weapon: { kind: 'melee', dmg: 55, cd: 0.5, range: 1.8, chop: 0.5, mine: 2.5, tier: 2, pick: true },
+    desc: 'Bites deep into stone — rocks crack in two swings. Damage 55.' },
   // -- weapons: ranged (invented with the Wooden Cabin era; train Range to extend) --
   { id: 'huntingBow', slot: 'weapon', level: 4, icon: '🏹', name: 'Hunting Bow',   cost: { wood: 25, hide: 4 }, needs: 'cabin',
     weapon: { kind: 'bow', dmg: 16, cd: 0.75, range: 3.5, pierce: false, tier: 1 },
@@ -233,8 +240,8 @@ export const ITEMS = [
     desc: 'Very fast piercing arrows, reach 10 m.' },
   // -- medieval (Age 5, needs the Keep) --
   { id: 'steelSword', slot: 'weapon', level: 9, icon: '⚔️', name: 'Knight\'s Sword', cost: { iron: 25, wood: 10, hide: 8 }, needs: 'keep',
-    weapon: { kind: 'melee', dmg: 150, cd: 0.42, range: 2.1, chop: 4, tier: 3 },
-    desc: 'Medieval steel. Damage 150, lightning-fast swings.' },
+    weapon: { kind: 'melee', dmg: 150, cd: 0.42, range: 2.1, chop: 1.5, mine: 0, tier: 3 },
+    desc: 'Medieval steel. Damage 150, lightning-fast swings (a poor lumber tool).' },
   { id: 'crossbow',   slot: 'weapon', level: 9, icon: '🎯', name: 'Crossbow',       cost: { wood: 50, iron: 20 }, needs: 'keep',
     weapon: { kind: 'bow', dmg: 60, cd: 0.9, range: 12, pierce: true, tier: 3 },
     desc: 'Medieval war machine. Piercing bolts for 60 damage.' },
@@ -345,6 +352,9 @@ export const STAT_TRACKS = [
   { id: 'pet', icon: '🐾', name: 'Pet Training', max: 5,
     desc: '+100 pet health and +25% pet damage per level (100 HP base, up to 600 + level bonus).',
     cost: (t) => ({ meat: 40 * t * t, hide: 4 * t }) },
+  { id: 'gather', icon: '🧺', name: 'Gathering', max: 5,
+    desc: '+15% wood and stone from every felled tree and cracked rock per level.',
+    cost: (t) => ({ meat: 22 * t * t, wood: 8 * t }) },
 ];
 
 // ==========================================================================

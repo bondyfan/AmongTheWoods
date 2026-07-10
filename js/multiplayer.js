@@ -19,7 +19,7 @@ import * as THREE from 'three';
 import { WoodsNet } from './net.js';
 import { ARENA, ARENA_RETURN_DELAY, arenaReward, ENEMY_TYPES, BOSS_RANKS,
          MOBA_BUILDINGS, roundResource, itemById } from './config.js';
-import { makeMan, makeAxe, makeBow, makeEnemyMesh, makeMeatDrop, makeWoodDrop,
+import { makeMan, makeAxe, makeBow, makePickaxe, makeEnemyMesh, makeMeatDrop, makeWoodDrop,
          makeStoneDrop, makeHideDrop, makeIronDrop, makeBerryDrop, makeItemDrop,
          makeEnemyShot, makeWolf, makeMobaTower, makeMobaBase,
          makeTeamFlag, TEAM_COLORS, mat } from './models.js';
@@ -100,7 +100,9 @@ class RemotePlayer {
     const w = itemById(this.weaponId)?.weapon;
     if (!w) return;
     if (w.kind === 'melee' && w.tier > 0) {
-      const axe = makeAxe(w.tier); axe.rotation.x = -0.2; rightSocket.add(axe);
+      const tool = w.pick ? makePickaxe(w.tier) : makeAxe(w.tier);
+      tool.rotation.x = -0.2;
+      rightSocket.add(tool);
     } else if (w.kind === 'bow') leftSocket.add(makeBow(w.tier));
   }
 

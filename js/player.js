@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { WORLD, XP_LEVELS, MAX_LEVEL, itemById, spellById, consumableById,
          biomeIndexAt, MAX_SPELL_SLOTS } from './config.js';
-import { makeMan, makeAxe, makeBow } from './models.js';
+import { makeMan, makeAxe, makeBow, makePickaxe } from './models.js';
 import { audio } from './audio.js';
 
 const MAX_CLIMB_SLOPE = 1.0; // steeper ground than this is a wall
@@ -42,7 +42,7 @@ export class Player {
     this.equipment = { weapon: 'fists', head: null, chest: null, boots: null, charm: null, pet: null, orb: null };
 
     // -- trainable stat tracks (0..10 each; pet 0..5) --
-    this.stats = { range: 0, power: 0, swift: 0, pet: 0 };
+    this.stats = { range: 0, power: 0, swift: 0, pet: 0, gather: 0 };
     this.petDead = false;             // a dead pet stays dead until resurrected
     this.petMode = 'aggressive';      // 'aggressive' | 'defensive' | 'passive'
 
@@ -199,6 +199,7 @@ export class Player {
       cd: base.cd * (1 - 0.04 * s.swift),
       range: base.range + (base.kind === 'bow' ? 2.0 : 0.1) * s.range,
     };
+    this.gatherMult = 1 + 0.15 * s.gather; // Gathering training: fatter yields
     // charm: a single trinket slot with a flat percentage bonus
     const charm = equipped('charm');
     if (charm?.stats?.dmgPct) this.weapon.dmg *= 1 + charm.stats.dmgPct;
@@ -258,9 +259,9 @@ export class Player {
     rightSocket.clear();
     leftSocket.clear();
     if (this.weapon.kind === 'melee' && this.weapon.tier > 0) {
-      const axe = makeAxe(this.weapon.tier);
-      axe.rotation.x = -0.2;
-      rightSocket.add(axe);
+      const tool = this.weapon.pick ? makePickaxe(this.weapon.tier) : makeAxe(this.weapon.tier);
+      tool.rotation.x = -0.2;
+      rightSocket.add(tool);
     }
     if (this.weapon.kind === 'bow') leftSocket.add(makeBow(this.weapon.tier));
   }
@@ -650,48 +651,52 @@ export class Player {
       }
     }
 
-    // chop the nearest tree in the arc
-    const trees = world.treesNear(this.pos, w.range + 0.6)
+    // ---- harvesting: the RIGHT tool for the job ----
+    // trees need chop power (club slowly, axes fast); rocks need a PICKAXE
+    const arcSort = (list) => list
       .filter(t => this._inArc(t.x, t.z, w.range, t.radius))
       .sort((a, b) => (a.x - this.pos.x) ** 2 + (a.z - this.pos.z) ** 2
                     - ((b.x - this.pos.x) ** 2 + (b.z - this.pos.z) ** 2));
+    const trees = arcSort(world.treesNear(this.pos, w.range + 0.6));
+    const rocks = arcSort(world.rocksNear?.(this.pos, w.range + 0.6) ?? []);
+
     if (trees.length && w.chop > 0) {
       const tree = trees[0];
-      const wood = world.chop(tree, w.chop * this.chopMult, this.pos);
-      this.hooks.onChop?.(tree, w.chop); // co-op keeps the partner's forest in sync
+      const power = w.chop * this.chopMult;
+      const wood = world.chop(tree, power, this.pos);
+      this.hooks.onChop?.(tree, power); // co-op keeps the partner's forest in sync
       if (wood > 0) {
+        const total = Math.max(1, Math.round(wood * this.gatherMult));
         const dropPos = new THREE.Vector3(tree.x, 0, tree.z);
-        const piles = Math.min(3, Math.max(1, Math.round(wood / 3)));
-        let left = wood;
+        const piles = Math.min(3, Math.max(1, Math.round(total / 3)));
+        let left = total;
         for (let i = 0; i < piles; i++) {
-          const amount = i === piles - 1 ? left : Math.ceil(wood / piles);
+          const amount = i === piles - 1 ? left : Math.ceil(total / piles);
           left -= amount;
           pickups.spawn('wood', amount, dropPos, 1.2);
         }
       }
-    } else if (w.chop >= 1) {
-      // no tree in reach — try mining a rock (needs a real tool, not bare hands)
-      const rocks = (world.rocksNear?.(this.pos, w.range + 0.6) ?? [])
-        .filter(t => this._inArc(t.x, t.z, w.range, t.radius))
-        .sort((a, b) => (a.x - this.pos.x) ** 2 + (a.z - this.pos.z) ** 2
-                      - ((b.x - this.pos.x) ** 2 + (b.z - this.pos.z) ** 2));
-      if (rocks.length) {
-        const stone = world.mineRock(rocks[0], w.chop * this.chopMult, this.pos);
-        if (stone > 0) {
-          const dropPos = new THREE.Vector3(rocks[0].x, 0, rocks[0].z);
-          pickups.spawn('stone', Math.ceil(stone / 2), dropPos, 1.0);
-          pickups.spawn('stone', Math.floor(stone / 2) || 1, dropPos, 1.0);
-          // Dark Forest onward, rocks carry veins of raw iron
-          if (biomeIndexAt(this.pos.x, this.pos.z) >= 1 && Math.random() < 0.15) {
-            pickups.spawn('iron', 1, dropPos, 0.8);
-            this.hooks.popup(dropPos.clone().setY(1.6), '🔩 iron vein!', '#c8d0d8');
-          }
+    } else if (rocks.length && w.mine > 0) {
+      const stone = world.mineRock(rocks[0], w.mine * this.chopMult, this.pos);
+      if (stone > 0) {
+        const total = Math.max(1, Math.round(stone * this.gatherMult));
+        const dropPos = new THREE.Vector3(rocks[0].x, 0, rocks[0].z);
+        pickups.spawn('stone', Math.ceil(total / 2), dropPos, 1.0);
+        pickups.spawn('stone', Math.floor(total / 2) || 1, dropPos, 1.0);
+        // Dark Forest onward, rocks carry veins of raw iron
+        if (biomeIndexAt(this.pos.x, this.pos.z) >= 1 && Math.random() < 0.15) {
+          pickups.spawn('iron', 1, dropPos, 0.8);
+          this.hooks.popup(dropPos.clone().setY(1.6), '🔩 iron vein!', '#c8d0d8');
         }
       }
-    } else if (w.chop < 1 && !this.hintedRock
-               && (world.rocksNear?.(this.pos, w.range + 0.6) ?? []).some(t => this._inArc(t.x, t.z, w.range, t.radius))) {
+    } else if (trees.length && w.chop <= 0 && !this.hintedAxe) {
+      this.hintedAxe = true;
+      this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
+        'You can\'t fell trees with that — craft a club or an axe!', '#ffcc66');
+    } else if (rocks.length && !(w.mine > 0) && !this.hintedRock) {
       this.hintedRock = true;
-      this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2), 'Bare hands can\'t mine rock — craft a club!', '#ffcc66');
+      this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
+        'Rock needs a PICKAXE — craft a Bone Pickaxe!', '#ffcc66');
     }
   }
 

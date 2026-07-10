@@ -93,6 +93,22 @@ export function makeAxe(tier) {
   return g;
 }
 
+// pickaxe: curved spike head on a haft (bone tier 1, iron tier 2)
+export function makePickaxe(tier) {
+  const g = new THREE.Group();
+  const headColor = tier >= 2 ? 0xcfd6dd : 0xe8e0cc; // iron / bone
+  const handle = box(0.06, 0.62, 0.06, 0x6b4a2d);
+  handle.position.y = -0.08;
+  const spike1 = box(0.06, 0.07, 0.3, headColor);
+  spike1.position.set(0, 0.22, 0.14);
+  spike1.rotation.x = -0.35;
+  const spike2 = box(0.06, 0.07, 0.3, headColor);
+  spike2.position.set(0, 0.22, -0.14);
+  spike2.rotation.x = 0.35;
+  g.add(handle, spike1, spike2);
+  return g;
+}
+
 export function makeBow(tier) {
   const g = new THREE.Group();
   const color = tier >= 2 ? 0x8a5a1a : 0x5c4326;

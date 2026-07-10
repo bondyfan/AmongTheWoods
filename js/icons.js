@@ -101,6 +101,12 @@ export const ITEM_ICONS = {
   swift: S(`
     <path d="M4 10h16M4 16h13M4 22h10" stroke="#9adcff" stroke-width="2.2" stroke-linecap="round"/>
     <path d="M20 6l8 10-8 10c-2-4-2-16 0-20z" fill="#5fa8e0" stroke="#2d6a9e" stroke-width="1.5" stroke-linejoin="round"/>`),
+  gather: S(`
+    <path d="M6 14h20l-2.5 13c-.2 1.2-1.2 2-2.4 2H10.9c-1.2 0-2.2-.8-2.4-2z"
+      fill="${WOOD}" stroke="${WOOD_D}" stroke-width="1.5" stroke-linejoin="round"/>
+    <path d="M9 14c0-4.5 3-8 7-8s7 3.5 7 8" fill="none" stroke="${WOOD_D}" stroke-width="2" stroke-linecap="round"/>
+    <path d="M8 19h16M9.5 24h13" stroke="${WOOD_D}" stroke-width="1.1" opacity="0.55"/>
+    <circle cx="12.5" cy="13" r="1.6" fill="#d8302e"/><circle cx="19" cy="12.5" r="1.6" fill="#e8a33a"/>`),
   pet: S(`
     <ellipse cx="16" cy="21" rx="6" ry="5" fill="${LEATHER}" stroke="${LEATHER_D}" stroke-width="1.4"/>
     <ellipse cx="8" cy="12" rx="2.8" ry="3.6" fill="${LEATHER}" stroke="${LEATHER_D}" stroke-width="1.3"/>
@@ -202,6 +208,15 @@ export const ITEM_ICONS = {
     <line x1="16" y1="4.5" x2="16" y2="20" stroke="${IRON_D}" stroke-width="1" opacity="0.6"/>
     <rect x="8.5" y="22" width="15" height="3" rx="1.5" fill="${GOLD}" stroke="${GOLD_D}" stroke-width="1.3"/>
     <rect x="14.4" y="25" width="3.2" height="5" rx="1.4" fill="${LEATHER}" stroke="${LEATHER_D}" stroke-width="1.2"/>`),
+  // -- tools: pickaxes --
+  bonePick: S(`${HAFT}
+    <path d="M8 12C10 5 18 1 26 4c-1 2-2.5 3.6-4.5 4.8 2.2.6 4 1.8 5.5 3.7-7 3.5-15 1.5-19-.5z"
+      fill="#e8e0cc" stroke="#a89f88" stroke-width="1.5" stroke-linejoin="round"/>
+    <path d="M12 10.5l4-4" stroke="#a89f88" stroke-width="1.1" opacity="0.6"/>`),
+  ironPick: S(`${HAFT}
+    <path d="M8 12C10 5 18 1 26 4c-1 2-2.5 3.6-4.5 4.8 2.2.6 4 1.8 5.5 3.7-7 3.5-15 1.5-19-.5z"
+      fill="${IRON}" stroke="${IRON_D}" stroke-width="1.5" stroke-linejoin="round"/>
+    <path d="M12 10.5l4-4" stroke="#ffffff" stroke-width="1.2" opacity="0.7"/>`),
   // -- weapons: ranged --
   huntingBow: bow(WOOD, WOOD_D),
   longbow: bow(LEATHER, LEATHER_D, ARROW),
