@@ -31,14 +31,14 @@ export const BIOMES = [
     enemies: ['scorpion', 'cobra', 'vulture', 'snake'], humanoids: ['bandit', 'banditBrute'], packs: { skulls: [0.85, 0.15, 0] }, treeDensity: 0.3,
     critters: ['rabbit', 'rabbit'] },
   { name: 'Dark Forest',    rMax: 2000, ground: 0x2c4a24, ground2: 0x24401f, dirt: 0x4a3a24,
-    fog: 0x5f7a58, sky: 0x5c7488, darkness: 0.45,
+    fog: 0x2e3c2c, sky: 0x2c3a44, darkness: 0.62, light: 0.5,
     foliage: [0x1e4a22, 0x27552a, 0x1a3f2e], trunk: 0x4c3520,
     trees: { pine: 0.55, leafy: 0.25, birch: 0, dead: 0.2 }, snowy: false,
     grass: 0x44663a, flowers: false, mushrooms: true,
     enemies: ['spider', 'snake', 'wolf', 'venomspider', 'bat'], humanoids: ['bandit', 'banditBrute'], packs: { skulls: [0.7, 0.3, 0] }, treeDensity: 1.3, denseForests: true,
     spiderHaunt: true, webField: true, critters: ['rabbit', 'horse'] },
   { name: 'Murky Swamp',    rMax: 2900, ground: 0x565c30, ground2: 0x4a5230, dirt: 0x3a3c28,
-    fog: 0x8a9678, sky: 0x93a08c,
+    fog: 0x3c4a44, sky: 0x3a4650, darkness: 0.4, light: 0.62,
     foliage: [0x3a5a30, 0x2e4a2a, 0x4a6438], trunk: 0x453a28,
     trees: { pine: 0.2, leafy: 0.5, birch: 0, dead: 0.3 }, snowy: false,
     grass: 0x60704a, flowers: false, mushrooms: true,
@@ -52,18 +52,18 @@ export const BIOMES = [
     enemies: ['wolf', 'boar', 'elk', 'venomspider', 'stormsnake', 'harpy'], humanoids: ['poacher'], packs: { skulls: [0.4, 0.4, 0.2] }, treeDensity: 0.7,
     critters: ['rabbit', 'rabbit', 'sheep', 'horse'] },
   { name: 'Haunted Forest', rMax: 4700, ground: 0x3a3a44, ground2: 0x32323c, dirt: 0x4c4258,
-    fog: 0x585470, sky: 0x565064, darkness: 0.7,
+    fog: 0x3c3850, sky: 0x363044, darkness: 0.75, light: 0.48,
     foliage: [0x2a3a28, 0x1e2e20, 0x3a3448], trunk: 0x3a3230,
     trees: { pine: 0.3, leafy: 0.1, birch: 0, dead: 0.6 }, snowy: false,
     grass: 0x5c6650, flowers: false, mushrooms: true,
-    enemies: ['zombie', 'bat', 'venomspider', 'wolf', 'treant', 'elk'], humanoids: ['shaman', 'poacher'], packs: { skulls: [0.3, 0.45, 0.25] }, treeDensity: 1.1, denseForests: true,
+    enemies: ['zombie', 'bat', 'venomspider', 'wolf', 'treant', 'elk', 'ghost'], humanoids: ['shaman', 'poacher'], packs: { skulls: [0.3, 0.45, 0.25] }, treeDensity: 1.1, denseForests: true,
     spiderHaunt: true, critters: ['horse'] },
   { name: 'Jungle',         rMax: 5100, ground: 0x2f8a28, ground2: 0x3a9c32, dirt: 0x7a6030,
     fog: 0x8ac878, sky: 0x8cc8e0,
     foliage: [0x1f6b2a, 0x2d8a34, 0x39a03e], trunk: 0x5a4426,
     trees: { pine: 0.1, leafy: 0.7, birch: 0.2, dead: 0 }, snowy: false,
     grass: 0x4f8f3a, flowers: true, mushrooms: true,
-    enemies: ['stormsnake', 'boar', 'bear', 'harpy', 'bogCrawler', 'snapper'], humanoids: ['tribesman'], packs: { skulls: [0.2, 0.5, 0.3] }, treeDensity: 1.6, denseForests: true,
+    enemies: ['stormsnake', 'boar', 'bear', 'harpy', 'bogCrawler', 'snapper', 'panther'], humanoids: ['tribesman'], packs: { skulls: [0.2, 0.5, 0.3] }, treeDensity: 1.6, denseForests: true,
     critters: ['rabbit', 'sheep', 'horse'] },
   { name: 'Frozen Peak',    rMax: 99999, ground: 0xf2f6fa, ground2: 0xe4ecf3, dirt: 0xc9d6e1,
     fog: 0xf4f8fc, sky: 0xdfe9f2,
@@ -209,6 +209,21 @@ export const ENEMY_TYPES = {
   icegolem: { name: 'Ice Golem', icon: '🗿',
              hp: 2160, dmg: 45, meleeDmg: 30, speed: 4, range: 2.2, attackCd: 1.8, xp: 80, meat: 9, hitR: 1.4, aggro: 18,
              ranged: true, shootRange: 10, spellCd: 4.0, projectileSpeed: 13, shotColor: 0xbfe8ff, stun: 0.8 },
+  // -- Haunted Forest: restless spirits drift between the dead trees --
+  ghost:   { name: 'Restless Ghost', icon: '👻',
+             hp: 520, dmg: 18, meleeDmg: 10, speed: 7, range: 1.4, attackCd: 1.3, xp: 42, meat: 0, hitR: 0.7, aggro: 19,
+             flying: true, ranged: true, shootRange: 9, spellCd: 3.0, projectileSpeed: 16, shotColor: 0xbfc8ff, stun: 0.7 },
+  // -- Jungle: the canopy hides ambush predators --
+  panther: { name: 'Shadow Panther', icon: '🐆',
+             hp: 900, dmg: 30, speed: 11.5, range: 1.6, attackCd: 0.9, xp: 55, meat: 4, hitR: 0.8, aggro: 24 },
+  // -- Griffins: flight-master bosses of the open rings. They never truly
+  // die — beaten, they drop their nest and fly beyond the horizon --
+  griffin: { name: 'Griffin', icon: '🦅',
+             hp: 700, dmg: 26, speed: 9, range: 2.0, attackCd: 1.1, xp: 110, meat: 6, hitR: 1.1, aggro: 24,
+             flying: true, griffin: true },
+  griffinChick: { name: 'Griffin Fledgling', icon: '🐤',
+             hp: 260, dmg: 11, speed: 9.5, range: 1.4, attackCd: 1.0, xp: 22, meat: 2, hitR: 0.55, aggro: 22,
+             flying: true },
 };
 
 // Pack bosses ("the mother") by skull rank (index 0 = 1 skull).
@@ -240,6 +255,9 @@ export const BOSS_NAMES = {
   rat: ['The Gutter Matron', 'Plaguewhisker'],
   wendigo: ['The Pale Wendigo', 'Hollowhunger'],
   yeti: ['Frostmaw', 'The White Silence'],
+  griffin: ['Skyrend', 'The Dune Talon', 'Stormfeather'],
+  ghost: ['The Weeping Shade', 'Hollow Whisper'],
+  panther: ['Nightpelt', 'The Silent Death'],
   golem: ['The Frozen Warden', 'Shatterheart'],
 };
 export function bossNameFor(type, id) {
@@ -381,6 +399,19 @@ export const ITEMS = [
   { id: 'duoSphere',      slot: 'companion', level: 10, icon: '🌐', name: 'Gemini Spheres',  cost: { meat: 130, iron: 24, stone: 60, essence: 12 }, needs: 'furnace',
     orb: { count: 2, targets: 2, dmg: 14 },
     desc: 'TWO spheres, each firing twin bolts.' },
+  // -- griffin nests: dropped by beaten griffins, never sold or looted
+  // (free: true keeps them out of every random loot pool). Click one in the
+  // inventory to PLACE it on the ground — a flight-master roost you can fly
+  // between (stand next to a placed nest to open the flight map).
+  { id: 'desertNest',   slot: 'nest', level: 1, icon: '🪺', name: 'Desert Griffin Nest', cost: null, free: true,
+    nest: { biomeMax: 1 },
+    desc: 'The Desert griffin\'s nest. Click to place it where you stand (Desert or any earlier ring). Stand by a placed nest to call a griffin and fly between your roosts.' },
+  { id: 'highlandNest', slot: 'nest', level: 5, icon: '🪺', name: 'Highland Griffin Nest', cost: null, free: true,
+    nest: { biomeMax: 4 },
+    desc: 'The Highland griffin\'s nest. Click to place it where you stand (Highlands or any earlier ring). Stand by a placed nest to call a griffin and fly between your roosts.' },
+  { id: 'frozenNest',   slot: 'nest', level: 9, icon: '🪺', name: 'Frozen Griffin Nest', cost: null, free: true,
+    nest: { biomeMax: 7 },
+    desc: 'The Frozen Peak griffin\'s nest. Click to place it anywhere on solid ground. Stand by a placed nest to call a griffin and fly between your roosts.' },
 ];
 
 export const itemById = (id) => ITEMS.find(i => i.id === id);
@@ -619,6 +650,8 @@ export const SUPPLY_UPGRADES = [
     desc: 'Wool padding under everything you wear: all damage taken −8%.' },
   { id: 'socks',   icon: '🧦', name: 'Thick Wool Socks', cost: { wool: 10, meat: 20 },
     desc: 'Swamp mud and spider webs slow you only HALF as much.' },
+  { id: 'torch',   icon: '🔦', name: 'Everburning Torch', cost: { wood: 10, hide: 3, essence: 1 },
+    desc: 'A resin-soaked torch that never goes out. Lights the ground around you in the dark biomes (Dark Forest, Haunted Forest, swamp and the cave) — and its warmth slows the Frozen Peak\'s chill.' },
 ];
 
 export const SHOP_GROUPS = [

@@ -228,11 +228,28 @@ export class World {
     if (this._arena) { this.scene.remove(this._arena); this._arena = null; }
   }
 
+  // 0..1: how deep inside the (flat) Murky Swamp ring this radius is —
+  // blends over 40 m so the swamp floor meets its neighbours smoothly
+  _swampFlatK(r) {
+    const d = Math.min(r - BIOMES[2].rMax, BIOMES[3].rMax - r);
+    return Math.max(0, Math.min(1, d / 40));
+  }
+
+  // 0..1: how deep inside the Highlands ring — its massifs grow EXTREME
+  _highlandsK(r) {
+    const d = Math.min(r - BIOMES[3].rMax, BIOMES[4].rMax - r);
+    return Math.max(0, Math.min(1, d / 50));
+  }
+
   // How strongly (0..1) a mountain massif rises here — masked low-frequency
   // noise, kept away from ring barriers so gates and bridges stay usable.
+  // In the Highlands the mask opens wide (mountains everywhere); in the
+  // swamp it closes completely (dead flat bog).
   _mountainK(x, z, r = radiusOf(x, z)) {
+    if (this._swampFlatK(r) > 0) return 0; // the swamp has NO hills or mountains
+    const thr = 0.62 - 0.17 * this._highlandsK(r);
     const m = valueNoise(x, z, 420, this.seed + 57);
-    if (m <= 0.62) return 0;
+    if (m <= thr) return 0;
     // fade massifs out SMOOTHLY near ring barriers (a hard cutoff would
     // leave impassable vertical walls circling every ring)
     let fade = 1;
@@ -241,8 +258,16 @@ export class World {
       if (d < 55) fade = Math.min(fade, Math.max(0, (d - 25) / 30));
     }
     if (fade <= 0) return 0;
-    const k = (m - 0.62) / 0.38;
+    const k = (m - thr) / (1 - thr);
     return k * k * fade;
+  }
+
+  // 0..1: winding mountain-trail band — where it crosses a massif the
+  // terrain stays SMOOTH (no cliff terraces) so the trail is climbable
+  _mountainPathK(x, z) {
+    const pv = valueNoise(x, z, 90, this.seed + 877);
+    const d = Math.abs(pv - 0.55);
+    return d >= 0.05 ? 0 : 1 - d / 0.05;
   }
 
   // Terrain height — detail bumps + long rolling hills + occasional mountain
@@ -254,32 +279,45 @@ export class World {
           - 1.2;
     const r = radiusOf(x, z);
     h += (valueNoise(x, z, 160, this.seed + 31) - 0.5) * 5;
+    // the Murky Swamp is dead flat — only faint ripples in the peat
+    const flat = this._swampFlatK(r);
+    if (flat > 0) h *= 1 - 0.88 * flat;
     const mk = this._mountainK(x, z, r);
     if (mk > 0) {
-      let m = mk * (20 + valueNoise(x, z, 55, this.seed + 91) * 12);
+      const highK = this._highlandsK(r); // Highlands: EXTREMELY tall massifs
+      const detail = valueNoise(x, z, 55, this.seed + 91);
+      const amp = (20 + detail * 12) * (1 + 2.0 * highK);
+      let m = mk * amp;
       // terraces: flat plateaus separated by short CLIFF walls — too steep to
       // walk up (the player's slope gate blocks them) but fine to drop off
       const t = m / TERRACE_STEP, fl = Math.floor(t), f = t - fl;
       const RAMP = 0.25; // last quarter of each band is the cliff face
       const s = f < 1 - RAMP ? 0 : (f - (1 - RAMP)) / RAMP;
-      m = (fl + s * s * (3 - 2 * s)) * TERRACE_STEP;
-      h += m;
+      let terraced = (fl + s * s * (3 - 2 * s)) * TERRACE_STEP;
+      // mountain trails: along the path band the slope stays smooth and
+      // slightly carved into the rock, so you can WALK to the summits
+      const pathK = this._mountainPathK(x, z);
+      if (pathK > 0) {
+        const smoothM = mk * (20 + detail * 4) * (1 + 2.0 * highK) * 0.82;
+        terraced = terraced * (1 - pathK) + smoothM * pathK;
+      }
+      h += terraced;
     }
     if (r < 28) h *= Math.max(0.1, (r - 10) / 18);
     return h;
   }
 
-  // ---- Murky Swamp zoning: ~50% open dirty water (raft country), ~30%
-  // sucking mud, ~20% dry hummocks. Paths, POIs and smiths sit on carved
-  // dry ground so the world stays traversable. ----
+  // ---- Murky Swamp zoning: ~80% open black water (BOAT country), the rest
+  // mud banks and rare dry hummocks. Paths, POIs and smiths sit on carved
+  // dry ground so the world stays traversable on foot — barely. ----
   swampZone(x, z) {
     const r = radiusOf(x, z);
     if (r <= BIOMES[2].rMax || r > BIOMES[3].rMax) return null; // not in the swamp ring
     if (this.pathDistance(x, z) < 7) return 'dry';               // trails stay dry
     if (this._dryIslands?.some(d => Math.hypot(d.x - x, d.z - z) < d.r)) return 'dry';
     const n = valueNoise(x, z, 85, this.seed + 404);
-    if (n < 0.50) return 'water';
-    if (n < 0.80) return 'mud';
+    if (n < 0.66) return 'water';
+    if (n < 0.82) return 'mud';
     return 'dry';
   }
 
@@ -764,10 +802,23 @@ export class World {
       }
     }
 
-    // the swamp reads at a glance: brown-green water, black mud, mossy hummocks
+    // the swamp reads at a glance: deep black-teal water, black mud, moss.
+    // A faint blue-green shimmer patches make the water look enchanted.
     const sz = this.swampZone(x, z);
-    if (sz === 'water') out.copy(new THREE.Color(0x39503e)).lerp(new THREE.Color(0x2e4438), grassMix);
-    else if (sz === 'mud') out.lerp(new THREE.Color(0x2c2418), 0.65);
+    if (sz === 'water') {
+      out.copy(new THREE.Color(0x16262c)).lerp(new THREE.Color(0x101c22), grassMix);
+      const glow = valueNoise(x, z, 12, this.seed + 909);
+      if (glow > 0.72) out.lerp(new THREE.Color(0x1e4a5a), (glow - 0.72) / 0.28 * 0.8);
+    } else if (sz === 'mud') out.lerp(new THREE.Color(0x1c1810), 0.7);
+
+    // Highlands mountain trails read as pale packed gravel on the rock
+    if (this._highlandsK(r) > 0) {
+      const mk = this._mountainK(x, z, r);
+      if (mk > 0.02) {
+        const pk = this._mountainPathK(x, z);
+        if (pk > 0.3) out.lerp(new THREE.Color(0xb7a97e), (pk - 0.3) / 0.7 * 0.75);
+      }
+    }
 
     // trodden field path: packed pale sand, wide and unmistakable
     const pd = this.pathDistance(x, z);

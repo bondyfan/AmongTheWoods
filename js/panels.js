@@ -597,7 +597,9 @@ export class Panels {
       const item = itemById(id);
       if (!item) continue;
       cells.push({ kind: 'item', id, itemRef: item, count: n > 1 ? n : 0,
-        title: `${item.name} — ${item.desc} (click to equip · drag to hotkey or drop)` });
+        title: item.nest
+          ? `${item.name} — ${item.desc} (click to PLACE it here)`
+          : `${item.name} — ${item.desc} (click to equip · drag to hotkey or drop)` });
     }
     $('inv-slots-label').textContent = `${cells.length}/${p.invSlots}`;
     const total = Math.max(p.invSlots, cells.length);
@@ -698,7 +700,11 @@ export class Panels {
   }
 
   _invClick(cell) {
-    if (cell.kind === 'item') this.hooks.onEquip(cell.id);
+    if (cell.kind === 'item') {
+      const item = itemById(cell.id);
+      if (item?.nest) this.hooks.onPlaceNest?.(cell.id); // griffin roost, not gear
+      else this.hooks.onEquip(cell.id);
+    }
     else if (cell.kind === 'consumable') this.hooks.onUseConsumable?.(cell.id);
     else if (cell.id === 'berry') this.hooks.onEatBerry?.();
     this.refresh();

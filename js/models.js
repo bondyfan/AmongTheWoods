@@ -1353,6 +1353,94 @@ export function makeFrostWisp() {
   return g;
 }
 
+// ---------- griffin: lion body, eagle head, big animated wings ----------
+export function makeGriffin(scale = 1) {
+  const g = quadruped({
+    bodyW: 0.72, bodyH: 0.62, bodyL: 1.35, color: 0xb08a4a,
+    headSize: 0.5, legH: 0.5, tail: true, eyeColor: 0xffd24a,
+  });
+  const head = g.userData.head;
+  // white eagle head with a hooked beak
+  head.material = mat(0xe8e4d8);
+  const beak = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.34, 5), mat(0xd8a020));
+  beak.rotation.x = -Math.PI / 2;
+  beak.position.set(0, -0.05, -0.42);
+  head.add(beak);
+  // feathered chest
+  const chest = box(0.74, 0.5, 0.4, 0xd8d0bc);
+  chest.position.set(0, 0.82, -0.55);
+  g.add(chest);
+  // wings — large layered membranes on pivots so they can beat
+  const wings = [];
+  for (const side of [-1, 1]) {
+    const wing = new THREE.Group();
+    const w1 = box(1.5, 0.08, 0.75, 0xa07c3e); w1.position.x = side * 0.8; wing.add(w1);
+    const w2 = box(0.9, 0.06, 0.55, 0xd8d0bc); w2.position.set(side * 1.55, 0.02, 0.05); wing.add(w2);
+    wing.position.set(side * 0.3, 1.25, 0.1);
+    wing.rotation.z = side * -0.22;
+    g.add(wing);
+    wings.push(wing);
+  }
+  g.userData.wings = wings;
+  g.scale.setScalar(scale);
+  return g;
+}
+
+export function makeGhost() {
+  const g = new THREE.Group();
+  const shroudMat = new THREE.MeshLambertMaterial({ color: 0xcfd4ee, transparent: true, opacity: 0.55 });
+  const body = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.7, 8), shroudMat);
+  body.position.y = 1.0;
+  g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.32, 8, 6), shroudMat);
+  head.position.y = 1.85;
+  g.add(head);
+  const eyeMat = new THREE.MeshBasicMaterial({ color: 0x8fb4ff });
+  for (const side of [-1, 1]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 5), eyeMat);
+    eye.position.set(side * 0.12, 1.9, -0.26);
+    g.add(eye);
+  }
+  return g;
+}
+
+export function makePanther() {
+  const g = quadruped({
+    bodyW: 0.5, bodyH: 0.46, bodyL: 1.2, color: 0x14141a,
+    headSize: 0.36, snout: true, snoutColor: 0x1e1e26, legH: 0.44, tail: true, eyeColor: 0x7fff4a,
+  });
+  return g;
+}
+
+// a PLACED griffin nest: twig ring on the ground with glowing eggs — the
+// flight-master roost the player can travel between
+export function makeGriffinRoost(rng = Math.random) {
+  const g = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.8, 0.5, 9), mat(0x6b4a2d));
+  base.position.y = 0.25;
+  g.add(base);
+  for (let i = 0; i < 14; i++) {
+    const a = (i / 14) * Math.PI * 2;
+    const twig = box(0.9, 0.14, 0.16, 0x8a6238);
+    twig.position.set(Math.cos(a) * 1.35, 0.62, Math.sin(a) * 1.35);
+    twig.rotation.y = a + Math.PI / 2 + (rng() - 0.5) * 0.5;
+    twig.rotation.z = (rng() - 0.5) * 0.3;
+    g.add(twig);
+  }
+  for (const [x, z] of [[-0.35, 0.15], [0.35, -0.1], [0.05, 0.4]]) {
+    const egg = sphere(0.24, 0xf2e8c8, 7);
+    egg.scale.y = 1.3;
+    egg.position.set(x, 0.62, z);
+    g.add(egg);
+  }
+  // a golden feather marks it as a flight roost
+  const feather = box(0.1, 1.1, 0.02, 0xe8c04a);
+  feather.position.set(0, 1.3, -0.2);
+  feather.rotation.z = 0.2;
+  g.add(feather);
+  return g;
+}
+
 export function makeEnemyMesh(type) {
   switch (type) {
     case 'rabbit': return makeRabbit();
@@ -1388,6 +1476,10 @@ export function makeEnemyMesh(type) {
     case 'scorpion': return makeScorpion();
     case 'cobra': return makeCobra();
     case 'vulture': return makeVulture();
+    case 'ghost': return makeGhost();
+    case 'panther': return makePanther();
+    case 'griffin': return makeGriffin(1);
+    case 'griffinChick': return makeGriffin(0.45);
   }
 }
 

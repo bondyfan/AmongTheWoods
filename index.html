@@ -211,11 +211,18 @@
           <small>Third-person camera behind your character (MMORPG style).
           <kbd>A</kbd>/<kbd>D</kbd> turn, <kbd>W</kbd>/<kbd>S</kbd> move — attacks hit what you face.</small></span>
       </label>
-      <label class="setting-row" style="margin-left:26px">
+      <label class="setting-row" id="mouselook-row" style="margin-left:26px">
         <input type="checkbox" id="set-mouselook">
         <span><b>🖱️ Free mouse-look</b> <small>(RPG view only)</small><br>
           <small>The mouse ALWAYS steers the camera (cursor locks into the game —
           <kbd>Esc</kbd> frees it). <kbd>A</kbd>/<kbd>D</kbd> strafe instead of turning.</small></span>
+      </label>
+      <label class="setting-row">
+        <input type="checkbox" id="set-autorotate">
+        <span><b>🔄 Auto camera rotate</b><br>
+          <small>Move in ONE direction for 5&nbsp;s and the camera swings around to face
+          where you're going (the minimap turns with it). In RPG view, backing up
+          (<kbd>S</kbd>) for 5&nbsp;s spins the camera behind you instead.</small></span>
       </label>
       <label class="setting-row">
         <input type="checkbox" id="set-mute">
@@ -272,6 +279,16 @@
       <button class="panel-close">✕</button>
     </div>
     <div id="bigmap-body"><canvas id="bigmap-canvas" width="620" height="620"></canvas></div>
+  </div>
+
+  <!-- griffin flight map (opens next to a placed griffin nest) -->
+  <div id="flightmap" class="panel hidden">
+    <div class="panel-head">
+      <h2>🪽 Flight Map</h2>
+      <span class="panel-res">Click a roost — a griffin will carry you there.</span>
+      <button class="panel-close" id="flightmap-close">✕</button>
+    </div>
+    <div id="flightmap-body"><canvas id="flightmap-canvas" width="620" height="620"></canvas></div>
   </div>
 
   <!-- respawn choice (dies with a graveyard built) -->

@@ -5,7 +5,8 @@ import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOB
          RESOURCES, RES_ICONS, HIDE_BEARING, VERDANT_HIDE_DROP, hideForHp, radiusOf, costFor,
          biomeIndexAt, progressAt, fmtResource, roundResource, itemById, spellById,
          consumableById, essenceDropFor, MAX_LEVEL, questFor, questXpFor } from './config.js';
-import { makeAimArc, updateAimArc, makeRaft, makeBlacksmith, makeHorse, makeWisp } from './models.js';
+import { makeAimArc, updateAimArc, makeRaft, makeBlacksmith, makeHorse, makeWisp,
+         makeGriffin, makeGriffinRoost } from './models.js';
 import { PostFX } from './postfx.js';
 import { Camp } from './camp.js';
 import { audio } from './audio.js';
@@ -155,6 +156,7 @@ const panels = new Panels({
   onAssignSlot: (i, id) => { player.spellSlots[i] = id; audio.sfx('click', 0.4); },
   onDropRes: (key) => dropResource(key),
   onDropItem: (id) => dropItem(id),
+  onPlaceNest: (id) => placeNest(id),
   onDropConsumable: (id) => dropConsumable(id),
   onEatBerry: () => player.eatBerry(),
   onUseConsumable: (id) => player.useConsumable(id),
@@ -500,6 +502,361 @@ function tickGust(dt) {
   }
 }
 
+// ---------- griffins: flight-master bosses of the open rings ----------
+// A griffin roosts in the Desert, the Highlands and the Frozen Peak, guarded
+// by its fledglings. At half health it takes wing and puts 100 m between
+// you; beaten, it drops its NEST instead of dying and flies beyond the
+// horizon (respawning ~20 minutes later). Place the nest anywhere on the
+// ground and it becomes a flight roost: stand beside it and a called
+// griffin will CARRY you to any other roost — WoW flight-master style.
+const GRIFFIN_BIOMES = {
+  1: { fleeSpeed: 30, nestItem: 'desertNest' },   // Scorched Desert
+  4: { fleeSpeed: 60, nestItem: 'highlandNest' }, // Highlands
+  7: { fleeSpeed: 90, nestItem: 'frozenNest' },   // Frozen Peak
+};
+const griffinNextAt = { 1: 90, 4: 90, 7: 90 };    // game.time gate per biome
+let griffinCheckT = 6;
+
+function tickGriffin(dt) {
+  if (game.kind !== 'survival' || (mp?.active && !mp.isHost)) return;
+  griffinCheckT -= dt;
+  if (griffinCheckT > 0) return;
+  griffinCheckT = 6;
+  const bi = game.biomeIndex;
+  const spec = GRIFFIN_BIOMES[bi];
+  if (!spec || game.time < griffinNextAt[bi]) return;
+  if (enemyMgr.list.some(e => e.cfg.griffin)) return; // one griffin at a time
+  if (Math.random() < 0.5) return; // roll the dice every few seconds
+  // land 80–120 m out; in the Highlands griffins roost on the HIGH peaks
+  let best = null;
+  for (let t = 0; t < 12; t++) {
+    const a = Math.random() * Math.PI * 2;
+    const d = 80 + Math.random() * 40;
+    const x = player.pos.x + Math.cos(a) * d, z = player.pos.z + Math.sin(a) * d;
+    if (biomeIndexAt(x, z) !== bi || world.isWater(x, z)) continue;
+    const h = world.heightAt(x, z);
+    if (!best || (bi === 4 && h > best.h)) best = { x, z, h };
+  }
+  if (!best) return;
+  const prog = progressAt(best.x, best.z);
+  const gid = 990000 + bi;
+  const g = enemyMgr._spawn('griffin', best.x, best.z, prog, 1, {
+    fleeSpeed: spec.fleeSpeed, nestItem: spec.nestItem, griffinBiome: bi,
+    noReinforce: true, ambush: true, groupId: gid,
+  });
+  for (let i = 0; i < 3; i++) {
+    enemyMgr._spawn('griffinChick',
+      best.x + Math.cos(i * 2.1) * 4.5, best.z + Math.sin(i * 2.1) * 4.5, prog, 0,
+      { groupId: gid });
+  }
+  ui.toast(`🦅 ${g.bossName} has landed nearby with its fledglings — defeat it and it will DROP ITS NEST!`, 'boss');
+  audio.sfx('lane_unlock', 0.5);
+}
+
+// ---- placed griffin roosts (flight network nodes) ----
+const flightNests = [];
+
+function placeNest(id) {
+  if (game.kind !== 'survival' || !inPlay()) return;
+  const item = itemById(id);
+  const bi = biomeIndexAt(player.pos.x, player.pos.z);
+  if (bi > item.nest.biomeMax) {
+    ui.toast(`🪺 The ${item.name} only settles in the ${BIOMES[item.nest.biomeMax].name} or an earlier ring.`, '');
+    audio.sfx('error', 0.5);
+    return;
+  }
+  if (world.isWater(player.pos.x, player.pos.z)) {
+    ui.toast('🪺 Not on water — the twigs would drift apart.', '');
+    audio.sfx('error', 0.5);
+    return;
+  }
+  const ix = player.invItems.indexOf(id);
+  if (ix < 0) return;
+  player.invItems.splice(ix, 1);
+  const x = player.pos.x + player.facing.x * 2.5, z = player.pos.z + player.facing.z * 2.5;
+  const mesh = makeGriffinRoost();
+  mesh.position.set(x, world.heightAt(x, z), z);
+  scene.add(mesh);
+  flightNests.push({ x, z, mesh, name: item.name });
+  minimap.reveal(x, z);
+  minimap.redrawT = 0; // the 🪽 marker shows up right away
+  ui.toast('🪺 Roost placed! Stand beside it and press E to open the flight map.', 'level');
+  audio.sfx('tower_build', 0.55);
+}
+
+function nearFlightNest() {
+  if (game.kind !== 'survival') return null;
+  return flightNests.find(n => Math.hypot(player.pos.x - n.x, player.pos.z - n.z) < 5) ?? null;
+}
+
+// ---- the flight map: the world map with wing icons on every roost ----
+let flightmapOpen = false;
+let flightNodes = []; // canvas-space hit targets rebuilt on every draw
+
+function drawFlightMap() {
+  const canvas = $id('flightmap-canvas');
+  // borrow the discovered-world rendering, forced to the whole-world view
+  const saveZoom = minimap.bigZoom, savePX = minimap.bigPanX, savePZ = minimap.bigPanZ;
+  minimap.bigZoom = 1;
+  minimap.drawBig(canvas, player, mp?.mode === 'coop' ? mp.remote : null);
+  minimap.bigZoom = saveZoom; minimap.bigPanX = savePX; minimap.bigPanZ = savePZ;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width;
+  const toPx = (wx, wz) => ({
+    x: ((wx + WORLD.radius) / (WORLD.radius * 2)) * W,
+    y: ((wz + WORLD.radius) / (WORLD.radius * 2)) * W,
+  });
+  flightNodes = [];
+  const here = nearFlightNest();
+  const nodes = [
+    { wx: 0, wz: 0, label: 'Home Camp', icon: '🏠' },
+    ...flightNests.map(n => ({ wx: n.x, wz: n.z, label: n.name, icon: '🪽', isHere: n === here })),
+  ];
+  ctx.textAlign = 'center';
+  for (const n of nodes) {
+    const p = toPx(n.wx, n.wz);
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 13, 0, Math.PI * 2);
+    ctx.fillStyle = n.isHere ? 'rgba(255,210,74,0.35)' : 'rgba(90,200,255,0.25)';
+    ctx.fill();
+    ctx.strokeStyle = n.isHere ? '#ffd24a' : '#5ac8ff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.font = '15px sans-serif';
+    ctx.fillText(n.icon, p.x, p.y + 5);
+    ctx.font = 'bold 11px sans-serif';
+    ctx.fillStyle = '#e8f4ff';
+    ctx.fillText(n.isHere ? `${n.label} (you are here)` : n.label, p.x, p.y + 26);
+    flightNodes.push({ ...p, wx: n.wx, wz: n.wz });
+  }
+}
+
+function toggleFlightMap(force) {
+  flightmapOpen = force !== undefined ? force : !flightmapOpen;
+  if (flight) flightmapOpen = false; // already in the air
+  $id('flightmap').classList.toggle('hidden', !flightmapOpen);
+  if (flightmapOpen) { audio.sfx('click', 0.4); drawFlightMap(); }
+}
+
+// ---- the flight itself: 5 s arrival, then the griffin carries you ----
+let flight = null; // { phase: 'arrive'|'ride', t, mesh, to, from, y, walkT }
+
+function startFlight(tx, tz) {
+  if (flight) return;
+  const mesh = makeGriffin(1.15);
+  scene.add(mesh);
+  const a = Math.random() * Math.PI * 2;
+  flight = {
+    phase: 'arrive', t: 5, mesh, walkT: 0, to: { x: tx, z: tz },
+    from: { x: player.pos.x + Math.cos(a) * 60, z: player.pos.z + Math.sin(a) * 60 },
+  };
+  ui.toast('🪽 A griffin answers the call — it lands in 5 seconds…', 'level');
+  audio.sfx('spawn', 0.5);
+}
+
+function tickFlight(dt) {
+  if (!flight) return;
+  const m = flight.mesh;
+  if (player.dead) { // slain while waiting — the griffin leaves without you
+    scene.remove(m);
+    flight = null;
+    player.flying = false;
+    return;
+  }
+  flight.walkT += dt * 9;
+  (m.userData.wings || []).forEach((w, wi) => {
+    w.rotation.z = Math.sin(flight.walkT * 5 + wi * Math.PI) * 0.6;
+  });
+  if (flight.phase === 'arrive') {
+    flight.t -= dt;
+    const k = Math.max(0, flight.t / 5); // 1 → 0 as it swoops in
+    const x = player.pos.x + (flight.from.x - player.pos.x) * k;
+    const z = player.pos.z + (flight.from.z - player.pos.z) * k;
+    m.position.set(x, world.heightAt(x, z) + 16 * k, z);
+    m.rotation.y = Math.atan2(player.pos.x - x, player.pos.z - z) + Math.PI;
+    if (flight.t <= 0) {
+      flight.phase = 'ride';
+      player.flying = true;
+      if (player.mounted) dismountHorse();
+      audio.creature('griffin', 'attack', 0.4);
+      ui.toast('🪽 You swing onto the griffin\'s back — hold on!', 'level');
+    }
+  } else {
+    const dx = flight.to.x - player.pos.x, dz = flight.to.z - player.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d < 3) { // touchdown
+      player.flying = false;
+      scene.remove(m);
+      flight = null;
+      ui.toast('🪽 The griffin sets you down and wheels away.', 'level');
+      audio.sfx('kill_gold', 0.4);
+      return;
+    }
+    const step = Math.min(d, 55 * dt);
+    player.pos.x += (dx / d) * step;
+    player.pos.z += (dz / d) * step;
+    player.facing.set(dx / d, 0, dz / d);
+    // cruise well above the terrain, dipping in toward the landing
+    const cruise = world.heightAt(player.pos.x, player.pos.z) + Math.min(16, 3 + d * 0.25);
+    flight.y = flight.y == null ? cruise : flight.y + (cruise - flight.y) * Math.min(1, dt * 2);
+    m.position.set(player.pos.x, flight.y, player.pos.z);
+    m.rotation.y = Math.atan2(dx, dz) + Math.PI;
+    player.mesh.position.set(player.pos.x, flight.y + 0.95, player.pos.z);
+    player.mesh.rotation.y = Math.atan2(dx, dz);
+  }
+}
+
+// ---------- magical blue fireflies drift over the black swamp water ----------
+const fireflies = [];
+let fireflyGroup = null;
+
+function tickFireflies(dt) {
+  const inSwamp = game.kind === 'survival'
+    && BIOMES[game.biomeIndex]?.name === 'Murky Swamp';
+  if (!fireflyGroup) {
+    if (!inSwamp) return;
+    fireflyGroup = new THREE.Group();
+    for (let i = 0; i < 34; i++) {
+      const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.07, 5, 4),
+        new THREE.MeshBasicMaterial({ color: 0x5ac8ff, transparent: true }));
+      const f = { mesh, a: Math.random() * Math.PI * 2, r: 4 + Math.random() * 26,
+        sp: 0.2 + Math.random() * 0.5, ph: Math.random() * 10, y: 0.6 + Math.random() * 1.8 };
+      mesh.position.set(player.pos.x + Math.cos(f.a) * f.r, 0, player.pos.z + Math.sin(f.a) * f.r);
+      fireflies.push(f);
+      fireflyGroup.add(mesh);
+    }
+    scene.add(fireflyGroup);
+  }
+  if (!inSwamp) {
+    scene.remove(fireflyGroup);
+    fireflyGroup = null;
+    fireflies.length = 0;
+    return;
+  }
+  for (const f of fireflies) {
+    f.ph += dt;
+    f.a += f.sp * dt * 0.3;
+    // each one slowly circles the player while bobbing and pulsing
+    const tx = player.pos.x + Math.cos(f.a) * f.r + Math.sin(f.ph * 0.7) * 3;
+    const tz = player.pos.z + Math.sin(f.a) * f.r + Math.cos(f.ph * 0.9) * 3;
+    f.mesh.position.x += (tx - f.mesh.position.x) * Math.min(1, dt * 0.8);
+    f.mesh.position.z += (tz - f.mesh.position.z) * Math.min(1, dt * 0.8);
+    f.mesh.position.y = world.heightAt(f.mesh.position.x, f.mesh.position.z)
+      + f.y + Math.sin(f.ph * 1.7) * 0.35;
+    f.mesh.material.opacity = 0.2 + 0.8 * (0.5 + Math.sin(f.ph * 2.3) * 0.5);
+  }
+}
+
+// ---------- everburning torch: a warm light bubble in the dark biomes ----------
+let torchLight = null, torchFlame = null, torchT = 0;
+
+function tickTorch(dt) {
+  const dark = (BIOMES[game.biomeIndex]?.darkness ?? 0) >= 0.35
+    || radiusOf(player.pos.x, player.pos.z) < WORLD.caveR + 6;
+  const on = game.kind === 'survival' && inPlay()
+    && player.upgrades.torch && dark && !player.dead;
+  if (on && !torchLight) {
+    torchLight = new THREE.PointLight(0xffb45a, 2.2, 18, 1.6);
+    torchFlame = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 5),
+      new THREE.MeshBasicMaterial({ color: 0xffc86a }));
+    scene.add(torchLight, torchFlame);
+  } else if (!on && torchLight) {
+    scene.remove(torchLight, torchFlame);
+    torchLight.dispose?.();
+    torchLight = torchFlame = null;
+  }
+  if (!torchLight) return;
+  torchT += dt;
+  const p = player.mesh.position;
+  torchLight.position.set(p.x + 0.45, p.y + 2.1, p.z);
+  torchFlame.position.copy(torchLight.position);
+  // real fire never burns steady
+  torchLight.intensity = 2.1 + Math.sin(torchT * 9) * 0.25 + Math.sin(torchT * 23.7) * 0.15;
+}
+
+// ---------- desert dust devils: wandering sand vortices that FLING you ----------
+let devil = null, devilCd = 45;
+
+function tickDustDevil(dt) {
+  if (game.kind !== 'survival' || BIOMES[game.biomeIndex]?.name !== 'Scorched Desert') {
+    if (devil) { scene.remove(devil.mesh); devil = null; }
+    return;
+  }
+  if (!devil) {
+    devilCd -= dt;
+    if (devilCd > 0) return;
+    devilCd = 50 + Math.random() * 40;
+    const a = Math.random() * Math.PI * 2;
+    const x = player.pos.x + Math.cos(a) * 55, z = player.pos.z + Math.sin(a) * 55;
+    const g = new THREE.Group();
+    for (let i = 0; i < 4; i++) {
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(0.7 + i * 0.55, 1.6, 7, 1, true),
+        new THREE.MeshLambertMaterial({ color: 0xd8bd88, transparent: true,
+          opacity: 0.42 - i * 0.06, side: THREE.DoubleSide }));
+      cone.position.y = 0.9 + i * 1.5;
+      cone.rotation.x = Math.PI; // funnel narrows toward the ground
+      g.add(cone);
+    }
+    g.position.set(x, world.heightAt(x, z), z);
+    scene.add(g);
+    devil = { mesh: g, t: 22, dir: Math.random() * Math.PI * 2, hitCd: 0 };
+    ui.toast('🌪️ A dust devil twists across the sand — don\'t let it catch you!', 'boss');
+    return;
+  }
+  devil.t -= dt;
+  devil.hitCd -= dt;
+  if (devil.t <= 0) { scene.remove(devil.mesh); devil = null; return; }
+  // wanders drunkenly, drifting a little toward the player
+  devil.dir += (Math.random() - 0.5) * dt * 1.6;
+  const m = devil.mesh;
+  const toP = Math.atan2(player.pos.x - m.position.x, player.pos.z - m.position.z);
+  m.position.x += (Math.sin(devil.dir) * 4 + Math.sin(toP) * 2) * dt;
+  m.position.z += (Math.cos(devil.dir) * 4 + Math.cos(toP) * 2) * dt;
+  m.position.y = world.heightAt(m.position.x, m.position.z);
+  m.rotation.y += dt * 9;
+  const d = Math.hypot(player.pos.x - m.position.x, player.pos.z - m.position.z);
+  if (d < 2.4 && devil.hitCd <= 0 && !player.dead && !player.flying) {
+    devil.hitCd = 1.5;
+    player.takeDamage(8);
+    const kx = (player.pos.x - m.position.x) / (d || 1);
+    const kz = (player.pos.z - m.position.z) / (d || 1);
+    player.pos.x += kx * 5;
+    player.pos.z += kz * 5;
+    ui.hurtFlash();
+    audio.sfx('special', 0.5);
+  }
+}
+
+// ---------- Frozen Peak cold: the chill builds until you find warmth ----------
+// Bonfires / safe havens melt it off fast; the everburning torch halves the
+// buildup. Fully frozen you slow down and bleed 2 HP a second.
+let coldK = 0, coldTickT = 0, coldWarned = false;
+
+function tickCold(dt) {
+  const inFrozen = game.kind === 'survival' && inPlay()
+    && BIOMES[game.biomeIndex]?.name === 'Frozen Peak' && !player.dead;
+  if (!inFrozen) {
+    coldK = Math.max(0, coldK - dt * 0.15);
+    if (coldK === 0) coldWarned = false;
+    return;
+  }
+  const warm = world.isTargetSafe?.(player.pos);
+  const rate = warm ? -0.3 : (player.upgrades.torch ? 0.5 : 1) / 75; // ~75 s to freeze
+  coldK = Math.max(0, Math.min(1, coldK + rate * dt));
+  if (coldK > 0.55 && !coldWarned) {
+    coldWarned = true;
+    ui.toast('🥶 You are freezing — find a bonfire, or keep a torch burning!', 'boss');
+  }
+  if (coldK >= 1) {
+    coldTickT -= dt;
+    if (coldTickT <= 0) {
+      coldTickT = 1;
+      player.takeDamage(2, { silent: true });
+      ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 1.9), '-2 ❄️', '#9fe8ff');
+    }
+  } else coldTickT = 0;
+}
+
 // ---------- wandering trader: sells your surplus for essence ----------
 const TRADE_RATES = [['wood', 20], ['stone', 20], ['hide', 10], ['meat', 30], ['wool', 12]];
 function tradeWith(poi) {
@@ -727,7 +1084,9 @@ function grantPickup(kind, payload) {
   if (kind === 'item') {
     const item = itemById(payload);
     player.ownItem(payload);
-    ui.toast(`🎁 Loot: ${item.icon} ${item.name} — in your bag (equip in Character, C).`, 'level');
+    ui.toast(item.nest
+      ? `🎁 Loot: ${item.icon} ${item.name} — open your bag (C) and CLICK it to place a flight roost.`
+      : `🎁 Loot: ${item.icon} ${item.name} — in your bag (equip in Character, C).`, 'level');
     panels.refresh();
   } else if (kind === 'salve' || kind === 'roast' || kind === 'venom' || kind === 'honey') {
     player.consumables[kind] = (player.consumables[kind] ?? 0) + payload;
@@ -858,6 +1217,14 @@ const enemyMgr = new EnemyManager(scene, world, {
       });
   },
   onRemove: (enemy) => ui.removeTracker('hp' + enemy.id),
+  // a beaten griffin drops its nest and flees; it may return in ~20 minutes
+  onGriffinEscape: (enemy) => {
+    pickups.spawn('item', enemy.nestItem ?? 'desertNest', enemy.pos, 0.8);
+    if (enemy.griffinBiome != null) griffinNextAt[enemy.griffinBiome] = game.time + 1200;
+    ui.banner('🪽 The griffin yields!');
+    ui.toast('🪺 Beaten, the griffin drops its NEST and flees beyond the horizon. Place the nest to make a flight roost!', 'level');
+    audio.sfx('victory', 0.5);
+  },
 });
 
 const projectiles = new Projectiles(scene);
@@ -868,6 +1235,7 @@ const companions = new Companions(scene, {
   removeTracker: (id) => ui.removeTracker(id),
 });
 const minimap = new Minimap(document.getElementById('minimap'), world);
+minimap.flightNests = flightNests; // 🪽 roost markers on the mini + world map
 
 // Boss loot: a chance to drop an unowned item near the player's level.
 function rollBossDrop(enemy) {
@@ -1050,7 +1418,7 @@ function endMoba(iWon) {
   if (game.mode !== 'play') return;
   game.mode = iWon ? 'won' : 'dead';
   aimArc.visible = false;
-  audio.stopMusic();
+  audio.stopMusic(); setAmbience(null);
   audio.sfx(iWon ? 'victory' : 'defeat', 0.6);
   const end = document.getElementById('end-title');
   ui.showEnd(iWon, endStats());
@@ -1203,6 +1571,21 @@ const settings = Object.assign(
     audio.sfx('click', 0.4);
   });
 
+  // auto camera rotate: after 5 s of moving in one direction the camera (and
+  // the minimap) turn so that direction reads as "up"; in RPG view, backing
+  // up for 5 s spins the camera behind you instead
+  const autoRotBox = $id('set-autorotate');
+  settings.autoRotate ??= false;
+  autoRotBox.checked = settings.autoRotate;
+  autoRotBox.addEventListener('change', () => {
+    settings.autoRotate = autoRotBox.checked;
+    localStorage.setItem('atw-settings', JSON.stringify(settings));
+    ui.toast(settings.autoRotate
+      ? '🔄 Auto camera rotate ON — hold a direction 5 s to turn the view'
+      : '🔄 Auto camera rotate off', 'level');
+    audio.sfx('click', 0.4);
+  });
+
   // graphics: bloom (default ON), ground texture detail, optional extras
   settings.bloom ??= true;
   settings.texDetail ??= 0;
@@ -1299,7 +1682,7 @@ async function ensureMp() {
       onCoopWin: () => {
         if (game.mode !== 'play') return;
         game.mode = 'won';
-        audio.stopMusic();
+        audio.stopMusic(); setAmbience(null);
         audio.sfx('victory', 0.6);
         ui.showEnd(true, endStats());
       },
@@ -1519,11 +1902,37 @@ function toggleBigMap(force) {
   $id('bigmap').classList.toggle('hidden', !bigmapOpen);
   if (bigmapOpen) {
     audio.sfx('click', 0.4);
+    minimap.bigPanX = minimap.bigPanZ = 0; // reopen centered on the player
     minimap.drawBig($id('bigmap-canvas'), player, mp?.mode === 'coop' ? mp.remote : null);
   }
 }
 input.onKey('KeyM', () => toggleBigMap());
 $id('minimap').addEventListener('click', () => toggleBigMap());
+
+// click & drag the big map with the mouse to pan around (when zoomed in)
+{
+  const bigCanvas = $id('bigmap-canvas');
+  let dragFrom = null;
+  bigCanvas.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    dragFrom = { x: e.clientX, y: e.clientY };
+    bigCanvas.setPointerCapture(e.pointerId);
+    bigCanvas.classList.add('dragging');
+  });
+  bigCanvas.addEventListener('pointermove', (e) => {
+    if (!dragFrom) return;
+    // clientX is CSS px; the canvas may be shrunk by max-width — rescale
+    const css2px = bigCanvas.width / (bigCanvas.clientWidth || bigCanvas.width);
+    const s = minimap.bigScale || 1;
+    minimap.bigPanX -= ((e.clientX - dragFrom.x) * css2px) / s;
+    minimap.bigPanZ -= ((e.clientY - dragFrom.y) * css2px) / s;
+    dragFrom = { x: e.clientX, y: e.clientY };
+    minimap.drawBig(bigCanvas, player, mp?.mode === 'coop' ? mp.remote : null);
+  });
+  const stopDrag = () => { dragFrom = null; bigCanvas.classList.remove('dragging'); };
+  bigCanvas.addEventListener('pointerup', stopDrag);
+  bigCanvas.addEventListener('pointercancel', stopDrag);
+}
 
 // minimap zoom buttons (don't let their clicks open the big map)
 function updateZoomButtons() {
@@ -1710,6 +2119,7 @@ input.onKey('KeyE', () => {
     else panels.renderSmith();
     audio.loopStart('smith_forge', 0.5);
   }
+  else if (nearFlightNest()) toggleFlightMap(true);
   else if (usePropNear()) { /* hive/cocoon/glade handled */ }
   else if (enemyMgr.prisonerNear?.(player.pos.x, player.pos.z, 3)) {
     freePrisoner(enemyMgr.prisonerNear(player.pos.x, player.pos.z, 3));
@@ -1791,6 +2201,24 @@ input.onKey('KeyP', () => {
   audio.sfx('click', 0.4);
 });
 $id('bigmap').querySelector('.panel-close').addEventListener('click', () => toggleBigMap(false));
+$id('flightmap-close').addEventListener('click', () => toggleFlightMap(false));
+// clicking a roost on the flight map calls a griffin to carry you there
+$id('flightmap-canvas').addEventListener('click', (e) => {
+  if (!flightmapOpen) return;
+  const c = e.currentTarget;
+  const rect = c.getBoundingClientRect();
+  const px = (e.clientX - rect.left) * (c.width / rect.width);
+  const py = (e.clientY - rect.top) * (c.height / rect.height);
+  const node = flightNodes.find(n => Math.hypot(n.x - px, n.y - py) < 24);
+  if (!node) return;
+  if (Math.hypot(node.wx - player.pos.x, node.wz - player.pos.z) < 12) {
+    ui.toast('🪽 You are already standing at this roost.', '');
+    audio.sfx('error', 0.4);
+    return;
+  }
+  toggleFlightMap(false);
+  startFlight(node.wx, node.wz);
+});
 for (const [btnId, d] of [['bigmap-zoomin', 1], ['bigmap-zoomout', -1]]) {
   $id(btnId).addEventListener('click', () => {
     minimap.bigZoomBy?.(d);
@@ -1807,6 +2235,7 @@ for (let i = 0; i < 6; i++) {
 }
 input.onKey('Escape', () => {
   if (!inPlay()) return;
+  if (flightmapOpen) { toggleFlightMap(false); return; }
   if (bigmapOpen) { toggleBigMap(false); return; }
   if (panels.open) { panels.toggle(null); return; }
   if (mp?.active) return; // the shared world can't pause
@@ -1985,10 +2414,44 @@ const caveFog = new THREE.Color(0x0c0f0a);
 
 // biomes with teeth announce their hazard the first time you step in
 const BIOME_HAZARD_NOTES = {
-  'Murky Swamp': '🦶 The mud drags at your boots — you move slower here.',
+  'Murky Swamp': '🛶 Deep black water everywhere — without a boat the swamp will not let you through.',
   'Haunted Forest': '☠️ Zombie claws fester: their hits poison you for a few seconds.',
+  'Frozen Peak': '❄️ The cold gnaws at you — keep moving, warm up at bonfires (a torch helps too).',
 };
 let envSpeedMult = 1;
+let biomeLightK = 1; // smoothed per-biome light dimming factor
+
+// per-biome music: the big hour-long tracks stream lazily on first entry
+const BIOME_MUSIC = [
+  'level1',            // 0 Verdant Forest
+  'biome_desert',      // 1 Scorched Desert
+  'biome_darkforest',  // 2 Dark Forest
+  'biome_swamp',       // 3 Murky Swamp
+  'biome_highlands',   // 4 Highlands
+  'biome_darkforest',  // 5 Haunted Forest
+  'biome_jungle',      // 6 Jungle
+  'level3',            // 7 Frozen Peak
+];
+
+// living soundscape: each biome breathes its own nature ambience loop, laid
+// UNDER the music. Verdant sings with birds, the swamp croaks, the peaks howl.
+const BIOME_AMBIENCE = [
+  'forest_ambience', // 0 Verdant — birdsong & leaves
+  'wind_ambience',   // 1 Scorched Desert — hot whistling wind
+  null,              // 2 Dark Forest — eerie hush (the gloom sells it)
+  'swamp_ambience',  // 3 Murky Swamp — frogs & bubbling
+  'wind_ambience',   // 4 Highlands — open windswept moor
+  null,              // 5 Haunted Forest — dead silence
+  'forest_ambience', // 6 Jungle — dense birds & insects
+  'wind_ambience',   // 7 Frozen Peak — howling gale
+];
+let ambienceName = null;
+function setAmbience(name) {
+  if (name === ambienceName) return;
+  if (ambienceName) audio.loopStop(ambienceName);
+  ambienceName = name;
+  if (name) audio.loopStart(name, 0.32);
+}
 
 function updateAtmosphere(dt) {
   const idx = biomeIndexAt(player.pos.x, player.pos.z);
@@ -1997,10 +2460,16 @@ function updateAtmosphere(dt) {
     const biome = BIOMES[idx];
     ui.banner(`— ${biome.name} —`);
     audio.sfx('lane_unlock', 0.5);
-    audio.playMusic(idx >= 3 ? 'level3' : 'level1');
+    audio.playMusic(BIOME_MUSIC[idx] ?? 'level3');
     const note = BIOME_HAZARD_NOTES[biome.name];
     if (note) ui.toast(note, 'boss');
   }
+  // ambience: the cave near home overrides the biome; open water laps under it
+  const rHome = Math.hypot(player.pos.x, player.pos.z);
+  const onWater = world.isWater?.(player.pos.x, player.pos.z);
+  setAmbience(rHome < 34 ? 'cave_ambience'
+    : onWater ? 'water_lapping'
+    : BIOME_AMBIENCE[game.biomeIndex] ?? null);
   envSpeedMult = world.swampZone?.(player.pos.x, player.pos.z) === 'mud' ? 0.78 : 1;
   $id('biome-gloom').style.opacity = BIOMES[game.biomeIndex].darkness ?? 0;
   envSpeedMult *= Math.min(
@@ -2008,6 +2477,8 @@ function updateAtmosphere(dt) {
     world.webSlowAt?.(player.pos.x, player.pos.z) ?? 1);
   // thick wool socks: mud and webs only bite half as hard
   if (player.upgrades.socks) envSpeedMult = 1 - (1 - envSpeedMult) * 0.5;
+  // Frozen Peak chill: stiff, frozen legs move up to 30% slower
+  envSpeedMult *= 1 - 0.3 * coldK;
   const biome = BIOMES[game.biomeIndex];
 
   // the cave is dark; light floods in as you walk toward the mouth
@@ -2015,8 +2486,11 @@ function updateAtmosphere(dt) {
   // the cave is pitch dark — but once a home is BUILT over it, it's lit
   const caveK = (camp?.levels.home ?? 0) > 0 ? 0
     : Math.max(0, Math.min(1, (WORLD.caveR + 6 - r) / (WORLD.caveR + 3)));
-  hemi.intensity = 0.9 - 0.62 * caveK;
-  sun.intensity = 1.4 * (1 - 0.8 * caveK);
+  // gloomy biomes (Dark Forest, Haunted Forest, swamp) dim the world lights
+  // themselves — the screen overlay alone left the geometry too bright
+  biomeLightK += (Math.min(1, biome.light ?? 1) - biomeLightK) * Math.min(1, dt * 1.5);
+  hemi.intensity = (0.9 - 0.62 * caveK) * biomeLightK;
+  sun.intensity = 1.4 * (1 - 0.8 * caveK) * biomeLightK;
   // the camera sits ~30 m away — keep the fog behind the hero so the cave
   // interior stays dimly visible while the outside world is swallowed
   scene.fog.near = 35 - 14 * caveK;
@@ -2054,6 +2528,8 @@ function applyViewMode() {
   const rpg = !!settings.rpgView;
   game.rpgView = rpg;
   input.rpgMode = rpg;
+  // the free mouse-look option only makes sense in RPG view — hide it otherwise
+  $id('mouselook-row').classList.toggle('hidden', !rpg);
   scene.fog.near = rpg ? 45 : 35;
   scene.fog.far = rpg ? (autoQuality.stage >= 3 ? 150 : 195) : (autoQuality.stage >= 3 ? 90 : 110);
   camera.far = rpg ? 340 : 300;
@@ -2082,7 +2558,47 @@ const camSmooth = new THREE.Vector3();
 let camInit = false;
 let rpgPitch = 0.34; // radians above the horizontal; negative looks UP
 let rpgDist = 8.6;   // wheel-zoomed camera distance
+
+// ---- auto camera rotate (Settings): hold ONE direction for 5 s and the
+// camera turns so that direction reads as "up" (top-down: an orbit yaw that
+// the minimap mirrors; RPG: a 180° spin when you back up on S) ----
+let camYaw = 0;          // top-down orbit angle; 0 = the classic north-up view
+let camYawTarget = 0;
+let topHoldDir = null;   // direction held in top-down mode + for how long
+let topHoldT = 0;
+let rpgHoldT = 0;        // how long S has been backing the character up
+let rpgFlip = 0;         // remaining radians of the RPG auto-180° turn
+let rpgFlipArmed = true; // S must be released before another auto-flip
+
+function trackAutoRotate(dt) {
+  if (!settings.autoRotate || game.mode !== 'play' || game.paused || player.dead) {
+    topHoldDir = null; topHoldT = 0; rpgHoldT = 0;
+    if (!settings.autoRotate) camYawTarget = 0;
+    return;
+  }
+  if (game.rpgView) {
+    topHoldDir = null; topHoldT = 0;
+    camYawTarget = 0; // top-down yaw resets while RPG drives the camera
+    if (input.moveZ > 0 && input.moveX === 0) { // pure backing up on S
+      rpgHoldT += dt;
+      if (rpgHoldT >= 5 && rpgFlipArmed && rpgFlip <= 0) {
+        rpgFlip = Math.PI;
+        rpgFlipArmed = false;
+      }
+    } else { rpgHoldT = 0; rpgFlipArmed = true; }
+  } else {
+    rpgHoldT = 0; rpgFlipArmed = true; rpgFlip = 0;
+    const d = player.moveDir; // world-space walk direction (all control modes)
+    if (!d) { topHoldDir = null; topHoldT = 0; return; }
+    if (topHoldDir && d.x * topHoldDir.x + d.z * topHoldDir.z > 0.94) {
+      topHoldT += dt; // still the same direction (within ~20°)
+      if (topHoldT >= 5) camYawTarget = Math.atan2(-d.x, -d.z);
+    } else { topHoldDir = { x: d.x, z: d.z }; topHoldT = 0; }
+  }
+}
+
 function updateCamera(dt = 0) {
+  trackAutoRotate(dt);
   const py = player.mesh.position.y;
   let sx = 0, sz = 0;
   if (shakeT > 0) {
@@ -2099,6 +2615,14 @@ function updateCamera(dt = 0) {
       const yaw = Math.atan2(player.facing.x, player.facing.z) - drag.x * 0.0045;
       player.facing.set(Math.sin(yaw), 0, Math.cos(yaw));
     }
+    // auto camera rotate: smoothly spin the character (and so the chase
+    // camera) 180° after 5 s of backing up on S
+    if (rpgFlip > 0 && !player.dead) {
+      const step = Math.min(rpgFlip, 3.2 * dt);
+      rpgFlip -= step;
+      const yaw = Math.atan2(player.facing.x, player.facing.z) + step;
+      player.facing.set(Math.sin(yaw), 0, Math.cos(yaw));
+    }
     rpgPitch = Math.max(-0.5, Math.min(1.25, rpgPitch + drag.y * 0.004));
     rpgDist = Math.max(3.5, Math.min(15, rpgDist + input.takeWheel() * 0.9));
     const flat = Math.cos(rpgPitch) * rpgDist;
@@ -2112,8 +2636,13 @@ function updateCamera(dt = 0) {
     camera.lookAt(player.pos.x + player.facing.x * 2 + sx, py + 1.7, player.pos.z + player.facing.z * 2 + sz);
   } else {
     camInit = false;
-    camera.position.set(player.pos.x + sx, py + 26, player.pos.z + 14 + sz);
-    camera.lookAt(player.pos.x + sx, py, player.pos.z - 2 + sz);
+    // ease the orbit yaw toward its target the short way around; at yaw 0
+    // this is exactly the classic fixed top-down camera
+    const diff = camYawTarget - camYaw;
+    camYaw += Math.atan2(Math.sin(diff), Math.cos(diff)) * Math.min(1, dt * 3);
+    const fx = Math.sin(camYaw), fz = Math.cos(camYaw);
+    camera.position.set(player.pos.x + fx * 14 + sx, py + 26, player.pos.z + fz * 14 + sz);
+    camera.lookAt(player.pos.x - fx * 2 + sx, py, player.pos.z - fz * 2 + sz);
   }
   sun.position.set(player.pos.x + 18, 35, player.pos.z + 12);
   sun.target.position.set(player.pos.x, 0, player.pos.z);
@@ -2138,7 +2667,9 @@ function step() {
     game.time += dt;
     updateAim(dt);
     const em = combatMgr(); // real mgr / co-op shadow / pvp arena / moba units
-    player.update(dt, {
+    // while a griffin carries you the flight drives your position — the
+    // normal walk/attack simulation pauses until touchdown
+    if (!(flight && flight.phase === 'ride')) player.update(dt, {
       input, world, enemyMgr: em, projectiles, pickups, aimPoint,
       arenaZone: mp?.active ? mp.arenaZone() : null,
       mobaBounds: game.kind === 'moba' ? MOBA.half : null,
@@ -2181,7 +2712,9 @@ function step() {
       companions.update(dt, player, em, projectiles, world);
       camp?.update(dt, em, projectiles);
       world.update(dt, player.pos);
-      // co-op: show the partner on the minimap too
+      // co-op: show the partner on the minimap too; in top-down view the
+      // minimap turns together with the auto-rotated camera (RPG: north-up)
+      minimap.rotation = game.rpgView ? 0 : camYaw;
       minimap.update(dt, player, em,
         mp?.active && mp.mode === 'coop' ? mp.remote : null);
       updateAtmosphere(dt);
@@ -2204,7 +2737,7 @@ function step() {
       // raft under the hero while paddling — stepping onto water first means
       // 2 s of setting the raft down (no moving), then a slow paddle with a
       // simple wake of expanding wave rings
-      const onWater = camp?.has('boat') && world.isWater(player.pos.x, player.pos.z);
+      const onWater = !player.flying && camp?.has('boat') && world.isWater(player.pos.x, player.pos.z);
       if (onWater && !wasOnWater) {
         boatPlaceT = 2;
         audio.sfx('tower_build', 0.5);
@@ -2238,6 +2771,12 @@ function step() {
       tickAvalanche(dt);
       tickBlizzard(dt);
       tickTempleTraps(dt);
+      tickGriffin(dt);
+      tickFlight(dt);
+      tickFireflies(dt);
+      tickTorch(dt);
+      tickDustDevil(dt);
+      tickCold(dt);
 
       // contextual E hint: revive > chest > home > landmark > treasure
       const hintEl = $id('home-hint');
@@ -2268,6 +2807,7 @@ function step() {
         : nearWildHorse() ? '🐴 A wild horse — press <kbd>E</kbd> to saddle and ride it'
         : nearParkedHorse() ? '🐴 Your horse — press <kbd>E</kbd> to mount'
         : nearSmith() ? '⚒️ Blacksmith — press <kbd>E</kbd> for quests &amp; the forge'
+        : nearFlightNest() ? '🪽 Griffin roost — press <kbd>E</kbd> to open the flight map'
         : world.propNear?.(player.pos.x, player.pos.z, 3) ? {
             hive: '🍯 A humming beehive — press <kbd>E</kbd> to raid it (mind the bees)',
             cocoon: '🕸️ A silk cocoon — press <kbd>E</kbd> to cut it open',
@@ -2306,7 +2846,7 @@ function step() {
       if (radiusOf(player.pos.x, player.pos.z) >= WORLD.goalR) {
         game.mode = 'won';
         aimArc.visible = false;
-        audio.stopMusic();
+        audio.stopMusic(); setAmbience(null);
         audio.sfx('victory', 0.6);
         mp?.broadcastWin();
         ui.showEnd(true, endStats());

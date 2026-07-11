@@ -389,6 +389,7 @@ export class Player {
 
   takeDamage(dmg, src = null) {
     if (this.dead) return;
+    if (this.flying) return; // riding a griffin — far out of anyone's reach
     if (this.upgrades.lining) dmg *= 0.92; // quilted wool soaks a bit of everything
     this.hurtT = 0;
     this.hp -= dmg;
@@ -482,6 +483,7 @@ export class Player {
 
     // -- dash overrides normal movement --
     let moving = false;
+    this.moveDir = null; // world-space walk direction this frame (auto camera rotate)
     if (this.dashT > 0) {
       this.dashT -= dt;
       this.pos.addScaledVector(this.dashDir, 34 * dt);
@@ -532,18 +534,25 @@ export class Player {
       if (moving) {
         const len = Math.hypot(mx, mz);
         mx /= len; mz /= len;
+        this.moveDir = { x: mx, z: mz };
         // paddling is a touch slower than running; roast buff speeds you up;
         // the swamp (ctx.envSpeedMult) drags at your boots
         const onWater = ctx.boat && world.isWater?.(this.pos.x, this.pos.z);
         const speed = (this.speed + (ctx.mounted ? 9 : 0)) * (onWater ? 0.4 : 1)
           * (this.roastT > 0 ? 1.1 : 1) * (ctx.envSpeedMult ?? 1);
         // cliffs are walls: block any step that climbs too steeply (walking
-        // DOWN or falling off is always allowed); sliding along one is fine
+        // DOWN or falling off is always allowed); sliding along one is fine.
+        // Deep swamp water is a wall too unless you carry the boat — but
+        // never trap someone already standing in it.
         const h0 = world.heightAt(this.pos.x, this.pos.z);
+        const inWaterNow = world.isWater?.(this.pos.x, this.pos.z);
         const canStep = (dx, dz) => {
           const l = Math.hypot(dx, dz);
           if (l < 1e-6) return false;
-          const ahead = world.heightAt(this.pos.x + (dx / l) * 0.9, this.pos.z + (dz / l) * 0.9);
+          const ax = this.pos.x + (dx / l) * 0.9, az = this.pos.z + (dz / l) * 0.9;
+          if (!ctx.boat && !inWaterNow && world.swampZone?.(ax, az) === 'water'
+              && !world._lilypadAt?.(ax, az)) return false;
+          const ahead = world.heightAt(ax, az);
           return (ahead - h0) / 0.9 <= MAX_CLIMB_SLOPE;
         };
         const dx = mx * speed * dt, dz = mz * speed * dt;

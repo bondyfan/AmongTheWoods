@@ -86,6 +86,11 @@ export class Minimap {
     this.deathAt = null;   // last place the player died (⚰️ marker)
     this.treasureAt = null; // active treasure-map dig site (✖)
     this.pings = [];       // co-op pings: { x, z, t }
+    this.rotation = 0;     // radians; auto camera rotate turns the map with the view
+    this._drawnRot = 0;
+    this.bigPanX = 0;      // big-map drag pan (world units)
+    this.bigPanZ = 0;
+    this.flightNests = null; // placed griffin roosts (main assigns its array)
   }
 
   addPing(x, z) {
@@ -129,6 +134,8 @@ export class Minimap {
     if (partner?.mesh?.visible) this.reveal(partner.pos.x, partner.pos.z);
     this.pings = this.pings.filter(p => (p.t -= dt) > 0);
     this.redrawT -= dt;
+    // while the camera is turning, redraw every frame so the map spins smoothly
+    if ((this.rotation || 0) !== this._drawnRot) this.redrawT = 0;
     if (this.redrawT <= 0) {
       this.redrawT = 0.25;
       this._draw(player, enemyMgr, partner);
@@ -149,10 +156,30 @@ export class Minimap {
     ctx.fillStyle = '#0a0f08';
     ctx.fillRect(0, 0, W, H);
 
+    // auto camera rotate: spin the whole map around the player (canvas center)
+    // so "up" on the minimap always matches "up" on the screen
+    const rot = this.rotation || 0;
+    this._drawnRot = rot;
+    ctx.save();
+    if (rot) {
+      ctx.translate(W / 2, H / 2);
+      ctx.rotate(rot);
+      ctx.translate(-W / 2, -H / 2);
+    }
+    // glyphs (🏠, 💀, ⚒ …) stay upright: counter-rotate around their anchor
+    const text = (t, x, y) => {
+      if (!rot) { ctx.fillText(t, x, y); return; }
+      ctx.save(); ctx.translate(x, y); ctx.rotate(-rot); ctx.fillText(t, 0, 0); ctx.restore();
+    };
+    // a rotated square shows its corners — overscan so no black wedges appear
+    const M = rot ? W * 0.21 : 0;
+    const inView = (p) => p.x >= -M && p.x <= W + M && p.y >= -M && p.y <= H + M;
+
     // discovered cells in view, colored by their biome
-    const c0x = Math.max(0, Math.floor((ox + WORLD.radius) / CELL));
-    const c0z = Math.max(0, Math.floor((oz + WORLD.radius) / CELL));
-    const cN = Math.ceil(SPAN / CELL) + 1;
+    const Mw = M / scale;
+    const c0x = Math.max(0, Math.floor((ox - Mw + WORLD.radius) / CELL));
+    const c0z = Math.max(0, Math.floor((oz - Mw + WORLD.radius) / CELL));
+    const cN = Math.ceil((SPAN + 2 * Mw) / CELL) + 1;
     for (let rz = c0z; rz < Math.min(this.rows, c0z + cN); rz++) {
       for (let cx = c0x; cx < Math.min(this.cols, c0x + cN); cx++) {
         if (!this.discovered[rz * this.cols + cx]) continue;
@@ -168,10 +195,10 @@ export class Minimap {
 
     // home marker (only when it's inside the view)
     const hc = toC(0, 0);
-    if (hc.x > 0 && hc.x < W && hc.y > 0 && hc.y < H) {
+    if (inView(hc)) {
       ctx.font = '10px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('🏠', hc.x, hc.y + 3);
+      text('🏠', hc.x, hc.y + 3);
     }
 
     // enemies: red dots, pack mothers: skulls
@@ -179,7 +206,7 @@ export class Minimap {
       ctx.textAlign = 'center';
       for (const e of enemyMgr.alive()) {
         const p = toC(e.pos.x, e.pos.z);
-        if (p.x < 0 || p.x > W || p.y < 0 || p.y > H) continue;
+        if (!inView(p)) continue;
         // the fog of war hides creatures in unexplored land
         if (!this._isDiscovered(e.pos.x, e.pos.z)) continue;
         if (e.bossRank > 0) {
@@ -194,7 +221,7 @@ export class Minimap {
           ctx.fill();
           ctx.restore();
           ctx.font = '9px sans-serif';
-          ctx.fillText('💀', p.x, p.y + 3);
+          text('💀', p.x, p.y + 3);
         } else {
           // hostiles are red; harmless grazing critters are white
           ctx.fillStyle = e.cfg?.passive ? '#f2efe6' : '#e04040';
@@ -209,44 +236,56 @@ export class Minimap {
     for (const sm of this.world.smiths ?? []) {
       if (!this._isDiscovered(sm.x, sm.z)) continue;
       const p = toC(sm.x, sm.z);
-      if (p.x < 0 || p.x > W || p.y < 0 || p.y > H) continue;
+      if (!inView(p)) continue;
       ctx.fillStyle = '#ffa528';
       ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2); ctx.fill();
       ctx.strokeStyle = '#3a2a10'; ctx.lineWidth = 1; ctx.stroke();
       ctx.textAlign = 'center';
       ctx.font = 'bold 8px sans-serif';
       ctx.fillStyle = '#2a1c08';
-      ctx.fillText('⚒', p.x, p.y + 3);
+      text('⚒', p.x, p.y + 3);
+    }
+
+    // placed griffin roosts — the flight network is always shown
+    for (const n of this.flightNests ?? []) {
+      const p = toC(n.x, n.z);
+      if (!inView(p)) continue;
+      ctx.fillStyle = '#5ac8ff';
+      ctx.beginPath(); ctx.arc(p.x, p.y, 5.5, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#0a2a3a'; ctx.lineWidth = 1; ctx.stroke();
+      ctx.textAlign = 'center';
+      ctx.font = '8px sans-serif';
+      text('🪽', p.x, p.y + 3);
     }
 
     // landmarks — only once their cell has been explored
     for (const poi of this.world.pois ?? []) {
       if (!this._isDiscovered(poi.x, poi.z)) continue;
       const p = toC(poi.x, poi.z);
-      if (p.x < 0 || p.x > W || p.y < 0 || p.y > H) continue;
+      if (!inView(p)) continue;
       ctx.textAlign = 'center';
       ctx.font = '10px sans-serif';
       ctx.globalAlpha = poi.claimed ? 0.35 : 1;
       ctx.fillStyle = poi.type === 'shrine' ? '#7fd1ff' : poi.type === 'crypt' ? '#f0ead8' : '#c9b8ff';
-      ctx.fillText(poi.type === 'shrine' ? '✦' : poi.type === 'crypt' ? '☗' : '▲', p.x, p.y + 3);
+      text(poi.type === 'shrine' ? '✦' : poi.type === 'crypt' ? '☗' : '▲', p.x, p.y + 3);
       ctx.globalAlpha = 1;
     }
 
     // active treasure map: X marks the spot (it's a map — always shown)
     if (this.treasureAt) {
       const p = toC(this.treasureAt.x, this.treasureAt.z);
-      if (p.x > 0 && p.x < W && p.y > 0 && p.y < H) {
+      if (inView(p)) {
         ctx.textAlign = 'center';
         ctx.font = 'bold 11px sans-serif';
         ctx.fillStyle = '#ff5030';
-        ctx.fillText('✖', p.x, p.y + 4);
+        text('✖', p.x, p.y + 4);
       }
     }
 
     // co-op pings: fading orange rings
     for (const ping of this.pings) {
       const p = toC(ping.x, ping.z);
-      if (p.x < 0 || p.x > W || p.y < 0 || p.y > H) continue;
+      if (!inView(p)) continue;
       ctx.strokeStyle = `rgba(255, 165, 40, ${Math.min(1, ping.t / 2)})`;
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -257,20 +296,32 @@ export class Minimap {
     // last death spot (also where your dropped loot lies)
     if (this.deathAt) {
       const dp = toC(this.deathAt.x, this.deathAt.z);
+      let x = dp.x, y = dp.y + 4;
+      if (rot) {
+        // pin far-away coffins to the inscribed circle so the marker still
+        // shows on the canvas after the map is rotated
+        const dx = x - W / 2, dy = y - H / 2, r = Math.hypot(dx, dy), rm = W / 2 - 8;
+        if (r > rm) { x = W / 2 + (dx / r) * rm; y = H / 2 + (dy / r) * rm; }
+      } else {
+        x = Math.max(6, Math.min(W - 6, x));
+        y = Math.max(11, Math.min(H - 2, y));
+      }
       ctx.textAlign = 'center';
       ctx.font = '12px sans-serif';
-      ctx.fillText('⚰️', Math.max(6, Math.min(W - 6, dp.x)), Math.max(11, Math.min(H - 2, dp.y + 4)));
+      text('⚰️', x, y);
     }
 
     // co-op partner: blue dot
     if (partner?.mesh?.visible) {
       const tp = toC(partner.pos.x, partner.pos.z);
-      if (tp.x > 0 && tp.x < W && tp.y > 0 && tp.y < H) {
+      if (inView(tp)) {
         ctx.fillStyle = '#5fa8e0';
         ctx.beginPath(); ctx.arc(tp.x, tp.y, 3, 0, Math.PI * 2); ctx.fill();
         ctx.strokeStyle = '#000'; ctx.stroke();
       }
     }
+
+    ctx.restore(); // end of the rotated map — the player dot stays screen-fixed
 
     // player: always dead center
     ctx.fillStyle = '#ffffff';
@@ -295,9 +346,19 @@ export class Minimap {
     const zoom = this.bigZoom ?? 1;
     const vspan = this.span / zoom;
     const clamp = (v) => Math.max(-WORLD.radius, Math.min(WORLD.radius - vspan, v));
-    const ox = zoom === 1 ? -WORLD.radius : clamp(player.pos.x - vspan / 2);
-    const oz = zoom === 1 ? -WORLD.radius : clamp(player.pos.z - vspan / 2);
+    let ox, oz;
+    if (zoom === 1) {
+      ox = -WORLD.radius; oz = -WORLD.radius;
+      this.bigPanX = 0; this.bigPanZ = 0; // whole world visible — nothing to pan
+    } else {
+      ox = clamp(player.pos.x - vspan / 2 + this.bigPanX);
+      oz = clamp(player.pos.z - vspan / 2 + this.bigPanZ);
+      // write the clamped pan back so dragging never piles up past the edge
+      this.bigPanX = ox - (player.pos.x - vspan / 2);
+      this.bigPanZ = oz - (player.pos.z - vspan / 2);
+    }
     const scale = W / vspan;
+    this.bigScale = scale; // canvas px per world unit — the drag handler needs it
     const toX = (wx) => (wx - ox) * scale;
     const toY = (wz) => (wz - oz) * scale;
     const c0x = Math.max(0, Math.floor((ox + WORLD.radius) / CELL));
@@ -330,6 +391,17 @@ export class Minimap {
       ctx.font = 'bold 9px sans-serif';
       ctx.fillStyle = '#2a1c08';
       ctx.fillText('⚒', bx, by + 3);
+      ctx.font = '11px sans-serif';
+    }
+    // placed griffin roosts
+    for (const n of this.flightNests ?? []) {
+      if (!inView(n.x, n.z)) continue;
+      const bx = toX(n.x), by = toY(n.z);
+      ctx.fillStyle = '#5ac8ff';
+      ctx.beginPath(); ctx.arc(bx, by, 7, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#0a2a3a'; ctx.lineWidth = 1; ctx.stroke();
+      ctx.font = '9px sans-serif';
+      ctx.fillText('🪽', bx, by + 3);
       ctx.font = '11px sans-serif';
     }
     for (const poi of this.world.pois ?? []) {

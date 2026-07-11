@@ -404,7 +404,7 @@ export class EnemyManager {
   }
 
   damage(enemy, dmg, knockDir, srcId = 'local', opts = null) {
-    if (enemy.dying) return;
+    if (enemy.dying || enemy.escaping) return; // a beaten griffin is beyond reach
     enemy.hp -= dmg;
     enemy.aggroed = true;
     enemy.returning = false; // getting hit re-engages a leashed enemy
@@ -441,8 +441,27 @@ export class EnemyManager {
       enemy.pos.x += knockDir.x * 0.45;
       enemy.pos.z += knockDir.z * 0.45;
     }
-    if (enemy.hp <= 0) this._kill(enemy);
+    if (enemy.hp <= 0) {
+      // griffins never truly die — beaten, they drop their nest and fly off
+      if (enemy.cfg.griffin) this._griffinEscape(enemy);
+      else this._kill(enemy);
+    }
     else audio.sfx('hit', 0.25, 90);
+  }
+
+  // A beaten griffin drops its nest where it stands, takes wing and vanishes
+  // beyond the horizon (main sets the 20-minute respawn timer via the hook).
+  _griffinEscape(enemy) {
+    enemy.hp = 1;
+    enemy.escaping = true;
+    enemy.escapeFrom = { x: enemy.pos.x, z: enemy.pos.z };
+    const a = Math.random() * Math.PI * 2;
+    enemy.escapeDir = { x: Math.sin(a), z: Math.cos(a) };
+    enemy.fleeSpeed ??= 30;
+    audio.creature(enemy.type, 'death', 0.5, 40);
+    if (enemy.bossRank > 0) this.hooks.onBossDeath(enemy); // skull tracker off
+    this.hooks.onRemove(enemy);                            // HP bar off
+    this.hooks.onGriffinEscape?.(enemy);
   }
 
   _kill(enemy) {
@@ -617,11 +636,59 @@ export class EnemyManager {
         continue;
       }
 
-      // festering venom ticks even while it moves
-      if (e.poisonT > 0) {
+      // festering venom ticks even while it moves (escaping griffins are gone)
+      if (e.poisonT > 0 && !e.escaping) {
         e.poisonT -= dt;
         e.hp -= e.poisonDps * dt;
-        if (e.hp <= 0) { e.lastHitBy = e.poisonSrc ?? 'local'; this._kill(e); continue; }
+        if (e.hp <= 0) {
+          e.lastHitBy = e.poisonSrc ?? 'local';
+          if (e.cfg.griffin && !e.escaping) this._griffinEscape(e);
+          else { this._kill(e); continue; }
+        }
+      }
+
+      // ---- griffin flight behavior: half-health retreat + final escape ----
+      if (e.cfg.griffin) {
+        const flyStep = (dx, dz) => {
+          e.pos.x += dx * (e.fleeSpeed ?? 30) * dt;
+          e.pos.z += dz * (e.fleeSpeed ?? 30) * dt;
+          e.walkT += dt * 8;
+          (e.mesh.userData.wings || []).forEach((wing, wi) => {
+            wing.rotation.z = Math.sin(e.walkT * 5 + wi * Math.PI) * 0.6;
+          });
+          e.mesh.rotation.y = Math.atan2(dx, dz) + Math.PI;
+          e.mesh.position.set(e.pos.x, this.world.heightAt(e.pos.x, e.pos.z) + e.flyY, e.pos.z);
+        };
+        if (e.escaping) {
+          // beaten: climb high, fly beyond the horizon and vanish
+          e.flyY = Math.min(35, e.flyY + dt * 7);
+          flyStep(e.escapeDir.x, e.escapeDir.z);
+          if (Math.hypot(e.pos.x - e.escapeFrom.x, e.pos.z - e.escapeFrom.z) > 200) {
+            this._remove(e, i);
+          }
+          continue;
+        }
+        // at half health it takes wing and puts 100 m between you FAST
+        if (!e.griffinFled && e.hp < e.maxHp * 0.5) {
+          e.griffinFled = true;
+          const dx = target ? e.pos.x - target.pos.x : Math.cos(e.wanderDir);
+          const dz = target ? e.pos.z - target.pos.z : Math.sin(e.wanderDir);
+          const l = Math.hypot(dx, dz) || 1;
+          e.fleeTo = { x: e.pos.x + (dx / l) * 100, z: e.pos.z + (dz / l) * 100 };
+          this.hooks.popup(e.mesh.position.clone().setY(e.mesh.position.y + 2.4),
+            '🪽 takes wing!', '#ffd24a', 'big');
+          audio.creature(e.type, 'attack', 0.5, 60);
+        }
+        if (e.fleeTo) {
+          const dx = e.fleeTo.x - e.pos.x, dz = e.fleeTo.z - e.pos.z;
+          const d = Math.hypot(dx, dz);
+          if (d < 4) { e.fleeTo = null; e.flyY = 1.5; }
+          else {
+            e.flyY = Math.min(10, e.flyY + dt * 5);
+            flyStep(dx / d, dz / d);
+            continue;
+          }
+        }
       }
 
       // stunned/frozen: no movement, no attacks

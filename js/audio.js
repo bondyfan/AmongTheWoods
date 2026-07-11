@@ -22,9 +22,22 @@ class AudioManager {
       'evolve', 'evolve_ready', 'hit', 'human_attack', 'human_death', 'kill_gold', 'lane_unlock', 'mine_hit', 'purchase',
       'rabbit_death', 'rat_attack', 'rat_death', 'rock_crack', 'sheep_death', 'smith_forge',
       'snake_attack', 'snake_death', 'spawn', 'special', 'spider_attack', 'spider_death',
-      'tower_build', 'upgrade', 'victory', 'wolf_attack', 'wolf_death'];
+      'tower_build', 'upgrade', 'victory', 'wolf_attack', 'wolf_death',
+      // distinct creature voices (attack + death per family)
+      'horse_death',
+      'ghost_attack', 'ghost_death', 'griffin_attack', 'griffin_death',
+      'panther_attack', 'panther_death', 'zombie_attack', 'zombie_death',
+      'wendigo_attack', 'wendigo_death', 'yeti_attack', 'yeti_death',
+      'treant_attack', 'treant_death', 'bird_attack', 'bird_death',
+      'golem_attack', 'golem_death', 'wisp_attack', 'wisp_death',
+      'snapper_attack', 'snapper_death', 'scorpion_attack', 'scorpion_death',
+      'thornling_attack', 'thornling_death', 'boar_attack', 'boar_death',
+      'elk_attack', 'elk_death', 'bear_attack', 'bear_death'];
+    // nature ambience loops — warmed via HTTP cache, played through loopStart
+    const AMB = ['forest_ambience', 'wind_ambience', 'swamp_ambience', 'cave_ambience', 'water_lapping'];
     const MUSIC = ['level1', 'level3', 'mainmenu'];
-    const urls = [...SFX.map(n => SFX_PATH + n + '.mp3'), ...MUSIC.map(n => MUSIC_PATH + n + '.mp3')];
+    const urls = [...SFX.map(n => SFX_PATH + n + '.mp3'), ...AMB.map(n => SFX_PATH + n + '.mp3'),
+      ...MUSIC.map(n => MUSIC_PATH + n + '.mp3')];
     let done = 0;
     await Promise.all(urls.map(async (url) => {
       // never let one stuck request hold the whole loading screen hostage
@@ -41,7 +54,11 @@ class AudioManager {
 
   setMusicVolume(v) {
     this.musicVolume = Math.max(0, Math.min(1, v));
-    if (this.music && !this.muted) this.music.volume = this.musicVolume;
+    if (this.music && !this.muted) {
+      clearInterval(this._fades?.get(this.music)); // don't fight a running fade
+      this._fades?.delete(this.music);
+      this.music.volume = this.musicVolume;
+    }
   }
 
   _base(name) {
@@ -63,19 +80,60 @@ class AudioManager {
     a.play().catch(() => {});
   }
 
+  // Music tracks are STREAMED on demand (some biome tracks are 50-130 MB /
+  // an hour long — they must never be preloaded or fully downloaded up
+  // front). Track switches crossfade, and every track remembers its playback
+  // position so re-entering a biome resumes where its music left off.
   playMusic(name) {
     if (this.musicName === name) return;
-    this.stopMusic();
+    this._musicPos ??= new Map();
+    // fade the old track out, then release it
+    if (this.music) {
+      const old = this.music, oldName = this.musicName;
+      this._musicPos.set(oldName, old.currentTime || 0);
+      this._fade(old, 0, 1.2, () => old.pause());
+    }
     this.musicName = name;
     const a = new Audio(MUSIC_PATH + name + '.mp3');
     a.loop = true;
-    a.volume = this.muted ? 0 : this.musicVolume;
+    a.preload = 'auto';        // the browser streams progressively — no full download
+    const resume = this._musicPos.get(name);
+    if (resume) {
+      a.addEventListener('loadedmetadata', () => { try { a.currentTime = resume; } catch {} }, { once: true });
+    }
+    a.volume = 0;
     a.play().catch(() => {});
     this.music = a;
+    this._fade(a, this.muted ? 0 : this.musicVolume, 1.2);
+  }
+
+  // linear volume fade using a small interval; onDone fires at the end
+  _fade(el, target, dur, onDone) {
+    this._fades ??= new Map();
+    clearInterval(this._fades.get(el));
+    const step = 60;                       // ms per tick
+    const delta = (target - el.volume) / (dur * 1000 / step);
+    const iv = setInterval(() => {
+      const v = el.volume + delta;
+      if ((delta >= 0 && v >= target) || (delta < 0 && v <= target)) {
+        el.volume = Math.max(0, Math.min(1, target));
+        clearInterval(iv);
+        this._fades.delete(el);
+        onDone?.();
+      } else el.volume = Math.max(0, Math.min(1, v));
+    }, step);
+    this._fades.set(el, iv);
   }
 
   stopMusic() {
-    if (this.music) { this.music.pause(); this.music = null; this.musicName = null; }
+    if (this.music) {
+      this._musicPos ??= new Map();
+      this._musicPos.set(this.musicName, this.music.currentTime || 0);
+      const old = this.music;
+      this._fade(old, 0, 0.8, () => old.pause());
+      this.music = null;
+      this.musicName = null;
+    }
   }
 
   // -------- ambient SFX loops (e.g. the blacksmith hammering while his
@@ -98,7 +156,11 @@ class AudioManager {
 
   toggleMute() {
     this.muted = !this.muted;
-    if (this.music) this.music.volume = this.muted ? 0 : this.musicVolume;
+    if (this.music) {
+      clearInterval(this._fades?.get(this.music));
+      this._fades?.delete(this.music);
+      this.music.volume = this.muted ? 0 : this.musicVolume;
+    }
     return this.muted;
   }
 
@@ -106,17 +168,32 @@ class AudioManager {
   // Per-family attack/death SFX generated with the ElevenLabs Sound Effects API
   // (see scripts/gen-sounds.mjs). Files live in assets/sounds/<family>_<kind>.mp3.
   _family(type) {
-    if (/spider/i.test(type)) return 'spider';
-    if (/snake|serpent/i.test(type)) return 'snake';
+    if (/spider|crawler/i.test(type)) return 'spider';   // incl. bogCrawler
+    if (/snake|serpent|cobra/i.test(type)) return 'snake';
     if (/wolf/i.test(type)) return 'wolf';
     if (type === 'rat') return 'rat';
     if (type === 'bat') return 'bat';
     if (type === 'rabbit') return 'rabbit';
     if (type === 'sheep') return 'sheep';
+    if (type === 'horse') return 'horse';
     if (/bandit|tribesman|shaman|poacher/i.test(type)) return 'human';
-    if (/harpy/i.test(type)) return 'bat';
-    if (/crawler/i.test(type)) return 'spider';
-    return 'beast'; // boar, elk, bear, wendigo, yeti, golem, treant, wisp, ...
+    if (/vulture|harpy/i.test(type)) return 'bird';
+    if (/ghost/i.test(type)) return 'ghost';
+    if (/griffin/i.test(type)) return 'griffin';         // incl. griffinChick
+    if (/panther/i.test(type)) return 'panther';
+    if (/zombie/i.test(type)) return 'zombie';
+    if (/wendigo/i.test(type)) return 'wendigo';
+    if (/yeti/i.test(type)) return 'yeti';
+    if (/treant/i.test(type)) return 'treant';
+    if (/thornling/i.test(type)) return 'thornling';
+    if (/snapper/i.test(type)) return 'snapper';
+    if (/scorpion/i.test(type)) return 'scorpion';
+    if (/golem/i.test(type)) return 'golem';             // incl. icegolem
+    if (/wisp/i.test(type)) return 'wisp';               // incl. frostWisp
+    if (/boar/i.test(type)) return 'boar';
+    if (/elk/i.test(type)) return 'elk';
+    if (/bear/i.test(type)) return 'bear';
+    return 'beast'; // safety fallback for any future type
   }
 
   // kind: 'attack' | 'death'. Reuses the sfx cache/clone/throttle machinery.

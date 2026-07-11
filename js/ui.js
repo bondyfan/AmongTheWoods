@@ -192,8 +192,13 @@ export class UI {
     for (const t of this.trackers.values()) {
       const pos = t.getPos();
       if (!pos) { t.el.style.opacity = 0; continue; }
+      // unit frames only show close up (matters in RPG view, where the far
+      // plane would otherwise plaster the horizon with names and HP bars)
+      const dist = pos.distanceTo(camera.position);
+      if (dist > 100) { t.el.style.opacity = 0; continue; }
       v.copy(pos).project(camera);
-      t.el.style.opacity = 1;
+      if (v.z > 1) { t.el.style.opacity = 0; continue; } // behind the camera
+      t.el.style.opacity = dist > 80 ? 1 - (dist - 80) / 20 : 1;
       t.el.style.transform = `translate(${(v.x * 0.5 + 0.5) * window.innerWidth}px, ${(-v.y * 0.5 + 0.5) * window.innerHeight}px)`;
       t.onUpdate?.(t.el);
     }
