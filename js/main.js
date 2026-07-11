@@ -296,6 +296,132 @@ function tickRace(dt) {
   }
 }
 
+// ---------- jungle temple traps: floor darts jab in a telegraphed rhythm ----------
+function tickTempleTraps(dt) {
+  if (BIOMES[game.biomeIndex]?.name !== 'Jungle') return;
+  const temple = world.pois?.find(p => p.type === 'temple' && !p.claimed
+    && Math.hypot(p.x - player.pos.x, p.z - player.pos.z) < 9);
+  if (!temple) return;
+  // three fire windows per 4 s cycle; the ring around the temple hurts on the beat
+  const phase = game.time % 4;
+  const firing = phase < 0.25 || (phase > 1.9 && phase < 2.15);
+  if (firing && !player.dead) {
+    const d = Math.hypot(temple.x - player.pos.x, temple.z - player.pos.z);
+    if (d > 3.5 && d < 8) { // safe on the steps (centre) or outside the ring
+      player.takeDamage(9, null);
+      ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2), '🏹 dart!', '#e8d84a');
+    }
+  }
+}
+
+// ---------- liana glide: E at a pole slings you to its partner ----------
+let glide = null; // { fx, fz, tx, tz, t }
+function startGlide(poi) {
+  if (glide) return;
+  glide = { fx: player.pos.x, fz: player.pos.z, tx: poi.tx, tz: poi.tz, t: 0 };
+  audio.sfx('special', 0.45);
+  ui.toast('🌿 Wheee!', '');
+}
+function tickGlide(dt) {
+  if (!glide) return;
+  glide.t += dt;
+  const k = Math.min(1, glide.t / 2);
+  const ease = k * k * (3 - 2 * k);
+  player.pos.x = glide.fx + (glide.tx - glide.fx) * ease;
+  player.pos.z = glide.fz + (glide.tz - glide.fz) * ease;
+  // a graceful arc: the player mesh lifts along the vine
+  player.mesh.position.y += Math.sin(k * Math.PI) * 3.2;
+  if (k >= 1) glide = null;
+}
+
+// ---------- frozen peak: avalanches answer the noise of battle ----------
+let avaCd = 15;
+const boulders = []; // { mesh, dx, dz, t, hit }
+function tickAvalanche(dt) {
+  const inPeak = BIOMES[game.biomeIndex]?.name === 'Frozen Peak';
+  for (let i = boulders.length - 1; i >= 0; i--) {
+    const b = boulders[i];
+    b.t += dt;
+    b.mesh.position.x += b.dx * 13 * dt;
+    b.mesh.position.z += b.dz * 13 * dt;
+    b.mesh.position.y = world.heightAt(b.mesh.position.x, b.mesh.position.z) + 0.8;
+    b.mesh.rotation.x += dt * 6;
+    if (!b.hit && !player.dead
+        && Math.hypot(player.pos.x - b.mesh.position.x, player.pos.z - b.mesh.position.z) < 1.9) {
+      b.hit = true;
+      player.takeDamage(25, null);
+      ui.toast('🏔️ Buried by the snow!', 'boss');
+    }
+    if (b.t > 3.5) { scene.remove(b.mesh); boulders.splice(i, 1); }
+  }
+  if (!inPeak) return;
+  avaCd -= dt;
+  if (avaCd > 0) return;
+  avaCd = 18 + Math.random() * 14;
+  // combat noise wakes the mountain
+  const fighting = enemyMgr.alive().some(e => e.aggroed
+    && Math.hypot(e.pos.x - player.pos.x, e.pos.z - player.pos.z) < 30);
+  if (!fighting || Math.random() > 0.45) return;
+  // boulders roll DOWNHILL through the player's position
+  const h0 = world.heightAt(player.pos.x, player.pos.z);
+  let dx = world.heightAt(player.pos.x - 3, player.pos.z) - world.heightAt(player.pos.x + 3, player.pos.z);
+  let dz = world.heightAt(player.pos.x, player.pos.z - 3) - world.heightAt(player.pos.x, player.pos.z + 3);
+  const l = Math.hypot(dx, dz) || 1;
+  dx /= l; dz /= l;
+  ui.toast('🏔️ AVALANCHE — the fight woke the mountain!', 'boss');
+  audio.sfx('rock_crack', 0.6);
+  for (let i = 0; i < 4; i++) {
+    const off = (i - 1.5) * 3.5;
+    const sx = player.pos.x - dx * 26 + dz * off;
+    const sz = player.pos.z - dz * 26 - dx * off;
+    const m = new THREE.Mesh(new THREE.DodecahedronGeometry(1 + Math.random() * 0.5, 0),
+      new THREE.MeshLambertMaterial({ color: 0xeef4f8 }));
+    m.position.set(sx, world.heightAt(sx, sz) + 0.8, sz);
+    scene.add(m);
+    boulders.push({ mesh: m, dx, dz, t: 0, hit: false });
+  }
+}
+
+// ---------- whiteout weather: Frozen Peak blizzards & Desert sandstorms ----------
+let blizzard = { on: false, t: 0, cd: 45 };
+function tickBlizzard(dt) {
+  const name = BIOMES[game.biomeIndex]?.name;
+  const spec = name === 'Frozen Peak'
+      ? { fog: 60, tint: 'rgba(230,238,245,0.62)', dur: 22, cdMin: 70, cdRng: 50,
+          on: '🌨️ A BLIZZARD swallows the world — stay close to the bonfires!', off: '🌨️ The blizzard passes…' }
+    : name === 'Scorched Desert'
+      ? { fog: 70, tint: 'rgba(224,196,130,0.55)', dur: 15, cdMin: 55, cdRng: 45,
+          on: '🏜️ A SANDSTORM rolls in — visibility drops!', off: '🏜️ The sandstorm settles…' }
+    : null;
+  const el = $id('blizzard');
+  if (!spec) {
+    if (blizzard.on) { blizzard.on = false; applyViewMode(); }
+    el.style.opacity = 0;
+    return;
+  }
+  el.style.background = `radial-gradient(ellipse at center, ${spec.tint.replace(/[\d.]+\)$/, '0.15)')} 0%, ${spec.tint} 100%)`;
+  if (blizzard.on) {
+    blizzard.t -= dt;
+    scene.fog.far += (spec.fog - scene.fog.far) * Math.min(1, dt * 2);
+    el.style.opacity = 0.55;
+    if (blizzard.t <= 0) {
+      blizzard.on = false;
+      blizzard.cd = spec.cdMin + Math.random() * spec.cdRng;
+      applyViewMode(); // restores the mode's fog distance
+      ui.toast(spec.off, '');
+    }
+  } else {
+    blizzard.cd -= dt;
+    el.style.opacity = 0;
+    if (blizzard.cd <= 0) {
+      blizzard.on = true;
+      blizzard.t = spec.dur;
+      ui.toast(spec.on, 'boss');
+      audio.sfx('special', 0.4);
+    }
+  }
+}
+
 // ---------- swamp sulfur bubbles: telegraphed geysers on a hash grid ----------
 // Each 16 m grid cell may hold a vent; it erupts every 9 s (offset by its
 // hash). The last second is the telegraph; the pop hurts EVERYTHING near it.
@@ -603,7 +729,7 @@ function grantPickup(kind, payload) {
     player.ownItem(payload);
     ui.toast(`🎁 Loot: ${item.icon} ${item.name} — in your bag (equip in Character, C).`, 'level');
     panels.refresh();
-  } else if (kind === 'salve' || kind === 'roast') {
+  } else if (kind === 'salve' || kind === 'roast' || kind === 'venom' || kind === 'honey') {
     player.consumables[kind] = (player.consumables[kind] ?? 0) + payload;
     ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2),
       `+${payload} ${consumableById(kind).icon}`, '#c9e8a4');
@@ -682,6 +808,7 @@ const enemyMgr = new EnemyManager(scene, world, {
     // into the Verdant Forest); small critters there — and bats — leave a
     // scrap, with an occasional whole pelt so Lv3 hide gear is reachable early
     if (enemy.type === 'sheep') pickups.spawn('wool', 1 + (Math.random() < 0.5 ? 1 : 0), enemy.pos, 0.8);
+    if (enemy.type === 'snapper' && Math.random() < 0.65) pickups.spawn('venom', 1, enemy.pos, 0.7);
     if (HIDE_BEARING.has(enemy.type)) {
       pickups.spawn('hide', hideForHp(enemy.maxHp), enemy.pos, 1.1 * enemy.sizeMult);
     } else if (biomeIndexAt(enemy.pos.x, enemy.pos.z) === 0 || enemy.type === 'bat') {
@@ -809,17 +936,33 @@ function startPlaying() {
         pickups.spawn('item', candidates[Math.floor(Math.random() * candidates.length)].id, at, 0.6);
       }
     };
-    // crypt landmarks come pre-garrisoned: a silent guard pack, rank by depth
+    // crypts, jungle temples and the summit come pre-garrisoned with a
+    // silent guard pack — the summit's keeper is a colossal named boss
     world.onPoiSpawned = (poi) => {
-      if (poi.claimed || poi.guarded || poi.type !== 'crypt') return;
+      if (poi.claimed || poi.guarded) return;
+      if (!['crypt', 'temple', 'summit'].includes(poi.type)) return;
       if (mp?.active && !mp.isHost) return; // host simulates the guards
       poi.guarded = true;
-      const rank = poi.ring < 2 ? 1 : poi.ring < 4 ? 2 : 3;
       const biome = BIOMES[biomeIndexAt(poi.x, poi.z)];
       const type = biome.enemies[Math.floor(Math.random() * biome.enemies.length)];
       const progress = progressAt(poi.x, poi.z);
-      for (let i = 0; i < 4 + rank; i++) {
-        const a = (i / (4 + rank)) * Math.PI * 2;
+      if (poi.type === 'summit') {
+        // The Father of the Mountain: a 3-skull colossus flanked by wardens
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * Math.PI * 2;
+          const g = enemyMgr._spawn('yeti', poi.x + Math.cos(a) * 6, poi.z + Math.sin(a) * 6, progress);
+          g.aggroed = false; g.cryptId = poi.id;
+        }
+        const boss = enemyMgr._spawn('icegolem', poi.x, poi.z - 5, progress, 3,
+          { ambush: true, noReinforce: false });
+        boss.bossName = 'Ymir, Father of the Mountain';
+        boss.aggroed = false; boss.cryptId = poi.id;
+        return;
+      }
+      const rank = poi.type === 'temple' ? 3 : (poi.ring < 2 ? 1 : poi.ring < 4 ? 2 : 3);
+      const count = poi.type === 'temple' ? 6 : 4 + rank;
+      for (let i = 0; i < count; i++) {
+        const a = (i / count) * Math.PI * 2;
         const g = enemyMgr._spawn(type, poi.x + Math.cos(a) * 4.5, poi.z + Math.sin(a) * 4.5, progress);
         g.aggroed = false;
         g.cryptId = poi.id;
@@ -1417,10 +1560,10 @@ function nearTreasure() {
 
 // landmark rewards: shrines bless, monoliths pay out, crypts must be cleared
 function claimPoi(poi) {
-  if (poi.type === 'crypt') {
+  if (['crypt', 'temple', 'summit'].includes(poi.type)) {
     const guards = enemyMgr.alive().filter(e => e.cryptId === poi.id);
     if (guards.length) {
-      ui.toast(`☠️ The crypt is still guarded — ${guards.length} keeper${guards.length > 1 ? 's' : ''} left!`, 'boss');
+      ui.toast(`☠️ Still guarded — ${guards.length} keeper${guards.length > 1 ? 's' : ''} left!`, 'boss');
       audio.sfx('error', 0.5);
       return;
     }
@@ -1443,6 +1586,16 @@ function claimPoi(poi) {
     return; // village stays (repeat E just greets you)
   }
   if (poi.type === 'race') { startRace(poi); return; }             // repeatable
+  if (poi.type === 'liana') { startGlide(poi); return; }           // repeatable
+  if (poi.type === 'bonfire') {                                     // repeatable rest stop
+    player.hp = player.maxHp;
+    if (!world.safeZones.some(sz => sz.x === poi.x && sz.z === poi.z)) {
+      world.safeZones.push({ x: poi.x, z: poi.z, r: 10 });
+    }
+    ui.toast('🔥 You warm up by the bonfire — fully healed, and this camp is safe now.', 'level');
+    audio.sfx('evolve_ready', 0.5);
+    return;
+  }
   poi.claimed = true;
   const ring = poi.ring;
   const at = { x: poi.x + 1.8, z: poi.z + 1.8 };
@@ -1454,6 +1607,24 @@ function claimPoi(poi) {
     pickups.spawn('meat', 12, at, 1.4);
     ui.toast('🏚️ You patch up the old farm — a safe haven now, larder included.', 'level');
     audio.sfx('tower_build', 0.5);
+  } else if (poi.type === 'temple') {
+    pickups.spawn('essence', 6, at, 1.6);
+    pickups.spawn('iron', 8, at, 1.6);
+    pickups.spawn('meat', 25, at, 1.8);
+    const c = ITEMS.filter(i => !i.free && i.slot !== 'companion');
+    pickups.spawn('item', c[Math.floor(Math.random() * c.length)].id, at, 0.6);
+    ui.banner('— The temple treasury is yours —');
+    audio.sfx('victory', 0.5);
+  } else if (poi.type === 'summit') {
+    const xp = questXpFor(player.level) * 3;
+    player.addXp(xp);
+    pickups.spawn('essence', 15, at, 2);
+    pickups.spawn('iron', 12, at, 2);
+    const cc = ITEMS.filter(i => !i.free && i.slot !== 'companion');
+    for (let i = 0; i < 2; i++) pickups.spawn('item', cc[Math.floor(Math.random() * cc.length)].id, at, 1);
+    ui.banner('— ⛰️ THE SUMMIT IS YOURS —');
+    ui.toast(`⛰️ You raise your banner over the world: +${xp} XP. There is nothing above you now.`, 'level');
+    audio.sfx('victory', 0.7);
   } else if (poi.type === 'nest') {
     pickups.spawn('essence', 2 + ring, at, 1.2);
     pickups.spawn('iron', 3 + ring, at, 1.2);
@@ -2063,6 +2234,10 @@ function step() {
       tickRace(dt);
       tickGust(dt);
       tickBubbles(dt);
+      tickGlide(dt);
+      tickAvalanche(dt);
+      tickBlizzard(dt);
+      tickTempleTraps(dt);
 
       // contextual E hint: revive > chest > home > landmark > treasure
       const hintEl = $id('home-hint');
@@ -2074,6 +2249,10 @@ function step() {
         village: '🪶 Tribal village — press <kbd>E</kbd> to offer tribute (15 🍖) for peace',
         race: '🏁 Race post — ride up ON A HORSE and press <kbd>E</kbd> to race',
         nest: '🥚 An eagle nest — press <kbd>E</kbd> to rob it (they will mind)',
+        temple: '🏛️ A jungle temple — clear the guards, then press <kbd>E</kbd> for the treasury',
+        liana: '🌿 A vine line — press <kbd>E</kbd> to glide across',
+        bonfire: '🔥 A bonfire — press <kbd>E</kbd> to rest (full heal, safe camp)',
+        summit: '⛰️ The summit — defeat its keeper, then press <kbd>E</kbd> to claim the peak',
         statue: '🗿 Cursed statue — press <kbd>E</kbd> to strike a pact (boon + bane)',
       };
       const POI_HINTS = {

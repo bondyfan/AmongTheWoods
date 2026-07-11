@@ -11,7 +11,8 @@ import { makeTree, makeRock, makeGrassTuft, makeFlower, makeMushroom, makeBush,
          makeLog, makeBoulder, makeBridge, makeCampfire, makeStalagmite,
          makeBerryBush, makeShrine, makeMonolith, makeCrypt, makeBlacksmith, makeCobweb,
          makeFarm, makeTrader, makeBeehive, makeCocoon, makeGlade, makeGraveyardRuin,
-         makeCursedStatue, makeVillage, makeRaceFlag, makeNest, makeLilypad } from './models.js';
+         makeCursedStatue, makeVillage, makeRaceFlag, makeNest, makeLilypad,
+         makeTemple, makeLianaPole, makeBonfire, makeSummitCairn } from './models.js';
 import { audio } from './audio.js';
 
 const CHUNK = 40;
@@ -473,12 +474,37 @@ export class World {
       }
     };
     place('village', 3, 2);    // Swamp: tribute buys you peace with the tribes
+    place('temple', 6, 2);     // Jungle: trapped step pyramids with a treasury
+
+    // Jungle liana ziplines come in PAIRS — E at one end glides you across
+    for (let i = 0; i < 3; i++) {
+      const rMin = BIOMES[5].rMax + 80, rMax = BIOMES[6].rMax - 80;
+      const a = rng() * Math.PI * 2;
+      const r = rMin + rng() * (rMax - rMin);
+      const x = Math.sin(a) * r, z = Math.cos(a) * r;
+      const b = rng() * Math.PI * 2;
+      const tx = x + Math.cos(b) * 38, tz = z + Math.sin(b) * 38;
+      if (this.rings.some(w => Math.abs(r - w.r) < 25)) continue;
+      const p1 = { id: id++, type: 'liana', x, z, tx, tz, ring: 6, claimed: false, guarded: false, mesh: null };
+      const p2 = { id: id++, type: 'liana', x: tx, z: tz, tx: x, tz: z, ring: 6, claimed: false, guarded: false, mesh: null };
+      this.pois.push(p1, p2);
+    }
+
+    // Frozen Peak: the summit pilgrimage — two bonfire checkpoints leading
+    // to the cairn where the Father of the Mountain waits
+    {
+      const a = rng() * Math.PI * 2;
+      for (const [type, rr] of [['bonfire', WORLD.radius - 560], ['bonfire', WORLD.radius - 380], ['summit', WORLD.radius - 210]]) {
+        this.pois.push({ id: id++, type, x: Math.sin(a) * rr, z: Math.cos(a) * rr,
+          ring: 7, claimed: false, guarded: false, mesh: null });
+      }
+    }
     place('race', 4, 2);       // Highlands: horse races
     place('nest', 4, 3);       // Highlands: eagle nests on rock pillars
     place('farm', 0, 1);       // Verdant: an abandoned farmstead to restore
     place('trader', 0, 2);     // Verdant: wandering merchants buying surplus
-    place('graveyard', 2, 2);  // Haunted: undead-wave defense events
-    place('statue', 2, 3);     // Haunted: cursed statues (boon + bane)
+    place('graveyard', 5, 2);  // Haunted (now ring 5): undead-wave defense events
+    place('statue', 5, 3);     // Haunted: cursed statues (boon + bane)
   }
 
   poisNear(x, z, radius) {
@@ -1149,7 +1175,11 @@ export class World {
     // -- landmarks whose spot falls inside this chunk --
     for (const poi of this.pois) {
       if (poi.x < cxw || poi.x >= cxw + CHUNK || poi.z < czw || poi.z >= czw + CHUNK) continue;
-      const mesh = poi.type === 'village' ? makeVillage()
+      const mesh = poi.type === 'temple' ? makeTemple()
+        : poi.type === 'liana' ? makeLianaPole()
+        : poi.type === 'bonfire' ? makeBonfire()
+        : poi.type === 'summit' ? makeSummitCairn()
+        : poi.type === 'village' ? makeVillage()
         : poi.type === 'race' ? makeRaceFlag()
         : poi.type === 'nest' ? makeNest()
         : poi.type === 'farm' ? makeFarm()

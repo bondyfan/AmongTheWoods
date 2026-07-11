@@ -411,6 +411,11 @@ export class EnemyManager {
     enemy.chaseT = 0;
     enemy.flashT = 0.12;     // brief white-hot scale pop so hits READ
     enemy.threatLog.push({ src: srcId, dmg, t: this.world.time });
+    if (opts?.poison) { // venom-coated weapons fester
+      enemy.poisonT = opts.poison.dur;
+      enemy.poisonDps = opts.poison.dps;
+      enemy.poisonSrc = srcId;
+    }
     if (enemy.cfg.passive && !enemy.spooked) {
       // one hurt rabbit spooks the whole herd
       enemy.spooked = true;
@@ -610,6 +615,13 @@ export class EnemyManager {
         if (e.bossRank > 0) this.hooks.onBossDeath(e); // clears the skull tracker
         this._remove(e, i);
         continue;
+      }
+
+      // festering venom ticks even while it moves
+      if (e.poisonT > 0) {
+        e.poisonT -= dt;
+        e.hp -= e.poisonDps * dt;
+        if (e.hp <= 0) { e.lastHitBy = e.poisonSrc ?? 'local'; this._kill(e); continue; }
       }
 
       // stunned/frozen: no movement, no attacks

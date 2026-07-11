@@ -679,6 +679,98 @@ export function makeWoolDrop() {
   return g;
 }
 
+export function makeScorpion() {
+  const g = new THREE.Group();
+  const body = box(0.5, 0.28, 0.8, 0x8a5a30);
+  body.position.y = 0.3;
+  g.add(body);
+  // curled tail with a stinger
+  const tail = new THREE.Group();
+  for (let i = 0; i < 4; i++) {
+    const seg = box(0.16 - i * 0.02, 0.16, 0.16, 0x7a4a28);
+    seg.position.set(0, 0.35 + i * 0.16, 0.45 - i * 0.05);
+    tail.add(seg);
+  }
+  const sting = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.2, 5), mat(0x2a1c10));
+  sting.position.set(0, 0.9, 0.28);
+  tail.add(sting);
+  g.add(tail);
+  // pincers
+  for (const side of [-1, 1]) {
+    const claw = box(0.2, 0.14, 0.3, 0x7a4a28);
+    claw.position.set(side * 0.3, 0.3, -0.5);
+    g.add(claw);
+  }
+  const legs = [];
+  for (let i = 0; i < 6; i++) {
+    const side = i % 2 === 0 ? -1 : 1;
+    const leg = box(0.08, 0.28, 0.08, 0x6a3a20);
+    leg.position.set(side * 0.34, 0.2, -0.2 + Math.floor(i / 2) * 0.28);
+    leg.rotation.z = side * 0.5;
+    g.add(leg);
+    legs.push(leg);
+  }
+  g.userData = { legs, spider: true };
+  return g;
+}
+
+export function makeCobra() {
+  const g = new THREE.Group();
+  // coiled body
+  const coil = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.16, 6, 10), mat(0x9a8a3a));
+  coil.rotation.x = -Math.PI / 2;
+  coil.position.y = 0.2;
+  g.add(coil);
+  const neck = box(0.24, 0.7, 0.2, 0x9a8a3a);
+  neck.position.set(0, 0.6, -0.2);
+  neck.rotation.x = 0.4;
+  g.add(neck);
+  const hood = box(0.5, 0.4, 0.1, 0xb0a04a);
+  hood.position.set(0, 0.95, -0.32);
+  g.add(hood);
+  const head = box(0.22, 0.2, 0.3, 0x8a7a30);
+  head.position.set(0, 1.05, -0.45);
+  g.add(head);
+  const eyeMat = new THREE.MeshBasicMaterial({ color: 0xe0c040 });
+  for (const side of [-1, 1]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.04, 5, 4), eyeMat);
+    eye.position.set(side * 0.07, 1.08, -0.58);
+    g.add(eye);
+  }
+  const segs = [neck];
+  g.userData = { segments: segs };
+  return g;
+}
+
+export function makeVulture() {
+  const g = new THREE.Group();
+  const body = box(0.42, 0.4, 0.7, 0x3a3028);
+  body.position.y = 1.4;
+  g.add(body);
+  const neck = box(0.14, 0.3, 0.14, 0xc9a980);
+  neck.position.set(0, 1.7, -0.35);
+  g.add(neck);
+  const head = box(0.18, 0.18, 0.22, 0xd8b8a0);
+  head.position.set(0, 1.9, -0.42);
+  g.add(head);
+  const beak = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.2, 5), mat(0x2a1c10));
+  beak.rotation.x = -Math.PI / 2;
+  beak.position.set(0, 1.88, -0.58);
+  g.add(beak);
+  const wings = [];
+  for (const side of [-1, 1]) {
+    const wing = new THREE.Group();
+    const membrane = box(0.9, 0.06, 0.5, 0x2a2018);
+    membrane.position.x = side * 0.5;
+    wing.add(membrane);
+    wing.position.set(side * 0.2, 1.45, 0);
+    g.add(wing);
+    wings.push(wing);
+  }
+  g.userData = { wings };
+  return g;
+}
+
 // ---------- biome landmark props (farm, trader, cocoon, graveyard...) ----------
 
 export function makeFarm(rng = Math.random) {
@@ -923,6 +1015,114 @@ export function makeLilypad(rng = Math.random) {
   pad.rotation.x = -Math.PI / 2;
   pad.rotation.z = rng() * Math.PI * 2;
   return pad;
+}
+
+export function makeTemple() {
+  const g = new THREE.Group();
+  // mossy step pyramid
+  for (let i = 0; i < 4; i++) {
+    const size = 7 - i * 1.6;
+    const step = box(size, 0.9, size, i % 2 ? 0x7a8578 : 0x6a7568);
+    step.position.y = 0.45 + i * 0.9;
+    step.castShadow = true;
+    g.add(step);
+  }
+  const shrine = box(1.4, 1.2, 1.4, 0x5a6558);
+  shrine.position.y = 4.2;
+  g.add(shrine);
+  const idol = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 6),
+    new THREE.MeshBasicMaterial({ color: 0xffd24a }));
+  idol.position.y = 5.1;
+  g.add(idol);
+  // vines
+  for (let i = 0; i < 5; i++) {
+    const vine = box(0.12, 2.5, 0.12, 0x2d6a2d);
+    const a = (i / 5) * Math.PI * 2;
+    vine.position.set(Math.cos(a) * 3.2, 1.6, Math.sin(a) * 3.2);
+    g.add(vine);
+  }
+  return g;
+}
+
+export function makeLianaPole() {
+  const g = new THREE.Group();
+  const pole = cyl(0.14, 0.2, 4.6, 0x5a4426, 6);
+  pole.position.y = 2.3;
+  g.add(pole);
+  const arm = box(1.3, 0.14, 0.14, 0x5a4426);
+  arm.position.y = 4.4;
+  g.add(arm);
+  const vine = box(0.07, 1.1, 0.07, 0x2d8a34);
+  vine.position.set(0.6, 3.85, 0);
+  g.add(vine);
+  return g;
+}
+
+export function makeSnapper() {
+  const g = new THREE.Group();
+  const bulb = sphere(0.55, 0x3f7a2e, 7);
+  bulb.position.y = 0.5;
+  bulb.scale.y = 1.2;
+  g.add(bulb);
+  // gaping jaw
+  const jawTop = new THREE.Mesh(new THREE.ConeGeometry(0.45, 0.7, 7), mat(0xd83c5e));
+  jawTop.position.set(0, 1.35, -0.15);
+  jawTop.rotation.x = 0.7;
+  g.add(jawTop);
+  for (let i = 0; i < 5; i++) { // teeth
+    const tooth = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.2, 4), mat(0xf2efe6));
+    tooth.position.set(-0.3 + i * 0.15, 1.05, -0.42);
+    tooth.rotation.x = Math.PI;
+    g.add(tooth);
+  }
+  for (let i = 0; i < 4; i++) { // groping tendrils = 'legs' so they wave
+    const t = box(0.09, 0.8, 0.09, 0x2d6a2d);
+    const a = (i / 4) * Math.PI * 2 + 0.4;
+    t.position.set(Math.cos(a) * 0.6, 0.45, Math.sin(a) * 0.6);
+    t.rotation.z = Math.cos(a) * 0.5;
+    g.add(t);
+  }
+  g.userData = { legs: [] };
+  return g;
+}
+
+export function makeBonfire() {
+  const g = new THREE.Group();
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    const stone = box(0.3, 0.22, 0.26, 0x8a8578);
+    stone.position.set(Math.cos(a) * 0.75, 0.11, Math.sin(a) * 0.75);
+    g.add(stone);
+  }
+  for (const r of [0.3, 1.4, 2.5]) {
+    const log = box(0.9, 0.16, 0.16, 0x4a3820);
+    log.rotation.y = r;
+    log.position.y = 0.18;
+    g.add(log);
+  }
+  const flame = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.9, 6),
+    new THREE.MeshBasicMaterial({ color: 0xff9a30 }));
+  flame.position.y = 0.75;
+  g.add(flame);
+  g.userData.flame = flame;
+  return g;
+}
+
+export function makeSummitCairn() {
+  const g = new THREE.Group();
+  for (let i = 0; i < 5; i++) {
+    const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(1.2 - i * 0.18, 0), mat(0xb8c4cc));
+    rock.position.y = 0.6 + i * 0.85;
+    rock.rotation.set(i * 0.7, i * 1.3, 0);
+    g.add(rock);
+  }
+  const banner = box(0.08, 2.2, 0.08, 0x5a4426);
+  banner.position.set(0.5, 5.2, 0);
+  g.add(banner);
+  const cloth = box(0.9, 0.5, 0.04, 0xd83c2e);
+  cloth.position.set(0.95, 6.0, 0);
+  g.add(cloth);
+  return g;
 }
 
 // ---------- humanoid camp sites: a dwelling + campfire ----------
@@ -1184,6 +1384,10 @@ export function makeEnemyMesh(type) {
     case 'harpy': return makeHarpy();
     case 'frostWisp': return makeFrostWisp();
     case 'horse': return makeHorse();
+    case 'snapper': return makeSnapper();
+    case 'scorpion': return makeScorpion();
+    case 'cobra': return makeCobra();
+    case 'vulture': return makeVulture();
   }
 }
 

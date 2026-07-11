@@ -49,6 +49,7 @@ export class Player {
     // -- consumables (F/G), poison, camp era perks --
     this.consumables = { salve: 0, roast: 0, honey: 0 };
     this.boon = null; // cursed-statue pact: { dmg, speed, regen, t } — bane included
+    this.venomT = 0;  // snapjaw venom on the blade: attacks poison enemies
     this.upgrades = {};   // one-time supply comforts: saddle/bedroll/lining/socks
     this.idleT = 0;       // seconds standing still (bedroll rest bonus)
     this.hurtT = 999;     // seconds since last damage taken
@@ -426,6 +427,12 @@ export class Player {
     const c = consumableById(id);
     if (!c) return false;
     this.consumables[id]--;
+    if (c.venomDur) {
+      this.venomT = c.venomDur;
+      this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2), '☠️ venom coat', '#8aff3a');
+      audio.sfx('special', 0.5);
+      return true;
+    }
     this.hp = Math.min(this.maxHp, this.hp + c.heal);
     if (c.speedDur) this.roastT = c.speedDur;
     this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
@@ -445,6 +452,7 @@ export class Player {
     this.rageT = Math.max(0, this.rageT - dt);
     this.roastT = Math.max(0, this.roastT - dt);
     if (this.boon && (this.boon.t -= dt) <= 0) { this.boon = null; this.recompute(); }
+    this.venomT = Math.max(0, this.venomT - dt);
     this.hurtT += dt;
     // wool bedroll: a moment of stillness out of combat and wounds knit fast
     const rest = (this.upgrades.bedroll && this.idleT > 3 && this.hurtT > 5) ? 6 : 1;
@@ -753,7 +761,8 @@ export class Player {
     const crit = Math.random() < CRIT_CHANCE;
     for (const e of enemyMgr.alive()) {
       if (this._inArc(e.pos.x, e.pos.z, w.range, e.hitR)) {
-        enemyMgr.damage(e, this.dmgMult * w.dmg * (crit ? CRIT_MULT : 1), this.facing, 'local', { crit });
+        enemyMgr.damage(e, this.dmgMult * w.dmg * (crit ? CRIT_MULT : 1), this.facing, 'local',
+          { crit, ...(this.venomT > 0 ? { poison: { dps: 4, dur: 3 } } : {}) });
       }
     }
 
