@@ -856,6 +856,75 @@ export function makeCursedStatue() {
   return g;
 }
 
+export function makeVillage(rng = Math.random) {
+  const g = new THREE.Group();
+  for (const [dx, dz, sc] of [[-3, 0, 1], [2.6, -1.5, 0.85], [1.8, 2.4, 0.9]]) {
+    const tent = new THREE.Mesh(new THREE.ConeGeometry(1.7 * sc, 3.0 * sc, 7), mat(0xa8865a));
+    tent.position.set(dx, 1.5 * sc, dz);
+    tent.castShadow = true;
+    g.add(tent);
+    const stripe = new THREE.Mesh(new THREE.ConeGeometry(1.72 * sc, 0.5 * sc, 7), mat(0x8a3c2e));
+    stripe.position.set(dx, 1.1 * sc, dz);
+    g.add(stripe);
+  }
+  // totem pole at the center
+  const totem = box(0.5, 2.6, 0.5, 0x6b4a2d);
+  totem.position.y = 1.3;
+  g.add(totem);
+  for (let i = 0; i < 3; i++) {
+    const face = box(0.56, 0.3, 0.56, [0xd83c2e, 0xe8d84a, 0x4a8ad8][i]);
+    face.position.y = 0.6 + i * 0.75;
+    g.add(face);
+  }
+  const wings = box(1.6, 0.18, 0.3, 0x8a6b42);
+  wings.position.y = 2.5;
+  g.add(wings);
+  return g;
+}
+
+export function makeRaceFlag(color = 0xd83c2e) {
+  const g = new THREE.Group();
+  const pole = cyl(0.07, 0.09, 3.2, 0x6b4a2d, 6);
+  pole.position.y = 1.6;
+  g.add(pole);
+  const flag = box(1.0, 0.6, 0.05, color);
+  flag.position.set(0.55, 2.8, 0);
+  g.add(flag);
+  g.userData.flag = flag;
+  return g;
+}
+
+export function makeNest(rng = Math.random) {
+  const g = new THREE.Group();
+  // rock pillar
+  const pillar = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.6, 3.4, 7), mat(0x8a8578));
+  pillar.position.y = 1.7;
+  pillar.castShadow = true;
+  g.add(pillar);
+  // twig ring
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2;
+    const twig = box(0.7, 0.1, 0.12, 0x6b4a2d);
+    twig.position.set(Math.cos(a) * 0.85, 3.5, Math.sin(a) * 0.85);
+    twig.rotation.y = a + Math.PI / 2 + (rng() - 0.5) * 0.4;
+    g.add(twig);
+  }
+  for (const [x, z] of [[-0.25, 0.1], [0.25, -0.1], [0, 0.3]]) {
+    const egg = sphere(0.2, 0xf2ead8, 6);
+    egg.scale.y = 1.25;
+    egg.position.set(x, 3.55, z);
+    g.add(egg);
+  }
+  return g;
+}
+
+export function makeLilypad(rng = Math.random) {
+  const pad = new THREE.Mesh(new THREE.CircleGeometry(1, 9, 0.5, Math.PI * 1.8), mat(0x4a8a3a));
+  pad.rotation.x = -Math.PI / 2;
+  pad.rotation.z = rng() * Math.PI * 2;
+  return pad;
+}
+
 // ---------- humanoid camp sites: a dwelling + campfire ----------
 // kind 'tribal' (tribesman/shaman) gets a teepee; everyone else a log hut.
 export function makeHumanCamp(kind = 'bandit', rng = Math.random) {

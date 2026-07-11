@@ -10,7 +10,7 @@ import { PostFX } from './postfx.js';
 import { Camp } from './camp.js';
 import { audio } from './audio.js';
 import { input } from './input.js';
-import { World } from './world.js';
+import { World, latticeHash } from './world.js';
 import { MobaWorld } from './mobaworld.js';
 import { Moba } from './moba.js';
 import { Player } from './player.js';
@@ -244,6 +244,136 @@ panels.player = player;
 const RES_POPUP = { meat: ['🍖', '#ff9d76'], wood: ['🪵', '#d8a468'],
                     stone: ['🪨', '#c8c8c0'], hide: ['🟫', '#c9986a'], iron: ['🔩', '#c8d0d8'],
                     berry: ['🫐', '#c9a4ff'], wool: ['🧶', '#f2efe6'], essence: ['🧪', '#5fe07f'] };
+// ---------- horse race: 4 checkpoints, beat the clock, win essence ----------
+let race = null; // { flags: [mesh], next, t }
+function startRace(poi) {
+  if (race) { ui.toast('🏁 Already racing!', ''); return; }
+  if (!player.mounted) { ui.toast('🏁 Come back ON A HORSE to race.', ''); audio.sfx('error', 0.4); return; }
+  const flags = [];
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + 0.4;
+    const fx = poi.x + Math.cos(a) * 62, fz = poi.z + Math.sin(a) * 62;
+    const flag = makeRaceFlag(i === 3 ? 0x4a8ad8 : 0xd83c2e);
+    flag.position.set(fx, world.heightAt(fx, fz), fz);
+    scene.add(flag);
+    flags.push(flag);
+  }
+  race = { flags, next: 0, t: 75, poi };
+  showPing(flags[0].position.x, flags[0].position.z);
+  ui.banner('— 🏁 RACE! 4 flags, 75 s —');
+  audio.sfx('lane_unlock', 0.6);
+}
+function endRace(won) {
+  for (const f of race.flags) scene.remove(f);
+  if (won) {
+    const xp = questXpFor(player.level);
+    player.addXp(xp);
+    player.essence = roundResource(player.essence + 5);
+    ui.banner('— 🏆 RACE WON —');
+    ui.toast(`🏆 Checkered flag! +5 🧪, +${xp} XP.`, 'level');
+    audio.sfx('victory', 0.55);
+  } else {
+    ui.toast('🏁 Too slow — the race is lost. Try again!', 'boss');
+    audio.sfx('defeat', 0.4);
+  }
+  race = null;
+}
+function tickRace(dt) {
+  if (!race) return;
+  race.t -= dt;
+  if (race.t <= 0) { endRace(false); return; }
+  if (!player.mounted) { ui.toast('🏁 You fell out of the saddle — race void.', ''); endRace(false); return; }
+  const f = race.flags[race.next];
+  f.userData.flag.rotation.y = Math.sin(game.time * 5) * 0.4; // beckoning wave
+  if (Math.hypot(player.pos.x - f.position.x, player.pos.z - f.position.z) < 4.5) {
+    scene.remove(f);
+    race.next++;
+    audio.sfx('click', 0.6);
+    if (race.next >= race.flags.length) { endRace(true); return; }
+    const nf = race.flags[race.next];
+    showPing(nf.position.x, nf.position.z);
+    ui.toast(`🏁 ${race.next}/4 — ${Math.ceil(race.t)}s left!`, 'level');
+  }
+}
+
+// ---------- swamp sulfur bubbles: telegraphed geysers on a hash grid ----------
+// Each 16 m grid cell may hold a vent; it erupts every 9 s (offset by its
+// hash). The last second is the telegraph; the pop hurts EVERYTHING near it.
+const BUBBLE_CELL = 16;
+const bubbleFx = new Map(); // cellKey -> ring mesh while telegraphing
+function bubbleVent(gx, gz) {
+  const h = latticeHash(gx * 7 + 3, gz * 11 + 5, world.seed + 909);
+  if (h < 0.72) return null;
+  const x = (gx + 0.25 + (h * 5 % 0.5)) * BUBBLE_CELL;
+  const z = (gz + 0.25 + (h * 9 % 0.5)) * BUBBLE_CELL;
+  const zone = world.swampZone?.(x, z);
+  if (zone !== 'water' && zone !== 'mud') return null;
+  return { x, z, off: h * 9 };
+}
+function tickBubbles(dt) {
+  if (BIOMES[game.biomeIndex]?.name !== 'Murky Swamp') {
+    for (const [k, m] of bubbleFx) { scene.remove(m); bubbleFx.delete(k); }
+    return;
+  }
+  const pgx = Math.floor(player.pos.x / BUBBLE_CELL), pgz = Math.floor(player.pos.z / BUBBLE_CELL);
+  for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
+    const gx = pgx + dx, gz = pgz + dz;
+    const v = bubbleVent(gx, gz);
+    if (!v) continue;
+    const key = gx + ',' + gz;
+    const phase = (game.time + v.off) % 9;
+    if (phase > 8 && !bubbleFx.has(key)) {
+      // telegraph: a swelling brown ring for the last second
+      const m = new THREE.Mesh(new THREE.RingGeometry(0.5, 0.75, 16),
+        new THREE.MeshBasicMaterial({ color: 0xb8a24a, transparent: true, opacity: 0.7 }));
+      m.rotation.x = -Math.PI / 2;
+      m.position.set(v.x, world.heightAt(v.x, v.z) + 0.95, v.z);
+      scene.add(m);
+      bubbleFx.set(key, m);
+      audio.sfx('click', 0.25, 300);
+    } else if (phase <= 8 && bubbleFx.has(key)) {
+      // POP — anything within 2.6 m takes the burst
+      const m = bubbleFx.get(key);
+      scene.remove(m);
+      bubbleFx.delete(key);
+      ui.popup(new THREE.Vector3(v.x, world.heightAt(v.x, v.z) + 1.6, v.z), '💨', '#e8d84a');
+      if (Math.hypot(player.pos.x - v.x, player.pos.z - v.z) < 2.6 && !player.dead) {
+        player.takeDamage(12, null);
+      }
+      for (const e of enemyMgr.alive()) {
+        if (Math.hypot(e.pos.x - v.x, e.pos.z - v.z) < 2.6) enemyMgr.damage(e, 15, null, 'local');
+      }
+      audio.sfx('rock_crack', 0.35, 200);
+    }
+    const fx = bubbleFx.get(key);
+    if (fx) fx.scale.setScalar(1 + ((game.time + v.off) % 9 - 8) * 2.2);
+  }
+}
+
+// ---------- highland gusts: the wind SHOVES everyone downwind ----------
+let gust = null; // { dx, dz, t }
+let gustCd = 40;
+function tickGust(dt) {
+  if (BIOMES[game.biomeIndex]?.name !== 'Highlands') { gust = null; return; }
+  if (!gust) {
+    gustCd -= dt;
+    if (gustCd > 0) return;
+    gustCd = 55 + Math.random() * 55;
+    const a = Math.random() * Math.PI * 2;
+    gust = { dx: Math.cos(a), dz: Math.sin(a), t: 16 };
+    ui.toast(`💨 A gust roars across the highlands — lean into it!`, 'boss');
+    audio.sfx('special', 0.35);
+    return;
+  }
+  gust.t -= dt;
+  if (gust.t <= 0) { gust = null; return; }
+  if (!player.dead) {
+    const push = player.mounted ? 0.6 : 1.3; // horses hold their footing
+    player.pos.x += gust.dx * push * dt;
+    player.pos.z += gust.dz * push * dt;
+  }
+}
+
 // ---------- wandering trader: sells your surplus for essence ----------
 const TRADE_RATES = [['wood', 20], ['stone', 20], ['hide', 10], ['meat', 30], ['wool', 12]];
 function tradeWith(poi) {
@@ -1297,6 +1427,22 @@ function claimPoi(poi) {
   }
   if (poi.type === 'trader') { tradeWith(poi); return; }         // repeatable
   if (poi.type === 'graveyard') { startGraveyardEvent(poi); return; }
+  if (poi.type === 'village') {
+    if (player.upgrades.tribePass) { ui.toast('🪶 The tribes already count you a friend.', ''); return; }
+    if (player.meat < 15) {
+      ui.toast('🪶 The elder wants a tribute of 15 🍖 — then the tribes will let you walk their lands.', '');
+      audio.sfx('error', 0.4);
+      return;
+    }
+    player.meat = roundResource(player.meat - 15);
+    player.upgrades.tribePass = true;
+    enemyMgr.tribePass = true;
+    ui.toast('🪶 Tribute accepted — tribesmen and shamans will no longer attack you!', 'level');
+    audio.sfx('victory', 0.45);
+    panels.refresh();
+    return; // village stays (repeat E just greets you)
+  }
+  if (poi.type === 'race') { startRace(poi); return; }             // repeatable
   poi.claimed = true;
   const ring = poi.ring;
   const at = { x: poi.x + 1.8, z: poi.z + 1.8 };
@@ -1308,6 +1454,19 @@ function claimPoi(poi) {
     pickups.spawn('meat', 12, at, 1.4);
     ui.toast('🏚️ You patch up the old farm — a safe haven now, larder included.', 'level');
     audio.sfx('tower_build', 0.5);
+  } else if (poi.type === 'nest') {
+    pickups.spawn('essence', 2 + ring, at, 1.2);
+    pickups.spawn('iron', 3 + ring, at, 1.2);
+    if (Math.random() < 0.3) {
+      const c = ITEMS.filter(i => !i.free && i.slot !== 'companion');
+      pickups.spawn('item', c[Math.floor(Math.random() * c.length)].id, at, 0.6);
+    }
+    for (let i = 0; i < 2; i++) {
+      const h = enemyMgr._spawn('harpy', poi.x + (i ? 4 : -4), poi.z + 3, progressAt(poi.x, poi.z));
+      h.aggroed = true;
+    }
+    ui.toast('🥚 You rob the nest — and the harpies OBJECT.', 'boss');
+    audio.sfx('lane_unlock', 0.55);
   } else if (poi.type === 'statue') {
     // a pact: pick your poison — every boon carries a bane (120 s)
     const pacts = [
@@ -1671,7 +1830,7 @@ function updateAtmosphere(dt) {
     const note = BIOME_HAZARD_NOTES[biome.name];
     if (note) ui.toast(note, 'boss');
   }
-  envSpeedMult = BIOMES[game.biomeIndex].name === 'Murky Swamp' ? 0.82 : 1;
+  envSpeedMult = world.swampZone?.(player.pos.x, player.pos.z) === 'mud' ? 0.78 : 1;
   $id('biome-gloom').style.opacity = BIOMES[game.biomeIndex].darkness ?? 0;
   envSpeedMult *= Math.min(
     enemyMgr?.webSlowAt?.(player.pos.x, player.pos.z) ?? 1,
@@ -1901,6 +2060,9 @@ function step() {
       updateChannel(dt);
       tickGraveEvent();
       tickWisp(dt);
+      tickRace(dt);
+      tickGust(dt);
+      tickBubbles(dt);
 
       // contextual E hint: revive > chest > home > landmark > treasure
       const hintEl = $id('home-hint');
@@ -1909,6 +2071,9 @@ function step() {
         farm: '🏚️ An abandoned farm — press <kbd>E</kbd> to restore it (safe haven + supplies)',
         trader: '🛒 Wandering trader — press <kbd>E</kbd> to sell surplus for essence',
         graveyard: '⚰️ Restless graveyard — press <kbd>E</kbd> to face the dead (3 waves)',
+        village: '🪶 Tribal village — press <kbd>E</kbd> to offer tribute (15 🍖) for peace',
+        race: '🏁 Race post — ride up ON A HORSE and press <kbd>E</kbd> to race',
+        nest: '🥚 An eagle nest — press <kbd>E</kbd> to rob it (they will mind)',
         statue: '🗿 Cursed statue — press <kbd>E</kbd> to strike a pact (boon + bane)',
       };
       const POI_HINTS = {

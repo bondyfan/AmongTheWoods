@@ -365,6 +365,12 @@ export class EnemyManager {
     }
   }
 
+  // tribute paid at the village → tribesmen and shamans keep the peace
+  // (they still fight back through the threat log if you attack them)
+  _pacified(e) {
+    return this.tribePass && /tribesman|shaman/.test(e.type) && !e.threatLog.length;
+  }
+
   // 60% movement slow while standing in a cobweb
   webSlowAt(x, z) {
     for (const w of this.webs) {
@@ -662,8 +668,8 @@ export class EnemyManager {
       // aggro + leash: a chase that never reaches its target is abandoned
       // after LEASH_TIME and the enemy jogs back to where it spawned
       if (e.returning) {
-        if (target && dist < e.cfg.aggro * 0.5) { e.returning = false; e.aggroed = true; e.chaseT = 0; }
-      } else if (target && dist < e.cfg.aggro) e.aggroed = true;
+        if (target && dist < e.cfg.aggro * 0.5 && !this._pacified(e)) { e.returning = false; e.aggroed = true; e.chaseT = 0; }
+      } else if (target && dist < e.cfg.aggro && !this._pacified(e)) e.aggroed = true;
       if (e.aggroed && target && !e.returning) {
         if (dist > e.range * 1.5) e.chaseT += dt; else e.chaseT = 0;
         if (e.chaseT > (e.bossRank ? LEASH_TIME_BOSS : LEASH_TIME)) {

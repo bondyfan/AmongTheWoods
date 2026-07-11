@@ -11,7 +11,7 @@ import { makeTree, makeRock, makeGrassTuft, makeFlower, makeMushroom, makeBush,
          makeLog, makeBoulder, makeBridge, makeCampfire, makeStalagmite,
          makeBerryBush, makeShrine, makeMonolith, makeCrypt, makeBlacksmith, makeCobweb,
          makeFarm, makeTrader, makeBeehive, makeCocoon, makeGlade, makeGraveyardRuin,
-         makeCursedStatue } from './models.js';
+         makeCursedStatue, makeVillage, makeRaceFlag, makeNest, makeLilypad } from './models.js';
 import { audio } from './audio.js';
 
 const CHUNK = 40;
@@ -30,7 +30,7 @@ function mulberry32(seed) {
 }
 
 // ---- deterministic value noise (terrain height & ground color patches) ----
-function latticeHash(ix, iz, seed) {
+export function latticeHash(ix, iz, seed) {
   let h = ix * 374761393 + iz * 668265263 + seed * 1442695;
   h = Math.imul(h ^ (h >>> 13), 1274126177);
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
@@ -268,10 +268,42 @@ export class World {
     return h;
   }
 
+  // ---- Murky Swamp zoning: ~50% open dirty water (raft country), ~30%
+  // sucking mud, ~20% dry hummocks. Paths, POIs and smiths sit on carved
+  // dry ground so the world stays traversable. ----
+  swampZone(x, z) {
+    const r = radiusOf(x, z);
+    if (r <= BIOMES[2].rMax || r > BIOMES[3].rMax) return null; // not in the swamp ring
+    if (this.pathDistance(x, z) < 7) return 'dry';               // trails stay dry
+    if (this._dryIslands?.some(d => Math.hypot(d.x - x, d.z - z) < d.r)) return 'dry';
+    const n = valueNoise(x, z, 85, this.seed + 404);
+    if (n < 0.50) return 'water';
+    if (n < 0.80) return 'mud';
+    return 'dry';
+  }
+
+  // deterministic lilypads: hash-grid stepping stones across the swamp water
+  _lilypadAt(x, z) {
+    const CELLP = 9;
+    const cx = Math.floor(x / CELLP), cz = Math.floor(z / CELLP);
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+      const h = latticeHash(cx + dx, cz + dz, this.seed + 808);
+      if (h < 0.45) continue;
+      const px = (cx + dx + 0.2 + (h * 7 % 0.6)) * CELLP;
+      const pz = (cz + dz + 0.2 + (h * 13 % 0.6)) * CELLP;
+      if (this.swampZone(px, pz) !== 'water') continue;
+      if (Math.hypot(x - px, z - pz) < 1.5) return { x: px, z: pz, r: 1.5 };
+    }
+    return null;
+  }
+
   // lakes carve a flat basin: without this a hill next to (or under) a lake
   // buries the water plane under the terrain
   heightAt(x, z) {
     let h = this._terrainH(x, z);
+    const sz = this.swampZone(x, z);
+    if (sz === 'water') h -= 0.9;      // open water sits in a shallow basin
+    else if (sz === 'mud') h -= 0.35;  // mud squelches a little lower
     for (const lake of this.lakesNear(x, z)) {
       const d = Math.hypot(x - lake.x, z - lake.z);
       const R = lake.r + 14;
@@ -394,6 +426,7 @@ export class World {
   _genPois() {
     const rng = mulberry32(this.seed ^ 0x9013);
     this.pois = [];
+    this._dryIslands = []; // carved dry pads in the swamp ring (POIs, smiths)
     const types = ['shrine', 'monolith', 'crypt'];
     let id = 1;
     for (let ring = 0; ring < BIOMES.length; ring++) {
@@ -416,6 +449,7 @@ export class World {
           id: id++, type: types[Math.floor(rng() * types.length)],
           x: placed.x, z: placed.z, ring, claimed: false, guarded: false, mesh: null,
         });
+        if (ring === 3) (this._dryIslands ??= []).push({ x: placed.x, z: placed.z, r: 24 });
       }
     }
 
@@ -433,10 +467,14 @@ export class World {
           if (this.lakesNear(x, z).some(l => Math.hypot(x - l.x, z - l.z) < l.r + 10)) continue;
           if (this.pois.some(pp => Math.hypot(pp.x - x, pp.z - z) < 90)) continue;
           this.pois.push({ id: id++, type, x, z, ring, claimed: false, guarded: false, mesh: null });
+          if (ring === 3) this._dryIslands.push({ x, z, r: 24 });
           break;
         }
       }
     };
+    place('village', 3, 2);    // Swamp: tribute buys you peace with the tribes
+    place('race', 4, 2);       // Highlands: horse races
+    place('nest', 4, 3);       // Highlands: eagle nests on rock pillars
     place('farm', 0, 1);       // Verdant: an abandoned farmstead to restore
     place('trader', 0, 2);     // Verdant: wandering merchants buying surplus
     place('graveyard', 2, 2);  // Haunted: undead-wave defense events
@@ -465,6 +503,11 @@ export class World {
         if (this.rings.some(w => Math.abs(r - w.r) < 18)) continue;
         if (this.lakesNear(x, z).some(l => Math.hypot(x - l.x, z - l.z) < l.r + 6)) continue;
         this.smiths.push({ id: id++, x, z, obstacleAdded: false });
+        // swamp smiths get a dry island too (list may not exist yet — genPois
+        // runs before genSmiths and creates it; be safe either way)
+        if (r > BIOMES[2].rMax && r <= BIOMES[3].rMax) {
+          (this._dryIslands ??= []).push({ x, z, r: 22 });
+        }
       }
     }
   }
@@ -695,6 +738,11 @@ export class World {
       }
     }
 
+    // the swamp reads at a glance: brown-green water, black mud, mossy hummocks
+    const sz = this.swampZone(x, z);
+    if (sz === 'water') out.copy(new THREE.Color(0x39503e)).lerp(new THREE.Color(0x2e4438), grassMix);
+    else if (sz === 'mud') out.lerp(new THREE.Color(0x2c2418), 0.65);
+
     // trodden field path: packed pale sand, wide and unmistakable
     const pd = this.pathDistance(x, z);
     if (pd < 5.2) {
@@ -817,6 +865,7 @@ export class World {
   }
 
   isWater(x, z) {
+    if (this.swampZone(x, z) === 'water' && !this._lilypadAt(x, z)) return true;
     for (const lake of this.lakesNear(x, z)) {
       const d = Math.hypot(x - lake.x, z - lake.z);
       if (d < lake.r) {
@@ -976,6 +1025,25 @@ export class World {
       }
     }
 
+    // swamp: draw the lilypad stepping stones this chunk owns
+    if (biome.name === 'Murky Swamp') {
+      const CELLP = 9;
+      for (let gx = Math.floor(cxw / CELLP); gx <= Math.floor((cxw + CHUNK) / CELLP); gx++) {
+        for (let gz = Math.floor(czw / CELLP); gz <= Math.floor((czw + CHUNK) / CELLP); gz++) {
+          const h = latticeHash(gx, gz, this.seed + 808);
+          if (h < 0.45) continue;
+          const px = (gx + 0.2 + (h * 7 % 0.6)) * CELLP;
+          const pz = (gz + 0.2 + (h * 13 % 0.6)) * CELLP;
+          if (px < cxw || px >= cxw + CHUNK || pz < czw || pz >= czw + CHUNK) continue;
+          if (this.swampZone(px, pz) !== 'water') continue;
+          const pad = makeLilypad(rng);
+          pad.scale.setScalar(1.5);
+          pad.position.set(px, this.heightAt(px, pz) + 0.9 + 0.06, pz); // rides at water level
+          group.add(pad);
+        }
+      }
+    }
+
     // spider-web fields: clusters of big sticky webs over ~30% of the biome
     const chunkWebs = [];
     if (biome.webField) {
@@ -1081,7 +1149,10 @@ export class World {
     // -- landmarks whose spot falls inside this chunk --
     for (const poi of this.pois) {
       if (poi.x < cxw || poi.x >= cxw + CHUNK || poi.z < czw || poi.z >= czw + CHUNK) continue;
-      const mesh = poi.type === 'farm' ? makeFarm()
+      const mesh = poi.type === 'village' ? makeVillage()
+        : poi.type === 'race' ? makeRaceFlag()
+        : poi.type === 'nest' ? makeNest()
+        : poi.type === 'farm' ? makeFarm()
         : poi.type === 'trader' ? makeTrader()
         : poi.type === 'graveyard' ? makeGraveyardRuin()
         : poi.type === 'statue' ? makeCursedStatue()
