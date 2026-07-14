@@ -666,3 +666,20 @@ kbd {
   filter: drop-shadow(0 0 4px rgba(255,77,216,0.7)); line-height: 1; }
 #waypoint-arrow .wp-dist { font-size: 12px; color: #ffb8ee; font-weight: bold;
   text-shadow: 0 1px 2px #000; }
+
+
+/* auth + cloud save */
+#auth-row { margin: 10px 0 4px; }
+#auth-signin { background: #fff; color: #333; border: none; border-radius: 8px;
+  padding: 8px 16px; font-weight: bold; cursor: pointer; }
+#auth-signin:hover { background: #f0f0f0; }
+#auth-user { color: #cfe3b8; font-size: 14px; }
+.mini-btn { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3);
+  color: #e8f0dc; border-radius: 8px; padding: 6px 12px; margin-left: 6px; cursor: pointer; }
+.mini-btn:hover { background: rgba(255,255,255,0.2); }
+#loadgame { width: min(520px, 94vw); }
+#loadgame-body { padding: 14px 18px; max-height: 60vh; overflow-y: auto; }
+.save-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin-bottom: 8px;
+  border: 1px solid rgba(255,255,255,0.15); border-radius: 10px; background: rgba(255,255,255,0.04); }
+.save-row .save-meta { flex: 1; }
+.save-row .save-when { font-size: 12px; color: #9fb884; }

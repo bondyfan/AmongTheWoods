@@ -16,7 +16,7 @@
 // single-player never waits on Firebase.
 // ==========================================================================
 
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
     getDatabase, ref, get, set, update, remove, push,
     onValue, onChildAdded, onDisconnect
@@ -28,7 +28,7 @@ let db = null;
 
 function ensureInit() {
     if (db) return;
-    app = initializeApp(firebaseConfig);
+    app = getApps().length ? getApp() : initializeApp(firebaseConfig);
     db = getDatabase(app);
 }
 

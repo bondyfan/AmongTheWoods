@@ -239,10 +239,28 @@
           <small>Edit any stat in the Character panel and spawn items into
           the inventory — for testing.</small></span>
       </label>
+      <div class="setting-row" id="cloud-row" style="display:none">
+        <span style="flex:1"><b>☁️ Cloud save</b> <small id="cloud-who"></small><br>
+          <small>Save/Load your character to the cloud (co-op survival only).</small></span>
+        <button id="set-savegame" class="mini-btn">💾 Save</button>
+        <button id="set-loadgame" class="mini-btn">📂 Load</button>
+      </div>
       <div class="setting-row" id="mpcode-row">
         <span><b>Multiplayer code:</b> <span id="set-mpcode" style="font-family:monospace;font-size:18px;letter-spacing:2px">—</span><br>
           <small>Share this code so a friend can join your running game.</small></span>
       </div>
+    </div>
+  </div>
+
+  <!-- cloud save picker -->
+  <div id="loadgame" class="panel hidden">
+    <div class="panel-head">
+      <h2>☁️ Load Game</h2>
+      <button class="panel-close">✕</button>
+    </div>
+    <div id="loadgame-body">
+      <p class="empty-note" id="loadgame-empty">Loading your saves…</p>
+      <div id="loadgame-list"></div>
     </div>
   </div>
 
@@ -309,6 +327,10 @@
     <div class="menu-inner">
       <h1>Among<br>The Woods</h1>
       <p class="tagline">Fight your way north through the wild, to the Frozen Peak.</p>
+      <div id="auth-row">
+        <button id="auth-signin">🔑 Sign in with Google</button>
+        <span id="auth-user" class="hidden"></span>
+      </div>
 
       <!-- step 1: pick a mode -->
       <div id="mode-select">

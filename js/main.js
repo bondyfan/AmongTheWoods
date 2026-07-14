@@ -1765,7 +1765,16 @@ const settings = Object.assign(
     $id('set-mpcode').textContent = (mp?.active && mpCode) ? mpCode : '— (not in a multiplayer game)';
     $id('admin-row').style.display = (game.kind === 'survival' && !mp?.active) ? '' : 'none';
     $id('set-admin').checked = !!game.adminMode;
+    // cloud save/load is only offered inside a co-op survival game while signed in
+    const canCloud = mp?.active && mp.mode === 'coop' && game.kind === 'survival';
+    const cloudRow = $id('cloud-row');
+    cloudRow.style.display = canCloud ? '' : 'none';
+    $id('cloud-who').textContent = authUser ? `— ${authUser.name}` : '— sign in on the menu first';
+    $id('set-savegame').disabled = !authUser;
+    $id('set-loadgame').disabled = !authUser;
   });
+  $id('set-savegame').addEventListener('click', saveGameCloud);
+  $id('set-loadgame').addEventListener('click', openLoadGame);
   $id('set-admin').addEventListener('change', () => {
     game.adminMode = $id('set-admin').checked;
     if (!game.adminMode && player.adminOverrides) {
@@ -1776,6 +1785,145 @@ const settings = Object.assign(
     ui.toast(game.adminMode ? '🛠 Admin mode ON' : 'Admin mode off', 'level');
   });
 }
+
+// ---------- Google auth + cloud save/load ----------
+let AuthMod = null, authUser = null;
+async function ensureAuth() {
+  if (!AuthMod) AuthMod = (await import('./auth.js')).Auth;
+  return AuthMod;
+}
+function refreshAuthUI() {
+  const btn = $id('auth-signin'), lbl = $id('auth-user');
+  if (authUser) {
+    btn.textContent = '🚪 Sign out';
+    lbl.textContent = `☁️ ${authUser.name}`;
+    lbl.classList.remove('hidden');
+  } else {
+    btn.textContent = '🔑 Sign in with Google';
+    lbl.classList.add('hidden');
+  }
+}
+// restore any existing session so the button reflects it, silently
+(async () => {
+  try { (await ensureAuth()).watch((u) => { authUser = u; refreshAuthUI(); }); } catch {}
+})();
+$id('auth-signin').addEventListener('click', async () => {
+  try {
+    const a = await ensureAuth();
+    if (authUser) { await a.signOutUser(); authUser = null; refreshAuthUI(); return; }
+    authUser = await a.signIn();
+    refreshAuthUI();
+    ui.toast(`☁️ Signed in as ${authUser.name}`, 'level');
+  } catch (e) { ui.toast('Sign-in failed: ' + (e?.message || e), 'boss'); }
+});
+
+// serialize the essentials of the current character + camp
+function serializeState() {
+  const p = player;
+  const data = {
+    level: p.level, xp: p.xp, hp: Math.round(p.hp),
+    res: Object.fromEntries(RESOURCES.map(k => [k, p[k] || 0])),
+    equipment: { ...p.equipment },
+    invItems: [...p.invItems],
+    consumables: { ...p.consumables },
+    stats: { ...p.stats },
+    spellsOwned: [...p.spellsOwned],
+    spellSlots: p.spellSlots.map(s => s ?? null),
+    upgrades: { ...p.upgrades },
+    invSlots: p.invSlots,
+    questDone: { ...p.questDone },
+    questHistory: [...p.questHistory],
+    quest: p.quest ? { ...p.quest } : null,
+    shrineBonus: p.shrineBonus || 0,
+    camp: camp ? { levels: { ...camp.levels }, storage: { ...camp.storage } } : null,
+    biomeIndex: game.biomeIndex,
+  };
+  return JSON.parse(JSON.stringify(data)); // strip undefined for Firebase
+}
+
+async function saveGameCloud() {
+  if (!authUser) { ui.toast('Sign in first (on the menu).', 'boss'); return; }
+  if (!(mp?.active && mp.mode === 'coop' && game.kind === 'survival')) {
+    ui.toast('You can only save inside a co-op survival game.', 'boss'); return;
+  }
+  try {
+    await (await ensureAuth()).saveGame(
+      { biome: BIOMES[game.biomeIndex].name, level: player.level }, serializeState());
+    ui.toast('💾 Game saved to the cloud!', 'level');
+    audio.sfx('upgrade', 0.5);
+  } catch (e) { ui.toast('Save failed: ' + (e?.message || e), 'boss'); }
+}
+
+async function openLoadGame() {
+  if (!authUser) { ui.toast('Sign in first (on the menu).', 'boss'); return; }
+  $id('loadgame').classList.remove('hidden');
+  const list = $id('loadgame-list'), empty = $id('loadgame-empty');
+  list.innerHTML = ''; empty.textContent = 'Loading your saves…'; empty.style.display = '';
+  try {
+    const saves = await (await ensureAuth()).listSaves();
+    if (!saves.length) { empty.textContent = 'No saves yet — hit Save first.'; return; }
+    empty.style.display = 'none';
+    for (const sv of saves) {
+      const row = document.createElement('div');
+      row.className = 'save-row';
+      const when = new Date(sv.at).toLocaleString();
+      row.innerHTML = `<div class="save-meta"><b>${sv.biome ?? '?'} · Lv ${sv.level ?? '?'}</b>
+        <div class="save-when">${when}</div></div>
+        <button class="mini-btn" data-load="${sv.id}">📂 Load</button>
+        <button class="mini-btn" data-del="${sv.id}">🗑</button>`;
+      row.querySelector('[data-load]').addEventListener('click', () => doLoad(sv.id));
+      row.querySelector('[data-del]').addEventListener('click', async () => {
+        try { await (await ensureAuth()).deleteSave(sv.id); row.remove(); } catch {}
+      });
+      list.appendChild(row);
+    }
+  } catch (e) { empty.textContent = 'Could not load saves: ' + (e?.message || e); }
+}
+
+async function doLoad(id) {
+  try {
+    const data = await (await ensureAuth()).loadSave(id);
+    if (!data) { ui.toast('That save is empty.', 'boss'); return; }
+    applyLoadedState(data);
+    $id('loadgame').classList.add('hidden');
+  } catch (e) { ui.toast('Load failed: ' + (e?.message || e), 'boss'); }
+}
+
+function applyLoadedState(d) {
+  const p = player;
+  p.level = Math.max(1, Math.min(MAX_LEVEL, d.level ?? 1));
+  p.xp = d.xp ?? 0;
+  for (const k of RESOURCES) p[k] = d.res?.[k] ?? 0;
+  p.equipment = { weapon: 'fists', head: null, chest: null, boots: null, charm: null, companion: null, ...(d.equipment || {}) };
+  p.invItems = Array.isArray(d.invItems) ? d.invItems.filter(Boolean) : [];
+  p.consumables = { salve: 0, roast: 0, honey: 0, ...(d.consumables || {}) };
+  p.stats = { range: 0, power: 0, swift: 0, pet: 0, gather: 0, ...(d.stats || {}) };
+  p.spellsOwned = new Set(d.spellsOwned || []);
+  p.spellSlots = Array.isArray(d.spellSlots) ? d.spellSlots.map(s => s ?? undefined) : [];
+  p.upgrades = { ...(d.upgrades || {}) };
+  if (d.invSlots) p.invSlots = d.invSlots;
+  p.questDone = { ...(d.questDone || {}) };
+  p.questHistory = Array.isArray(d.questHistory) ? d.questHistory : [];
+  p.quest = d.quest || null;
+  p.shrineBonus = d.shrineBonus || 0;
+  if (camp && d.camp) {
+    Object.assign(camp.levels, d.camp.levels || {});
+    Object.assign(camp.storage, d.camp.storage || {});
+    if (camp.levels.home > 0) world.buildHome(camp.levels.home);
+    for (const id of ['chest', 'furnace', 'boat', 'tower', 'banner', 'grave']) {
+      if ((camp.levels[id] || 0) > 0) { try { camp._placeMesh(id); } catch {} }
+    }
+    applyCampPerks();
+  }
+  p.recompute();
+  p.hp = Math.min(p.maxHp, d.hp ?? p.maxHp);
+  companions.sync(player);
+  panels.refresh();
+  ui.banner('☁️ Save loaded');
+  ui.toast('☁️ Your character has been restored into this game.', 'level');
+  audio.sfx('victory', 0.4);
+}
+$id('loadgame').querySelector('.panel-close').addEventListener('click', () => $id('loadgame').classList.add('hidden'));
 
 async function ensureMp() {
   if (!mp) {
