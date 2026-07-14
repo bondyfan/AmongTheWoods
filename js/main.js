@@ -92,6 +92,8 @@ const game = {
   kind: 'survival', // survival | moba
   paused: false,
   time: 0,
+  tod: 0.28,      // time of day 0..1 (0 = midnight, 0.5 = noon) — starts mid-morning
+  nightK: 0,      // 0 = full day, 1 = deep night (drives lights/spawns/fireflies)
   biomeIndex: 0,
   seed: 20260704,
   // Serializable world snapshot for future multiplayer (host → guests).
@@ -2511,6 +2513,53 @@ function setAmbience(name) {
   if (name) audio.loopStart(name, 0.32);
 }
 
+// ---------- day / night cycle ----------
+// A full day is DAY_LENGTH seconds. game.tod runs 0..1 (0 = midnight,
+// 0.5 = noon). nightK is a smooth 0 (day) .. 1 (deep night) used to dim the
+// world lights, tint the sky, swell spawns/aggro and scatter fireflies.
+const DAY_LENGTH = 600; // 10 real minutes per in-game day
+const nightFlies = [];
+let fireflyGeo = null, fireflyMat = null;
+function tickDayNight(dt) {
+  game.tod = (game.tod + dt / DAY_LENGTH) % 1;
+  // sun elevation: -1 midnight, +1 noon → dayness in [0,1]
+  const elev = Math.sin(game.tod * Math.PI * 2 - Math.PI / 2);
+  const dayness = Math.max(0, Math.min(1, elev * 1.6 + 0.5));
+  game.nightK = 1 - dayness;
+  if (enemyMgr) enemyMgr.nightK = game.nightK;
+
+  // HUD clock: a sun that sets into a moon
+  const clock = $id('tod-clock');
+  if (clock) {
+    const icon = game.nightK > 0.75 ? '🌙' : game.nightK > 0.45 ? '🌆' : game.nightK > 0.2 ? '🌤️' : '☀️';
+    const hh = Math.floor(((game.tod + 0.5) % 1) * 24); // tod 0 = 00:00 midnight
+    clock.textContent = `${icon} ${String(hh).padStart(2, '0')}:00`;
+  }
+
+  // screen darkening
+  $id('night-tint').style.opacity = (game.nightK * 0.6).toFixed(2);
+
+  // fireflies drift around the player once it's dark enough
+  if (!fireflyGeo) {
+    fireflyGeo = new THREE.SphereGeometry(0.05, 5, 4);
+    fireflyMat = new THREE.MeshBasicMaterial({ color: 0xc9ff7f });
+  }
+  const wantFlies = game.nightK > 0.35 && game.mode === 'play' ? Math.round(game.nightK * 14) : 0;
+  while (nightFlies.length < wantFlies) {
+    const m = new THREE.Mesh(fireflyGeo, fireflyMat);
+    nightFlies.push({ mesh: m, a: Math.random() * 6.28, r: 4 + Math.random() * 9, ph: Math.random() * 6.28, sp: 0.3 + Math.random() * 0.5 });
+    scene.add(m);
+  }
+  while (nightFlies.length > wantFlies) { const f = nightFlies.pop(); scene.remove(f.mesh); }
+  for (const f of nightFlies) {
+    f.a += f.sp * dt * 0.3;
+    const x = player.pos.x + Math.cos(f.a) * f.r;
+    const z = player.pos.z + Math.sin(f.a) * f.r;
+    f.mesh.position.set(x, world.heightAt(x, z) + 1 + Math.sin(game.time * 2 + f.ph) * 0.5, z);
+    f.mesh.visible = Math.sin(game.time * 3 + f.ph) > -0.3; // gentle blink
+  }
+}
+
 function updateAtmosphere(dt) {
   const idx = biomeIndexAt(player.pos.x, player.pos.z);
   if (idx !== game.biomeIndex) {
@@ -2547,8 +2596,12 @@ function updateAtmosphere(dt) {
   // gloomy biomes (Dark Forest, Haunted Forest, swamp) dim the world lights
   // themselves — the screen overlay alone left the geometry too bright
   biomeLightK += (Math.min(1, biome.light ?? 1) - biomeLightK) * Math.min(1, dt * 1.5);
-  hemi.intensity = (0.9 - 0.62 * caveK) * biomeLightK;
-  sun.intensity = 1.4 * (1 - 0.8 * caveK) * biomeLightK;
+  const nightK = game.nightK || 0;
+  hemi.intensity = (0.9 - 0.62 * caveK) * biomeLightK * (1 - 0.68 * nightK);
+  sun.intensity = 1.4 * (1 - 0.8 * caveK) * biomeLightK * (1 - 0.85 * nightK);
+  // warm the sun at dawn/dusk, silver it at deep night
+  const dusk = Math.max(0, 1 - Math.abs(nightK - 0.5) * 4); // peaks at the twilight band
+  sun.color.setRGB(1 - 0.25 * nightK, 0.95 - 0.2 * nightK + 0.05 * dusk, 0.87 - 0.15 * nightK - 0.15 * dusk);
   // the camera sits ~30 m away — keep the fog behind the hero so the cave
   // interior stays dimly visible while the outside world is swallowed
   scene.fog.near = 35 - 14 * caveK;
@@ -2556,8 +2609,9 @@ function updateAtmosphere(dt) {
 
   // caveK already fades smoothly with distance, so apply it directly; the
   // slow time-lerp is only for biome-to-biome transitions out in the open
-  const fogTarget = new THREE.Color(biome.fog).lerp(caveFog, caveK);
-  const skyTarget = new THREE.Color(biome.sky).lerp(caveFog, caveK);
+  const nightSky = new THREE.Color(0x0a1230), nightFog = new THREE.Color(0x141a34);
+  const fogTarget = new THREE.Color(biome.fog).lerp(nightFog, nightK * 0.8).lerp(caveFog, caveK);
+  const skyTarget = new THREE.Color(biome.sky).lerp(nightSky, nightK * 0.85).lerp(caveFog, caveK);
   if (caveK > 0.01) {
     fogColor.copy(fogTarget);
     skyColor.copy(skyTarget);
@@ -2777,6 +2831,7 @@ function step() {
       minimap.rotation = game.rpgView ? Math.atan2(-player.facing.x, -player.facing.z) : camYaw;
       minimap.update(dt, player, em,
         mp?.active && mp.mode === 'coop' ? mp.remote : null);
+      tickDayNight(dt);
       updateAtmosphere(dt);
       updatePings(dt);
 

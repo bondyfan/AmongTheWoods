@@ -158,7 +158,7 @@ export class EnemyManager {
     const progress = progressAt(cx, cz);
     const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
     const pool = [];
-    const singles = Math.round((3 + progress * 7) * SPAWN_DENSITY);
+    const singles = Math.round((3 + progress * 7) * SPAWN_DENSITY * (1 + 0.6 * (this.nightK || 0)));
     for (let i = 0; i < singles; i++) pool.push({ type: pick(biome.enemies) });
 
     if (biome.packs && Math.random() < 0.4) {
@@ -747,8 +747,9 @@ export class EnemyManager {
       // aggro + leash: a chase that never reaches its target is abandoned
       // after LEASH_TIME and the enemy jogs back to where it spawned
       if (e.returning) {
-        if (target && dist < e.cfg.aggro * 0.5 && !this._pacified(e)) { e.returning = false; e.aggroed = true; e.chaseT = 0; }
-      } else if (target && dist < e.cfg.aggro && !this._pacified(e)) e.aggroed = true;
+        const nAg = 1 + 0.5 * (this.nightK || 0); // creatures hunt farther at night
+        if (target && dist < e.cfg.aggro * 0.5 * nAg && !this._pacified(e)) { e.returning = false; e.aggroed = true; e.chaseT = 0; }
+      } else if (target && dist < e.cfg.aggro * (1 + 0.5 * (this.nightK || 0)) && !this._pacified(e)) e.aggroed = true;
       if (e.aggroed && target && !e.returning) {
         if (dist > e.range * 1.5) e.chaseT += dt; else e.chaseT = 0;
         if (e.chaseT > (e.bossRank ? LEASH_TIME_BOSS : LEASH_TIME)) {
