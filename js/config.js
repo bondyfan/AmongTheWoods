@@ -415,6 +415,36 @@ export const ITEMS = [
   { id: 'frozenNest',   slot: 'nest', level: 9, icon: '🪺', name: 'Frozen Griffin Nest', cost: null, free: true,
     nest: { biomeMax: 7 },
     desc: 'The Frozen Peak griffin\'s nest. Click to place it anywhere on solid ground. Stand by a placed nest to call a griffin and fly between your roosts.' },
+
+  // ---- UNIQUE boss drops: guaranteed from each biome's lair boss, never sold ----
+  { id: 'verdantHeart', slot: 'charm', level: 3, unique: true, icon: '🌿', name: 'Verdant Heart',
+    stats: { regen: 1.0, dmgPct: 0.10 }, desc: 'UNIQUE — dropped by Sythe the Broodmother. +1.0 ❤️/s and +10% damage.' },
+  { id: 'sunfangBlade', slot: 'weapon', level: 5, unique: true, icon: '🗡️', name: 'Sunfang Blade',
+    weapon: { kind: 'melee', dmg: 95, cd: 0.6, range: 2.0, chop: 1, mine: 0, tier: 2 },
+    desc: 'UNIQUE — dropped by Kthara Sunfang. A blistering-fast desert blade.' },
+  { id: 'widowShroud', slot: 'chest', level: 6, unique: true, icon: '🕸️', name: "Widow's Shroud",
+    stats: { hp: 160, regen: 0.6 }, desc: 'UNIQUE — dropped by Vess the Widow. +160 max health, +0.6 ❤️/s.' },
+  { id: 'mireBoots', slot: 'boots', level: 7, unique: true, icon: '🥾', name: 'Mirewalker Boots',
+    stats: { speed: 4, hp: 60 }, desc: 'UNIQUE — dropped by the Mire Hydra. +4 speed, +60 max health.' },
+  { id: 'ironhornCrown', slot: 'head', level: 8, unique: true, icon: '👑', name: 'Ironhorn Crown',
+    stats: { hp: 150, regen: 0.5 }, desc: 'UNIQUE — dropped by Old Ironhorn. +150 max health, +0.5 ❤️/s.' },
+  { id: 'shadeAmulet', slot: 'charm', level: 9, unique: true, icon: '👻', name: 'Amulet of the Shade',
+    stats: { dmgPct: 0.20, regen: 0.8 }, desc: 'UNIQUE — dropped by the Weeping Shade. +20% damage, +0.8 ❤️/s.' },
+  { id: 'snapjawMaul', slot: 'weapon', level: 10, unique: true, icon: '🔨', name: 'Snapjaw Maul',
+    weapon: { kind: 'melee', dmg: 190, cd: 0.9, range: 2.2, chop: 2, mine: 1, tier: 3 },
+    desc: 'UNIQUE — dropped by Old Snapjaw. A crushing jungle maul.' },
+];
+
+// One named boss per biome ring (7 = Frozen Peak already has the summit Ymir),
+// each roosting in a LAIR landmark and dropping its UNIQUE item, guaranteed.
+export const BIOME_LAIRS = [
+  { name: 'Sythe the Broodmother', type: 'spider',      drop: 'verdantHeart' },
+  { name: 'Kthara Sunfang',        type: 'scorpion',    drop: 'sunfangBlade' },
+  { name: 'Vess the Widow',        type: 'venomspider', drop: 'widowShroud'  },
+  { name: 'The Mire Hydra',        type: 'bogCrawler',  drop: 'mireBoots'    },
+  { name: 'Old Ironhorn',          type: 'elk',         drop: 'ironhornCrown'},
+  { name: 'The Weeping Shade',     type: 'ghost',       drop: 'shadeAmulet'  },
+  { name: 'Old Snapjaw',           type: 'snapper',     drop: 'snapjawMaul'  },
 ];
 
 export const itemById = (id) => ITEMS.find(i => i.id === id);
@@ -670,7 +700,7 @@ export const SUPPLY_UPGRADES = [
 ];
 
 export const SHOP_GROUPS = [
-  { key: 'weapons',  label: '⚔️ Weapons',   items: () => ITEMS.filter(i => i.slot === 'weapon' && !i.free && !isForgeItem(i)) },
+  { key: 'weapons',  label: '⚔️ Weapons',   items: () => ITEMS.filter(i => i.slot === 'weapon' && !i.free && !i.unique && !isForgeItem(i)) },
   { key: 'friends',  label: '🐾 Companions', items: () => ITEMS.filter(i => i.slot === 'companion') },
   { key: 'spells',   label: '📖 Spells',    items: () => SPELLS },
   { key: 'training', label: '📈 Training',  items: () => STAT_TRACKS },
@@ -678,8 +708,8 @@ export const SHOP_GROUPS = [
 
 export const SMITH_GROUPS = [
   { key: 'quests',  label: '📜 Quests' },
-  { key: 'weapons', label: '⚔️ Weapons', items: () => ITEMS.filter(i => i.slot === 'weapon' && !i.free) },
-  { key: 'gear',    label: '🛡️ Gear',    items: () => ITEMS.filter(i => ['head', 'chest', 'boots', 'charm'].includes(i.slot)) },
+  { key: 'weapons', label: '⚔️ Weapons', items: () => ITEMS.filter(i => i.slot === 'weapon' && !i.free && !i.unique) },
+  { key: 'gear',    label: '🛡️ Gear',    items: () => ITEMS.filter(i => ['head', 'chest', 'boots', 'charm'].includes(i.slot) && !i.unique) },
 ];
 
 // ---- blacksmith quest lines: 8 sequential quests per biome, generated from

@@ -267,8 +267,8 @@ export class Minimap {
       ctx.textAlign = 'center';
       ctx.font = '10px sans-serif';
       ctx.globalAlpha = poi.claimed ? 0.35 : 1;
-      ctx.fillStyle = poi.type === 'shrine' ? '#7fd1ff' : poi.type === 'crypt' ? '#f0ead8' : '#c9b8ff';
-      text(poi.type === 'shrine' ? '✦' : poi.type === 'crypt' ? '☗' : '▲', p.x, p.y + 3);
+      ctx.fillStyle = poi.type === 'shrine' ? '#7fd1ff' : poi.type === 'crypt' ? '#f0ead8' : poi.type === 'lair' ? '#ff6a6a' : '#c9b8ff';
+      text(poi.type === 'shrine' ? '✦' : poi.type === 'crypt' ? '☗' : poi.type === 'lair' ? '💀' : '▲', p.x, p.y + 3);
       ctx.globalAlpha = 1;
     }
 
@@ -420,8 +420,8 @@ export class Minimap {
     for (const poi of this.world.pois ?? []) {
       if (!this._isDiscovered(poi.x, poi.z) || !inView(poi.x, poi.z)) continue;
       ctx.globalAlpha = poi.claimed ? 0.35 : 1;
-      ctx.fillStyle = poi.type === 'shrine' ? '#7fd1ff' : poi.type === 'crypt' ? '#f0ead8' : '#c9b8ff';
-      ctx.fillText(poi.type === 'shrine' ? '✦' : poi.type === 'crypt' ? '☗' : '▲',
+      ctx.fillStyle = poi.type === 'shrine' ? '#7fd1ff' : poi.type === 'crypt' ? '#f0ead8' : poi.type === 'lair' ? '#ff6a6a' : '#c9b8ff';
+      ctx.fillText(poi.type === 'shrine' ? '✦' : poi.type === 'crypt' ? '☗' : poi.type === 'lair' ? '💀' : '▲',
         toX(poi.x), toY(poi.z) + 4);
       ctx.globalAlpha = 1;
     }

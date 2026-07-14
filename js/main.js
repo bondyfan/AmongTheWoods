@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOBA,
          RESOURCES, RES_ICONS, HIDE_BEARING, VERDANT_HIDE_DROP, hideForHp, radiusOf, costFor,
          biomeIndexAt, progressAt, fmtResource, roundResource, itemById, spellById,
-         consumableById, essenceDropFor, MAX_LEVEL, questFor, questXpFor } from './config.js';
+         consumableById, essenceDropFor, MAX_LEVEL, questFor, questXpFor, BIOME_LAIRS } from './config.js';
 import { makeAimArc, updateAimArc, makeRaft, makeBlacksmith, makeHorse, makeWisp,
          makeGriffin, makeGriffinRoost, makeTumbleweed } from './models.js';
 import { PostFX } from './postfx.js';
@@ -1093,7 +1093,7 @@ function usePropNear() {
       pickups.spawn('essence', 1, { x: pr.x, z: pr.z }, 0.8);
       pickups.spawn('hide', 2, { x: pr.x, z: pr.z }, 0.9);
       if (Math.random() < 0.12) {
-        const c = ITEMS.filter(i => !i.free && i.slot !== 'companion');
+        const c = ITEMS.filter(i => !i.free && i.slot !== 'companion' && !i.unique);
         pickups.spawn('item', c[Math.floor(Math.random() * c.length)].id, { x: pr.x, z: pr.z }, 0.5);
       }
       ui.toast('🕸️ The cocoon splits — someone\'s last belongings.', 'level');
@@ -1282,7 +1282,16 @@ const enemyMgr = new EnemyManager(scene, world, {
       const ess = essenceDropFor(biomeIndexAt(enemy.pos.x, enemy.pos.z));
       if (ess > 0) pickups.spawn('essence', ess, enemy.pos, 0.8);
     }
-    if (enemy.bossRank > 0) rollBossDrop(enemy);
+    if (enemy.lairDrop) {
+      // a NAMED lair boss: its unique item is GUARANTEED, plus a fat cache
+      pickups.spawn('item', enemy.lairDrop, enemy.pos, 0.4);
+      pickups.spawn('essence', 5, enemy.pos, 1.2);
+      const poi = world.pois?.find(p => p.id === enemy.lairId);
+      if (poi) { poi.claimed = true; minimap.redrawT = 0; }
+      ui.banner(`— ${enemy.bossName} falls! —`);
+      ui.toast(`🏆 ${enemy.bossName} is slain — its unique treasure is yours!`, 'level');
+      audio.sfx('victory', 0.6);
+    } else if (enemy.bossRank > 0) rollBossDrop(enemy);
   },
   onDiscover: discoverType,
   onBossSpawn: (enemy) => {
@@ -1347,7 +1356,7 @@ function rollBossDrop(enemy) {
   if (Math.random() < rank.dropChance) {
     // companions are never loot — you TAME a wolf, you don't skin one for it
     const candidates = ITEMS.filter(i =>
-      !i.free && !player.hasItem(i.id) && i.level <= player.level + 1
+      !i.free && !i.unique && !player.hasItem(i.id) && i.level <= player.level + 1
       && i.slot !== 'companion');
     if (!candidates.length) { pickups.spawn('meat', 5, enemy.pos, 1); return; }
     const item = candidates[Math.floor(Math.random() * candidates.length)];
@@ -1404,7 +1413,7 @@ function startPlaying() {
       pickups.spawn('hide', Math.round(3 * k), at, 1.2);
       if (bi >= 3) pickups.spawn('iron', 2 + bi, at, 1.2);
       if (Math.random() < 0.4 + bi * 0.06) {
-        const candidates = ITEMS.filter(i => !i.free && i.slot !== 'companion');
+        const candidates = ITEMS.filter(i => !i.free && i.slot !== 'companion' && !i.unique);
         pickups.spawn('item', candidates[Math.floor(Math.random() * candidates.length)].id, at, 0.6);
       }
     };
@@ -1412,12 +1421,28 @@ function startPlaying() {
     // silent guard pack — the summit's keeper is a colossal named boss
     world.onPoiSpawned = (poi) => {
       if (poi.claimed || poi.guarded) return;
-      if (!['crypt', 'temple', 'summit'].includes(poi.type)) return;
+      if (!['crypt', 'temple', 'summit', 'lair'].includes(poi.type)) return;
       if (mp?.active && !mp.isHost) return; // host simulates the guards
       poi.guarded = true;
       const biome = BIOMES[biomeIndexAt(poi.x, poi.z)];
       const type = biome.enemies[Math.floor(Math.random() * biome.enemies.length)];
       const progress = progressAt(poi.x, poi.z);
+      if (poi.type === 'lair') {
+        // a biome's NAMED boss, roosting in its lair with a guaranteed unique drop
+        const lair = BIOME_LAIRS[poi.ring];
+        if (!lair) return;
+        for (let i = 0; i < 5; i++) {
+          const a = (i / 5) * Math.PI * 2;
+          const g = enemyMgr._spawn(type, poi.x + Math.cos(a) * 5, poi.z + Math.sin(a) * 5, progress);
+          g.aggroed = false; g.cryptId = poi.id;
+        }
+        const boss = enemyMgr._spawn(lair.type, poi.x, poi.z - 4, progress, 3, { ambush: true });
+        boss.bossName = lair.name;
+        boss.lairDrop = lair.drop;   // guaranteed unique on death
+        boss.lairId = poi.id;
+        boss.aggroed = false; boss.cryptId = poi.id;
+        return;
+      }
       if (poi.type === 'summit') {
         // The Father of the Mountain: a 3-skull colossus flanked by wardens
         for (let i = 0; i < 6; i++) {
@@ -2089,7 +2114,7 @@ function nearTreasure() {
 
 // landmark rewards: shrines bless, monoliths pay out, crypts must be cleared
 function claimPoi(poi) {
-  if (['crypt', 'temple', 'summit'].includes(poi.type)) {
+  if (['crypt', 'temple', 'summit', 'lair'].includes(poi.type)) {
     const guards = enemyMgr.alive().filter(e => e.cryptId === poi.id);
     if (guards.length) {
       ui.toast(`☠️ Still guarded — ${guards.length} keeper${guards.length > 1 ? 's' : ''} left!`, 'boss');
@@ -2140,7 +2165,7 @@ function claimPoi(poi) {
     pickups.spawn('essence', 6, at, 1.6);
     pickups.spawn('iron', 8, at, 1.6);
     pickups.spawn('meat', 25, at, 1.8);
-    const c = ITEMS.filter(i => !i.free && i.slot !== 'companion');
+    const c = ITEMS.filter(i => !i.free && i.slot !== 'companion' && !i.unique);
     pickups.spawn('item', c[Math.floor(Math.random() * c.length)].id, at, 0.6);
     ui.banner('— The temple treasury is yours —');
     audio.sfx('victory', 0.5);
@@ -2149,7 +2174,7 @@ function claimPoi(poi) {
     player.addXp(xp);
     pickups.spawn('essence', 15, at, 2);
     pickups.spawn('iron', 12, at, 2);
-    const cc = ITEMS.filter(i => !i.free && i.slot !== 'companion');
+    const cc = ITEMS.filter(i => !i.free && i.slot !== 'companion' && !i.unique);
     for (let i = 0; i < 2; i++) pickups.spawn('item', cc[Math.floor(Math.random() * cc.length)].id, at, 1);
     ui.banner('— ⛰️ THE SUMMIT IS YOURS —');
     ui.toast(`⛰️ You raise your banner over the world: +${xp} XP. There is nothing above you now.`, 'level');
@@ -2158,7 +2183,7 @@ function claimPoi(poi) {
     pickups.spawn('essence', 2 + ring, at, 1.2);
     pickups.spawn('iron', 3 + ring, at, 1.2);
     if (Math.random() < 0.3) {
-      const c = ITEMS.filter(i => !i.free && i.slot !== 'companion');
+      const c = ITEMS.filter(i => !i.free && i.slot !== 'companion' && !i.unique);
       pickups.spawn('item', c[Math.floor(Math.random() * c.length)].id, at, 0.6);
     }
     for (let i = 0; i < 2; i++) {
@@ -2194,7 +2219,7 @@ function claimPoi(poi) {
   } else { // crypt
     pickups.spawn('meat', 15 + ring * 6, at, 1.7);
     pickups.spawn('hide', 3 + ring * 2, at, 1.4);
-    const candidates = ITEMS.filter(i => !i.free && i.slot !== 'companion' && !player.hasItem(i.id));
+    const candidates = ITEMS.filter(i => !i.free && i.slot !== 'companion' && !i.unique && !player.hasItem(i.id));
     if (candidates.length) {
       pickups.spawn('item', candidates[Math.floor(Math.random() * candidates.length)].id, at, 0.6);
     }
@@ -2212,7 +2237,7 @@ function digTreasure() {
   pickups.spawn('hide', 4 + ring * 2, t, 1.4);
   if (ring >= 2) pickups.spawn('iron', 3 + ring * 2, t, 1.2);
   if (Math.random() < 0.35) {
-    const candidates = ITEMS.filter(i => !i.free && i.slot !== 'companion' && !player.hasItem(i.id));
+    const candidates = ITEMS.filter(i => !i.free && i.slot !== 'companion' && !i.unique && !player.hasItem(i.id));
     if (candidates.length) {
       pickups.spawn('item', candidates[Math.floor(Math.random() * candidates.length)].id, t, 0.6);
     }
@@ -2993,6 +3018,7 @@ function step() {
         liana: '🌿 A vine line — press <kbd>E</kbd> to glide across',
         bonfire: '🔥 A bonfire — press <kbd>E</kbd> to rest (full heal, safe camp)',
         summit: '⛰️ The summit — defeat its keeper, then press <kbd>E</kbd> to claim the peak',
+        lair: '💀 A boss lair — slay its named master for a UNIQUE treasure',
         statue: '🗿 Cursed statue — press <kbd>E</kbd> to strike a pact (boon + bane)',
       };
       const POI_HINTS = {

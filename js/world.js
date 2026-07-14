@@ -512,6 +512,7 @@ export class World {
         }
       }
     };
+    for (let ring = 0; ring < 7; ring++) place('lair', ring, 1); // one named boss lair per biome
     place('village', 3, 2);    // Swamp: tribute buys you peace with the tribes
     place('temple', 6, 2);     // Jungle: trapped step pyramids with a treasury
 
@@ -1240,7 +1241,8 @@ export class World {
     // -- landmarks whose spot falls inside this chunk --
     for (const poi of this.pois) {
       if (poi.x < cxw || poi.x >= cxw + CHUNK || poi.z < czw || poi.z >= czw + CHUNK) continue;
-      const mesh = poi.type === 'temple' ? makeTemple()
+      const mesh = poi.type === 'lair' ? makeCrypt()
+        : poi.type === 'temple' ? makeTemple()
         : poi.type === 'liana' ? makeLianaPole()
         : poi.type === 'bonfire' ? makeBonfire()
         : poi.type === 'summit' ? makeSummitCairn()
