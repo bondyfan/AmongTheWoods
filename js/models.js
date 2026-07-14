@@ -669,6 +669,74 @@ export function makeHorse(rng = Math.random) {
 }
 
 // dropped tuft of wool: soft white puffs
+export function makeHoneyDrop() {
+  const g = new THREE.Group();
+  // a golden honeycomb slab: a hex grid of little cells
+  const comb = box(0.34, 0.08, 0.30, 0xe0a828);
+  comb.position.y = 0.1;
+  g.add(comb);
+  const cellMat = mat(0xc98a1e);
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    const cell = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.09, 6), cellMat);
+    cell.position.set(Math.cos(a) * 0.09, 0.15, Math.sin(a) * 0.09);
+    g.add(cell);
+  }
+  const centre = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.09, 6), cellMat);
+  centre.position.y = 0.15;
+  g.add(centre);
+  // a glossy honey drip
+  const drip = sphere(0.06, 0xffca3a, 6);
+  drip.position.set(0.12, 0.06, -0.1);
+  g.add(drip);
+  return g;
+}
+
+// a big woven straw skep — the destructible wild beehive (has HP)
+export function makeBeehiveBig(rng = Math.random) {
+  const g = new THREE.Group();
+  for (let i = 0; i < 5; i++) {
+    const r = 0.85 - i * 0.14;
+    const ring = new THREE.Mesh(new THREE.CylinderGeometry(r, r + 0.06, 0.34, 10),
+      mat(i % 2 ? 0xd8b46a : 0xc9a352));
+    ring.position.y = 0.3 + i * 0.32;
+    ring.castShadow = true;
+    g.add(ring);
+  }
+  const cap = sphere(0.5, 0xd8b46a, 8);
+  cap.position.y = 1.95;
+  cap.scale.y = 0.6;
+  g.add(cap);
+  const hole = new THREE.Mesh(new THREE.CircleGeometry(0.14, 8),
+    new THREE.MeshBasicMaterial({ color: 0x2a1c08 }));
+  hole.position.set(0, 0.55, -0.86);
+  g.add(hole);
+  return g;
+}
+
+export function makeBee() {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.13, 6, 5), mat(0xf2c033));
+  body.scale.set(1, 0.8, 1.3);
+  g.add(body);
+  for (const z of [-0.06, 0.06]) {
+    const stripe = box(0.22, 0.16, 0.05, 0x2a2018);
+    stripe.position.z = z;
+    g.add(stripe);
+  }
+  const wings = [];
+  for (const side of [-1, 1]) {
+    const w = new THREE.Mesh(new THREE.SphereGeometry(0.09, 5, 4),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 }));
+    w.scale.set(1.4, 0.3, 0.7);
+    w.position.set(side * 0.12, 0.12, 0);
+    g.add(w);
+    wings.push(w);
+  }
+  g.userData = { wings };
+  return g;
+}
+
 export function makeWoolDrop() {
   const g = new THREE.Group();
   for (const [x, y, z, r] of [[0, 0.14, 0, 0.16], [-0.12, 0.1, 0.06, 0.11], [0.12, 0.12, -0.05, 0.12], [0.02, 0.24, 0.04, 0.1]]) {
@@ -1574,6 +1642,7 @@ export function makeEnemyMesh(type) {
     case 'cobra': return makeCobra();
     case 'vulture': return makeVulture();
     case 'cactusman': return makeCactusMan();
+    case 'bee': return makeBee();
     case 'ghost': return makeGhost();
     case 'panther': return makePanther();
     case 'griffin': return makeGriffin(1);

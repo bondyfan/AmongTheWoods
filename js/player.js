@@ -779,6 +779,14 @@ export class Player {
       }
     }
 
+    // bash a wild beehive open with any weapon
+    for (const hive of (world.hivesNear?.(this.pos, w.range + 0.6) ?? [])) {
+      if (!this._inArc(hive.x, hive.z, w.range, hive.radius)) continue;
+      const res = world.hitHive(hive, this.dmgMult * w.dmg);
+      this.hooks.onHiveHit?.(hive, res);
+      break; // one hive per swing
+    }
+
     // berry bushes: any melee swing knocks ripe berries to the ground
     for (const bush of (world.bushesNear?.(this.pos, w.range + 0.6) ?? [])) {
       if (!bush.berries || !this._inArc(bush.x, bush.z, w.range, bush.radius)) continue;

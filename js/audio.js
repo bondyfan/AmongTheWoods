@@ -172,7 +172,7 @@ class AudioManager {
     if (/snake|serpent|cobra/i.test(type)) return 'snake';
     if (/wolf/i.test(type)) return 'wolf';
     if (type === 'rat') return 'rat';
-    if (type === 'bat') return 'bat';
+    if (type === 'bat' || type === 'bee') return 'bat'; // insect buzz ~ bat screech
     if (type === 'rabbit') return 'rabbit';
     if (type === 'sheep') return 'sheep';
     if (type === 'horse') return 'horse';

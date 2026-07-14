@@ -140,6 +140,8 @@ export const ENEMY_TYPES = {
              ranged: true, shootRange: 8, spellCd: 2.4, projectileSpeed: 18, shotColor: 0xc9e05a },
   vulture: { name: 'Desert Vulture', icon: '🦅',
              hp: 105, dmg: 6,  speed: 11,  range: 1.4, attackCd: 1.1, xp: 7,  meat: 1, hitR: 0.55, aggro: 16, flying: true },
+  bee: { name: 'Angry Bee', icon: '🐝',
+             hp: 8, dmg: 3, speed: 9, range: 1.0, attackCd: 0.8, xp: 1, meat: 0, hitR: 0.3, aggro: 40, flying: true },
   cactusman: { name: 'Saguaro Sentinel', icon: '🌵',
              hp: 520, dmg: 9, speed: 0, range: 1.6, attackCd: 1.2, xp: 24, meat: 0, hitR: 0.7, aggro: 9,
              ranged: true, shootRange: 10, spellCd: 2.6, projectileSpeed: 16, shotColor: 0xbfe07a, radial: 12 },

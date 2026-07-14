@@ -10,7 +10,7 @@ import { WORLD, BIOMES, biomeAt, radiusOf } from './config.js';
 import { makeTree, makeRock, makeGrassTuft, makeFlower, makeMushroom, makeBush,
          makeLog, makeBoulder, makeBridge, makeCampfire, makeStalagmite,
          makeBerryBush, makeShrine, makeMonolith, makeCrypt, makeBlacksmith, makeCobweb,
-         makeFarm, makeTrader, makeBeehive, makeCocoon, makeGlade, makeGraveyardRuin,
+         makeFarm, makeTrader, makeBeehive, makeBeehiveBig, makeCocoon, makeGlade, makeGraveyardRuin,
          makeCursedStatue, makeVillage, makeRaceFlag, makeNest, makeLilypad,
          makeTemple, makeLianaPole, makeBonfire, makeSummitCairn, makeCactus } from './models.js';
 import { audio } from './audio.js';
@@ -1071,16 +1071,21 @@ export class World {
         group.add(obj);
       }
     };
-    // biome-signature chunk props: beehives on Verdant trees, silk cocoons
-    // and firefly glades in the Dark Forest
+    // biome-signature chunk props: silk cocoons & firefly glades (Dark Forest)
     const props = [];
-    if (biome.name === 'Verdant Forest' && rng() < 0.10) {
+    // big destructible beehives in the warm biomes (NOT frozen/dark/haunted).
+    // Bash one open: 10-20 bees pour out, and it drops honeycomb when it breaks.
+    const hives = [];
+    const HONEY_BIOMES = ['Verdant Forest', 'Scorched Desert', 'Highlands', 'Murky Swamp', 'Jungle'];
+    if (HONEY_BIOMES.includes(biome.name) && rng() < 0.16) {
       const x = cxw + 6 + rng() * (CHUNK - 12), z = czw + 6 + rng() * (CHUNK - 12);
       if (inBounds(x, z) && radiusOf(x, z) > 110) {
-        const hive = makeBeehive();
-        hive.position.set(x, this.heightAt(x, z) + 1.7, z); // hangs at head height
+        const hive = makeBeehiveBig(rng);
+        hive.position.set(x, this.heightAt(x, z), z);
         group.add(hive);
-        props.push({ kind: 'hive', x, z, mesh: hive, used: false });
+        hives.push({ id: this.nextTreeId++, x, z, mesh: hive, hp: 40, maxHp: 40,
+                     disturbed: false, dead: false, regrowAt: 0, radius: 1.0, alive: true });
+        this.obstacles.push({ x, z, r: 0.9 });
       }
     }
     if (biome.name === 'Highlands' || biome.name === 'Scorched Desert') {
@@ -1266,11 +1271,20 @@ export class World {
     }
 
     this.scene.add(group);
-    this.chunks.set(key, { group, trees, rocks, webs: chunkWebs, bushes, props });
+    this.chunks.set(key, { group, trees, rocks, webs: chunkWebs, bushes, props, hives });
   }
 
   update(dt, playerPos) {
     this.time += dt;
+    // beehives rebuild themselves a while after being smashed
+    for (const chunk of this.chunks.values()) {
+      for (const h of chunk.hives ?? []) {
+        if (h.dead && this.time >= h.regrowAt) {
+          h.dead = false; h.disturbed = false; h.hp = h.maxHp;
+          h.mesh.visible = true; h.mesh.rotation.z = 0;
+        }
+      }
+    }
     // berry regrowth on loaded bushes (unloaded ones re-check on chunk gen)
     for (const chunk of this.chunks.values()) {
       for (const b of chunk.bushes ?? []) {
@@ -1339,6 +1353,33 @@ export class World {
   }
 
   treesNear(pos, radius) { return this._near(pos, radius, 'trees'); }
+  // beehives within reach (alive only)
+  hivesNear(pos, radius) {
+    const out = [];
+    const pcx = Math.floor(pos.x / CHUNK), pcz = Math.floor(pos.z / CHUNK);
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+      const chunk = this.chunks.get(this._chunkKey(pcx + dx, pcz + dz));
+      for (const h of chunk?.hives ?? []) {
+        if (h.dead) continue;
+        if (Math.hypot(h.x - pos.x, h.z - pos.z) < radius + h.radius) out.push(h);
+      }
+    }
+    return out;
+  }
+  // bash a hive; returns { firstHit, destroyed }
+  hitHive(hive, dmg) {
+    const res = { firstHit: !hive.disturbed, destroyed: false };
+    hive.disturbed = true;
+    hive.hp -= dmg;
+    hive.mesh.rotation.z = (Math.random() - 0.5) * 0.15; // shudder
+    if (hive.hp <= 0) {
+      hive.dead = true;
+      hive.mesh.visible = false;
+      hive.regrowAt = this.time + 150; // rebuilds after a while
+      res.destroyed = true;
+    }
+    return res;
+  }
   // nearest unused biome prop (hive/cocoon/glade) within reach
   propNear(x, z, radius = 3) {
     const cx = Math.floor(x / CHUNK), cz = Math.floor(z / CHUNK);

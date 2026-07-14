@@ -160,8 +160,8 @@ const panels = new Panels({
   onDropItem: (id) => dropItem(id),
   onPlaceNest: (id) => placeNest(id),
   onDropConsumable: (id) => dropConsumable(id),
-  onEatBerry: () => player.eatBerry(),
-  onUseConsumable: (id) => player.useConsumable(id),
+  onEatBerry: () => { player.eatBerry(); refreshHud(); },
+  onUseConsumable: (id) => { player.useConsumable(id); refreshHud(); },
   onBuyBag: (cost) => {
     if (!Object.entries(cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
     for (const [k, v] of Object.entries(cost)) player[k] = roundResource(player[k] - v);
@@ -220,6 +220,26 @@ let world = new World(scene, game.seed);
 const player = new Player(scene, {
   popup: (pos, text, color, cls) => ui.popup(pos, text, color, cls),
   onHurt: () => ui.hurtFlash(),
+  onHiveHit: (hive, res) => {
+    if (res.firstHit) {
+      // the swarm pours out — ONCE
+      const n = 10 + Math.floor(Math.random() * 11); // 10-20
+      const prog = progressAt(hive.x, hive.z);
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2;
+        const e = enemyMgr._spawn('bee', hive.x + Math.cos(a) * 1.4, hive.z + Math.sin(a) * 1.4, prog * 0.3);
+        e.aggroed = true;
+      }
+      ui.toast('🐝 You crack the hive — the swarm is FURIOUS!', 'boss');
+      audio.sfx('special', 0.4);
+    }
+    if (res.destroyed) {
+      const at = { x: hive.x, z: hive.z };
+      for (let i = 0; i < 2 + Math.floor(Math.random() * 3); i++) pickups.spawn('honey', 1, at, 1.0);
+      ui.toast('🍯 The hive breaks open — honeycomb!', 'level');
+      audio.sfx('kill_gold', 0.45);
+    }
+  },
   onLevelUp: (level) => {
     audio.sfx('evolve', 0.55);
     player.spawnLevelUpEffect();
@@ -1079,16 +1099,7 @@ function usePropNear() {
   if (!pr) return false;
   pr.used = true;
   pr.mesh.visible = pr.kind === 'glade'; // glade keeps its fireflies
-  if (pr.kind === 'hive') {
-    player.consumables.honey = (player.consumables.honey ?? 0) + 1 + (Math.random() < 0.4 ? 1 : 0);
-    ui.toast('🍯 You raid the hive — wild honey!', 'level');
-    if (Math.random() < 0.35) {
-      player.takeDamage(6, { silent: true });
-      player.poisonT = 3; player.poisonDps = 2;
-      ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2.2), '🐝 stung!', '#ffd24a');
-    }
-    audio.sfx('purchase', 0.5);
-  } else if (pr.kind === 'cocoon') {
+  if (pr.kind === 'cocoon') {
     if (Math.random() < 0.5) {
       pickups.spawn('essence', 1, { x: pr.x, z: pr.z }, 0.8);
       pickups.spawn('hide', 2, { x: pr.x, z: pr.z }, 0.9);
@@ -2398,6 +2409,7 @@ function digTreasure() {
 
 input.onKey('KeyE', () => {
   if (!inPlay()) return;
+  if (player.mounted) { dismountHorse(); return; } // E or X gets you off the horse
   if (mp?.revivablePartner?.()) { // co-op: helping a downed friend wins
     const t = mp.remote.targetPos;
     startChannel(2, '💚 Reviving partner…', { x: t.x, z: t.z }, () => mp.tryRevivePartner());
@@ -2463,7 +2475,7 @@ function canResurrectPetHere() {
     && !player.dead && (nearHome() || nearGrave());
 }
 
-input.onKey('KeyX', () => { if (inPlay()) dismountHorse(); });
+input.onKey('KeyX', () => { if (game.mode === 'play' && player.mounted) dismountHorse(); });
 
 input.onKey('KeyR', () => {
   if (!inPlay() || !canResurrectPetHere()) return;
@@ -2611,8 +2623,15 @@ function mountUp() {
 function dismountHorse() {
   if (!player.mounted) return;
   player.mounted = false;
-  parkedAt = { x: player.pos.x, z: player.pos.z };
-  horseMesh.position.set(parkedAt.x, world.heightAt(parkedAt.x, parkedAt.z), parkedAt.z);
+  // park the horse a couple metres to the side so it isn't inside the rider
+  const sx = player.pos.x - player.facing.x * 2.2, sz = player.pos.z - player.facing.z * 2.2;
+  parkedAt = { x: sx, z: sz };
+  if (horseMesh) {
+    horseMesh.visible = true;
+    horseMesh.position.set(sx, world.heightAt(sx, sz), sz);
+  }
+  player.mesh.position.y = world.heightAt(player.pos.x, player.pos.z); // back on your feet
+  ui.toast('🐴 Dismounted — press E beside the horse to ride again.', '');
   audio.sfx('click', 0.4);
 }
 
@@ -3016,6 +3035,14 @@ function updateCamera(dt = 0) {
   }
   sun.position.set(player.pos.x + 18, 35, player.pos.z + 12);
   sun.target.position.set(player.pos.x, 0, player.pos.z);
+}
+
+// force the HUD (hp/xp/etc.) to redraw right now — needed when the player
+// acts while a panel is open (the sim, and its per-frame HUD update, is paused)
+function refreshHud() {
+  if (game.mode !== 'play' || game.kind !== 'survival') return;
+  const progress = progressAt(player.pos.x, player.pos.z);
+  ui.updateHUD(player, progress, BIOMES[game.biomeIndex].name);
 }
 
 // ---------- main loop ----------
