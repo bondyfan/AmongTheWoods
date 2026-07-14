@@ -158,8 +158,14 @@ export class EnemyManager {
     const progress = progressAt(cx, cz);
     const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
     const pool = [];
+    // at night the roster shifts: two day types stay home, one predator prowls
+    const night = (this.nightK || 0) > 0.5;
+    const nr = night && biome.night ? biome.night.remove : [];
+    const dayEnemies = biome.enemies.filter(t => !nr.includes(t));
+    const nightPool = night && biome.night?.add
+      ? [...dayEnemies, biome.night.add, biome.night.add] : dayEnemies; // the addition is common
     const singles = Math.round((3 + progress * 7) * SPAWN_DENSITY * (1 + 0.6 * (this.nightK || 0)));
-    for (let i = 0; i < singles; i++) pool.push({ type: pick(biome.enemies) });
+    for (let i = 0; i < singles; i++) pool.push({ type: pick(nightPool) });
 
     if (biome.packs && Math.random() < 0.4) {
       const type = pick(biome.enemies);
@@ -202,8 +208,9 @@ export class EnemyManager {
       }
     }
 
-    if (biome.critters && Math.random() < 0.55) {
-      const type = pick(biome.critters);
+    const critters = biome.critters ? biome.critters.filter(t => !nr.includes(t)) : null;
+    if (critters && critters.length && Math.random() < 0.55) {
+      const type = pick(critters);
       const cfg = ENEMY_TYPES[type];
       const [lo, hi] = cfg.herd ?? [3, 10];
       const gid = nextGroupId++;
@@ -237,9 +244,14 @@ export class EnemyManager {
       if (!byGroup.has(gk)) byGroup.set(gk, []);
       byGroup.get(gk).push(spec);
     }
+    const mNight = (this.nightK || 0) > 0.5;
+    const mBiome = biomeAt(cx, cz);
+    const mRemove = mNight && mBiome.night ? mBiome.night.remove : [];
     const remaining = [];
     for (const [, specs] of byGroup) {
       if (this.alive().length >= MAX_ALIVE_HARD) { remaining.push(...specs); continue; }
+      // after dark the day-only critters stay in the pool (they return at dawn)
+      if (mRemove.length && specs.some(sp => mRemove.includes(sp.type))) { remaining.push(...specs); continue; }
       // humanoid bands settle a permanent camp site: first visit builds the
       // dwelling, and every re-materialization brings them home to it
       const isCamp = specs.some(sp => sp.camp);
@@ -485,6 +497,32 @@ export class EnemyManager {
     }
 
     this._bossReinforcements(dt, targets);
+
+    // night purge: a day-only critter that's now far from every player melts
+    // away after dark (but one within 150 m — that you can SEE — stays put)
+    this.nightPurgeT = (this.nightPurgeT ?? 0) - dt;
+    if (this.nightPurgeT <= 0) {
+      this.nightPurgeT = 1;
+      if ((this.nightK || 0) > 0.5) {
+        for (let i = this.list.length - 1; i >= 0; i--) {
+          const e = this.list[i];
+          if (e.dying || e.bossRank > 0) continue;
+          const nb = biomeAt(e.pos.x, e.pos.z);
+          if (!nb.night || !nb.night.remove.includes(e.type)) continue;
+          let near = false;
+          for (const t of targets) {
+            if (t.dead || !t.pos) continue;
+            if (Math.hypot(t.pos.x - e.pos.x, t.pos.z - e.pos.z) < 150) { near = true; break; }
+          }
+          if (near) continue;
+          if (e.zoneKey) {
+            const zone = this.zones.get(e.zoneKey);
+            zone?.pool?.push(e._spec ?? { type: e.type, groupId: e.groupId, announced: true });
+          }
+          this._remove(e, i);
+        }
+      }
+    }
 
     // bestiary: a creature counts as discovered only once you've SEEN it up
     // close (12 m) — not when it spawns somewhere off-screen
