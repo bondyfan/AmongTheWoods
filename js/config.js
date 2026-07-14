@@ -538,6 +538,16 @@ export const CAMP_BUILDINGS = [
       { level: 5, cost: { stone: 30, wood: 20, meat: 20 },
         desc: 'A remote respawn shrine, built WHERE YOU STAND. When you die you choose: wake at the cave or at the graveyard.' },
     ] },
+  { id: 'banner', icon: '🚩', max: 3,
+    names: ['War Banner', 'Rallying Standard', 'Grand Ensign'],
+    levels: [
+      { level: 5,  cost: { meat: 120, wood: 120, hide: 20 },
+        desc: 'Raise a war banner over camp. +8% XP and the loot magnet reaches further. (A late-game meat/wood sink.)' },
+      { level: 8,  cost: { meat: 320, wood: 260, iron: 20, hide: 40 },
+        desc: 'A rallying standard. +16% XP, wider loot magnet, +40 max health.' },
+      { level: 11, cost: { meat: 700, wood: 550, iron: 60, essence: 15 },
+        desc: 'A grand ensign flying over your keep. +25% XP, widest magnet, +90 max health.' },
+    ] },
 ];
 
 // era = how far your home has advanced (10 ages planned, 5 coded so far)
@@ -655,6 +665,8 @@ export const SUPPLY_UPGRADES = [
     desc: 'Swamp mud and spider webs slow you only HALF as much.' },
   { id: 'torch',   icon: '🔦', name: 'Everburning Torch', cost: { wood: 10, hide: 3, essence: 1 },
     desc: 'A resin-soaked torch that never goes out. Lights the ground around you in the dark biomes (Dark Forest, Haunted Forest, swamp and the cave) — and its warmth slows the Frozen Peak\'s chill.' },
+  { id: 'torchoil', icon: '🛢️', name: 'Alchemist\'s Torch Oil', cost: { essence: 6, meat: 60, wood: 40 },
+    desc: 'Douse your torch in bright-burning oil — its light bubble grows far wider in the dark. (Needs the Everburning Torch.)' },
 ];
 
 export const SHOP_GROUPS = [

@@ -5,7 +5,7 @@
 // watches over home. Built things appear physically at fixed camp spots.
 
 import { CAMP_BUILDINGS, ERAS, RESOURCES, fmtResource, roundResource } from './config.js';
-import { makeFurnace, makeChest, makeBoatRack, makeMobaTower, makeGraveyard } from './models.js';
+import { makeFurnace, makeChest, makeBoatRack, makeMobaTower, makeGraveyard, makeBanner } from './models.js';
 import { audio } from './audio.js';
 
 const SPOTS = {
@@ -14,6 +14,7 @@ const SPOTS = {
   furnace: { x: 11, z: 11 },
   boat:    { x: 0,  z: 21 },
   tower:   { x: 13, z: 17 },
+  banner:  { x: -8, z: 14 },
   // 'grave' has no fixed spot — it is built wherever the player stands
 };
 const HOME_HEAL_RADIUS = 10; // inside your home building (the center)
@@ -25,7 +26,7 @@ export class Camp {
     this.world = world;
     this.player = player;
     this.hooks = hooks; // { popup, toast }
-    this.levels = { home: 0, chest: 0, furnace: 0, boat: 0, tower: 0, grave: 0 };
+    this.levels = { home: 0, chest: 0, furnace: 0, boat: 0, tower: 0, grave: 0, banner: 0 };
     this.storage = Object.fromEntries(RESOURCES.map(k => [k, 0])); // incl. wool/essence
     this.meshes = {};
     this.gravePos = null;
@@ -50,14 +51,15 @@ export class Camp {
 
   // max-hp bonus from the home building — worth building FOR, not box-ticking
   homeHpBonus() {
-    return [0, 20, 60, 120, 180][Math.min(this.levels.home, 4)];
+    return [0, 20, 60, 120, 180][Math.min(this.levels.home, 4)]
+      + [0, 0, 40, 90][Math.min(this.levels.banner, 3)];
   }
 
   // secondary era perks: cabin pulls loot from further, the stone house
   // swings harder at trees & rocks, the keep sharpens your wits (+XP)
-  magnetMult() { return this.has('cabin') ? 1.3 : 1; }
+  magnetMult() { return (this.has('cabin') ? 1.3 : 1) * (1 + 0.18 * this.levels.banner); }
   chopMult() { return this.has('stonehouse') ? 1.25 : 1; }
-  xpMult() { return this.has('keep') ? 1.15 : 1; }
+  xpMult() { return (this.has('keep') ? 1.15 : 1) * (1 + [0, 0.08, 0.16, 0.25][Math.min(this.levels.banner, 3)]); }
 
   buildingInfo(id) {
     const def = CAMP_BUILDINGS.find(b => b.id === id);
@@ -103,6 +105,7 @@ export class Camp {
     else if (id === 'boat') mesh = makeBoatRack();
     else if (id === 'grave') { mesh = makeGraveyard(); this.gravePos = { x: spot.x, z: spot.z }; }
     else if (id === 'tower') { mesh = makeMobaTower(0x86b45e); mesh.scale.setScalar(0.8); }
+    else if (id === 'banner') mesh = makeBanner(this.levels.banner);
     mesh.position.set(spot.x, this.world.heightAt(spot.x, spot.z), spot.z);
     this.scene.add(mesh);
     this.meshes[id] = mesh;

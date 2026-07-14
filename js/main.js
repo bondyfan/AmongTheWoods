@@ -860,7 +860,7 @@ function tickTorch(dt) {
   const on = game.kind === 'survival' && inPlay()
     && player.upgrades.torch && dark && !player.dead;
   if (on && !torchLight) {
-    torchLight = new THREE.PointLight(0xffb45a, 2.2, 18, 1.6);
+    torchLight = new THREE.PointLight(0xffb45a, 2.2, player.upgrades.torchoil ? 30 : 18, 1.6);
     torchFlame = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 5),
       new THREE.MeshBasicMaterial({ color: 0xffc86a }));
     scene.add(torchLight, torchFlame);

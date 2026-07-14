@@ -844,6 +844,32 @@ export function makeCactusMan() { return saguaro(Math.random, true); }
 // ---------- biome landmark props (farm, trader, cocoon, graveyard...) ----------
 // ---------- biome landmark props (farm, trader, cocoon, graveyard...) ----------
 
+export function makeBanner(level = 1) {
+  const g = new THREE.Group();
+  const h = 3.2 + level * 0.6;
+  const pole = cyl(0.08, 0.1, h, 0x6b4a2d, 6);
+  pole.position.y = h / 2;
+  pole.castShadow = true;
+  g.add(pole);
+  const cols = [0xb83a3a, 0xd8b84a, 0x4a8ad8];
+  const flag = box(1.3, 0.9, 0.05, cols[Math.min(level - 1, 2)]);
+  flag.position.set(0.72, h - 0.7, 0);
+  g.add(flag);
+  const trim = box(1.34, 0.12, 0.06, 0xf2ead8);
+  trim.position.set(0.72, h - 1.15, 0);
+  g.add(trim);
+  const finial = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.28, 6), mat(0xe8d84a));
+  finial.position.y = h + 0.14;
+  g.add(finial);
+  // extra pennants at higher tiers
+  for (let i = 1; i < level; i++) {
+    const p = box(0.5, 0.3, 0.04, cols[i % 3]);
+    p.position.set(0.5, h - 1.6 - i * 0.5, 0);
+    g.add(p);
+  }
+  return g;
+}
+
 export function makeFarm(rng = Math.random) {
   const g = new THREE.Group();
   const barn = box(3.4, 2.0, 2.6, 0x8a4a30);
