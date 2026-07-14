@@ -12,7 +12,7 @@ import { makeTree, makeRock, makeGrassTuft, makeFlower, makeMushroom, makeBush,
          makeBerryBush, makeShrine, makeMonolith, makeCrypt, makeBlacksmith, makeCobweb,
          makeFarm, makeTrader, makeBeehive, makeCocoon, makeGlade, makeGraveyardRuin,
          makeCursedStatue, makeVillage, makeRaceFlag, makeNest, makeLilypad,
-         makeTemple, makeLianaPole, makeBonfire, makeSummitCairn } from './models.js';
+         makeTemple, makeLianaPole, makeBonfire, makeSummitCairn, makeCactus } from './models.js';
 import { audio } from './audio.js';
 
 const CHUNK = 40;
@@ -1080,6 +1080,19 @@ export class World {
         hive.position.set(x, this.heightAt(x, z) + 1.7, z); // hangs at head height
         group.add(hive);
         props.push({ kind: 'hive', x, z, mesh: hive, used: false });
+      }
+    }
+    if (biome.name === 'Highlands' || biome.name === 'Scorched Desert') {
+      // scattered saguaro cacti — a couple per chunk in the dry country
+      const n = biome.name === 'Scorched Desert' ? 3 : 2;
+      for (let i = 0; i < n; i++) {
+        if (rng() > 0.5) continue;
+        const x = cxw + 4 + rng() * (CHUNK - 8), z = czw + 4 + rng() * (CHUNK - 8);
+        if (!inBounds(x, z)) continue;
+        const c = makeCactus(rng);
+        this._place(c, x, z);
+        c.rotation.y = rng() * Math.PI * 2;
+        group.add(c);
       }
     }
     if (biome.name === 'Dark Forest') {

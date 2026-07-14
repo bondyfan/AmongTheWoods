@@ -827,9 +827,21 @@ export class EnemyManager {
         e.pauseT = 0.5;
         e.lungeT = 0.2;
         const origin = e.mesh.position.clone().setY(e.mesh.position.y + 0.8 * e.sizeMult);
-        projectiles.spawnEnemyShot(origin, target, {
-          dmg: e.dmg, speed: e.cfg.projectileSpeed, color: e.cfg.shotColor, stun: e.cfg.stun || 0,
-        });
+        if (e.cfg.radial) {
+          // cactus sentinels loose a whole RING of thorns around themselves
+          const n = e.cfg.radial;
+          for (let i = 0; i < n; i++) {
+            const a = (i / n) * Math.PI * 2 + (e.id % 5) * 0.12;
+            const fake = { pos: { x: e.pos.x + Math.cos(a) * 12, z: e.pos.z + Math.sin(a) * 12 } };
+            projectiles.spawnEnemyShot(origin.clone(), fake, {
+              dmg: e.dmg, speed: e.cfg.projectileSpeed, color: e.cfg.shotColor, stun: 0,
+            });
+          }
+        } else {
+          projectiles.spawnEnemyShot(origin, target, {
+            dmg: e.dmg, speed: e.cfg.projectileSpeed, color: e.cfg.shotColor, stun: e.cfg.stun || 0,
+          });
+        }
         audio.sfx('attack_ranged', 0.18, 200);
         audio.creature(e.type, 'attack', 0.32, 200);
           e.atkAt = this.world.time;

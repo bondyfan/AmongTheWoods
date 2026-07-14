@@ -771,6 +771,77 @@ export function makeVulture() {
   return g;
 }
 
+// ---------- Highlands western flavour: tumbleweeds, cacti, cactus-men ----------
+
+// a dry rolling tumbleweed: a tangled ball of pale twigs
+export function makeTumbleweed(rng = Math.random) {
+  const g = new THREE.Group();
+  const mat = new THREE.LineBasicMaterial({ color: 0xbfa96a, transparent: true, opacity: 0.9 });
+  const pts = [];
+  for (let i = 0; i < 26; i++) {
+    const a = rng() * Math.PI * 2, b = rng() * Math.PI - Math.PI / 2;
+    const a2 = a + (rng() - 0.5) * 1.2, b2 = b + (rng() - 0.5) * 1.2;
+    const R = 0.75;
+    pts.push(new THREE.Vector3(Math.cos(a) * Math.cos(b) * R, Math.sin(b) * R + 0.75, Math.sin(a) * Math.cos(b) * R));
+    pts.push(new THREE.Vector3(Math.cos(a2) * Math.cos(b2) * R, Math.sin(b2) * R + 0.75, Math.sin(a2) * Math.cos(b2) * R));
+  }
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  g.add(new THREE.LineSegments(geo, mat));
+  return g;
+}
+
+// a saguaro cactus (decorative prop); armed=true adds a face for the enemy
+function saguaro(rng = Math.random, armed = false) {
+  const g = new THREE.Group();
+  const green = 0x3f7a3a, darker = 0x356a30;
+  const trunk = cyl(0.34, 0.42, 2.6, green, 8);
+  trunk.position.y = 1.3;
+  trunk.castShadow = true;
+  g.add(trunk);
+  // ribs
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2;
+    const rib = box(0.06, 2.4, 0.06, darker);
+    rib.position.set(Math.cos(a) * 0.38, 1.3, Math.sin(a) * 0.38);
+    g.add(rib);
+  }
+  // two upcurving arms
+  for (const side of [-1, 1]) {
+    if (!armed && rng() < 0.35) continue;
+    const arm = cyl(0.2, 0.26, 1.0, green, 7);
+    arm.position.set(side * 0.5, 1.5, 0);
+    arm.rotation.z = side * 1.1;
+    g.add(arm);
+    const up = cyl(0.2, 0.22, 0.9, green, 7);
+    up.position.set(side * 0.82, 2.05, 0);
+    g.add(up);
+  }
+  // spines
+  const spineMat = new THREE.MeshBasicMaterial({ color: 0xe8e0c0 });
+  for (let i = 0; i < 20; i++) {
+    const sp = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.16, 4), spineMat);
+    const a = rng() * Math.PI * 2, y = 0.4 + rng() * 2.0;
+    sp.position.set(Math.cos(a) * 0.42, y, Math.sin(a) * 0.42);
+    sp.rotation.z = -Math.cos(a) * 1.57; sp.rotation.x = Math.sin(a) * 1.57;
+    g.add(sp);
+  }
+  if (armed) {
+    const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffe24a });
+    for (const sx of [-0.13, 0.13]) {
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.07, 6, 5), eyeMat);
+      eye.position.set(sx, 1.75, -0.34);
+      g.add(eye);
+    }
+    const mouth = box(0.22, 0.06, 0.05, 0x1e3a1c);
+    mouth.position.set(0, 1.5, -0.36);
+    g.add(mouth);
+  }
+  return g;
+}
+export function makeCactus(rng = Math.random) { return saguaro(rng, false); }
+export function makeCactusMan() { return saguaro(Math.random, true); }
+
+// ---------- biome landmark props (farm, trader, cocoon, graveyard...) ----------
 // ---------- biome landmark props (farm, trader, cocoon, graveyard...) ----------
 
 export function makeFarm(rng = Math.random) {
@@ -1476,6 +1547,7 @@ export function makeEnemyMesh(type) {
     case 'scorpion': return makeScorpion();
     case 'cobra': return makeCobra();
     case 'vulture': return makeVulture();
+    case 'cactusman': return makeCactusMan();
     case 'ghost': return makeGhost();
     case 'panther': return makePanther();
     case 'griffin': return makeGriffin(1);

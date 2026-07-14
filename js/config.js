@@ -49,7 +49,7 @@ export const BIOMES = [
     foliage: [0x5c6e33, 0x6d7d3a, 0x4e5e2c], trunk: 0x5c4a33,
     trees: { pine: 0.5, leafy: 0.1, birch: 0.1, dead: 0.3 }, snowy: false,
     grass: 0x8f9060, flowers: false, mushrooms: false,
-    enemies: ['wolf', 'boar', 'elk', 'venomspider', 'stormsnake', 'harpy'], humanoids: ['poacher'], packs: { skulls: [0.4, 0.4, 0.2] }, treeDensity: 0.7,
+    enemies: ['wolf', 'boar', 'elk', 'venomspider', 'stormsnake', 'harpy', 'cactusman'], humanoids: ['poacher'], packs: { skulls: [0.4, 0.4, 0.2] }, treeDensity: 0.7,
     critters: ['rabbit', 'rabbit', 'sheep', 'horse'] },
   { name: 'Haunted Forest', rMax: 4700, ground: 0x3a3a44, ground2: 0x32323c, dirt: 0x4c4258,
     fog: 0x3c3850, sky: 0x363044, darkness: 0.75, light: 0.48,
@@ -140,6 +140,9 @@ export const ENEMY_TYPES = {
              ranged: true, shootRange: 8, spellCd: 2.4, projectileSpeed: 18, shotColor: 0xc9e05a },
   vulture: { name: 'Desert Vulture', icon: '🦅',
              hp: 105, dmg: 6,  speed: 11,  range: 1.4, attackCd: 1.1, xp: 7,  meat: 1, hitR: 0.55, aggro: 16, flying: true },
+  cactusman: { name: 'Saguaro Sentinel', icon: '🌵',
+             hp: 520, dmg: 9, speed: 0, range: 1.6, attackCd: 1.2, xp: 24, meat: 0, hitR: 0.7, aggro: 9,
+             ranged: true, shootRange: 10, spellCd: 2.6, projectileSpeed: 16, shotColor: 0xbfe07a, radial: 12 },
   // -- Dark Forest --
   wolf:    { name: 'Black Wolf', icon: '🐺',
              hp: 245,  dmg: 10, speed: 9.5, range: 1.6, attackCd: 1.0, xp: 15, meat: 2, hitR: 0.8,  aggro: 16, behavior: 'pack' },

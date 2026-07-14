@@ -6,7 +6,7 @@ import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOB
          biomeIndexAt, progressAt, fmtResource, roundResource, itemById, spellById,
          consumableById, essenceDropFor, MAX_LEVEL, questFor, questXpFor } from './config.js';
 import { makeAimArc, updateAimArc, makeRaft, makeBlacksmith, makeHorse, makeWisp,
-         makeGriffin, makeGriffinRoost } from './models.js';
+         makeGriffin, makeGriffinRoost, makeTumbleweed } from './models.js';
 import { PostFX } from './postfx.js';
 import { Camp } from './camp.js';
 import { audio } from './audio.js';
@@ -500,6 +500,44 @@ function tickGust(dt) {
     player.pos.x += gust.dx * push * dt;
     player.pos.z += gust.dz * push * dt;
   }
+}
+
+// ---------- rolling tumbleweeds: western flavour across the Highlands ----------
+const tumbleweeds = [];
+let tumbleCd = 3, windDir = { x: 1, z: 0 };
+function tickTumbleweeds(dt) {
+  const inHi = BIOMES[game.biomeIndex]?.name === 'Highlands';
+  // roll & retire the live ones
+  for (let i = tumbleweeds.length - 1; i >= 0; i--) {
+    const t = tumbleweeds[i];
+    t.t += dt;
+    t.x += t.dx * t.spd * dt;
+    t.z += t.dz * t.spd * dt;
+    const gy = world.heightAt(t.x, t.z);
+    t.mesh.position.set(t.x, gy + 0.75 + Math.abs(Math.sin(t.t * 3)) * 0.12, t.z);
+    // roll forward around the axis perpendicular to travel
+    t.mesh.rotation.x += t.spd * dt * 1.1;
+    t.mesh.rotation.z = Math.atan2(t.dx, t.dz);
+    if (Math.hypot(t.x - player.pos.x, t.z - player.pos.z) > 95 || t.t > 30) {
+      scene.remove(t.mesh); tumbleweeds.splice(i, 1);
+    }
+  }
+  if (!inHi) return;
+  // wind heading drifts slowly (or snaps to an active gust)
+  if (gust) { windDir.x = gust.dx; windDir.z = gust.dz; }
+  tumbleCd -= dt;
+  if (tumbleCd > 0 || tumbleweeds.length > 8) return;
+  tumbleCd = 2.5 + Math.random() * 4;
+  // spawn UPWIND of the player, ~60 m out, offset sideways so it rolls across view
+  const px = -windDir.z, pz = windDir.x; // perpendicular
+  const off = (Math.random() - 0.5) * 70;
+  const sx = player.pos.x - windDir.x * 60 + px * off;
+  const sz = player.pos.z - windDir.z * 60 + pz * off;
+  if (radiusOf(sx, sz) > WORLD.radius - 5) return;
+  const mesh = makeTumbleweed();
+  mesh.position.set(sx, world.heightAt(sx, sz) + 0.75, sz);
+  scene.add(mesh);
+  tumbleweeds.push({ mesh, x: sx, z: sz, dx: windDir.x, dz: windDir.z, spd: 5 + Math.random() * 4, t: 0 });
 }
 
 // ---------- griffins: flight-master bosses of the open rings ----------
@@ -2788,6 +2826,7 @@ function step() {
       tickWisp(dt);
       tickRace(dt);
       tickGust(dt);
+      tickTumbleweeds(dt);
       tickBubbles(dt);
       tickGlide(dt);
       tickAvalanche(dt);

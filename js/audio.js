@@ -185,7 +185,7 @@ class AudioManager {
     if (/wendigo/i.test(type)) return 'wendigo';
     if (/yeti/i.test(type)) return 'yeti';
     if (/treant/i.test(type)) return 'treant';
-    if (/thornling/i.test(type)) return 'thornling';
+    if (/thornling|cactus/i.test(type)) return 'thornling';
     if (/snapper/i.test(type)) return 'snapper';
     if (/scorpion/i.test(type)) return 'scorpion';
     if (/golem/i.test(type)) return 'golem';             // incl. icegolem
