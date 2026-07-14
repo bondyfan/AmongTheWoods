@@ -386,6 +386,39 @@ function tickAvalanche(dt) {
   }
 }
 
+// ---------- rain: falling streaks recycled in a box around the camera ----------
+let rainMesh = null, rainOn = false;
+function setRain(on, dt) {
+  if (on && !rainMesh) {
+    const N = 320, pos = new Float32Array(N * 6);
+    for (let i = 0; i < N; i++) {
+      const x = (Math.random() - 0.5) * 60, y = Math.random() * 40, z = (Math.random() - 0.5) * 60;
+      pos[i*6] = x; pos[i*6+1] = y; pos[i*6+2] = z;
+      pos[i*6+3] = x + 0.2; pos[i*6+4] = y - 1.2; pos[i*6+5] = z; // a short slanted streak
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    rainMesh = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0xaebfd0, transparent: true, opacity: 0.5 }));
+    rainMesh.frustumCulled = false;
+    scene.add(rainMesh);
+  }
+  rainOn = on;
+  if (rainMesh) {
+    rainMesh.visible = on;
+    if (on) {
+      // follow the camera and rain DOWN, wrapping streaks back to the top
+      rainMesh.position.set(camera.position.x, 0, camera.position.z);
+      const a = rainMesh.geometry.attributes.position;
+      for (let i = 0; i < a.count; i += 2) {
+        let y0 = a.getY(i) - 34 * dt, y1 = a.getY(i + 1) - 34 * dt;
+        if (y1 < 0) { const ny = 40 + Math.random() * 6; y1 = ny - 1.2; y0 = ny; }
+        a.setY(i, y0); a.setY(i + 1, y1);
+      }
+      a.needsUpdate = true;
+    }
+  }
+}
+
 // ---------- whiteout weather: Frozen Peak blizzards & Desert sandstorms ----------
 let blizzard = { on: false, t: 0, cd: 45 };
 function tickBlizzard(dt) {
@@ -396,6 +429,12 @@ function tickBlizzard(dt) {
     : name === 'Scorched Desert'
       ? { fog: 70, tint: 'rgba(224,196,130,0.55)', dur: 15, cdMin: 55, cdRng: 45,
           on: '🏜️ A SANDSTORM rolls in — visibility drops!', off: '🏜️ The sandstorm settles…' }
+    : name === 'Jungle'
+      ? { fog: 80, tint: 'rgba(120,150,170,0.32)', dur: 26, cdMin: 45, cdRng: 40, rain: true,
+          on: '🌧️ A jungle downpour opens up!', off: '🌧️ The rain eases off…' }
+    : name === 'Murky Swamp'
+      ? { fog: 55, tint: 'rgba(150,160,150,0.42)', dur: 30, cdMin: 40, cdRng: 45,
+          on: '🌫️ A thick fog rolls across the mire — you can barely see.', off: '🌫️ The fog thins…' }
     : null;
   const el = $id('blizzard');
   if (!spec) {
@@ -404,10 +443,11 @@ function tickBlizzard(dt) {
     return;
   }
   el.style.background = `radial-gradient(ellipse at center, ${spec.tint.replace(/[\d.]+\)$/, '0.15)')} 0%, ${spec.tint} 100%)`;
+  setRain(!!(blizzard.on && spec.rain), dt);
   if (blizzard.on) {
     blizzard.t -= dt;
     scene.fog.far += (spec.fog - scene.fog.far) * Math.min(1, dt * 2);
-    el.style.opacity = 0.55;
+    el.style.opacity = spec.rain ? 0.28 : 0.55; // rain is a light wash, not a whiteout
     if (blizzard.t <= 0) {
       blizzard.on = false;
       blizzard.cd = spec.cdMin + Math.random() * spec.cdRng;
