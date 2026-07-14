@@ -545,12 +545,14 @@ export class Player {
         // Deep swamp water is a wall too unless you carry the boat — but
         // never trap someone already standing in it.
         const h0 = world.heightAt(this.pos.x, this.pos.z);
-        const inWaterNow = world.isWater?.(this.pos.x, this.pos.z);
         const canStep = (dx, dz) => {
           const l = Math.hypot(dx, dz);
           if (l < 1e-6) return false;
           const ax = this.pos.x + (dx / l) * 0.9, az = this.pos.z + (dz / l) * 0.9;
-          if (!ctx.boat && !inWaterNow && world.swampZone?.(ax, az) === 'water'
+          // deep swamp water is a WALL without the boat — you may only reach it
+          // by paddling. (A step whose DESTINATION is water is blocked, so a
+          // player caught in water can still wade OUT toward any shore.)
+          if (!ctx.boat && world.swampZone?.(ax, az) === 'water'
               && !world._lilypadAt?.(ax, az)) return false;
           const ahead = world.heightAt(ax, az);
           return (ahead - h0) / 0.9 <= MAX_CLIMB_SLOPE;

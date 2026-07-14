@@ -219,10 +219,10 @@ export const ENEMY_TYPES = {
   // -- Griffins: flight-master bosses of the open rings. They never truly
   // die — beaten, they drop their nest and fly beyond the horizon --
   griffin: { name: 'Griffin', icon: '🦅',
-             hp: 700, dmg: 26, speed: 9, range: 2.0, attackCd: 1.1, xp: 110, meat: 6, hitR: 1.1, aggro: 24,
+             hp: 700, dmg: 26, speed: 3.6, range: 2.0, attackCd: 1.1, xp: 110, meat: 6, hitR: 1.1, aggro: 24,
              flying: true, griffin: true },
   griffinChick: { name: 'Griffin Fledgling', icon: '🐤',
-             hp: 260, dmg: 11, speed: 9.5, range: 1.4, attackCd: 1.0, xp: 22, meat: 2, hitR: 0.55, aggro: 22,
+             hp: 260, dmg: 11, speed: 3.8, range: 1.4, attackCd: 1.0, xp: 22, meat: 2, hitR: 0.55, aggro: 22,
              flying: true },
 };
 

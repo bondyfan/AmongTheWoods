@@ -510,9 +510,9 @@ function tickGust(dt) {
 // ground and it becomes a flight roost: stand beside it and a called
 // griffin will CARRY you to any other roost — WoW flight-master style.
 const GRIFFIN_BIOMES = {
-  1: { fleeSpeed: 30, nestItem: 'desertNest' },   // Scorched Desert
-  4: { fleeSpeed: 60, nestItem: 'highlandNest' }, // Highlands
-  7: { fleeSpeed: 90, nestItem: 'frozenNest' },   // Frozen Peak
+  1: { fleeSpeed: 12, nestItem: 'desertNest' },   // Scorched Desert
+  4: { fleeSpeed: 24, nestItem: 'highlandNest' }, // Highlands
+  7: { fleeSpeed: 36, nestItem: 'frozenNest' },   // Frozen Peak
 };
 const griffinNextAt = { 1: 90, 4: 90, 7: 90 };    // game.time gate per biome
 let griffinCheckT = 6;
@@ -556,32 +556,56 @@ function tickGriffin(dt) {
 // ---- placed griffin roosts (flight network nodes) ----
 const flightNests = [];
 
+// A roost is PLACED with the cursor: using the item arms a translucent ghost
+// that follows the ground under the mouse; left-click drops it where you aim.
+let pendingNest = null; // { id, ghost }
 function placeNest(id) {
   if (game.kind !== 'survival' || !inPlay()) return;
-  const item = itemById(id);
-  const bi = biomeIndexAt(player.pos.x, player.pos.z);
-  if (bi > item.nest.biomeMax) {
-    ui.toast(`🪺 The ${item.name} only settles in the ${BIOMES[item.nest.biomeMax].name} or an earlier ring.`, '');
-    audio.sfx('error', 0.5);
-    return;
+  if (!player.invItems.includes(id)) return;
+  if (pendingNest) cancelNestPlacement();
+  const ghost = makeGriffinRoost();
+  ghost.traverse(o => { if (o.material) { o.material = o.material.clone(); o.material.transparent = true; o.material.opacity = 0.5; } });
+  scene.add(ghost);
+  pendingNest = { id, ghost };
+  ui.toast('🪺 Aim with the cursor and click the ground to place the roost. (Esc cancels)', 'level');
+  audio.sfx('click', 0.5);
+}
+function cancelNestPlacement() {
+  if (!pendingNest) return;
+  scene.remove(pendingNest.ghost);
+  pendingNest = null;
+}
+// each frame: slide the ghost to the aim point and tint it by validity
+function updateNestGhost() {
+  if (!pendingNest) return;
+  const x = aimPoint.x, z = aimPoint.z;
+  pendingNest.ghost.position.set(x, world.heightAt(x, z), z);
+  pendingNest.valid = !world.isWater(x, z)
+    && biomeIndexAt(x, z) <= itemById(pendingNest.id).nest.biomeMax
+    && Math.hypot(x - player.pos.x, z - player.pos.z) < 40;
+}
+function confirmNestPlacement() {
+  if (!pendingNest) return true;
+  const id = pendingNest.id, item = itemById(id);
+  const x = aimPoint.x, z = aimPoint.z;
+  if (world.isWater(x, z)) { ui.toast('🪺 Not on water — the twigs would drift apart.', ''); audio.sfx('error', 0.5); return true; }
+  if (biomeIndexAt(x, z) > item.nest.biomeMax) {
+    ui.toast(`🪺 The ${item.name} only settles in the ${BIOMES[item.nest.biomeMax].name} or an earlier ring.`, ''); audio.sfx('error', 0.5); return true;
   }
-  if (world.isWater(player.pos.x, player.pos.z)) {
-    ui.toast('🪺 Not on water — the twigs would drift apart.', '');
-    audio.sfx('error', 0.5);
-    return;
-  }
+  if (Math.hypot(x - player.pos.x, z - player.pos.z) > 40) { ui.toast('🪺 Too far — pick a spot closer to you.', ''); audio.sfx('error', 0.5); return true; }
   const ix = player.invItems.indexOf(id);
-  if (ix < 0) return;
+  if (ix < 0) { cancelNestPlacement(); return true; }
   player.invItems.splice(ix, 1);
-  const x = player.pos.x + player.facing.x * 2.5, z = player.pos.z + player.facing.z * 2.5;
   const mesh = makeGriffinRoost();
   mesh.position.set(x, world.heightAt(x, z), z);
   scene.add(mesh);
   flightNests.push({ x, z, mesh, name: item.name });
   minimap.reveal(x, z);
-  minimap.redrawT = 0; // the 🪽 marker shows up right away
+  minimap.redrawT = 0;
+  cancelNestPlacement();
   ui.toast('🪺 Roost placed! Stand beside it and press E to open the flight map.', 'level');
   audio.sfx('tower_build', 0.55);
+  return true;
 }
 
 function nearFlightNest() {
@@ -692,7 +716,7 @@ function tickFlight(dt) {
       audio.sfx('kill_gold', 0.4);
       return;
     }
-    const step = Math.min(d, 55 * dt);
+    const step = Math.min(d, 22 * dt);
     player.pos.x += (dx / d) * step;
     player.pos.z += (dz / d) * step;
     player.facing.set(dx / d, 0, dz / d);
@@ -1586,30 +1610,25 @@ const settings = Object.assign(
     audio.sfx('click', 0.4);
   });
 
-  // graphics: bloom (default ON), ground texture detail, optional extras
-  settings.bloom ??= true;
+  // graphics: only ground texture detail is user-facing now. Bloom is OFF by
+  // default (it dulled the image), and the shadow/filmic toggles are gone.
+  settings.bloom = false;
+  settings.hiShadows = false;
+  settings.filmic = false;
   settings.texDetail ??= 0;
-  settings.hiShadows ??= false;
-  settings.filmic ??= false;
-  $id('set-bloom').checked = settings.bloom;
   $id('set-texdetail').value = String(settings.texDetail);
-  $id('set-hishadows').checked = settings.hiShadows;
-  $id('set-filmic').checked = settings.filmic;
   applyGraphics();
   const saveGfx = () => {
     localStorage.setItem('atw-settings', JSON.stringify(settings));
     applyGraphics();
     audio.sfx('click', 0.4);
   };
-  $id('set-bloom').addEventListener('change', () => { settings.bloom = $id('set-bloom').checked; saveGfx(); });
   $id('set-texdetail').addEventListener('change', () => {
     settings.texDetail = +$id('set-texdetail').value;
     saveGfx();
     world.regenChunks(); // ground tiles rebuild at the new detail
     world.update(0, player.pos);
   });
-  $id('set-hishadows').addEventListener('change', () => { settings.hiShadows = $id('set-hishadows').checked; saveGfx(); });
-  $id('set-filmic').addEventListener('change', () => { settings.filmic = $id('set-filmic').checked; saveGfx(); });
 
   // volume sliders (persisted); music slider maps 100% → volume 0.7
   const sfxSlider = $id('set-sfx'), musicSlider = $id('set-music');
@@ -2235,6 +2254,7 @@ for (let i = 0; i < 6; i++) {
 }
 input.onKey('Escape', () => {
   if (!inPlay()) return;
+  if (pendingNest) { cancelNestPlacement(); ui.toast('🪺 Placement cancelled.', ''); return; }
   if (flightmapOpen) { toggleFlightMap(false); return; }
   if (bigmapOpen) { toggleBigMap(false); return; }
   if (panels.open) { panels.toggle(null); return; }
@@ -2518,6 +2538,7 @@ let shakeT = 0; // brief tremble on boss entrances
 // fov + fog wall keep the draw load in check
 // free mouse-look: clicking the world (with no panel open) locks the pointer
 renderer.domElement.addEventListener('click', () => {
+  if (pendingNest) { confirmNestPlacement(); return; }
   if (game.rpgView && settings.mouseLook && game.mode === 'play'
       && !panels.openSet.size && !document.pointerLockElement) {
     renderer.domElement.requestPointerLock?.();
@@ -2666,6 +2687,7 @@ function step() {
   if (game.mode === 'play' && !game.paused) {
     game.time += dt;
     updateAim(dt);
+    updateNestGhost();
     const em = combatMgr(); // real mgr / co-op shadow / pvp arena / moba units
     // while a griffin carries you the flight drives your position — the
     // normal walk/attack simulation pauses until touchdown
@@ -2714,7 +2736,7 @@ function step() {
       world.update(dt, player.pos);
       // co-op: show the partner on the minimap too; in top-down view the
       // minimap turns together with the auto-rotated camera (RPG: north-up)
-      minimap.rotation = game.rpgView ? 0 : camYaw;
+      minimap.rotation = game.rpgView ? Math.atan2(-player.facing.x, -player.facing.z) : camYaw;
       minimap.update(dt, player, em,
         mp?.active && mp.mode === 'coop' ? mp.remote : null);
       updateAtmosphere(dt);

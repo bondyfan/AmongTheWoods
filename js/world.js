@@ -313,11 +313,12 @@ export class World {
   swampZone(x, z) {
     const r = radiusOf(x, z);
     if (r <= BIOMES[2].rMax || r > BIOMES[3].rMax) return null; // not in the swamp ring
-    if (this.pathDistance(x, z) < 7) return 'dry';               // trails stay dry
+    if (this.pathDistance(x, z) < 4) return 'dry';               // a NARROW causeway
     if (this._dryIslands?.some(d => Math.hypot(d.x - x, d.z - z) < d.r)) return 'dry';
+    // measured on the real noise field: <0.70 ≈ 82% water, mud ≈ 10%, dry ≈ 8%
     const n = valueNoise(x, z, 85, this.seed + 404);
-    if (n < 0.66) return 'water';
-    if (n < 0.82) return 'mud';
+    if (n < 0.70) return 'water';
+    if (n < 0.80) return 'mud';
     return 'dry';
   }
 
@@ -327,7 +328,7 @@ export class World {
     const cx = Math.floor(x / CELLP), cz = Math.floor(z / CELLP);
     for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
       const h = latticeHash(cx + dx, cz + dz, this.seed + 808);
-      if (h < 0.45) continue;
+      if (h < 0.85) continue; // pads are RARE — they can't replace the boat
       const px = (cx + dx + 0.2 + (h * 7 % 0.6)) * CELLP;
       const pz = (cz + dz + 0.2 + (h * 13 % 0.6)) * CELLP;
       if (this.swampZone(px, pz) !== 'water') continue;
@@ -1108,7 +1109,7 @@ export class World {
       for (let gx = Math.floor(cxw / CELLP); gx <= Math.floor((cxw + CHUNK) / CELLP); gx++) {
         for (let gz = Math.floor(czw / CELLP); gz <= Math.floor((czw + CHUNK) / CELLP); gz++) {
           const h = latticeHash(gx, gz, this.seed + 808);
-          if (h < 0.45) continue;
+          if (h < 0.85) continue; // must match _lilypadAt — pads are rare
           const px = (gx + 0.2 + (h * 7 % 0.6)) * CELLP;
           const pz = (gz + 0.2 + (h * 13 % 0.6)) * CELLP;
           if (px < cxw || px >= cxw + CHUNK || pz < czw || pz >= czw + CHUNK) continue;

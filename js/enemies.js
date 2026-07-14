@@ -457,7 +457,7 @@ export class EnemyManager {
     enemy.escapeFrom = { x: enemy.pos.x, z: enemy.pos.z };
     const a = Math.random() * Math.PI * 2;
     enemy.escapeDir = { x: Math.sin(a), z: Math.cos(a) };
-    enemy.fleeSpeed ??= 30;
+    enemy.fleeSpeed ??= 12;
     audio.creature(enemy.type, 'death', 0.5, 40);
     if (enemy.bossRank > 0) this.hooks.onBossDeath(enemy); // skull tracker off
     this.hooks.onRemove(enemy);                            // HP bar off
