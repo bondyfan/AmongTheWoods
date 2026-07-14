@@ -835,12 +835,12 @@ export class EnemyManager {
             const a = (i / n) * Math.PI * 2 + (e.id % 5) * 0.12;
             const fake = { pos: { x: e.pos.x + Math.cos(a) * 12, z: e.pos.z + Math.sin(a) * 12 } };
             projectiles.spawnEnemyShot(origin.clone(), fake, {
-              dmg: e.dmg, speed: e.cfg.projectileSpeed, color: e.cfg.shotColor, stun: 0,
+              dmg: e.dmg, speed: e.cfg.projectileSpeed, color: e.cfg.shotColor, stun: 0, srcName: e.cfg.name,
             });
           }
         } else {
           projectiles.spawnEnemyShot(origin, target, {
-            dmg: e.dmg, speed: e.cfg.projectileSpeed, color: e.cfg.shotColor, stun: e.cfg.stun || 0,
+            dmg: e.dmg, speed: e.cfg.projectileSpeed, color: e.cfg.shotColor, stun: e.cfg.stun || 0, srcName: e.bossName ?? e.cfg.name,
           });
         }
         audio.sfx('attack_ranged', 0.18, 200);
@@ -859,7 +859,7 @@ export class EnemyManager {
           e.lungeT = 0.25;
           if (target && dist < e.range * 1.35) {
             target.takeDamage(e.meleeDmg * 1.25,
-              { id: e.id, pos: e.pos, range: e.range * 1.35, melee: true, poison: e.cfg.poison });
+              { id: e.id, name: e.bossName ?? e.cfg.name, pos: e.pos, range: e.range * 1.35, melee: true, poison: e.cfg.poison });
           }
           audio.creature(e.type, 'attack', 0.4, 110);
           e.atkAt = this.world.time;
@@ -872,7 +872,7 @@ export class EnemyManager {
         } else {
           e.lungeT = 0.25;
           target.takeDamage(e.meleeDmg,
-            { id: e.id, pos: e.pos, range: e.range, melee: true, poison: e.cfg.poison });
+            { id: e.id, name: e.bossName ?? e.cfg.name, pos: e.pos, range: e.range, melee: true, poison: e.cfg.poison });
           audio.creature(e.type, 'attack', 0.3, 110);
           e.atkAt = this.world.time;
         }

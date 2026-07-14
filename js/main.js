@@ -312,7 +312,7 @@ function tickTempleTraps(dt) {
   if (firing && !player.dead) {
     const d = Math.hypot(temple.x - player.pos.x, temple.z - player.pos.z);
     if (d > 3.5 && d < 8) { // safe on the steps (centre) or outside the ring
-      player.takeDamage(9, null);
+      player.takeDamage(9, { name: 'a temple dart trap' });
       ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2), '🏹 dart!', '#e8d84a');
     }
   }
@@ -353,7 +353,7 @@ function tickAvalanche(dt) {
     if (!b.hit && !player.dead
         && Math.hypot(player.pos.x - b.mesh.position.x, player.pos.z - b.mesh.position.z) < 1.9) {
       b.hit = true;
-      player.takeDamage(25, null);
+      player.takeDamage(25, { name: 'an avalanche' });
       ui.toast('🏔️ Buried by the snow!', 'boss');
     }
     if (b.t > 3.5) { scene.remove(b.mesh); boulders.splice(i, 1); }
@@ -508,7 +508,7 @@ function tickBubbles(dt) {
       bubbleFx.delete(key);
       ui.popup(new THREE.Vector3(v.x, world.heightAt(v.x, v.z) + 1.6, v.z), '💨', '#e8d84a');
       if (Math.hypot(player.pos.x - v.x, player.pos.z - v.z) < 2.6 && !player.dead) {
-        player.takeDamage(12, null);
+        player.takeDamage(12, { name: 'a sulfur geyser' });
       }
       for (const e of enemyMgr.alive()) {
         if (Math.hypot(e.pos.x - v.x, e.pos.z - v.z) < 2.6) enemyMgr.damage(e, 15, null, 'local');
@@ -921,7 +921,7 @@ function tickDustDevil(dt) {
   const d = Math.hypot(player.pos.x - m.position.x, player.pos.z - m.position.z);
   if (d < 2.4 && devil.hitCd <= 0 && !player.dead && !player.flying) {
     devil.hitCd = 1.5;
-    player.takeDamage(8);
+    player.takeDamage(8, { name: 'a dust devil' });
     const kx = (player.pos.x - m.position.x) / (d || 1);
     const kz = (player.pos.z - m.position.z) / (d || 1);
     player.pos.x += kx * 5;
@@ -1580,7 +1580,11 @@ function survivalRespawn() {
   player.loseLevel();
   player.mesh.rotation.z = Math.PI / 2; // lie down while "out"
   audio.sfx('defeat', 0.5);
-  ui.toast(`☠️ You fell… this level's XP progress is gone; half your carried loot (${dropped}) spilled where you died. Chest storage is safe.`, 'boss');
+  const by = player.killedBy || 'the wilds';
+  const surv = Math.floor(game.time / 60), survS = Math.floor(game.time % 60);
+  ui.banner(`☠️ Slain by ${by}`);
+  ui.toast(`☠️ Slain by ${by} · Lv ${player.level} · survived ${surv}:${String(survS).padStart(2, '0')} · this level's XP progress is gone, ${dropped} loot spilled. Chest storage is safe.`, 'boss');
+  player.killedBy = null;
   setTimeout(() => {
     if (game.mode !== 'play') return;
     // with a graveyard built you choose where to wake up
@@ -2031,6 +2035,23 @@ $id('minimap').addEventListener('click', () => toggleBigMap());
   const stopDrag = () => { dragFrom = null; bigCanvas.classList.remove('dragging'); };
   bigCanvas.addEventListener('pointerup', stopDrag);
   bigCanvas.addEventListener('pointercancel', stopDrag);
+  // RIGHT-click drops a navigation waypoint at the clicked world point
+  bigCanvas.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    const rect = bigCanvas.getBoundingClientRect();
+    const css2px = bigCanvas.width / (rect.width || bigCanvas.width);
+    const cx = (e.clientX - rect.left) * css2px, cy = (e.clientY - rect.top) * css2px;
+    const wx = (minimap._bigOx ?? -WORLD.radius) + cx / (minimap.bigScale || 1);
+    const wz = (minimap._bigOz ?? -WORLD.radius) + cy / (minimap.bigScale || 1);
+    if (radiusOf(wx, wz) > WORLD.radius) { minimap.waypoint = null; }
+    else {
+      minimap.waypoint = { x: wx, z: wz };
+      ui.toast('📍 Waypoint set — follow the arrow.', 'level');
+      audio.sfx('click', 0.4);
+    }
+    minimap.redrawT = 0;
+    minimap.drawBig(bigCanvas, player, mp?.mode === 'coop' ? mp.remote : null);
+  });
 }
 
 // minimap zoom buttons (don't let their clicks open the big map)
@@ -2553,6 +2574,29 @@ function setAmbience(name) {
   if (name) audio.loopStart(name, 0.32);
 }
 
+// ---------- waypoint compass: an arrow pointing to the map flag ----------
+const _wpFwd = new THREE.Vector3();
+function updateWaypoint() {
+  const arrow = $id('waypoint-arrow');
+  const wp = minimap.waypoint;
+  if (!wp || game.mode !== 'play') { arrow.classList.add('hidden'); return; }
+  const dx = wp.x - player.pos.x, dz = wp.z - player.pos.z;
+  const dist = Math.hypot(dx, dz);
+  if (dist < 6) { // arrived — retire the flag
+    minimap.waypoint = null; minimap.redrawT = 0;
+    arrow.classList.add('hidden');
+    ui.toast('📍 Waypoint reached.', '');
+    return;
+  }
+  camera.getWorldDirection(_wpFwd); _wpFwd.y = 0;
+  const fl = Math.hypot(_wpFwd.x, _wpFwd.z) || 1; _wpFwd.x /= fl; _wpFwd.z /= fl;
+  // signed angle from camera-forward to the target (0 = dead ahead / up)
+  const ang = Math.atan2(_wpFwd.x * dz - _wpFwd.z * dx, _wpFwd.x * dx + _wpFwd.z * dz);
+  arrow.classList.remove('hidden');
+  arrow.querySelector('.wp-tri').style.transform = `rotate(${ang}rad)`;
+  arrow.querySelector('.wp-dist').textContent = dist < 1000 ? `${Math.round(dist)} m` : `${(dist / 1000).toFixed(1)} km`;
+}
+
 // ---------- day / night cycle ----------
 // A full day is DAY_LENGTH seconds. game.tod runs 0..1 (0 = midnight,
 // 0.5 = noon). nightK is a smooth 0 (day) .. 1 (deep night) used to dim the
@@ -2873,6 +2917,7 @@ function step() {
         mp?.active && mp.mode === 'coop' ? mp.remote : null);
       tickDayNight(dt);
       updateAtmosphere(dt);
+      updateWaypoint(dt);
       updatePings(dt);
 
       // the horse carries you: mesh rides under the player, legs trot

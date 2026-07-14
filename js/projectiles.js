@@ -36,13 +36,13 @@ export class Projectiles {
   }
 
   // Enemy spit: flies straight at where the player is right now.
-  spawnEnemyShot(origin, player, { dmg, speed, color, stun = 0 }) {
+  spawnEnemyShot(origin, player, { dmg, speed, color, stun = 0, srcName = null }) {
     const mesh = makeEnemyShot(color);
     mesh.position.copy(origin);
     const dir = new THREE.Vector3(player.pos.x, origin.y, player.pos.z).sub(origin).normalize();
     this.scene.add(mesh);
     this.list.push({
-      id: nextProjectileId++, kind: 'enemyShot', mesh, color,
+      id: nextProjectileId++, kind: 'enemyShot', mesh, color, srcName,
       vel: dir.multiplyScalar(speed), dmg, stun, life: 2.2, hit: new Set(),
     });
   }
@@ -86,7 +86,7 @@ export class Projectiles {
           if (t.dead) continue;
           const dx = t.pos.x - p.mesh.position.x, dz = t.pos.z - p.mesh.position.z;
           if (dx * dx + dz * dz < 0.72 ** 2) {
-            t.takeDamage(p.dmg, { pos: { x: p.mesh.position.x, z: p.mesh.position.z }, range: 1.4, shot: true });
+            t.takeDamage(p.dmg, { name: p.srcName, pos: { x: p.mesh.position.x, z: p.mesh.position.z }, range: 1.4, shot: true });
             if (p.stun) t.applyStun?.(p.stun, { pos: { x: p.mesh.position.x, z: p.mesh.position.z }, range: 1.4, shot: true });
             consumed = true;
             break;

@@ -53,6 +53,7 @@ export class Player {
     this.upgrades = {};   // one-time supply comforts: saddle/bedroll/lining/socks
     this.idleT = 0;       // seconds standing still (bedroll rest bonus)
     this.hurtT = 999;     // seconds since last damage taken
+    this.killedBy = null; // name of the last source that damaged us (death recap)
     // blacksmith quest line: one active quest, per-biome completion counters
     this.quest = null;        // { biome, idx, type, need, count, name, ... }
     this.questDone = {};      // biomeIndex -> completed count (next idx to offer)
@@ -374,7 +375,7 @@ export class Player {
           const dmg = Math.round((fall - SAFE_FALL) * 6);
           this.hooks.popup?.(this.mesh.position.clone().setY(this.mesh.position.y + 2), `-${dmg} 🩸 fall`, '#ff6a5a');
           audio.sfx('hit', 0.5, 60);
-          this.takeDamage(dmg, { silent: true });
+          this.takeDamage(dmg, { silent: true, name: 'a nasty fall' });
         } else if (fall > 1.2) audio.sfx('base_hit', 0.25, 200);
       }
     } else {
@@ -392,6 +393,7 @@ export class Player {
     if (this.flying) return; // riding a griffin — far out of anyone's reach
     if (this.upgrades.lining) dmg *= 0.92; // quilted wool soaks a bit of everything
     this.hurtT = 0;
+    if (src?.name) this.killedBy = src.name; // remember the last thing that hurt us
     this.hp -= dmg;
     // every hit shows its number — incoming damage floats red above you
     if (!src?.silent) {

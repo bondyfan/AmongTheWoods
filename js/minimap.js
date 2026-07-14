@@ -85,6 +85,7 @@ export class Minimap {
     this.zoom = 0;
     this.deathAt = null;   // last place the player died (⚰️ marker)
     this.treasureAt = null; // active treasure-map dig site (✖)
+    this.waypoint = null;   // player-set navigation flag (📍)
     this.pings = [];       // co-op pings: { x, z, t }
     this.rotation = 0;     // radians; auto camera rotate turns the map with the view
     this._drawnRot = 0;
@@ -271,6 +272,17 @@ export class Minimap {
       ctx.globalAlpha = 1;
     }
 
+    // player waypoint (📍) — a map is a map, always shown
+    if (this.waypoint) {
+      const p = toC(this.waypoint.x, this.waypoint.z);
+      if (inView(p)) {
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 12px sans-serif';
+        ctx.fillStyle = '#ff4dd8';
+        text('📍', p.x, p.y + 4);
+      }
+    }
+
     // active treasure map: X marks the spot (it's a map — always shown)
     if (this.treasureAt) {
       const p = toC(this.treasureAt.x, this.treasureAt.z);
@@ -359,6 +371,7 @@ export class Minimap {
     }
     const scale = W / vspan;
     this.bigScale = scale; // canvas px per world unit — the drag handler needs it
+    this._bigOx = ox; this._bigOz = oz; // world origin of the view (waypoint clicks invert this)
     const toX = (wx) => (wx - ox) * scale;
     const toY = (wz) => (wz - oz) * scale;
     const c0x = Math.max(0, Math.floor((ox + WORLD.radius) / CELL));
@@ -411,6 +424,11 @@ export class Minimap {
       ctx.fillText(poi.type === 'shrine' ? '✦' : poi.type === 'crypt' ? '☗' : '▲',
         toX(poi.x), toY(poi.z) + 4);
       ctx.globalAlpha = 1;
+    }
+    if (this.waypoint && inView(this.waypoint.x, this.waypoint.z)) {
+      ctx.font = 'bold 15px sans-serif'; ctx.fillStyle = '#ff4dd8';
+      ctx.fillText('📍', toX(this.waypoint.x), toY(this.waypoint.z) + 4);
+      ctx.font = '11px sans-serif';
     }
     if (this.treasureAt && inView(this.treasureAt.x, this.treasureAt.z)) {
       ctx.font = 'bold 13px sans-serif';
