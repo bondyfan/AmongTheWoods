@@ -173,16 +173,6 @@ const panels = new Panels({
   mobaTeam: () => mobaSide,
   nearHome: () => nearHome(), // the home building only upgrades in person
   nearSmith: () => nearSmith(), // weapons & gear can only be forged here
-  // -- admin mode (singleplayer testing) --
-  onBuySupplyUpgrade: (id, cost) => {
-    if (player.upgrades[id]) return;
-    if (!Object.entries(cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
-    for (const [k, v] of Object.entries(cost)) player[k] = roundResource(player[k] - v);
-    player.upgrades[id] = true;
-    audio.sfx('upgrade', 0.5);
-    ui.toast('✔ Bought — it works from now on.', 'level');
-    panels.refresh();
-  },
   onAcceptQuest: (bi, idx) => acceptQuest(bi, idx),
   onAbandonQuest: () => abandonQuest(),
   currentBiome: () => biomeIndexAt(player.pos.x, player.pos.z),
@@ -203,11 +193,8 @@ const panels = new Panels({
     if (id.startsWith('c:')) {
       const cid = id.slice(2);
       player.consumables[cid] = (player.consumables[cid] ?? 0) + 1;
-    } else if (id.startsWith('u:')) {
-      player.upgrades[id.slice(2)] = true; // saddle / torch / bedroll / lining / socks / torch oil
-      player.recompute();
     } else {
-      player.invItems.push(id);
+      player.invItems.push(id); // supply gear is ordinary items now — equip in Character
     }
     audio.sfx('special', 0.4);
     panels.refresh();
@@ -892,9 +879,9 @@ function tickTorch(dt) {
   const dark = (BIOMES[game.biomeIndex]?.darkness ?? 0) >= 0.35
     || radiusOf(player.pos.x, player.pos.z) < WORLD.caveR + 6;
   const on = game.kind === 'survival' && inPlay()
-    && player.upgrades.torch && dark && !player.dead;
+    && player.torchGear && dark && !player.dead;
   if (on && !torchLight) {
-    torchLight = new THREE.PointLight(0xffb45a, 2.2, player.upgrades.torchoil ? 30 : 18, 1.6);
+    torchLight = new THREE.PointLight(0xffb45a, 2.2, player.torchGear.radius ?? 18, 1.6);
     torchFlame = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 5),
       new THREE.MeshBasicMaterial({ color: 0xffc86a }));
     scene.add(torchLight, torchFlame);
@@ -905,6 +892,7 @@ function tickTorch(dt) {
   }
   if (!torchLight) return;
   torchT += dt;
+  torchLight.distance = player.torchGear.radius ?? 18; // follows a torch swap live
   const p = player.mesh.position;
   torchLight.position.set(p.x + 0.45, p.y + 2.1, p.z);
   torchFlame.position.copy(torchLight.position);
@@ -1033,7 +1021,7 @@ function tickCold(dt) {
     return;
   }
   const warm = world.isTargetSafe?.(player.pos);
-  const rate = warm ? -0.3 : (player.upgrades.torch ? 0.5 : 1) / 75; // ~75 s to freeze
+  const rate = warm ? -0.3 : (player.torchGear ? 0.5 : 1) / 75; // ~75 s to freeze
   coldK = Math.max(0, Math.min(1, coldK + rate * dt));
   if (coldK > 0.55 && !coldWarned) {
     coldWarned = true;
@@ -2010,13 +1998,26 @@ function applyLoadedState(d) {
   p.level = Math.max(1, Math.min(MAX_LEVEL, d.level ?? 1));
   p.xp = d.xp ?? 0;
   for (const k of RESOURCES) p[k] = d.res?.[k] ?? 0;
-  p.equipment = { weapon: 'fists', head: null, chest: null, boots: null, charm: null, companion: null, ...(d.equipment || {}) };
+  p.equipment = { weapon: 'fists', offhand: null, head: null, chest: null, underlayer: null,
+                  legs: null, boots: null, back: null, mount: null, charm: null, companion: null,
+                  ...(d.equipment || {}) };
   p.invItems = Array.isArray(d.invItems) ? d.invItems.filter(Boolean) : [];
   p.consumables = { salve: 0, roast: 0, honey: 0, ...(d.consumables || {}) };
   p.stats = { range: 0, power: 0, swift: 0, pet: 0, gather: 0, ...(d.stats || {}) };
   p.spellsOwned = new Set(d.spellsOwned || []);
   p.spellSlots = Array.isArray(d.spellSlots) ? d.spellSlots.map(s => s ?? undefined) : [];
   p.upgrades = { ...(d.upgrades || {}) };
+  // MIGRATION: old saves stored supply gear as boolean upgrades — convert each
+  // owned flag into the real item (equipped straight into its new slot)
+  const upgradeSlots = { torch: 'offhand', torchoil: 'offhand', socks: 'legs',
+                         lining: 'underlayer', bedroll: 'back', saddle: 'mount' };
+  for (const [uid, slot] of Object.entries(upgradeSlots)) {
+    if (!p.upgrades[uid]) continue;
+    delete p.upgrades[uid];
+    if (!p.equipment[slot]) p.equipment[slot] = uid;      // torchoil wins over torch below
+    else if (uid === 'torchoil') { p.invItems.push(p.equipment[slot]); p.equipment[slot] = uid; }
+    else if (!p.invItems.includes(uid)) p.invItems.push(uid);
+  }
   if (d.invSlots) p.invSlots = d.invSlots;
   p.questDone = { ...(d.questDone || {}) };
   p.questHistory = Array.isArray(d.questHistory) ? d.questHistory : [];
@@ -2307,6 +2308,8 @@ function toggleBigMap(force) {
   if (bigmapOpen) {
     audio.sfx('click', 0.4);
     minimap.bigPanX = minimap.bigPanZ = 0; // reopen centered on the player
+    // admin mode only: the one-click full-map reveal
+    $id('bigmap-discover').classList.toggle('hidden', !game.adminMode);
     minimap.drawBig($id('bigmap-canvas'), player, mp?.mode === 'coop' ? mp.remote : null);
   } else if (discoveryMode) {
     // closing the map cancels an unused scroll draw — refund it
@@ -2327,6 +2330,15 @@ function startDiscovery(radius) {
 }
 input.onKey('KeyM', () => toggleBigMap());
 $id('minimap').addEventListener('click', () => toggleBigMap());
+// admin: rip the fog off the whole world in one click
+$id('bigmap-discover').addEventListener('click', () => {
+  if (!game.adminMode) return;
+  minimap.discovered.fill(1);
+  minimap.redrawT = 0;
+  minimap.drawBig($id('bigmap-canvas'), player, mp?.mode === 'coop' ? mp.remote : null);
+  audio.sfx('map_reveal', 0.7);
+  ui.toast('🔍 The whole world lies bare.', 'level');
+});
 
 // click & drag the big map with the mouse to pan around (when zoomed in)
 {
@@ -2794,7 +2806,7 @@ let wasOnWater = false, boatPlaceT = 0, waveT = 0, lastWaveX = 0, lastWaveZ = 0;
 let horseMesh = null;     // the tamed horse's mesh (under you, or parked)
 let parkedAt = null;      // { x, z } while dismounted
 function nearWildHorse() {
-  if (!player.upgrades.saddle || player.mounted || game.kind !== 'survival') return null;
+  if (!player.hasSaddle || player.mounted || game.kind !== 'survival') return null;
   return enemyMgr.list.find(e => e.type === 'horse' && !e.dying
     && Math.hypot(e.pos.x - player.pos.x, e.pos.z - player.pos.z) < 3.4) ?? null;
 }
@@ -3125,8 +3137,8 @@ function updateAtmosphere(dt) {
   envSpeedMult *= Math.min(
     enemyMgr?.webSlowAt?.(player.pos.x, player.pos.z) ?? 1,
     world.webSlowAt?.(player.pos.x, player.pos.z) ?? 1);
-  // thick wool socks: mud and webs only bite half as hard
-  if (player.upgrades.socks) envSpeedMult = 1 - (1 - envSpeedMult) * 0.5;
+  // thick wool socks (legs slot): mud and webs only bite half as hard
+  if (player.mudguard < 1) envSpeedMult = 1 - (1 - envSpeedMult) * player.mudguard;
   // Frozen Peak chill: stiff, frozen legs move up to 30% slower
   envSpeedMult *= 1 - 0.3 * coldK;
   const biome = BIOMES[game.biomeIndex];

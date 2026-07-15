@@ -1,7 +1,7 @@
 // ---- Modal panels: upgrade shop (grouped tabs), character sheet with
 // equipment slots, bestiary of discovered creatures ----
 
-import { SHOP_GROUPS, SMITH_GROUPS, SUPPLY_UPGRADES, questFor, questXpFor, QUESTS_PER_BIOME, BIOMES, SLOTS, SLOT_LABELS, ENEMY_TYPES, ITEMS, SPELLS,
+import { SHOP_GROUPS, SMITH_GROUPS, questFor, questXpFor, QUESTS_PER_BIOME, BIOMES, SLOTS, SLOT_LABELS, ENEMY_TYPES, ITEMS, SPELLS,
          STAT_TRACKS, MOBA_BUILDINGS, CAMP_BUILDINGS, RES_ICONS, RESOURCES, CONSUMABLES,
          MAX_SPELL_SLOTS, fmtResource, itemById, spellById, costFor } from './config.js';
 
@@ -339,20 +339,23 @@ export class Panels {
 
   // Consumables: repeatable purchases, used in the field with F / G.
   _renderSupplies(wrap) {
-    // one-time comforts first: saddle + the three wool crafts
-    for (const u of SUPPLY_UPGRADES) {
-      const owned = !!this.player.upgrades?.[u.id];
-      const affordable = this._affordable(u.cost);
+    // expedition gear first: real items now, each worn in its own slot
+    for (const it of ITEMS.filter(i => i.supply)) {
+      const owned = this.player.hasItem(it.id);
+      const locked = it.level > this.player.level;
+      const affordable = this._affordable(it.cost);
       const card = document.createElement('div');
-      card.className = 'card' + (owned ? ' owned' : affordable ? ' buyable' : ' expensive');
+      card.className = 'card' + (owned ? ' owned' : affordable && !locked ? ' buyable' : ' expensive');
+      const foot = owned ? '<span class="tag ok">✔ Owned — equip in Character (C)</span>'
+        : locked ? `<span class="tag">🔒 Lv ${it.level}</span>`
+        : `<button class="buy-btn" data-supply="${it.id}">Buy — ${this._costStr(it.cost)}</button>`;
       card.innerHTML = `
-        <div class="card-head"><span class="icon">${u.icon}</span>
-          <span class="name">${u.name}</span><span class="lv">upgrade</span></div>
-        <div class="desc">${u.desc}</div>
-        <div class="card-foot">${owned ? '<span class="tag ok">✔ Owned</span>'
-          : `<button class="buy-btn" data-supply="${u.id}">Buy — ${this._costStr(u.cost)}</button>`}</div>`;
+        <div class="card-head"><span class="icon">${it.icon}</span>
+          <span class="name">${it.name}</span><span class="lv">${SLOT_LABELS[it.slot].toLowerCase()}</span></div>
+        <div class="desc">${it.desc}</div>
+        <div class="card-foot">${foot}</div>`;
       card.querySelector('[data-supply]')?.addEventListener('click', () =>
-        this.hooks.onBuySupplyUpgrade?.(u.id, u.cost));
+        this.hooks.onBuyItem?.(it.id));
       wrap.appendChild(card);
     }
 
@@ -385,7 +388,7 @@ export class Panels {
     wrap.appendChild(bag);
     bag.querySelector('[data-bag]')?.addEventListener('click', () => this.hooks.onBuyBag?.(bagCost));
 
-    wrap.querySelectorAll('.buy-btn:not([data-bag])').forEach(btn =>
+    wrap.querySelectorAll('.buy-btn:not([data-bag]):not([data-supply])').forEach(btn =>
       btn.addEventListener('click', () => this.hooks.onBuyConsumable?.(btn.dataset.id)));
   }
 
@@ -439,7 +442,8 @@ export class Panels {
   renderCharacter() {
     const p = this.player;
 
-    const DOLL = { left: ['weapon', 'head', 'chest'], right: ['boots', 'charm', 'companion'] };
+    const DOLL = { left: ['weapon', 'offhand', 'head', 'chest', 'underlayer', 'legs'],
+                   right: ['boots', 'back', 'mount', 'charm', 'companion'] };
     for (const side of ['left', 'right']) {
       const col = $('doll-' + side);
       col.innerHTML = '';
@@ -629,8 +633,6 @@ export class Panels {
       const opts =
         `<optgroup label="Gear & weapons">` +
         ITEMS.map(i => `<option value="${i.id}">${i.name}${i.unique ? ' ★' : ''} (Lv${i.level})</option>`).join('') +
-        `</optgroup><optgroup label="Upgrades">` +
-        SUPPLY_UPGRADES.map(u => `<option value="u:${u.id}">${u.name} (upgrade)</option>`).join('') +
         `</optgroup><optgroup label="Consumables">` +
         CONSUMABLES.map(c => `<option value="c:${c.id}">${c.name} (consumable)</option>`).join('') +
         `</optgroup>`;

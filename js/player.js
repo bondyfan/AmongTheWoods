@@ -39,7 +39,8 @@ export class Player {
     // equipped pieces live only in `equipment`. 'fists' are innate.
     this.invItems = [];
     this.invSlots = 10; // backpack stack slots (upgradeable in Supplies)
-    this.equipment = { weapon: 'fists', head: null, chest: null, boots: null, charm: null, companion: null };
+    this.equipment = { weapon: 'fists', offhand: null, head: null, chest: null, underlayer: null,
+                       legs: null, boots: null, back: null, mount: null, charm: null, companion: null };
 
     // -- trainable stat tracks (0..10 each; pet 0..5) --
     this.stats = { range: 0, power: 0, swift: 0, pet: 0, gather: 0 };
@@ -50,7 +51,7 @@ export class Player {
     this.consumables = { salve: 0, roast: 0, honey: 0 };
     this.boon = null; // cursed-statue pact: { dmg, speed, regen, t } — bane included
     this.venomT = 0;  // snapjaw venom on the blade: attacks poison enemies
-    this.upgrades = {};   // one-time supply comforts: saddle/bedroll/lining/socks
+    this.upgrades = {};   // rare boolean perks (tribePass); supply gear is real items now
     this.idleT = 0;       // seconds standing still (bedroll rest bonus)
     this.hurtT = 999;     // seconds since last damage taken
     this.killedBy = null; // name of the last source that damaged us (death recap)
@@ -258,6 +259,12 @@ export class Player {
       range: base.range + (base.kind === 'bow' ? 2.0 : 0.1) * s.range,
     };
     this.gatherMult = 1 + 0.15 * s.gather; // Gathering training: fatter yields
+    // expedition gear: each comfort lives in its own slot now (no more flags)
+    this.torchGear = equipped('offhand')?.torch || null;   // { radius } while a torch is in hand
+    this.dmgCut = equipped('underlayer')?.dmgCut || 0;     // quilted lining soak
+    this.mudguard = equipped('legs')?.mudguard ?? 1;       // socks halve mud/web slows
+    this.restMult = equipped('back')?.rest || 1;           // bedroll rest regen
+    this.hasSaddle = !!equipped('mount')?.saddle;          // can mount wild horses
     // charm: a single trinket slot with a flat percentage bonus
     const charm = equipped('charm');
     if (charm?.stats?.dmgPct) this.weapon.dmg *= 1 + charm.stats.dmgPct;
@@ -391,7 +398,7 @@ export class Player {
   takeDamage(dmg, src = null) {
     if (this.dead) return;
     if (this.flying) return; // riding a griffin — far out of anyone's reach
-    if (this.upgrades.lining) dmg *= 0.92; // quilted wool soaks a bit of everything
+    if (this.dmgCut) dmg *= 1 - this.dmgCut; // quilted wool lining soaks a bit of everything
     this.hurtT = 0;
     if (src?.name) this.killedBy = src.name; // remember the last thing that hurt us
     this.hp -= dmg;
@@ -471,8 +478,8 @@ export class Player {
     if (this.boon && (this.boon.t -= dt) <= 0) { this.boon = null; this.recompute(); }
     this.venomT = Math.max(0, this.venomT - dt);
     this.hurtT += dt;
-    // wool bedroll: a moment of stillness out of combat and wounds knit fast
-    const rest = (this.upgrades.bedroll && this.idleT > 3 && this.hurtT > 5) ? 6 : 1;
+    // wool bedroll (worn on the back): stillness out of combat knits wounds fast
+    const rest = (this.restMult > 1 && this.idleT > 3 && this.hurtT > 5) ? this.restMult : 1;
     if (this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.hpRegen * rest * dt);
     for (const id in this.spellCds) this.spellCds[id] = Math.max(0, this.spellCds[id] - dt);
 

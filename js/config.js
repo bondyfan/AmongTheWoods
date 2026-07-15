@@ -288,8 +288,10 @@ export function questXpFor(level) {
 
 // ---- Equippable items (WoW-style slots). Bought in the shop or dropped by
 // pack bosses. Only ONE weapon is wielded at a time — Q cycles owned weapons. ----
-export const SLOTS = ['weapon', 'head', 'chest', 'boots', 'charm', 'companion'];
-export const SLOT_LABELS = { weapon: 'Weapon', head: 'Head', chest: 'Chest', boots: 'Boots', charm: 'Charm', companion: 'Companion' };
+export const SLOTS = ['weapon', 'offhand', 'head', 'chest', 'underlayer', 'legs', 'boots', 'back', 'mount', 'charm', 'companion'];
+export const SLOT_LABELS = { weapon: 'Weapon', offhand: 'Off-hand', head: 'Head', chest: 'Chest',
+  underlayer: 'Underlayer', legs: 'Legs', boots: 'Boots', back: 'Back', mount: 'Mount',
+  charm: 'Charm', companion: 'Companion' };
 
 // Gear progresses through the ages. `needs` gates an item behind a camp
 // building (survival): 'tent' → Hide Tent, 'cabin' → Wooden Cabin,
@@ -404,6 +406,27 @@ export const ITEMS = [
   { id: 'duoSphere',      slot: 'companion', level: 10, icon: '🌐', name: 'Gemini Spheres',  cost: { meat: 130, iron: 24, stone: 60, essence: 12 }, needs: 'furnace',
     orb: { count: 2, targets: 2, dmg: 14 },
     desc: 'TWO spheres, each firing twin bolts.' },
+  // -- expedition gear (Supplies tab): wearable comfort items, each with its
+  // own WoW-style slot. supply: true keeps them out of the weapon/gear shops.
+  { id: 'torch',   slot: 'offhand', level: 3, supply: true, icon: '🔦', name: 'Everburning Torch',
+    cost: { wood: 10, hide: 3, essence: 1 }, torch: { radius: 18 },
+    desc: 'A resin-soaked torch that never goes out. Carry it in your off-hand: it lights the ground around you in the dark biomes (Dark Forest, Haunted Forest, swamp and the cave) — and its warmth slows the Frozen Peak\'s chill.' },
+  { id: 'torchoil', slot: 'offhand', level: 6, supply: true, icon: '🛢️', name: 'Oil-Doused Torch',
+    cost: { essence: 6, meat: 60, wood: 40 }, torch: { radius: 30 },
+    desc: 'A torch drenched in bright-burning alchemist\'s oil — its light bubble is far wider. Replaces the Everburning Torch in your off-hand.' },
+  { id: 'socks',   slot: 'legs', level: 3, supply: true, icon: '🧦', name: 'Thick Wool Socks',
+    cost: { wool: 10, meat: 20 }, mudguard: 0.5,
+    desc: 'Worn on your legs: swamp mud and spider webs slow you only HALF as much.' },
+  { id: 'lining',  slot: 'underlayer', level: 4, supply: true, icon: '🧥', name: 'Quilted Wool Lining',
+    cost: { wool: 14, hide: 8 }, dmgCut: 0.08,
+    desc: 'Wool padding worn under everything else: all damage taken −8%.' },
+  { id: 'bedroll', slot: 'back', level: 3, supply: true, icon: '🛏️', name: 'Wool Bedroll',
+    cost: { wool: 8, hide: 4 }, rest: 6,
+    desc: 'Strapped across your back. Stand still for a moment out of combat and you regenerate 6× faster.' },
+  { id: 'saddle',  slot: 'mount', level: 4, supply: true, icon: '🐴', name: 'Riding Saddle',
+    cost: { hide: 12, iron: 4, meat: 30 },  saddle: true,
+    desc: 'Carry it and you can saddle a wild horse (E next to one, 3rd biome onward). Riding: +9 speed, but you cannot attack. X to dismount.' },
+
   // -- griffin nests: dropped by beaten griffins, never sold or looted
   // (free: true keeps them out of every random loot pool). Click one in the
   // inventory to PLACE it on the ground — a flight-master roost you can fly
@@ -688,20 +711,9 @@ export const isForgeItem = (i) =>
   ['weapon', 'head', 'chest', 'boots', 'charm'].includes(i.slot) && !i.free && i.id !== 'club';
 
 // one-time survival comforts sold in the Supplies tab (like the Bag Upgrade)
-export const SUPPLY_UPGRADES = [
-  { id: 'saddle',  icon: '🐴', name: 'Riding Saddle', cost: { hide: 12, iron: 4, meat: 30 },
-    desc: 'Saddle a wild horse (E next to one, 3rd biome onward). Riding: +9 speed, but you cannot attack. X to dismount.' },
-  { id: 'bedroll', icon: '🛏️', name: 'Wool Bedroll', cost: { wool: 8, hide: 4 },
-    desc: 'Stand still for a moment out of combat and you regenerate 6× faster.' },
-  { id: 'lining',  icon: '🧥', name: 'Quilted Wool Lining', cost: { wool: 14, hide: 8 },
-    desc: 'Wool padding under everything you wear: all damage taken −8%.' },
-  { id: 'socks',   icon: '🧦', name: 'Thick Wool Socks', cost: { wool: 10, meat: 20 },
-    desc: 'Swamp mud and spider webs slow you only HALF as much.' },
-  { id: 'torch',   icon: '🔦', name: 'Everburning Torch', cost: { wood: 10, hide: 3, essence: 1 },
-    desc: 'A resin-soaked torch that never goes out. Lights the ground around you in the dark biomes (Dark Forest, Haunted Forest, swamp and the cave) — and its warmth slows the Frozen Peak\'s chill.' },
-  { id: 'torchoil', icon: '🛢️', name: 'Alchemist\'s Torch Oil', cost: { essence: 6, meat: 60, wood: 40 },
-    desc: 'Douse your torch in bright-burning oil — its light bubble grows far wider in the dark. (Needs the Everburning Torch.)' },
-];
+// (supply upgrades became real equippable ITEMS — see the `supply: true`
+// entries in ITEMS: torch/torchoil → off-hand, socks → legs, lining →
+// underlayer, bedroll → back, saddle → mount)
 
 export const SHOP_GROUPS = [
   { key: 'weapons',  label: '⚔️ Weapons',   items: () => ITEMS.filter(i => i.slot === 'weapon' && !i.free && !i.unique && !isForgeItem(i)) },
