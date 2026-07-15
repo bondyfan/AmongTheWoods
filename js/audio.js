@@ -34,9 +34,11 @@ class AudioManager {
       'thornling_attack', 'thornling_death', 'boar_attack', 'boar_death',
       'elk_attack', 'elk_death', 'bear_attack', 'bear_death',
       'bee_attack', 'bee_death', 'cactus_attack', 'cactus_death',
-      'spear_throw', 'map_reveal'];
+      'spear_throw', 'map_reveal',
+      'torch_equip', 'aggro', 'equip_gear', 'buy'];
     // nature ambience loops — warmed via HTTP cache, played through loopStart
-    const AMB = ['forest_ambience', 'wind_ambience', 'swamp_ambience', 'cave_ambience', 'water_lapping'];
+    const AMB = ['forest_ambience', 'wind_ambience', 'swamp_ambience', 'cave_ambience', 'water_lapping',
+      'torch_loop', 'night_crickets', 'verdant_birds'];
     const MUSIC = ['level1', 'level3', 'mainmenu'];
     const urls = [...SFX.map(n => SFX_PATH + n + '.mp3'), ...AMB.map(n => SFX_PATH + n + '.mp3'),
       ...MUSIC.map(n => MUSIC_PATH + n + '.mp3')];

@@ -148,7 +148,8 @@ const panels = new Panels({
       return;
     }
     player.equip(id);
-    audio.sfx('click', 0.5);
+    // a burning torch lights with a whoomp; everything else buckles on
+    audio.sfx(item?.torch ? 'torch_equip' : 'equip_gear', 0.5);
     panels.refresh();
   },
   onToast: (msg) => ui.toast(msg, 'error'),
@@ -896,10 +897,12 @@ function tickTorch(dt) {
   if (on && !torchLight) {
     torchLight = new THREE.PointLight(0xffb45a, 2.2, 5, 1.4);
     scene.add(torchLight);
+    audio.loopStart('torch_loop', 0.3); // the flame crackles while it's lit
   } else if (!on && torchLight) {
     scene.remove(torchLight);
     torchLight.dispose?.();
     torchLight = null;
+    audio.loopStop('torch_loop');
   }
   if (!torchLight) return;
   torchT += dt;
@@ -2244,7 +2247,7 @@ function buyItem(id) {
   for (const [k, v] of Object.entries(cost)) player[k] = roundResource(player[k] - v);
   player.ownItem(id);
   ui.toast(`🎒 ${item.name} is in your bag — equip it in Character (C).`, 'level');
-  audio.sfx('purchase', 0.5);
+  audio.sfx('buy', 0.5);
   panels.refresh();
   panels.flashCard(item.name);
 }
@@ -2280,7 +2283,7 @@ function buyConsumable(id) {
   if (!Object.entries(c.cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
   for (const [k, v] of Object.entries(c.cost)) player[k] = roundResource(player[k] - v);
   player.consumables[id] = (player.consumables[id] ?? 0) + 1;
-  audio.sfx('purchase', 0.5);
+  audio.sfx('buy', 0.5);
   panels.refresh();
   panels.flashCard(c.name);
 }
@@ -3121,7 +3124,7 @@ const BIOME_MUSIC = [
 // living soundscape: each biome breathes its own nature ambience loop, laid
 // UNDER the music. Verdant sings with birds, the swamp croaks, the peaks howl.
 const BIOME_AMBIENCE = [
-  'forest_ambience', // 0 Verdant — birdsong & leaves
+  'verdant_birds',   // 0 Verdant — rich daytime birdsong & nature
   'wind_ambience',   // 1 Scorched Desert — hot whistling wind
   null,              // 2 Dark Forest — eerie hush (the gloom sells it)
   'swamp_ambience',  // 3 Murky Swamp — frogs & bubbling
@@ -3132,10 +3135,21 @@ const BIOME_AMBIENCE = [
 ];
 let ambienceName = null;
 function setAmbience(name) {
+  // leaving the world (name === null on death / menu / win) silences every
+  // ambient layer, including the crickets and the torch flame
+  if (name === null) { setNightAmbience(false); audio.loopStop('torch_loop'); }
   if (name === ambienceName) return;
   if (ambienceName) audio.loopStop(ambienceName);
   ambienceName = name;
   if (name) audio.loopStart(name, 0.32);
+}
+// a second, independent ambience layer for the evening crickets
+let nightAmbienceOn = false;
+function setNightAmbience(on) {
+  if (on === nightAmbienceOn) return;
+  nightAmbienceOn = on;
+  if (on) audio.loopStart('night_crickets', 0.28);
+  else audio.loopStop('night_crickets');
 }
 
 // ---------- waypoint compass: an arrow pointing to the map flag ----------
@@ -3323,9 +3337,16 @@ function updateAtmosphere(dt) {
   // ambience: the cave near home overrides the biome; open water laps under it
   const rHome = Math.hypot(player.pos.x, player.pos.z);
   const onWater = world.isWater?.(player.pos.x, player.pos.z);
-  setAmbience(rHome < 34 ? 'cave_ambience'
+  const night = (game.nightK || 0) > 0.6;
+  let amb = rHome < 34 ? 'cave_ambience'
     : onWater ? 'water_lapping'
-    : BIOME_AMBIENCE[game.biomeIndex] ?? null);
+    : BIOME_AMBIENCE[game.biomeIndex] ?? null;
+  // birdsong is a DAYTIME sound — at night the outdoor crickets carry it
+  if (night && (game.biomeIndex === 0 || game.biomeIndex === 6)) amb = null;
+  setAmbience(amb);
+  // night crickets: a separate outdoor overlay layered under everything,
+  // never underground and never at home in the cave
+  setNightAmbience(!game.dungeon && night && rHome >= 34);
   envSpeedMult = world.swampZone?.(player.pos.x, player.pos.z) === 'mud' ? 0.78 : 1;
   $id('biome-gloom').style.opacity = BIOMES[game.biomeIndex].darkness ?? 0;
   envSpeedMult *= Math.min(
@@ -3653,6 +3674,16 @@ function step() {
         tickCold(dt);
       }
       tickTorch(dt); // your torch burns down there too
+
+      // aggro sting: plays ONCE when you go from "nothing chasing me" to
+      // "something is coming" — not again for each extra attacker
+      if (game.kind === 'survival') {
+        const anyAggro = enemyMgr.list.some(e =>
+          e.aggroed && !e.dying && !e.cfg?.passive
+          && Math.hypot(e.pos.x - player.pos.x, e.pos.z - player.pos.z) < 26);
+        if (anyAggro && !game._anyAggro && !player.dead) audio.sfx('aggro', 0.5);
+        game._anyAggro = anyAggro;
+      }
 
       // contextual E hint: revive > chest > home > landmark > treasure
       const hintEl = $id('home-hint');

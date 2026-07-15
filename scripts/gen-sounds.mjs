@@ -80,6 +80,13 @@ const SOUNDS = [
   ['cactus_death', 'A cactus creature dying: a dry splitting crack of fibrous pulp and a soft collapsing thud of spines and flesh, arid, no music, no voice', 1.1],
   ['spear_throw', 'A wooden spear thrown hard: a short grunt-less whoosh of a heavy javelin cutting the air and a faint whistle as it flies, dry and physical, no music, no voice', 0.8],
   ['map_reveal', 'A magical parchment scroll unfurling: a soft papery whoosh and a warm shimmering sparkle chime as hidden land is revealed, gentle and pleasant, no music, no voice', 1.3],
+  ['torch_equip', 'A torch being lit and raised: a quick scrape and a soft WHOOMP of catching flame flaring up, short and warm, no music, no voice', 0.8],
+  ['torch_loop', 'A steady burning torch flame: continuous crackling fire and gently flapping flames, warm and close, seamless loop with no start or end, no music, no voice', 8.0],
+  ['aggro', 'A sudden alert sting: a short sharp low growl-snarl with a quick tense whoosh as a beast notices its prey and charges, threatening and brief, no music, no voice', 0.7],
+  ['equip_gear', 'Equipping gear: a crisp leather-and-buckle shuffle with a light metal clink as armor is strapped on, short and tactile, no music, no voice', 0.7],
+  ['buy', 'A purchase confirmation: a pleasant bright coin-jingle and a soft wooden thunk as goods change hands, satisfying and short, no music, no voice', 0.8],
+  ['night_crickets', 'Peaceful nighttime outdoor ambience: a chorus of chirping crickets and distant hooting owl, soft night breeze through grass, calm and nocturnal. Seamless loop with no start or end, no music, no human voice', 16.0],
+  ['verdant_birds', 'Bright sunny forest daytime ambience: rich layered birdsong, chirping and warbling songbirds near and far, gentle rustling leaves and a warm breeze, lively and cheerful. Seamless loop with no start or end, no music, no human voice', 16.0],
 ];
 
 const exists = async (p) => { try { await access(p); return true; } catch { return false; } };
