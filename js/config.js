@@ -458,6 +458,9 @@ export const ITEMS = [
   { id: 'snapjawMaul', slot: 'weapon', level: 10, unique: true, icon: '🔨', name: 'Snapjaw Maul',
     weapon: { kind: 'melee', dmg: 190, cd: 0.9, range: 2.2, chop: 2, mine: 1, tier: 3 },
     desc: 'UNIQUE — dropped by Old Snapjaw. A crushing jungle maul.' },
+  { id: 'frostMantle', slot: 'back', level: 10, unique: true, icon: '🧊', name: 'Mantle of the Colossus',
+    stats: { hp: 150, regen: 1.0 }, rest: 6, coldproof: true,
+    desc: 'UNIQUE — skinned from Grimfrost the Colossus. +150 ❤️, +1.0 ❤️/s, rests like a bedroll — and the Frozen Peak\'s chill cannot touch you.' },
 ];
 
 // One named boss per biome ring (7 = Frozen Peak already has the summit Ymir),
@@ -470,6 +473,8 @@ export const BIOME_LAIRS = [
   { name: 'Old Ironhorn',          type: 'elk',         drop: 'ironhornCrown'},
   { name: 'The Weeping Shade',     type: 'ghost',       drop: 'shadeAmulet'  },
   { name: 'Old Snapjaw',           type: 'snapper',     drop: 'snapjawMaul'  },
+  // ring 7 — Frozen Peak: a COLOSSAL yeti, bigger and tougher than any lair boss
+  { name: 'Grimfrost the Colossus', type: 'yeti',        drop: 'frostMantle', extraScale: 1.5, hpMult: 1.5 },
 ];
 
 export const itemById = (id) => ITEMS.find(i => i.id === id);

@@ -512,7 +512,7 @@ export class World {
         }
       }
     };
-    for (let ring = 0; ring < 7; ring++) place('lair', ring, 1); // one named boss lair per biome
+    for (let ring = 0; ring < 8; ring++) place('lair', ring, 1); // one named boss lair per biome (incl. Frozen Peak)
     place('village', 3, 2);    // Swamp: tribute buys you peace with the tribes
     place('temple', 6, 2);     // Jungle: trapped step pyramids with a treasury
 

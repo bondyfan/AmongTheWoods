@@ -228,7 +228,7 @@ export class Player {
     const equipped = (slot) => itemById(this.equipment[slot]);
     const oldMax = this.maxHp || 100;
     let hp = 100 + (this.level - 1) * 10 + (this.shrineBonus || 0), speedAdd = 0;
-    for (const slot of ['head', 'chest', 'boots']) {
+    for (const slot of ['head', 'chest', 'boots', 'offhand', 'underlayer', 'legs', 'back', 'mount']) {
       const it = equipped(slot);
       if (it?.stats?.hp) hp += it.stats.hp;
       if (it?.stats?.speed) speedAdd += it.stats.speed;
@@ -242,7 +242,7 @@ export class Player {
     this.speed = 5.5 + 0.1 * lvl + speedAdd;
     // passive regeneration: everyone knits back slowly; gear can stack it up
     let regen = 0.1 + 0.1 * lvl;
-    for (const slot of ['head', 'chest', 'boots', 'charm']) {
+    for (const slot of ['head', 'chest', 'boots', 'charm', 'offhand', 'underlayer', 'legs', 'back', 'mount']) {
       const it = equipped(slot);
       if (it?.stats?.regen) regen += it.stats.regen;
     }
@@ -265,6 +265,7 @@ export class Player {
     this.mudguard = equipped('legs')?.mudguard ?? 1;       // socks halve mud/web slows
     this.restMult = equipped('back')?.rest || 1;           // bedroll rest regen
     this.hasSaddle = !!equipped('mount')?.saddle;          // can mount wild horses
+    this.coldProof = !!equipped('back')?.coldproof;        // Colossus mantle shrugs off the chill
     // charm: a single trinket slot with a flat percentage bonus
     const charm = equipped('charm');
     if (charm?.stats?.dmgPct) this.weapon.dmg *= 1 + charm.stats.dmgPct;

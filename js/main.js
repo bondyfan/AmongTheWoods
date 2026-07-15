@@ -1020,7 +1020,7 @@ function tickCold(dt) {
     if (coldK === 0) coldWarned = false;
     return;
   }
-  const warm = world.isTargetSafe?.(player.pos);
+  const warm = world.isTargetSafe?.(player.pos) || player.coldProof; // the Colossus mantle IS warmth
   const rate = warm ? -0.3 : (player.torchGear ? 0.5 : 1) / 75; // ~75 s to freeze
   coldK = Math.max(0, Math.min(1, coldK + rate * dt));
   if (coldK > 0.55 && !coldWarned) {
@@ -1519,6 +1519,17 @@ function startPlaying() {
         boss.lairDrop = lair.drop;   // guaranteed unique on death
         boss.lairId = poi.id;
         boss.lairBoss = true;        // calls its brood at half health
+        // some masters outgrow even a 3-skull frame (Grimfrost the Colossus)
+        if (lair.extraScale) {
+          boss.mesh.scale.multiplyScalar(lair.extraScale);
+          boss.sizeMult *= lair.extraScale;
+          boss.hitR *= lair.extraScale;
+          boss.range *= lair.extraScale;
+        }
+        if (lair.hpMult) {
+          boss.hp *= lair.hpMult;
+          boss.maxHp = boss.hp;
+        }
         boss.aggroed = false; boss.cryptId = poi.id;
         // the master of the lair stirs — a proper entrance
         ui.banner(`💀 ${lair.name} 💀`);
@@ -3550,14 +3561,17 @@ function step() {
       const progress = progressAt(player.pos.x, player.pos.z);
       ui.updateHUD(player, progress, BIOMES[game.biomeIndex].name);
 
-      if (radiusOf(player.pos.x, player.pos.z) >= WORLD.goalR) {
-        game.mode = 'won';
-        aimArc.visible = false;
-        audio.stopMusic(); setAmbience(null);
-        audio.sfx('victory', 0.6);
-        mp?.broadcastWin();
-        ui.showEnd(true, endStats());
-        document.getElementById('end-title').textContent = 'You crossed the whole wilds!';
+      // crossing the whole wilds is a MILESTONE, not the end — celebrate once
+      // (fat XP + fanfare) and keep the world running: Grimfrost, the summit
+      // and everything else are still out there
+      if (!game.crossedWilds && radiusOf(player.pos.x, player.pos.z) >= WORLD.goalR) {
+        game.crossedWilds = true;
+        const xp = questXpFor(player.level) * 4;
+        player.addXp(xp);
+        audio.sfx('victory', 0.7);
+        ui.banner('🏔️ YOU CROSSED THE WHOLE WILDS!');
+        ui.goldFlash();
+        ui.toast(`🏔️ From the cave to the world's icy rim: +${xp} XP. The peak still holds its masters — Grimfrost's lair and the summit await.`, 'level');
       }
     }
   }
