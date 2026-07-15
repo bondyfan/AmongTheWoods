@@ -93,7 +93,7 @@ const game = {
   kind: 'survival', // survival | moba
   paused: false,
   time: 0,
-  tod: 0.28,      // time of day 0..1 (0 = midnight, 0.5 = noon) — starts mid-morning
+  tod: 8 / 24,    // time of day 0..1 (0 = midnight) — the day opens at 08:00
   nightK: 0,      // 0 = full day, 1 = deep night (drives lights/spawns/fireflies)
   biomeIndex: 0,
   seed: 20260704,
@@ -1403,6 +1403,7 @@ function endStats() {
 function startPlaying() {
   ui.hideMenu();
   game.mode = 'play';
+  game.tod = START_TOD; // every run opens at 08:00 (co-op then syncs to the room epoch)
   audio.playMusic('level1');
   if (game.kind === 'survival') {
     // everyone gets their own camp at the cave mouth
@@ -2808,18 +2809,32 @@ function updateWaypoint() {
 }
 
 // ---------- day / night cycle ----------
-// A full day is DAY_LENGTH seconds. game.tod runs 0..1 (0 = midnight,
-// 0.5 = noon). nightK is a smooth 0 (day) .. 1 (deep night) used to dim the
-// world lights, tint the sky, swell spawns/aggro and scatter fireflies.
-const DAY_LENGTH = 600; // 10 real minutes per in-game day
+// game.tod runs 0..1 over one in-game day. One in-game HOUR = one real
+// minute, so a full day is 24 real minutes. The day opens at 08:00. Night is
+// 22:00-05:00; nightK is a smooth 0 (day) .. 1 (deep night).
+const DAY_LENGTH = 24 * 60; // 24 real minutes per day (1 game hour = 1 real minute)
+const START_TOD = 8 / 24;   // the game opens at 08:00
 const nightFlies = [];
 let fireflyGeo = null, fireflyMat = null, starField = null;
+
+// darkness by the hour: full night 22:00-05:00, day 07:00-20:00, smooth
+// dawn (05-07) and dusk (20-22) between
+function nightAtHour(h) {
+  if (h >= 22 || h < 5) return 1;
+  if (h >= 7 && h < 20) return 0;
+  const t = (h >= 5 && h < 7) ? 1 - (h - 5) / 2 : (h - 20) / 2; // dawn down / dusk up
+  return t * t * (3 - 2 * t); // smoothstep
+}
+
 function tickDayNight(dt) {
-  game.tod = (game.tod + dt / DAY_LENGTH) % 1;
-  // sun elevation: -1 midnight, +1 noon → dayness in [0,1]
-  const elev = Math.sin(game.tod * Math.PI * 2 - Math.PI / 2);
-  const dayness = Math.max(0, Math.min(1, elev * 1.6 + 0.5));
-  game.nightK = 1 - dayness;
+  // co-op: derive the clock from the shared room epoch so both players see
+  // the exact same time of day, no messages needed
+  if (mp?.active && mp.mode === 'coop' && mp.meta?.created) {
+    game.tod = (START_TOD + (Date.now() - mp.meta.created) / 1000 / DAY_LENGTH) % 1;
+  } else {
+    game.tod = (game.tod + dt / DAY_LENGTH) % 1;
+  }
+  game.nightK = nightAtHour(game.tod * 24);
   if (enemyMgr) enemyMgr.nightK = game.nightK;
 
   // HUD clock: a sun that sets into a moon
