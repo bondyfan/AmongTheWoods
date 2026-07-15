@@ -442,9 +442,11 @@ export class Panels {
   renderCharacter() {
     const p = this.player;
 
-    const DOLL = { left: ['weapon', 'offhand', 'head', 'chest', 'underlayer', 'legs'],
-                   right: ['boots', 'back', 'mount', 'charm', 'companion'] };
-    for (const side of ['left', 'right']) {
+    // armor hugs the doll on the sides; hands/mount/companion sit in a row below
+    const DOLL = { left: ['head', 'chest', 'underlayer'],
+                   right: ['legs', 'boots', 'back'],
+                   bottom: ['weapon', 'offhand', 'mount', 'companion', 'charm'] };
+    for (const side of ['left', 'right', 'bottom']) {
       const col = $('doll-' + side);
       col.innerHTML = '';
       for (const slot of DOLL[side]) {

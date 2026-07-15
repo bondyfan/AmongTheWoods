@@ -557,6 +557,7 @@ kbd {
   border: 1px solid rgba(232, 201, 106, 0.3);
 }
 .doll-col { display: flex; flex-direction: column; gap: 10px; }
+.doll-row { display: flex; gap: 10px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
 .doll-slot {
   width: 58px; height: 58px; border-radius: 10px; position: relative;
   background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.16);
