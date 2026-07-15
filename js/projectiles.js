@@ -1,7 +1,7 @@
 // ---- Arrows (player), bolts (guardian sphere) & enemy shots (poison/ice) ----
 
 import * as THREE from 'three';
-import { makeArrow, makeBolt, makeEnemyShot } from './models.js';
+import { makeArrow, makeBolt, makeEnemyShot, makeSpear } from './models.js';
 
 let nextProjectileId = 1;
 
@@ -36,13 +36,14 @@ export class Projectiles {
   }
 
   // Enemy spit: flies straight at where the player is right now.
-  spawnEnemyShot(origin, player, { dmg, speed, color, stun = 0, srcName = null }) {
-    const mesh = makeEnemyShot(color);
-    mesh.position.copy(origin);
+  spawnEnemyShot(origin, player, { dmg, speed, color, stun = 0, srcName = null, spear = false }) {
     const dir = new THREE.Vector3(player.pos.x, origin.y, player.pos.z).sub(origin).normalize();
+    const mesh = spear ? makeSpear() : makeEnemyShot(color);
+    mesh.position.copy(origin);
+    if (spear) mesh.rotation.y = Math.atan2(dir.x, dir.z); // point along its flight
     this.scene.add(mesh);
     this.list.push({
-      id: nextProjectileId++, kind: 'enemyShot', mesh, color, srcName,
+      id: nextProjectileId++, kind: 'enemyShot', mesh, color, srcName, spear,
       vel: dir.multiplyScalar(speed), dmg, stun, life: 2.2, hit: new Set(),
     });
   }
@@ -51,6 +52,7 @@ export class Projectiles {
   snapshotShots() {
     return this.list.filter(p => p.kind === 'enemyShot').map(p => ({
       i: p.id, x: +p.mesh.position.x.toFixed(1), z: +p.mesh.position.z.toFixed(1), c: p.color,
+      ...(p.spear ? { sp: 1 } : {}),
     }));
   }
 

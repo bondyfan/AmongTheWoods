@@ -162,8 +162,12 @@ export class Minimap {
     return !!this.discovered[cz * this.cols + cx];
   }
 
-  reveal(x, z) {
-    const r = Math.ceil(REVEAL_RADIUS / CELL);
+  reveal(x, z) { this.revealArea(x, z, REVEAL_RADIUS); }
+
+  // reveal all cells within `radius` world-metres of (x, z) — used by both the
+  // walking fog-of-war and the Scroll of Discovery.
+  revealArea(x, z, radius) {
+    const r = Math.ceil(radius / CELL);
     const { cx, cz } = this._cellAt(x, z);
     for (let dz = -r; dz <= r; dz++) {
       for (let dx = -r; dx <= r; dx++) {

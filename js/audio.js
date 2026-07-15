@@ -33,7 +33,8 @@ class AudioManager {
       'snapper_attack', 'snapper_death', 'scorpion_attack', 'scorpion_death',
       'thornling_attack', 'thornling_death', 'boar_attack', 'boar_death',
       'elk_attack', 'elk_death', 'bear_attack', 'bear_death',
-      'bee_attack', 'bee_death', 'cactus_attack', 'cactus_death'];
+      'bee_attack', 'bee_death', 'cactus_attack', 'cactus_death',
+      'spear_throw', 'map_reveal'];
     // nature ambience loops — warmed via HTTP cache, played through loopStart
     const AMB = ['forest_ambience', 'wind_ambience', 'swamp_ambience', 'cave_ambience', 'water_lapping'];
     const MUSIC = ['level1', 'level3', 'mainmenu'];

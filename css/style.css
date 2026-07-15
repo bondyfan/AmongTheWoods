@@ -292,6 +292,7 @@ kbd {
 #bigmap-canvas { border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); max-width: 100%;
   cursor: grab; touch-action: none; }
 #bigmap-canvas.dragging { cursor: grabbing; }
+#bigmap.discovery #bigmap-canvas { cursor: crosshair; box-shadow: 0 0 22px rgba(255, 210, 90, 0.55); }
 #minimap { cursor: pointer; pointer-events: auto; }
 
 /* ---------- griffin flight map ---------- */

@@ -78,6 +78,8 @@ const SOUNDS = [
   ['bee_death', 'A single bee squished: a short buzzing sputter cut off with a tiny wet pop, insect, no music, no voice', 0.6],
   ['cactus_attack', 'A living cactus creature attacking: dry woody creaking and a bristling rustle of sharp spines flicking out, arid and prickly, no music, no voice', 0.9],
   ['cactus_death', 'A cactus creature dying: a dry splitting crack of fibrous pulp and a soft collapsing thud of spines and flesh, arid, no music, no voice', 1.1],
+  ['spear_throw', 'A wooden spear thrown hard: a short grunt-less whoosh of a heavy javelin cutting the air and a faint whistle as it flies, dry and physical, no music, no voice', 0.8],
+  ['map_reveal', 'A magical parchment scroll unfurling: a soft papery whoosh and a warm shimmering sparkle chime as hidden land is revealed, gentle and pleasant, no music, no voice', 1.3],
 ];
 
 const exists = async (p) => { try { await access(p); return true; } catch { return false; } };

@@ -244,6 +244,16 @@ const player = new Player(scene, {
       audio.sfx('kill_gold', 0.45);
     }
   },
+  onCampHit: (camp, res) => {
+    if (res.firstHit) audio.sfx('mine_hit', 0.4, 120); // timber thudding
+    if (res.destroyed) {
+      pickups.spawn('scroll', 1, { x: camp.x, z: camp.z }, 1.0);
+      ui.toast('📜 The dwelling caves in — a Scroll of Discovery spills from the wreckage!', 'level');
+      audio.sfx('rock_crack', 0.5);
+      audio.sfx('kill_gold', 0.4, 120);
+    }
+  },
+  onScrollUse: () => startDiscovery(300),
   onLevelUp: (level) => {
     audio.sfx('evolve', 0.55);
     player.spawnLevelUpEffect();
@@ -1261,7 +1271,7 @@ function grantPickup(kind, payload) {
       ? `🎁 Loot: ${item.icon} ${item.name} — open your bag (C) and CLICK it to place a flight roost.`
       : `🎁 Loot: ${item.icon} ${item.name} — in your bag (equip in Character, C).`, 'level');
     panels.refresh();
-  } else if (kind === 'salve' || kind === 'roast' || kind === 'venom' || kind === 'honey') {
+  } else if (kind === 'salve' || kind === 'roast' || kind === 'venom' || kind === 'honey' || kind === 'scroll') {
     player.consumables[kind] = (player.consumables[kind] ?? 0) + payload;
     ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2),
       `+${payload} ${consumableById(kind).icon}`, '#c9e8a4');
@@ -2289,6 +2299,7 @@ input.onKey('KeyN', () => inPlay() && panels.toggle('bestiary'));
 // M / minimap click → the big world map (mute moved to Settings)
 let bigmapOpen = false;
 let bigmapT = 0;
+let discoveryMode = null; // { radius } while a Scroll of Discovery awaits a click
 function toggleBigMap(force) {
   if (game.kind !== 'survival' || game.mode !== 'play') { bigmapOpen = false; return; }
   bigmapOpen = force !== undefined ? force : !bigmapOpen;
@@ -2297,7 +2308,22 @@ function toggleBigMap(force) {
     audio.sfx('click', 0.4);
     minimap.bigPanX = minimap.bigPanZ = 0; // reopen centered on the player
     minimap.drawBig($id('bigmap-canvas'), player, mp?.mode === 'coop' ? mp.remote : null);
+  } else if (discoveryMode) {
+    // closing the map cancels an unused scroll draw — refund it
+    discoveryMode = null;
+    $id('bigmap').classList.remove('discovery');
   }
+}
+
+// Scroll of Discovery: open the map and wait for the player to pick a spot,
+// then reveal the fog within `radius` metres of it with a satisfying pulse.
+function startDiscovery(radius) {
+  if (panels.open) panels.toggle(null); // close the bag so the map is clickable
+  discoveryMode = { radius };
+  toggleBigMap(true);
+  $id('bigmap').classList.add('discovery');
+  ui.toast('📜 Pick a spot on the map to unfurl the scroll and reveal the land around it.', 'level');
+  audio.sfx('special', 0.5);
 }
 input.onKey('KeyM', () => toggleBigMap());
 $id('minimap').addEventListener('click', () => toggleBigMap());
@@ -2306,13 +2332,40 @@ $id('minimap').addEventListener('click', () => toggleBigMap());
 {
   const bigCanvas = $id('bigmap-canvas');
   let dragFrom = null;
+  // client px → world coords, and → canvas px (shared by drag/waypoint/scroll)
+  const canvasPx = (e) => {
+    const rect = bigCanvas.getBoundingClientRect();
+    const css2px = bigCanvas.width / (rect.width || bigCanvas.width);
+    return { cx: (e.clientX - rect.left) * css2px, cy: (e.clientY - rect.top) * css2px };
+  };
+  const toWorld = ({ cx, cy }) => ({
+    wx: (minimap._bigOx ?? -WORLD.radius) + cx / (minimap.bigScale || 1),
+    wz: (minimap._bigOz ?? -WORLD.radius) + cy / (minimap.bigScale || 1),
+  });
   bigCanvas.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
+    // Scroll of Discovery: left-click PICKS a spot instead of dragging
+    if (discoveryMode) { revealDiscovery(e); return; }
     dragFrom = { x: e.clientX, y: e.clientY };
     bigCanvas.setPointerCapture(e.pointerId);
     bigCanvas.classList.add('dragging');
   });
   bigCanvas.addEventListener('pointermove', (e) => {
+    // while a scroll is open, draw the 300 m reveal ring under the cursor
+    if (discoveryMode) {
+      minimap.drawBig(bigCanvas, player, mp?.mode === 'coop' ? mp.remote : null);
+      const { cx, cy } = canvasPx(e);
+      const rpx = discoveryMode.radius * (minimap.bigScale || 1);
+      const ctx = bigCanvas.getContext('2d');
+      ctx.save();
+      ctx.beginPath(); ctx.arc(cx, cy, rpx, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255, 226, 120, 0.14)';
+      ctx.strokeStyle = 'rgba(255, 226, 120, 0.9)';
+      ctx.lineWidth = 2; ctx.setLineDash([6, 5]);
+      ctx.fill(); ctx.stroke();
+      ctx.restore();
+      return;
+    }
     if (!dragFrom) return;
     // clientX is CSS px; the canvas may be shrunk by max-width — rescale
     const css2px = bigCanvas.width / (bigCanvas.clientWidth || bigCanvas.width);
@@ -2325,6 +2378,42 @@ $id('minimap').addEventListener('click', () => toggleBigMap());
   const stopDrag = () => { dragFrom = null; bigCanvas.classList.remove('dragging'); };
   bigCanvas.addEventListener('pointerup', stopDrag);
   bigCanvas.addEventListener('pointercancel', stopDrag);
+
+  // unfurl the scroll at the clicked spot: reveal the ring + a golden pulse
+  function revealDiscovery(e) {
+    const px = canvasPx(e);
+    const { wx, wz } = toWorld(px);
+    const radius = discoveryMode.radius;
+    discoveryMode = null;
+    $id('bigmap').classList.remove('discovery');
+    minimap.revealArea(wx, wz, radius);
+    minimap.redrawT = 0;
+    audio.sfx('map_reveal', 0.7);
+    ui.toast('📜 The scroll flares — the mist peels back!', 'level');
+    // a golden ring blooms outward from the chosen spot, then settles
+    const rpx = radius * (minimap.bigScale || 1);
+    let t = 0;
+    const pulse = () => {
+      if (!bigmapOpen) return;
+      t += 1 / 60;
+      minimap.drawBig(bigCanvas, player, mp?.mode === 'coop' ? mp.remote : null);
+      const ctx = bigCanvas.getContext('2d');
+      const k = Math.min(1, t / 0.7);
+      ctx.save();
+      ctx.beginPath(); ctx.arc(px.cx, px.cy, rpx * k, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(255, 226, 120, ${1 - k})`;
+      ctx.lineWidth = 3 + 4 * (1 - k);
+      ctx.shadowColor = 'rgba(255, 210, 90, 0.9)'; ctx.shadowBlur = 16;
+      ctx.stroke();
+      ctx.beginPath(); ctx.arc(px.cx, px.cy, rpx, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255, 226, 120, ${0.16 * (1 - k)})`;
+      ctx.fill();
+      ctx.restore();
+      if (t < 0.7) requestAnimationFrame(pulse);
+      else minimap.drawBig(bigCanvas, player, mp?.mode === 'coop' ? mp.remote : null);
+    };
+    requestAnimationFrame(pulse);
+  }
   // RIGHT-click drops a navigation waypoint at the clicked world point
   bigCanvas.addEventListener('contextmenu', (e) => {
     e.preventDefault();

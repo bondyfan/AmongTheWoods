@@ -430,6 +430,11 @@ export class Player {
     const c = consumableById(id);
     if (!c) return false;
     this.consumables[id]--;
+    if (c.reveal) {
+      // Scroll of Discovery: hand off to the UI to open the map & reveal a ring
+      this.hooks.onScrollUse?.(c);
+      return true;
+    }
     if (c.venomDur) {
       this.venomT = c.venomDur;
       this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2), '☠️ venom coat', '#8aff3a');
@@ -794,6 +799,14 @@ export class Player {
       const res = world.hitHive(hive, this.dmgMult * w.dmg);
       this.hooks.onHiveHit?.(hive, res);
       break; // one hive per swing
+    }
+
+    // raid a bandit dwelling — smash it apart for a Scroll of Discovery
+    for (const camp of (enemyMgr.campsNear?.(this.pos, w.range + 0.8) ?? [])) {
+      if (!this._inArc(camp.x, camp.z, w.range, camp.radius)) continue;
+      const res = enemyMgr.hitCamp(camp, this.dmgMult * w.dmg);
+      this.hooks.onCampHit?.(camp, res);
+      break; // one dwelling per swing
     }
 
     // berry bushes: any melee swing knocks ripe berries to the ground

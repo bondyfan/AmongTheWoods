@@ -22,7 +22,7 @@ import { ARENA, ARENA_RETURN_DELAY, arenaReward, ENEMY_TYPES, BOSS_RANKS,
 import { makeMan, makeAxe, makeBow, makePickaxe, makeEnemyMesh, makeMeatDrop, makeWoodDrop,
          makeStoneDrop, makeHideDrop, makeIronDrop, makeBerryDrop, makeSalveDrop, makeRoastDrop,
          makeEssenceDrop, makeWoolDrop, makeItemDrop,
-         makeEnemyShot, makeWolf, makeMobaTower, makeMobaBase,
+         makeEnemyShot, makeSpear, makeWolf, makeMobaTower, makeMobaBase,
          makeTeamFlag, TEAM_COLORS, mat } from './models.js';
 import { audio } from './audio.js';
 
@@ -231,9 +231,9 @@ class ShadowWorld {
       shotIds.add(sh.i);
       let s = this.shots.get(sh.i);
       if (!s) {
-        const mesh = makeEnemyShot(sh.c || 0x8aff3a);
+        const mesh = sh.sp ? makeSpear() : makeEnemyShot(sh.c || 0x8aff3a);
         this.scene.add(mesh);
-        s = { mesh, target: new THREE.Vector3(sh.x, 0.9, sh.z) };
+        s = { mesh, spear: !!sh.sp, target: new THREE.Vector3(sh.x, 0.9, sh.z) };
         s.mesh.position.copy(s.target);
         this.shots.set(sh.i, s);
       }
@@ -329,7 +329,13 @@ class ShadowWorld {
       }
     }
 
-    for (const s of this.shots.values()) s.mesh.position.lerp(s.target, Math.min(1, dt * 10));
+    for (const s of this.shots.values()) {
+      if (s.spear) {
+        const dx = s.target.x - s.mesh.position.x, dz = s.target.z - s.mesh.position.z;
+        if (dx * dx + dz * dz > 1e-4) s.mesh.rotation.y = Math.atan2(dx, dz);
+      }
+      s.mesh.position.lerp(s.target, Math.min(1, dt * 10));
+    }
   }
 
   dispose() {

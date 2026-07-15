@@ -21,7 +21,7 @@ export const BIOMES = [
     foliage: [0x2d6a2d, 0x3c7f37, 0x4c8f3f], trunk: 0x6b4a2d,
     trees: { pine: 0.4, leafy: 0.4, birch: 0.2, dead: 0 }, snowy: false,
     grass: 0x6fa04c, flowers: true, mushrooms: false,
-    enemies: ['rat', 'spider', 'snake', 'thornling'], humanoids: ['bandit'], packs: null, treeDensity: 1.0, denseForests: true,
+    enemies: ['rat', 'spider', 'snake'], humanoids: ['bandit'], packs: null, treeDensity: 1.0, denseForests: true,
     critters: ['rabbit', 'rabbit', 'rabbit', 'sheep'], night: { remove: ['rabbit', 'sheep'], add: 'spider' } },
   { name: 'Scorched Desert', rMax: 1200, ground: 0xd8b878, ground2: 0xc9a860, dirt: 0xb89050,
     fog: 0xe8d8b0, sky: 0xbcd8e8, desert: true,
@@ -180,9 +180,9 @@ export const ENEMY_TYPES = {
              hp: 1890, dmg: 40, speed: 9, range: 2.5, attackCd: 1.7, xp: 70, meat: 8, hitR: 1.5,  aggro: 18, behavior: 'heavy' },
   // -- humanoids: bandits, tribes & other two-legged trouble. Rarer than
   // beasts, and they travel in small camps (2-5 together). --
-  bandit:  { name: 'Bandit', icon: '🏹',
-             hp: 90,  dmg: 7,  meleeDmg: 5, speed: 6, range: 1.4, attackCd: 1.2, xp: 10, meat: 1, hitR: 0.55, aggro: 15,
-             humanoid: true, ranged: true, shootRange: 9, spellCd: 2.2, projectileSpeed: 22, shotColor: 0xd8b878 },
+  bandit:  { name: 'Bandit', icon: '🗡️',
+             hp: 90,  dmg: 9,  meleeDmg: 5, speed: 6, range: 1.4, attackCd: 1.2, xp: 10, meat: 1, hitR: 0.55, aggro: 15,
+             humanoid: true, ranged: true, spear: true, shootRange: 10, spellCd: 2.4, projectileSpeed: 20, shotColor: 0xb08a5a },
   banditBrute: { name: 'Bandit Brute', icon: '🪓',
              hp: 280, dmg: 13, speed: 6.5, range: 1.7, attackCd: 1.2, xp: 22, meat: 2, hitR: 0.8, aggro: 15,
              humanoid: true },
@@ -461,6 +461,8 @@ export const CONSUMABLES = [
     heal: 45, desc: 'Raided from a beehive. Click it in the inventory: +45 health.' },
   { id: 'venom', icon: '☠️', name: 'Snapjaw Venom', found: true, venomDur: 60,
     desc: 'Milked from a carnivorous bloom. Click to coat your weapon: attacks poison for 60 s.' },
+  { id: 'scroll', icon: '📜', name: 'Scroll of Discovery', found: true, reveal: 300,
+    desc: 'Looted from a raided bandit dwelling. Click it to open the map, then click anywhere to reveal the land within 300 m.' },
 ];
 export const consumableById = (id) => CONSUMABLES.find(c => c.id === id);
 

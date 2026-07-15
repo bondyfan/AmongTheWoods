@@ -3,7 +3,8 @@
 
 import * as THREE from 'three';
 import { makeMeatDrop, makeWoodDrop, makeItemDrop, makeStoneDrop, makeHideDrop, makeIronDrop,
-         makeBerryDrop, makeSalveDrop, makeRoastDrop, makeEssenceDrop, makeWoolDrop, makeHoneyDrop } from './models.js';
+         makeBerryDrop, makeSalveDrop, makeRoastDrop, makeEssenceDrop, makeWoolDrop, makeHoneyDrop,
+         makeScrollDrop } from './models.js';
 import { roundResource } from './config.js';
 import { audio } from './audio.js';
 
@@ -28,7 +29,7 @@ export class Pickups {
     const makers = { meat: makeMeatDrop, wood: makeWoodDrop, stone: makeStoneDrop,
                      hide: makeHideDrop, iron: makeIronDrop, berry: makeBerryDrop,
                      salve: makeSalveDrop, roast: makeRoastDrop, essence: makeEssenceDrop,
-                     wool: makeWoolDrop, honey: makeHoneyDrop, item: makeItemDrop };
+                     wool: makeWoolDrop, honey: makeHoneyDrop, scroll: makeScrollDrop, item: makeItemDrop };
     const mesh = (makers[kind] || makeItemDrop)();
     const x = pos.x + (Math.random() - 0.5) * scatter * 2;
     const z = pos.z + (Math.random() - 0.5) * scatter * 2;
@@ -106,5 +107,6 @@ export const pickupSfx = {
   stone: () => audio.sfx('click', 0.4, 80),
   hide: () => audio.sfx('kill_gold', 0.3, 80),
   iron: () => audio.sfx('upgrade', 0.35, 120),
+  scroll: () => audio.sfx('special', 0.55),
   item: () => audio.sfx('special', 0.55),
 };

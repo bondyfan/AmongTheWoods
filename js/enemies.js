@@ -347,9 +347,12 @@ export class EnemyManager {
     mesh.position.set(at.x, this.world.heightAt(at.x, at.z), at.z);
     mesh.rotation.y = Math.random() * Math.PI * 2;
     this.scene.add(mesh);
+    const obstacle = { x: at.x, z: at.z, r: kind === 'tribal' ? 1.8 : 1.9 };
+    this.world.obstacles?.push(obstacle);
+    // the dwelling is destructible — smash it for a Scroll of Discovery
     this.campSites ??= [];
-    this.campSites.push(mesh);
-    this.world.obstacles?.push({ x: at.x, z: at.z, r: kind === 'tribal' ? 1.8 : 1.9 });
+    this.campSites.push({ x: at.x, z: at.z, mesh, kind, obstacle,
+                          hp: 120, maxHp: 120, radius: obstacle.r + 0.5, dead: false });
     // some camps keep a caged prisoner — free him for a reward (E)
     if (Math.random() < 0.35) {
       const cx = at.x + 3.2, cz = at.z + 1.5;
@@ -359,6 +362,30 @@ export class EnemyManager {
       this.prisoners ??= [];
       this.prisoners.push({ x: cx, z: cz, mesh: cage, freed: false });
     }
+  }
+
+  // standing (undestroyed) camp dwellings within reach of a melee swing
+  campsNear(pos, radius) {
+    return (this.campSites ?? []).filter(c => !c.dead
+      && Math.hypot(c.x - pos.x, c.z - pos.z) < radius + c.radius);
+  }
+
+  // bash a dwelling; returns { firstHit, destroyed }
+  hitCamp(camp, dmg) {
+    const res = { firstHit: !camp.disturbed, destroyed: false };
+    camp.disturbed = true;
+    camp.hp -= dmg;
+    camp.mesh.rotation.z = (Math.random() - 0.5) * 0.09; // shudder under the blow
+    if (camp.hp <= 0 && !camp.dead) {
+      camp.dead = true;
+      res.destroyed = true;
+      // collapse into rubble and clear the collision so you can walk the ruin
+      camp.mesh.scale.y *= 0.32;
+      camp.mesh.position.y -= 0.28;
+      camp.mesh.rotation.z = (Math.random() - 0.5) * 0.5;
+      if (camp.obstacle) camp.obstacle.r = 0;
+    }
+    return res;
   }
 
   prisonerNear(x, z, radius = 3) {
@@ -882,10 +909,13 @@ export class EnemyManager {
           }
         } else {
           projectiles.spawnEnemyShot(origin, target, {
-            dmg: e.dmg, speed: e.cfg.projectileSpeed, color: e.cfg.shotColor, stun: e.cfg.stun || 0, srcName: e.bossName ?? e.cfg.name,
+            dmg: e.dmg, speed: e.cfg.projectileSpeed, color: e.cfg.shotColor, stun: e.cfg.stun || 0,
+            srcName: e.bossName ?? e.cfg.name, spear: !!e.cfg.spear,
           });
         }
-        audio.sfx('attack_ranged', 0.18, 200);
+        // spear-throwers get a distinct heave-and-whistle; others the generic hiss
+        if (e.cfg.spear) audio.sfx('spear_throw', 0.4, 160);
+        else audio.sfx('attack_ranged', 0.18, 200);
         audio.creature(e.type, 'attack', 0.32, 200);
           e.atkAt = this.world.time;
       }

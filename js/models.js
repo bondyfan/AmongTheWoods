@@ -1663,6 +1663,36 @@ export function makeEnemyShot(color) {
     new THREE.MeshBasicMaterial({ color }));
 }
 
+// A thrown spear/javelin — a long wooden shaft with an iron head, pointing +Z
+// (the caller yaws it to face its flight direction).
+export function makeSpear() {
+  const g = new THREE.Group();
+  const shaft = cyl(0.035, 0.035, 1.15, 0x7a5a34, 6);
+  shaft.rotation.x = Math.PI / 2; // lay it along Z
+  const head = cone(0.09, 0.32, 0x9aa0a8, 6);
+  head.rotation.x = Math.PI / 2;  // point +Z
+  head.position.z = 0.72;
+  const bind = cyl(0.05, 0.05, 0.09, 0x4a3620, 6);
+  bind.rotation.x = Math.PI / 2;
+  bind.position.z = 0.52;
+  g.add(shaft, head, bind);
+  return g;
+}
+
+// Rolled scroll dropped by a raided bandit dwelling.
+export function makeScrollDrop() {
+  const g = new THREE.Group();
+  const paper = cyl(0.14, 0.14, 0.42, 0xe8dcb0, 9);
+  paper.rotation.z = Math.PI / 2;
+  const capA = cyl(0.155, 0.155, 0.06, 0xb89a5a, 9);
+  capA.rotation.z = Math.PI / 2; capA.position.x = 0.2;
+  const capB = capA.clone(); capB.position.x = -0.2;
+  const ribbon = box(0.05, 0.3, 0.3, 0xc0442f);
+  g.add(paper, capA, capB, ribbon);
+  g.scale.setScalar(0.9);
+  return g;
+}
+
 // ---------- aim indicator: a short arc of the weapon-range circle, shown in
 // the direction the player is currently facing (scaled by range each frame) ----
 export function makeAimArc() {
