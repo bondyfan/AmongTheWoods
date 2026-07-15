@@ -461,6 +461,44 @@ export class Minimap {
       }
     }
     const inView = (wx, wz) => wx >= ox && wx <= ox + vspan && wz >= oz && wz <= oz + vspan;
+
+    // ---- ring borders between biomes + the road that threads their gates ----
+    // borders show as faint dashed circles; a gap in the circle = an ENTRANCE.
+    for (const ring of this.world.rings ?? []) {
+      ctx.strokeStyle = ring.type === 'river' ? 'rgba(120,180,230,0.5)' : 'rgba(180,150,110,0.55)';
+      ctx.lineWidth = 1.4;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      ctx.arc(toX(0), toY(0), ring.r * scale, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // each gate: erase the border there and mark it with an entrance chevron
+      for (const gap of ring.gaps ?? []) {
+        const gx = Math.sin(gap.a) * ring.r, gz = Math.cos(gap.a) * ring.r;
+        if (!inView(gx, gz)) continue;
+        const bx = toX(gx), by = toY(gz);
+        ctx.fillStyle = '#f2d24a';
+        ctx.strokeStyle = '#3a2c08';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(bx, by, 3.6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.beginPath(); ctx.arc(bx, by, 1.4, 0, Math.PI * 2);
+        ctx.fillStyle = '#3a2c08'; ctx.fill();
+      }
+    }
+    // the winding road from home out through every gate — a warm dotted trail
+    const road = this.world.pathPts;
+    if (road && road.length > 1) {
+      ctx.strokeStyle = 'rgba(232, 206, 140, 0.8)';
+      ctx.lineWidth = Math.max(1.6, 2.4 * Math.min(1, scale * 8));
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.setLineDash([Math.max(3, 5 * Math.min(1, scale * 6)), 4]);
+      ctx.beginPath();
+      ctx.moveTo(toX(road[0].x), toY(road[0].z));
+      for (let i = 1; i < road.length; i++) ctx.lineTo(toX(road[i].x), toY(road[i].z));
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
     ctx.textAlign = 'center';
     ctx.font = '13px sans-serif';
     if (inView(0, 0)) ctx.fillText('🏠', toX(0), toY(0) + 4);

@@ -497,7 +497,10 @@ export class Panels {
     if (p.level > 1) spParts.push(`+${((p.level - 1) * 0.1).toFixed(1)} level`);
     const boots = itemById(p.equipment.boots);
     if (boots?.stats?.speed) spParts.push(`+${boots.stats.speed} ${boots.name}`);
-    rows.push(['🏃 Speed', (Math.round(p.speed * 10) / 10), spParts.join(' · ')]);
+    if (p.mounted) spParts.push('+9 🐴 horse');
+    // the +9 mount bonus is added at move time, not baked into p.speed — show the total
+    const shownSpeed = p.speed + (p.mounted ? 9 : 0);
+    rows.push(['🏃 Speed', (Math.round(shownSpeed * 10) / 10), spParts.join(' · ')]);
 
     const rgParts = [`${base.range} m ${itemById(p.equipment.weapon)?.name ?? 'fists'}`];
     if (s.range) rgParts.push(`+${((base.kind === 'bow' ? 2 : 0.1) * s.range).toFixed(1)} m training`);

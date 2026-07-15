@@ -36,7 +36,7 @@ export const BIOMES = [
     trees: { pine: 0.55, leafy: 0.25, birch: 0, dead: 0.2 }, snowy: false,
     grass: 0x44663a, flowers: false, mushrooms: true,
     enemies: ['spider', 'snake', 'wolf', 'venomspider', 'bat'], humanoids: ['bandit', 'banditBrute'], packs: { skulls: [0.7, 0.3, 0] }, treeDensity: 1.3, denseForests: true,
-    spiderHaunt: true, webField: true, critters: ['rabbit', 'horse'], night: { remove: ['rabbit', 'snake'], add: 'venomspider' } },
+    spiderHaunt: true, webField: true, critters: ['rabbit'], night: { remove: ['rabbit', 'snake'], add: 'venomspider' } },
   { name: 'Murky Swamp',    rMax: 2900, ground: 0x565c30, ground2: 0x4a5230, dirt: 0x3a3c28,
     fog: 0x3c4a44, sky: 0x3a4650, darkness: 0.4, light: 0.62,
     foliage: [0x3a5a30, 0x2e4a2a, 0x4a6438], trunk: 0x453a28,
