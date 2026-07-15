@@ -402,28 +402,36 @@ export class World {
       if (!ring.gaps.length) break;
       let gate = ring.gaps[0];
       for (const g of ring.gaps) if (angDiff(g.a, curA) < angDiff(gate.a, curA)) gate = g;
-      const gx = Math.sin(gate.a) * ring.r, gz = Math.cos(gate.a) * ring.r;
-      const dist = Math.hypot(gx - cur.x, gz - cur.z);
-      const n = Math.max(4, Math.ceil(dist / 22));
-      // perpendicular for the meander offset
-      const px = -(gz - cur.z) / dist, pz = (gx - cur.x) / dist;
+      // Interpolate in POLAR space (angle + radius), NOT along a straight
+      // Cartesian chord: a chord between two gates far apart in angle cuts
+      // back through the center. Sweeping the angle at a steadily growing
+      // radius keeps the road heading OUTWARD, straight into the gate.
+      const startR = Math.hypot(cur.x, cur.z) || 1;
+      const gateR = ring.r;
+      let dA = gate.a - curA;                       // take the SHORT way round
+      while (dA > Math.PI) dA -= Math.PI * 2;
+      while (dA < -Math.PI) dA += Math.PI * 2;
+      const arcLen = Math.abs(dA) * (startR + gateR) * 0.5;
+      const dist = Math.hypot(arcLen, gateR - startR);
+      const n = Math.max(5, Math.ceil(dist / 22));
       const waves = 2 + Math.floor(rng() * 3), phase = rng() * Math.PI * 2;
-      const amp = Math.min(60, dist * (0.05 + rng() * 0.05));
+      const amp = Math.min(50, dist * (0.04 + rng() * 0.04));
       for (let i = 1; i <= n; i++) {
         const t = i / n;
-        // meander fades near both endpoints so gates are hit dead-on
+        // meander is a RADIAL wobble that fades at both ends, so the gate is
+        // still hit dead-on and the path never swings toward the center
         const fade = Math.sin(t * Math.PI);
         const off = Math.sin(t * Math.PI * waves + phase) * amp * fade
-          + (valueNoise(t * 900, 0, 60, this.seed + 777) - 0.5) * 26 * fade;
-        pts.push({ x: cur.x + (gx - cur.x) * t + px * off,
-                   z: cur.z + (gz - cur.z) * t + pz * off });
+          + (valueNoise(t * 900, 0, 60, this.seed + 777) - 0.5) * 22 * fade;
+        const a = curA + dA * t;
+        const r = startR + (gateR - startR) * t + off;
+        pts.push({ x: Math.sin(a) * r, z: Math.cos(a) * r });
       }
-      cur = { x: gx, z: gz };
-      curA = gate.a;
       // step just past the gate so the path re-emerges on the far side
-      const outX = Math.sin(gate.a) * (ring.r + 30), outZ = Math.cos(gate.a) * (ring.r + 30);
-      pts.push({ x: outX, z: outZ });
-      cur = { x: outX, z: outZ };
+      curA = gate.a;
+      const outR = ring.r + 30;
+      cur = { x: Math.sin(gate.a) * outR, z: Math.cos(gate.a) * outR };
+      pts.push({ x: cur.x, z: cur.z });
     }
     this.pathPts = pts;
     // bucket segments on an 80 m grid so pathDistance stays cheap per vertex
