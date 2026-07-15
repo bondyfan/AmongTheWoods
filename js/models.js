@@ -1663,6 +1663,112 @@ export function makeEnemyShot(color) {
     new THREE.MeshBasicMaterial({ color }));
 }
 
+// ---------- lair entrance: a burrow/cave mouth, dressed per biome ----------
+// A low earthen mound with a gaping black hole — reads as "something lives
+// down there", not as a building. Ring picks the biome dressing.
+export function makeLairEntrance(ring = 0) {
+  const THEMES = [
+    { rock: 0x5d7a42, accent: 'leaves' },   // 0 Verdant — mossy burrow
+    { rock: 0xc9a860, accent: 'bones' },    // 1 Desert — sun-bleached hollow
+    { rock: 0x3a4a30, accent: 'roots' },    // 2 Dark Forest — root-torn maw
+    { rock: 0x5a5c38, accent: 'reeds' },    // 3 Swamp — mud sinkhole
+    { rock: 0x8a8578, accent: 'slabs' },    // 4 Highlands — cracked crag
+    { rock: 0x55505e, accent: 'graves' },   // 5 Haunted — pale barrow
+    { rock: 0x4a7a3a, accent: 'vines' },    // 6 Jungle — overgrown stone maw
+    { rock: 0xc4d6e4, accent: 'icicles' },  // 7 Frozen — ice cave mouth
+  ];
+  const T = THEMES[ring] ?? THEMES[0];
+  const g = new THREE.Group();
+
+  // the mound: a squashed rocky dome
+  const mound = sphere(2.5, T.rock, 7);
+  mound.scale.set(1.3, 0.72, 1.05);
+  mound.position.y = 0.35;
+  g.add(mound);
+
+  // the MOUTH: a pitch-black opening punched into the front face
+  const mouth = new THREE.Mesh(new THREE.CircleGeometry(1.0, 12),
+    new THREE.MeshBasicMaterial({ color: 0x030303 }));
+  mouth.position.set(0, 0.8, 2.42);
+  mouth.rotation.x = -0.12;
+  g.add(mouth);
+
+  // rough boulders ringing the mouth like broken teeth
+  for (let i = 0; i < 5; i++) {
+    const a = Math.PI * (0.15 + (i / 4) * 0.7); // arc over the top of the hole
+    const b = sphere(0.34 + Math.random() * 0.18, T.rock, 5);
+    b.position.set(Math.cos(a) * 1.35, 0.8 + Math.sin(a) * 1.15, 2.3);
+    b.scale.y = 0.8;
+    g.add(b);
+  }
+  // trampled dirt apron in front of the hole
+  const apron = new THREE.Mesh(new THREE.CircleGeometry(1.6, 9), mat(0x2c2418));
+  apron.rotation.x = -Math.PI / 2;
+  apron.position.set(0, 0.02, 3.0);
+  g.add(apron);
+
+  // ---- biome dressing ----
+  const acc = T.accent;
+  if (acc === 'leaves' || acc === 'vines') {
+    // moss tufts / hanging vines over the mouth
+    const green = acc === 'vines' ? 0x2f8a28 : 0x4a7a30;
+    for (let i = 0; i < 4; i++) {
+      const v = cyl(0.06, 0.06, 0.7 + Math.random() * 0.5, green, 5);
+      v.position.set(-0.9 + i * 0.6, 1.6 - (acc === 'vines' ? 0.35 : 0.1), 2.45);
+      g.add(v);
+    }
+  } else if (acc === 'bones') {
+    // a great ribcage arching over the hole
+    for (let i = 0; i < 3; i++) {
+      const rib = new THREE.Mesh(new THREE.TorusGeometry(1.3 + i * 0.12, 0.07, 5, 10, Math.PI),
+        mat(0xe8e0d0));
+      rib.position.set(0, 0.5, 1.6 - i * 0.7);
+      g.add(rib);
+    }
+  } else if (acc === 'roots') {
+    // gnarled roots clawing around the entrance
+    for (let i = 0; i < 4; i++) {
+      const r = cyl(0.1, 0.16, 1.7, 0x4a3520, 5);
+      r.position.set(i < 2 ? -1.5 : 1.5, 0.8, 1.9 + (i % 2) * 0.4);
+      r.rotation.z = (i < 2 ? -1 : 1) * (0.5 + (i % 2) * 0.3);
+      g.add(r);
+    }
+  } else if (acc === 'reeds') {
+    for (let i = 0; i < 6; i++) {
+      const reed = cyl(0.045, 0.045, 1.0 + Math.random() * 0.6, 0x6a7a30, 4);
+      const a = Math.random() * Math.PI * 2, rr = 2.2 + Math.random() * 0.8;
+      reed.position.set(Math.cos(a) * rr, 0.5, Math.sin(a) * rr * 0.6 + 1.4);
+      reed.rotation.z = (Math.random() - 0.5) * 0.3;
+      g.add(reed);
+    }
+  } else if (acc === 'slabs') {
+    // sheared rock slabs leaning against the crag
+    for (let i = 0; i < 3; i++) {
+      const s = box(0.5, 1.6, 0.25, 0x76705f);
+      s.position.set(-1.8 + i * 1.8, 0.8, 1.6);
+      s.rotation.z = (i - 1) * 0.35;
+      g.add(s);
+    }
+  } else if (acc === 'graves') {
+    // two leaning gravestones flanking the barrow mouth
+    for (const side of [-1, 1]) {
+      const gs = box(0.5, 0.9, 0.16, 0x9a97a4);
+      gs.position.set(side * 1.7, 0.45, 2.6);
+      gs.rotation.z = side * 0.22;
+      g.add(gs);
+    }
+  } else if (acc === 'icicles') {
+    // icicles fanging down over the mouth
+    for (let i = 0; i < 5; i++) {
+      const ice = cone(0.09, 0.5 + Math.random() * 0.4, 0xdfefFa, 5);
+      ice.rotation.x = Math.PI;
+      ice.position.set(-0.8 + i * 0.4, 1.7, 2.4);
+      g.add(ice);
+    }
+  }
+  return g;
+}
+
 // A hand-held burning torch: wooden handle, tarred head, animated flame and
 // an additive glow sprite so the blaze reads even in full daylight.
 // userData exposes { flame, flameCore, glow } for per-frame flicker.

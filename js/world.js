@@ -12,7 +12,8 @@ import { makeTree, makeRock, makeGrassTuft, makeFlower, makeMushroom, makeBush,
          makeBerryBush, makeShrine, makeMonolith, makeCrypt, makeBlacksmith, makeCobweb,
          makeFarm, makeTrader, makeBeehive, makeBeehiveBig, makeCocoon, makeGlade, makeGraveyardRuin,
          makeCursedStatue, makeVillage, makeRaceFlag, makeNest, makeLilypad,
-         makeTemple, makeLianaPole, makeBonfire, makeSummitCairn, makeCactus } from './models.js';
+         makeTemple, makeLianaPole, makeBonfire, makeSummitCairn, makeCactus,
+         makeLairEntrance } from './models.js';
 import { audio } from './audio.js';
 
 const CHUNK = 40;
@@ -1246,7 +1247,7 @@ export class World {
     // -- landmarks whose spot falls inside this chunk --
     for (const poi of this.pois) {
       if (poi.x < cxw || poi.x >= cxw + CHUNK || poi.z < czw || poi.z >= czw + CHUNK) continue;
-      const mesh = poi.type === 'lair' ? makeCrypt()
+      const mesh = poi.type === 'lair' ? makeLairEntrance(poi.ring)
         : poi.type === 'temple' ? makeTemple()
         : poi.type === 'liana' ? makeLianaPole()
         : poi.type === 'bonfire' ? makeBonfire()

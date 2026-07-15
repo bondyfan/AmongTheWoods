@@ -58,7 +58,25 @@ const wolfHead = (extra = '') => S(`
 
 const bolt = (fill, dark) => `<path d="M18 2L7 18h6l-3 12 12-17h-6l4-11z" fill="${fill}" stroke="${dark}" stroke-width="1.3" stroke-linejoin="round"/>`;
 
+// hand torch: wooden handle, tar wrap, layered flame — tiers differ by flame
+// heat and halo (no emoji on items, ever)
+const torchIcon = (outer, inner, halo = '') => S(`${halo}
+  <line x1="16" y1="29" x2="16" y2="15" stroke="${WOOD}" stroke-width="3.8" stroke-linecap="round"/>
+  <line x1="16" y1="29" x2="16" y2="15" stroke="${WOOD_D}" stroke-width="1.2" stroke-linecap="round" opacity="0.4"/>
+  <rect x="12.4" y="12.6" width="7.2" height="4.6" rx="1.8" fill="#3a2a16" stroke="#241809" stroke-width="1"/>
+  <path d="M16 2.5c3.2 3.4 5 6 5 8.6 0 3.1-2.2 5.1-5 5.1s-5-2-5-5.1c0-2.6 1.8-5.2 5-8.6z"
+    fill="${outer}" stroke="#a84a10" stroke-width="1.2" stroke-linejoin="round"/>
+  <path d="M16 6.8c1.7 2 2.5 3.4 2.5 4.8 0 1.8-1.1 2.9-2.5 2.9s-2.5-1.1-2.5-2.9c0-1.4.8-2.8 2.5-4.8z"
+    fill="${inner}"/>`);
+
 export const ITEM_ICONS = {
+  // ===== expedition torches =====
+  torch: torchIcon('#ff9a2e', '#ffd873'),
+  torchoil: torchIcon('#ffb036', '#fff2b0',
+    `<circle cx="16" cy="10" r="9.5" fill="#ffb036" opacity="0.18"/>`),
+  torchember: torchIcon('#ff6b1a', '#ffe08a',
+    `<circle cx="16" cy="10" r="12" fill="#ff5a1a" opacity="0.2"/>
+     <circle cx="16" cy="10" r="8" fill="#ff8a2a" opacity="0.25"/>`),
   // ===== spells =====
   haste: S(bolt('#ffe94a', '#b8960a')),
   powerDash: S(`

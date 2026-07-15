@@ -615,6 +615,8 @@ kbd {
   border-radius: 10px; background: rgba(255,160,40,0.06); }
 .admin-box h4 { margin: 0 0 8px; color: #ffb554; font-size: 13px; }
 .admin-box h4 small { color: #b9a68a; font-weight: normal; margin-left: 6px; }
+.admin-presets { display: flex; gap: 8px; margin-bottom: 10px; }
+.admin-presets .buy-btn { flex: 1; }
 .admin-field { display: inline-flex; flex-direction: column; gap: 2px; margin: 0 8px 6px 0;
   font-size: 11px; color: #cfc4ae; }
 .admin-field input { width: 72px; background: rgba(0,0,0,0.35); color: #ffe8c0;

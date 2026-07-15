@@ -528,12 +528,25 @@ export class Panels {
         ['maxHp', 'Max HP'], ['speed', 'Speed'], ['range', 'Range m'], ['regen', 'Regen/s']];
       const box = document.createElement('div');
       box.className = 'admin-box';
+      // one-click power presets, then the per-stat override fields
+      const PRESETS = [
+        ['Strong',    { speed: 40, maxHp: 500,  regen: 20,  attack: 40,   aspd: 7 }],
+        ['Stronger',  { speed: 40, maxHp: 1500, regen: 70,  attack: 150,  aspd: 8 }],
+        ['Strongest', { speed: 40, maxHp: 5000, regen: 500, attack: 1000, aspd: 10 }],
+      ];
       box.innerHTML = '<h4>🛠 Admin overrides <small>blank = default</small></h4>' +
+        `<div class="admin-presets">${PRESETS.map(([name], i) =>
+          `<button class="buy-btn" data-preset="${i}">${name}</button>`).join('')}</div>` +
         fields.map(([k, l]) => `<label class="admin-field">${l}
           <input type="number" step="any" data-adm="${k}" value="${ov[k] ?? ''}" placeholder="—"></label>`).join('');
       $('char-stats').appendChild(box);
       box.querySelectorAll('input').forEach(inp => inp.addEventListener('change', () => {
         this.hooks.onAdminStat?.(inp.dataset.adm, inp.value === '' ? null : +inp.value);
+      }));
+      box.querySelectorAll('[data-preset]').forEach(btn => btn.addEventListener('click', () => {
+        for (const [k, v] of Object.entries(PRESETS[+btn.dataset.preset][1]))
+          this.hooks.onAdminStat?.(k, v);
+        this.renderCharacter(); // show the freshly applied numbers
       }));
     }
 

@@ -108,6 +108,7 @@ const game = {
     };
   },
 };
+if (DEVMODE) game.adminMode = true; // ?devmode boots straight into admin mode
 
 // multiplayer session (loaded on demand from the menu; null in solo play)
 let mp = null;
@@ -903,9 +904,11 @@ function tickTorch(dt) {
   if (!torchLight) return;
   torchT += dt;
   torchLight.distance = player.torchGear.radius ?? 5; // tier bubble, follows swaps live
-  // real fire never burns steady; in daylight the lamp fades to a warm shimmer
-  torchLight.intensity = (dark ? 2.6 : 0.9)
-    + Math.sin(torchT * 9) * 0.25 + Math.sin(torchT * 23.7) * 0.15;
+  // real fire never burns steady: layered sine flicker + a slow guttering
+  // wave, much stronger in the dark where the flame carries the scene
+  const flick = Math.sin(torchT * 9) * 0.45 + Math.sin(torchT * 23.7) * 0.3
+    + Math.sin(torchT * 3.1) * 0.2;
+  torchLight.intensity = (dark ? 3.2 : 0.9) + flick * (dark ? 1 : 0.4);
   const p = player.mesh.position;
   torchLight.position.set(p.x, p.y + 1.5, p.z);
   // flicker the HELD flame (mesh lives in the player's hand socket)
@@ -3067,7 +3070,10 @@ function updateAim() {
       0, player.pos.z + player.facing.z * player.attackRange);
   } else {
     // normal free cursor: the aim point is exactly where the mouse hits the
-    // ground, and the player simply faces it (no clamping)
+    // ground, and the player simply faces it (no clamping). The plane rides
+    // at the PLAYER's height — critical in lair dungeons (floor at y=-60),
+    // where a fixed y=0 plane sits behind the camera and aiming froze.
+    groundPlane.constant = -(player.y ?? 0);
     raycaster.setFromCamera(new THREE.Vector2(input.mouse.x, input.mouse.y), camera);
     raycaster.ray.intersectPlane(groundPlane, aimPoint);
   }
@@ -3225,8 +3231,9 @@ function tickDayNight(dt) {
     clock.textContent = `${icon} ${String(hh).padStart(2, '0')}:00`;
   }
 
-  // screen darkening
-  $id('night-tint').style.opacity = (game.nightK * 0.6).toFixed(2);
+  // screen darkening — never underground: the dungeon does its own gloom, and
+  // a DOM overlay would flatten the torchlight into darkness
+  $id('night-tint').style.opacity = game.dungeon ? '0' : (game.nightK * 0.6).toFixed(2);
 
   // stars fade in on the night sky (a static field parked on the camera)
   if (!starField) {
@@ -3297,7 +3304,7 @@ function updateAtmosphere(dt) {
     scene.fog.far = 58;
     hemi.intensity = 0.24; // torchlight carries the scene down here
     sun.intensity = 0.12;
-    $id('biome-gloom').style.opacity = 0.55;
+    $id('biome-gloom').style.opacity = 0.3; // a soft edge vignette — the REAL dark comes from fog, so torchlight stays visible
     setAmbience('cave_ambience');
     envSpeedMult = 1;
     return;
