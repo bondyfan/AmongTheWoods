@@ -243,6 +243,39 @@ export class Minimap {
       }
     }
 
+    // ---- biome-ring borders + their gate entrances + the road ----
+    // drawn inside the rotated map so they line up with the terrain
+    for (const ring of this.world.rings ?? []) {
+      const c = toC(0, 0);
+      ctx.strokeStyle = ring.type === 'river' ? 'rgba(120,180,230,0.55)' : 'rgba(190,160,115,0.6)';
+      ctx.lineWidth = 1.3;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, ring.r * scale, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      for (const gap of ring.gaps ?? []) {
+        const gp = toC(Math.sin(gap.a) * ring.r, Math.cos(gap.a) * ring.r);
+        if (!inView(gp)) continue;
+        ctx.fillStyle = '#f2d24a';
+        ctx.strokeStyle = '#3a2c08'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(gp.x, gp.y, 3.2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      }
+    }
+    const road = this.world.pathPts;
+    if (road && road.length > 1) {
+      ctx.strokeStyle = 'rgba(236, 210, 146, 0.85)';
+      ctx.lineWidth = 2.2;
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      const p0 = toC(road[0].x, road[0].z);
+      ctx.moveTo(p0.x, p0.y);
+      for (let i = 1; i < road.length; i++) { const p = toC(road[i].x, road[i].z); ctx.lineTo(p.x, p.y); }
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
     // home marker (only when it's inside the view)
     const hc = toC(0, 0);
     if (inView(hc)) {
