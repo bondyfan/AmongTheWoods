@@ -275,9 +275,9 @@ export class Minimap {
       ctx.stroke();
       ctx.setLineDash([]);
     };
-    // fork spurs first (under the main road): lair = red, dead-end = faded grey
+    // all trails look IDENTICAL — the player can't tell which fork leads where
     for (const br of this.world.branches ?? [])
-      drawTrail(br.pts, br.kind === 'lair' ? 'rgba(226, 96, 80, 0.8)' : 'rgba(150, 146, 130, 0.55)', 1.8);
+      drawTrail(br.pts, 'rgba(236, 210, 146, 0.85)', 2.2);
     drawTrail(this.world.pathPts, 'rgba(236, 210, 146, 0.85)', 2.2);
 
     // home marker (only when it's inside the view)
@@ -536,8 +536,9 @@ export class Minimap {
       ctx.stroke();
       ctx.setLineDash([]);
     };
+    // every fork looks the SAME as the main road — no telling where each leads
     for (const br of this.world.branches ?? [])
-      drawTrailBig(br.pts, br.kind === 'lair' ? 'rgba(226, 96, 80, 0.75)' : 'rgba(150, 146, 130, 0.5)', roadW * 0.8);
+      drawTrailBig(br.pts, 'rgba(232, 206, 140, 0.8)', roadW);
     drawTrailBig(this.world.pathPts, 'rgba(232, 206, 140, 0.8)', roadW);
 
     ctx.textAlign = 'center';
