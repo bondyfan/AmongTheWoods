@@ -450,6 +450,15 @@ export class Player {
     this._updateLevelFx(dt); // cosmetic — keeps animating regardless of state
     if (this.dead) return;
 
+    // caught in a dust devil: the tornado owns our position & vertical this
+    // frame — no walking, no attacks, and (crucially) NO regen while aloft.
+    if (this.captured) {
+      this.hurtT += dt;
+      this.attackCd = Math.max(0, this.attackCd - dt);
+      this._updateSlashes?.(dt);
+      return;
+    }
+
     // timed effects
     this.hasteT = Math.max(0, this.hasteT - dt);
     this.rageT = Math.max(0, this.rageT - dt);

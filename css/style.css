@@ -359,6 +359,25 @@ kbd {
   background: radial-gradient(ellipse at center, rgba(30, 45, 22, 0.88) 0%, rgba(8, 13, 6, 0.96) 100%);
 }
 .menu-inner { text-align: center; max-width: 640px; padding: 20px; }
+/* signed-in identity badge, top-right of the menu */
+#user-badge {
+  position: absolute; top: 18px; right: 20px; z-index: 2;
+  display: flex; align-items: center; gap: 9px;
+  background: rgba(12, 20, 9, 0.72); border: 1px solid rgba(150, 190, 110, 0.28);
+  border-radius: 22px; padding: 5px 8px 5px 5px;
+  color: #dbead0; font-size: 13.5px;
+}
+#user-badge.hidden { display: none; }
+#user-badge img { width: 30px; height: 30px; border-radius: 50%; object-fit: cover;
+  background: rgba(255,255,255,0.1); }
+#user-badge #user-name { font-weight: 600; max-width: 160px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+#user-badge #user-signout {
+  margin-left: 4px; background: rgba(180, 70, 60, 0.22); color: #f0c9c2;
+  border: 1px solid rgba(200, 90, 70, 0.4); border-radius: 14px;
+  padding: 4px 11px; font-size: 12px; cursor: pointer;
+}
+#user-badge #user-signout:hover { background: rgba(200, 80, 66, 0.4); color: #fff; }
 .menu-inner h1 {
   font-size: 72px; line-height: 1.02; letter-spacing: 4px; color: #d8e6c0;
   text-shadow: 0 4px 24px rgba(0,0,0,0.9), 0 0 60px rgba(120, 190, 80, 0.25);

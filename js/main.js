@@ -902,12 +902,30 @@ function tickTorch(dt) {
   torchLight.intensity = 2.1 + Math.sin(torchT * 9) * 0.25 + Math.sin(torchT * 23.7) * 0.15;
 }
 
-// ---------- desert dust devils: wandering sand vortices that FLING you ----------
+// ---------- desert dust devils: giant sand tornadoes that SWALLOW you ----------
+// The funnel sucks the player in, whirls them high off the ground (draining
+// half their max HP and cutting all regen while aloft), then flings them out.
 let devil = null, devilCd = 45;
+const DEVIL_CAPTURE_R = 3.6;   // funnel is ~2× the old size, so a wider mouth
+const DEVIL_RIDE_T = 4.5;      // seconds spent whirling before it lets go
+
+function releaseFromDevil(fling) {
+  if (!player.captured) return;
+  player.captured = false;
+  player.mesh.rotation.y = 0;
+  const cx = devil ? devil.mesh.position.x : player.pos.x;
+  const cz = devil ? devil.mesh.position.z : player.pos.z;
+  if (fling) {
+    const fa = Math.random() * Math.PI * 2;
+    player.pos.x = cx + Math.cos(fa) * 6;
+    player.pos.z = cz + Math.sin(fa) * 6;
+  }
+  player.y = world.heightAt(player.pos.x, player.pos.z); // set down gently, no fall dmg
+}
 
 function tickDustDevil(dt) {
   if (game.kind !== 'survival' || BIOMES[game.biomeIndex]?.name !== 'Scorched Desert') {
-    if (devil) { scene.remove(devil.mesh); devil = null; }
+    if (devil) { releaseFromDevil(false); scene.remove(devil.mesh); devil = null; }
     return;
   }
   if (!devil) {
@@ -917,41 +935,77 @@ function tickDustDevil(dt) {
     const a = Math.random() * Math.PI * 2;
     const x = player.pos.x + Math.cos(a) * 55, z = player.pos.z + Math.sin(a) * 55;
     const g = new THREE.Group();
-    for (let i = 0; i < 4; i++) {
-      const cone = new THREE.Mesh(new THREE.ConeGeometry(0.7 + i * 0.55, 1.6, 7, 1, true),
+    // 2× bigger: doubled cone radii/heights and stacked twice as tall
+    for (let i = 0; i < 5; i++) {
+      const cone = new THREE.Mesh(new THREE.ConeGeometry((0.7 + i * 0.55) * 2, 3.2, 8, 1, true),
         new THREE.MeshLambertMaterial({ color: 0xd8bd88, transparent: true,
-          opacity: 0.42 - i * 0.06, side: THREE.DoubleSide }));
-      cone.position.y = 0.9 + i * 1.5;
+          opacity: 0.44 - i * 0.055, side: THREE.DoubleSide }));
+      cone.position.y = (0.9 + i * 1.5) * 2;
       cone.rotation.x = Math.PI; // funnel narrows toward the ground
       g.add(cone);
     }
     g.position.set(x, world.heightAt(x, z), z);
     scene.add(g);
-    devil = { mesh: g, t: 22, dir: Math.random() * Math.PI * 2, hitCd: 0 };
-    ui.toast('🌪️ A dust devil twists across the sand — don\'t let it catch you!', 'boss');
+    devil = { mesh: g, t: 22, dir: Math.random() * Math.PI * 2, ride: 0, ang: 0 };
+    ui.toast('🌪️ A towering sand tornado prowls the desert — don\'t let it swallow you!', 'boss');
     return;
   }
+  const m = devil.mesh;
+  m.rotation.y += dt * 9;
+
+  // -- riding the funnel: whirl the player around the eye, high off the sand --
+  if (player.captured) {
+    if (player.dead) { releaseFromDevil(false); return; }
+    devil.ride -= dt;
+    devil.ang += dt * 6;
+    const orbitR = 1.8;
+    const cx = m.position.x, cz = m.position.z;
+    // keep dragging toward the player a touch so the storm carries them along
+    m.position.x += Math.sin(devil.dir) * 2.5 * dt;
+    m.position.z += Math.cos(devil.dir) * 2.5 * dt;
+    m.position.y = world.heightAt(m.position.x, m.position.z);
+    player.pos.x = cx + Math.cos(devil.ang) * orbitR;
+    player.pos.z = cz + Math.sin(devil.ang) * orbitR;
+    // rise quickly, hover near the top, then the release drops them
+    const up = Math.min(1, (DEVIL_RIDE_T - devil.ride) / 0.7) * Math.min(1, devil.ride / 0.5 + 0.15);
+    player.mesh.position.set(player.pos.x, world.heightAt(cx, cz) + 2 + 6 * up, player.pos.z);
+    player.mesh.rotation.y += dt * 9;
+    if (devil.ride <= 0) {
+      releaseFromDevil(true);
+      ui.toast('🌪️ The tornado hurls you back down to the sand!', 'boss');
+      audio.sfx('special', 0.5);
+    }
+    return; // frozen lifetime & no re-capture while already aboard
+  }
+
   devil.t -= dt;
-  devil.hitCd -= dt;
   if (devil.t <= 0) { scene.remove(devil.mesh); devil = null; return; }
   // wanders drunkenly, drifting a little toward the player
   devil.dir += (Math.random() - 0.5) * dt * 1.6;
-  const m = devil.mesh;
   const toP = Math.atan2(player.pos.x - m.position.x, player.pos.z - m.position.z);
   m.position.x += (Math.sin(devil.dir) * 4 + Math.sin(toP) * 2) * dt;
   m.position.z += (Math.cos(devil.dir) * 4 + Math.cos(toP) * 2) * dt;
   m.position.y = world.heightAt(m.position.x, m.position.z);
-  m.rotation.y += dt * 9;
   const d = Math.hypot(player.pos.x - m.position.x, player.pos.z - m.position.z);
-  if (d < 2.4 && devil.hitCd <= 0 && !player.dead && !player.flying) {
-    devil.hitCd = 1.5;
-    player.takeDamage(8, { name: 'a dust devil' });
-    const kx = (player.pos.x - m.position.x) / (d || 1);
-    const kz = (player.pos.z - m.position.z) / (d || 1);
-    player.pos.x += kx * 5;
-    player.pos.z += kz * 5;
+  // -- swallow the player: drain half their MAX hp, then whirl them aloft --
+  if (d < DEVIL_CAPTURE_R && !player.dead && !player.flying) {
+    const drain = player.maxHp * 0.5;
+    player.killedBy = 'a sand tornado';
+    player.hurtT = 0;
+    player.hp -= drain;
     ui.hurtFlash();
-    audio.sfx('special', 0.5);
+    ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2.2),
+      '-' + Math.round(drain) + ' 🌪️', '#ffb27a');
+    audio.sfx('special', 0.6);
+    if (player.hp <= 0) {
+      player.hp = 0; player.dead = true;
+      player.hooks.onDeath?.();
+      return;
+    }
+    player.captured = true;
+    devil.ride = DEVIL_RIDE_T;
+    devil.ang = Math.atan2(player.pos.z - m.position.z, player.pos.x - m.position.x);
+    ui.toast('🌪️ The tornado sweeps you up — you\'re spinning helplessly!', 'boss');
   }
 }
 
@@ -1813,16 +1867,31 @@ async function ensureAuth() {
 function openGate() { $id('auth-gate').classList.remove('gone'); }
 function passGate() { $id('auth-gate').classList.add('gone'); }
 
+// reflect the signed-in identity in the menu (top-right badge) so you can
+// always see WHO you are — and sign out to switch accounts.
+function renderUserBadge(u) {
+  const badge = $id('user-badge');
+  if (!badge) return;
+  if (DEVMODE || !u) { badge.classList.add('hidden'); return; }
+  $id('user-name').textContent = u.name || 'Adventurer';
+  const photo = $id('user-photo');
+  if (u.photo) { photo.src = u.photo; photo.style.display = ''; }
+  else photo.style.display = 'none';
+  badge.classList.remove('hidden');
+}
+
 // ?devmode skips the gate entirely (for local testing without Google set up)
 if (DEVMODE) {
   passGate();
 } else {
-  // watch the session: signed in → drop the gate; signed out → keep it up
+  // watch the session: a REAL user (with a uid) drops the gate; anything else
+  // keeps it up. onAuthStateChanged fires once on load with the current user.
   (async () => {
     try {
       (await ensureAuth()).watch((u) => {
-        authUser = u;
-        if (u) passGate(); else openGate();
+        authUser = (u && u.uid) ? u : null;
+        renderUserBadge(authUser);
+        if (authUser) passGate(); else openGate();
       });
     } catch (e) {
       $id('gate-msg').textContent = 'Could not reach Google sign-in: ' + (e?.message || e);
@@ -1833,11 +1902,24 @@ if (DEVMODE) {
     msg.textContent = 'Opening Google…';
     try {
       const a = await ensureAuth();
-      authUser = await a.signIn();
-      passGate();
+      const u = await a.signIn();
+      // only pass once we truly have an authenticated account
+      if (u && u.uid) {
+        authUser = u;
+        renderUserBadge(u);
+        passGate();
+      } else {
+        msg.textContent = 'Sign-in did not complete. Please try again.';
+      }
     } catch (e) {
       msg.textContent = 'Sign-in failed: ' + (e?.message || e);
     }
+  });
+  $id('user-signout').addEventListener('click', async () => {
+    try { await (await ensureAuth()).signOutUser(); } catch {}
+    authUser = null;
+    renderUserBadge(null);
+    openGate();
   });
 }
 
