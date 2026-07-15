@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { WORLD, XP_LEVELS, MAX_LEVEL, itemById, spellById, consumableById,
          biomeIndexAt, RESOURCES, MAX_SPELL_SLOTS } from './config.js';
-import { makeMan, makeAxe, makeBow, makePickaxe } from './models.js';
+import { makeMan, makeAxe, makeBow, makePickaxe, makeTorchMesh } from './models.js';
 import { audio } from './audio.js';
 
 const MAX_CLIMB_SLOPE = 1.0; // steeper ground than this is a wall
@@ -349,6 +349,15 @@ export class Player {
       rightSocket.add(tool);
     }
     if (this.weapon.kind === 'bow') leftSocket.add(makeBow(this.weapon.tier));
+    // a torch is truly HELD: free hand gets the burning stick (the bow claims
+    // the left hand, so archers carry the torch on the right)
+    this.mesh.userData.torchRef = null;
+    if (this.torchGear) {
+      const t = makeTorchMesh();
+      t.rotation.x = 0.3; // tipped slightly forward, away from the face
+      (this.weapon.kind === 'bow' ? rightSocket : leftSocket).add(t);
+      this.mesh.userData.torchRef = t;
+    }
   }
 
   // ---------- progression ----------
@@ -479,6 +488,29 @@ export class Player {
     if (this.boon && (this.boon.t -= dt) <= 0) { this.boon = null; this.recompute(); }
     this.venomT = Math.max(0, this.venomT - dt);
     this.hurtT += dt;
+    // a held torch BURNS: ~5 real minutes (5 in-game hours) per stick, then
+    // it crumbles to ash and leaves your hand empty. Fuel is tracked PER TIER
+    // (swapping torches never refills one) and only ticks while it's in hand.
+    if (this.torchGear) {
+      const tid = this.equipment.offhand;
+      this.torchFuelById ??= {};
+      this.torchFuelById[tid] ??= 300;
+      this.torchFuelById[tid] -= dt;
+      if (this.torchFuelById[tid] <= 30 && !this._torchWarned) {
+        this._torchWarned = true;
+        this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
+          '🔥 Torch is guttering…', '#ffcc66');
+      }
+      if (this.torchFuelById[tid] <= 0) {
+        this.equipment.offhand = null;      // ash — the stick is gone for good
+        delete this.torchFuelById[tid];     // the NEXT one of this tier starts fresh
+        this._torchWarned = false;
+        this.recompute();
+        this.hooks.onEquipChange?.('offhand');
+        this.hooks.onTorchOut?.(tid);
+      }
+    } else this._torchWarned = false;
+
     // wool bedroll (worn on the back): stillness out of combat knits wounds fast
     const rest = (this.restMult > 1 && this.idleT > 3 && this.hurtT > 5) ? this.restMult : 1;
     if (this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.hpRegen * rest * dt);

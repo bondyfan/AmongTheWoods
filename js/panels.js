@@ -342,13 +342,15 @@ export class Panels {
     // expedition gear first: real items now, each worn in its own slot
     for (const it of ITEMS.filter(i => i.supply)) {
       const owned = this.player.hasItem(it.id);
+      const rebuyable = !!it.torch; // torches burn out — always sell spares
       const locked = it.level > this.player.level;
       const affordable = this._affordable(it.cost);
       const card = document.createElement('div');
-      card.className = 'card' + (owned ? ' owned' : affordable && !locked ? ' buyable' : ' expensive');
-      const foot = owned ? '<span class="tag ok">✔ Owned — equip in Character (C)</span>'
-        : locked ? `<span class="tag">🔒 Lv ${it.level}</span>`
-        : `<button class="buy-btn" data-supply="${it.id}">Buy — ${this._costStr(it.cost)}</button>`;
+      card.className = 'card' + (owned && !rebuyable ? ' owned' : affordable && !locked ? ' buyable' : ' expensive');
+      const foot = locked ? `<span class="tag">🔒 Lv ${it.level}</span>`
+        : (owned && !rebuyable) ? '<span class="tag ok">✔ Owned — equip in Character (C)</span>'
+        : (owned ? '<span class="tag ok">✔ Owned</span> ' : '')
+          + `<button class="buy-btn" data-supply="${it.id}">Buy${owned ? ' another' : ''} — ${this._costStr(it.cost)}</button>`;
       card.innerHTML = `
         <div class="card-head"><span class="icon">${it.icon}</span>
           <span class="name">${it.name}</span><span class="lv">${SLOT_LABELS[it.slot].toLowerCase()}</span></div>

@@ -242,6 +242,12 @@ const player = new Player(scene, {
     }
   },
   onScrollUse: () => startDiscovery(300),
+  onTorchOut: () => {
+    ui.toast('🔥 Your torch burned down to ash — equip a spare or craft another (Supplies).', 'boss');
+    audio.sfx('error', 0.4);
+    refreshHud();
+    panels.refresh();
+  },
   onLevelUp: (level) => {
     audio.sfx('evolve', 0.55);
     player.spawnLevelUpEffect();
@@ -873,33 +879,43 @@ function tickFireflies(dt) {
   }
 }
 
-// ---------- everburning torch: a warm light bubble in the dark biomes ----------
-let torchLight = null, torchFlame = null, torchT = 0;
+// ---------- held torch: the stick in your hand blazes and casts real light ----------
+// The light burns whenever a torch is equipped (its GLOW reads even in
+// daylight); in the dark — night, dark biomes, the cave, lair dungeons — it
+// carves out a bubble of the tier's radius (5 / 10 / 15 m).
+let torchLight = null, torchT = 0;
 
 function tickTorch(dt) {
   const dark = !!game.dungeon // lair dungeons are always torch-dark
     || (BIOMES[game.biomeIndex]?.darkness ?? 0) >= 0.35
+    || (game.nightK || 0) > 0.55
     || radiusOf(player.pos.x, player.pos.z) < WORLD.caveR + 6;
   const on = game.kind === 'survival' && inPlay()
-    && player.torchGear && dark && !player.dead;
+    && player.torchGear && !player.dead;
   if (on && !torchLight) {
-    torchLight = new THREE.PointLight(0xffb45a, 2.2, player.torchGear.radius ?? 18, 1.6);
-    torchFlame = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 5),
-      new THREE.MeshBasicMaterial({ color: 0xffc86a }));
-    scene.add(torchLight, torchFlame);
+    torchLight = new THREE.PointLight(0xffb45a, 2.2, 5, 1.4);
+    scene.add(torchLight);
   } else if (!on && torchLight) {
-    scene.remove(torchLight, torchFlame);
+    scene.remove(torchLight);
     torchLight.dispose?.();
-    torchLight = torchFlame = null;
+    torchLight = null;
   }
   if (!torchLight) return;
   torchT += dt;
-  torchLight.distance = player.torchGear.radius ?? 18; // follows a torch swap live
+  torchLight.distance = player.torchGear.radius ?? 5; // tier bubble, follows swaps live
+  // real fire never burns steady; in daylight the lamp fades to a warm shimmer
+  torchLight.intensity = (dark ? 2.6 : 0.9)
+    + Math.sin(torchT * 9) * 0.25 + Math.sin(torchT * 23.7) * 0.15;
   const p = player.mesh.position;
-  torchLight.position.set(p.x + 0.45, p.y + 2.1, p.z);
-  torchFlame.position.copy(torchLight.position);
-  // real fire never burns steady
-  torchLight.intensity = 2.1 + Math.sin(torchT * 9) * 0.25 + Math.sin(torchT * 23.7) * 0.15;
+  torchLight.position.set(p.x, p.y + 1.5, p.z);
+  // flicker the HELD flame (mesh lives in the player's hand socket)
+  const t = player.mesh.userData.torchRef;
+  if (t) {
+    const k = 1 + Math.sin(torchT * 11) * 0.16 + Math.sin(torchT * 27.3) * 0.1;
+    t.userData.flame.scale.set(k, 1 + (k - 1) * 1.7, k);
+    t.userData.flameCore.scale.set(k, k, k);
+    t.userData.glow.scale.setScalar(1.25 + (k - 1) * 1.4);
+  }
 }
 
 // ---------- desert dust devils: giant sand tornadoes that SWALLOW you ----------
@@ -1960,6 +1976,7 @@ function serializeState() {
     spellsOwned: [...p.spellsOwned],
     spellSlots: p.spellSlots.map(s => s ?? null),
     upgrades: { ...p.upgrades },
+    torchFuel: { ...(p.torchFuelById || {}) },
     invSlots: p.invSlots,
     questDone: { ...p.questDone },
     questHistory: [...p.questHistory],
@@ -2033,6 +2050,7 @@ function applyLoadedState(d) {
   p.spellsOwned = new Set(d.spellsOwned || []);
   p.spellSlots = Array.isArray(d.spellSlots) ? d.spellSlots.map(s => s ?? undefined) : [];
   p.upgrades = { ...(d.upgrades || {}) };
+  p.torchFuelById = (d.torchFuel && typeof d.torchFuel === 'object') ? { ...d.torchFuel } : {};
   // MIGRATION: old saves stored supply gear as boolean upgrades — convert each
   // owned flag into the real item (equipped straight into its new slot)
   const upgradeSlots = { torch: 'offhand', torchoil: 'offhand', socks: 'legs',

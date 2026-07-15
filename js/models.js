@@ -1663,6 +1663,40 @@ export function makeEnemyShot(color) {
     new THREE.MeshBasicMaterial({ color }));
 }
 
+// A hand-held burning torch: wooden handle, tarred head, animated flame and
+// an additive glow sprite so the blaze reads even in full daylight.
+// userData exposes { flame, flameCore, glow } for per-frame flicker.
+let _torchGlowTex = null;
+export function makeTorchMesh() {
+  const g = new THREE.Group();
+  const handle = cyl(0.045, 0.055, 0.55, 0x6b4a26, 6); handle.position.y = 0.12;
+  const wrap = cyl(0.078, 0.078, 0.15, 0x3a2a16, 6); wrap.position.y = 0.36;
+  const flame = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.32, 6),
+    new THREE.MeshBasicMaterial({ color: 0xff9a2e }));
+  flame.position.y = 0.58;
+  const flameCore = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.2, 6),
+    new THREE.MeshBasicMaterial({ color: 0xffe28a }));
+  flameCore.position.y = 0.54;
+  if (!_torchGlowTex) {
+    const c = document.createElement('canvas'); c.width = c.height = 64;
+    const cx = c.getContext('2d');
+    const grd = cx.createRadialGradient(32, 32, 2, 32, 32, 30);
+    grd.addColorStop(0, 'rgba(255, 200, 110, 0.95)');
+    grd.addColorStop(0.45, 'rgba(255, 150, 50, 0.35)');
+    grd.addColorStop(1, 'rgba(255, 120, 30, 0)');
+    cx.fillStyle = grd; cx.fillRect(0, 0, 64, 64);
+    _torchGlowTex = new THREE.CanvasTexture(c);
+  }
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: _torchGlowTex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true,
+  }));
+  glow.scale.setScalar(1.4);
+  glow.position.y = 0.6;
+  g.add(handle, wrap, flame, flameCore, glow);
+  g.userData = { flame, flameCore, glow };
+  return g;
+}
+
 // A thrown spear/javelin — a long wooden shaft with an iron head, pointing +Z
 // (the caller yaws it to face its flight direction).
 export function makeSpear() {

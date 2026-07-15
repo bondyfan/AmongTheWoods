@@ -408,12 +408,17 @@ export const ITEMS = [
     desc: 'TWO spheres, each firing twin bolts.' },
   // -- expedition gear (Supplies tab): wearable comfort items, each with its
   // own WoW-style slot. supply: true keeps them out of the weapon/gear shops.
-  { id: 'torch',   slot: 'offhand', level: 3, supply: true, icon: '🔦', name: 'Everburning Torch',
-    cost: { wood: 10, hide: 3, essence: 1 }, torch: { radius: 18 },
-    desc: 'A resin-soaked torch that never goes out. Carry it in your off-hand: it lights the ground around you in the dark biomes (Dark Forest, Haunted Forest, swamp and the cave) — and its warmth slows the Frozen Peak\'s chill.' },
-  { id: 'torchoil', slot: 'offhand', level: 6, supply: true, icon: '🛢️', name: 'Oil-Doused Torch',
-    cost: { essence: 6, meat: 60, wood: 40 }, torch: { radius: 30 },
-    desc: 'A torch drenched in bright-burning alchemist\'s oil — its light bubble is far wider. Replaces the Everburning Torch in your off-hand.' },
+  // torches BURN: one stick lasts ~5 real minutes (5 in-game hours), then it
+  // crumbles to ash and vanishes from your hand — carry spares!
+  { id: 'torch',   slot: 'offhand', level: 2, supply: true, icon: '🔦', name: 'Torch',
+    cost: { wood: 6, hide: 1 }, torch: { radius: 5 },
+    desc: 'A burning stick held in your off-hand — you SEE it blaze as you walk. Lights ~5 m around you in the dark (night, dark biomes, lairs) and its warmth slows the Frozen Peak\'s chill. Burns out after 5 minutes.' },
+  { id: 'torchoil', slot: 'offhand', level: 5, supply: true, icon: '🛢️', name: 'Oiled Torch',
+    cost: { wood: 12, hide: 3, essence: 1 }, torch: { radius: 10 },
+    desc: 'Soaked in alchemist\'s oil — burns brighter: lights ~10 m around you. Burns out after 5 minutes.' },
+  { id: 'torchember', slot: 'offhand', level: 8, supply: true, icon: '🔥', name: 'Emberheart Torch',
+    cost: { wood: 20, iron: 4, essence: 5 }, torch: { radius: 15 },
+    desc: 'A molten ember lashed into a torch head — a blazing ~15 m circle of light. Burns out after 5 minutes.' },
   { id: 'socks',   slot: 'legs', level: 3, supply: true, icon: '🧦', name: 'Thick Wool Socks',
     cost: { wool: 10, meat: 20 }, mudguard: 0.5,
     desc: 'Worn on your legs: swamp mud and spider webs slow you only HALF as much.' },
