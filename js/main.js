@@ -817,7 +817,7 @@ function tickFlight(dt) {
       audio.sfx('kill_gold', 0.4);
       return;
     }
-    const step = Math.min(d, 22 * dt);
+    const step = Math.min(d, 34 * dt); // griffin flight — the fastest way to travel
     player.pos.x += (dx / d) * step;
     player.pos.z += (dz / d) * step;
     player.facing.set(dx / d, 0, dz / d);
@@ -2813,7 +2813,7 @@ function updateWaypoint() {
 // world lights, tint the sky, swell spawns/aggro and scatter fireflies.
 const DAY_LENGTH = 600; // 10 real minutes per in-game day
 const nightFlies = [];
-let fireflyGeo = null, fireflyMat = null;
+let fireflyGeo = null, fireflyMat = null, starField = null;
 function tickDayNight(dt) {
   game.tod = (game.tod + dt / DAY_LENGTH) % 1;
   // sun elevation: -1 midnight, +1 noon → dayness in [0,1]
@@ -2832,6 +2832,31 @@ function tickDayNight(dt) {
 
   // screen darkening
   $id('night-tint').style.opacity = (game.nightK * 0.6).toFixed(2);
+
+  // stars fade in on the night sky (a static field parked on the camera)
+  if (!starField) {
+    const N = 900, pos = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) {
+      // scatter over the upper dome, well beyond the world but inside camera.far
+      const a = Math.random() * Math.PI * 2, el = Math.random() * 0.9 + 0.08, r = 240;
+      pos[i*3] = Math.cos(a) * Math.cos(el) * r;
+      pos[i*3+1] = Math.sin(el) * r;
+      pos[i*3+2] = Math.sin(a) * Math.cos(el) * r;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    starField = new THREE.Points(geo, new THREE.PointsMaterial({
+      color: 0xfdfbef, size: 1.6, sizeAttenuation: false,
+      transparent: true, opacity: 0, depthWrite: false, fog: false }));
+    starField.frustumCulled = false;
+    scene.add(starField);
+  }
+  starField.material.opacity = Math.max(0, (game.nightK - 0.25) / 0.75); // appear as dusk deepens
+  starField.visible = starField.material.opacity > 0.01;
+  if (starField.visible) {
+    starField.position.copy(camera.position);
+    starField.rotation.y += dt * 0.006; // a slow celestial drift
+  }
 
   // fireflies drift around the player once it's dark enough
   if (!fireflyGeo) {
