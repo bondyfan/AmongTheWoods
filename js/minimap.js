@@ -6,6 +6,51 @@ import { lanePoint } from './mobaworld.js';
 const CELL = 25;                       // world units per discovery cell
 const REVEAL_RADIUS = 45;              // world units revealed around the player
 
+const WP_COLOR = '#ffd21a';            // waypoint yellow (map flag + arrows)
+
+// a yellow map-pin (teardrop) whose point sits exactly on (x, y). `rot`
+// counter-rotates it so it stays upright when the minimap is spinning.
+function drawWpPin(ctx, x, y, s = 1, rot = 0) {
+  ctx.save();
+  ctx.translate(x, y);
+  if (rot) ctx.rotate(rot);
+  ctx.scale(s, s);
+  ctx.fillStyle = WP_COLOR;
+  ctx.strokeStyle = 'rgba(40,30,0,0.85)';
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.moveTo(0, 0);                                  // the tip on the target
+  ctx.bezierCurveTo(-5.5, -6, -6, -12, 0, -13.5);    // left side up to the head
+  ctx.bezierCurveTo(6, -12, 5.5, -6, 0, 0);          // right side back to the tip
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  ctx.beginPath();                                   // dark eye of the pin
+  ctx.arc(0, -9, 2.4, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(40,30,0,0.9)';
+  ctx.fill();
+  ctx.restore();
+}
+
+// a filled yellow ARROW pointing +X (caller rotates it toward the target)
+function drawWpArrow(ctx, s = 1) {
+  ctx.save();
+  ctx.scale(s, s);
+  ctx.fillStyle = WP_COLOR;
+  ctx.strokeStyle = 'rgba(40,30,0,0.85)';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(-8, -2);   // shaft back-top
+  ctx.lineTo(1, -2);    // shaft to head base
+  ctx.lineTo(1, -5.5);  // head barb (top)
+  ctx.lineTo(9, 0);     // arrow tip
+  ctx.lineTo(1, 5.5);   // head barb (bottom)
+  ctx.lineTo(1, 2);     // back to shaft
+  ctx.lineTo(-8, 2);    // shaft back-bottom
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  ctx.restore();
+}
+
 // ---- MOBA minimap: square, full visibility, lanes + units + buildings ----
 export class MobaMinimap {
   constructor(canvas, moba) {
@@ -272,30 +317,21 @@ export class Minimap {
       ctx.globalAlpha = 1;
     }
 
-    // player waypoint (📍) — a map is a map, always shown. When the flag is
-    // off the minimap, pin a pink arrow to the rim pointing the way to it.
+    // player waypoint — a yellow flag, always shown. When it's off the
+    // minimap, pin a yellow ARROW to the rim pointing the way to it.
     if (this.waypoint) {
       const p = toC(this.waypoint.x, this.waypoint.z);
       if (inView(p)) {
-        ctx.textAlign = 'center';
-        ctx.font = 'bold 12px sans-serif';
-        ctx.fillStyle = '#ff4dd8';
-        text('📍', p.x, p.y + 4);
+        drawWpPin(ctx, p.x, p.y, 1, -rot); // stay upright while the map spins
       } else {
         const cxp = W / 2, cyp = H / 2;
         const dx = p.x - cxp, dy = p.y - cyp;
         const len = Math.hypot(dx, dy) || 1;
-        const R = W / 2 - 9; // sit just inside the circular rim
+        const R = W / 2 - 11; // sit just inside the circular rim
         ctx.save();
         ctx.translate(cxp + dx / len * R, cyp + dy / len * R);
         ctx.rotate(Math.atan2(dy, dx));
-        ctx.fillStyle = '#ff4dd8';
-        ctx.strokeStyle = 'rgba(0,0,0,0.55)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(8, 0); ctx.lineTo(-5, -5.5); ctx.lineTo(-2, 0); ctx.lineTo(-5, 5.5);
-        ctx.closePath();
-        ctx.fill(); ctx.stroke();
+        drawWpArrow(ctx, 1);
         ctx.restore();
       }
     }
@@ -443,9 +479,7 @@ export class Minimap {
       ctx.globalAlpha = 1;
     }
     if (this.waypoint && inView(this.waypoint.x, this.waypoint.z)) {
-      ctx.font = 'bold 15px sans-serif'; ctx.fillStyle = '#ff4dd8';
-      ctx.fillText('📍', toX(this.waypoint.x), toY(this.waypoint.z) + 4);
-      ctx.font = '11px sans-serif';
+      drawWpPin(ctx, toX(this.waypoint.x), toY(this.waypoint.z), 1.35);
     }
     if (this.treasureAt && inView(this.treasureAt.x, this.treasureAt.z)) {
       ctx.font = 'bold 13px sans-serif';

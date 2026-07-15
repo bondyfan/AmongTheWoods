@@ -2873,19 +2873,52 @@ function setAmbience(name) {
 }
 
 // ---------- waypoint compass: an arrow pointing to the map flag ----------
+// A flat yellow arrow also lies on the ground under the player, pointing the
+// way — so you never have to glance up at the minimap to stay on course.
+let wpGroundArrow = null;
+function ensureWpGroundArrow() {
+  if (wpGroundArrow) return wpGroundArrow;
+  const v = new Float32Array([
+    -0.16, 0, -0.9,   0.16, 0, -0.9,   0.16, 0, 0.25,  -0.16, 0, 0.25, // shaft quad
+    -0.5, 0, 0.25,    0.5, 0, 0.25,    0.0, 0, 1.15,                    // head triangle
+  ]);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(v, 3));
+  g.setIndex([0, 1, 2, 0, 2, 3, 4, 5, 6]);
+  g.computeVertexNormals();
+  const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({
+    color: 0xffd21a, transparent: true, opacity: 0.92,
+    side: THREE.DoubleSide, depthWrite: false,
+  }));
+  m.scale.setScalar(1.35);
+  m.renderOrder = 5;
+  m.visible = false;
+  scene.add(m);
+  return (wpGroundArrow = m);
+}
+function hideWpGroundArrow() { if (wpGroundArrow) wpGroundArrow.visible = false; }
+
 const _wpFwd = new THREE.Vector3();
 function updateWaypoint() {
   const arrow = $id('waypoint-arrow');
   const wp = minimap.waypoint;
-  if (!wp || game.mode !== 'play') { arrow.classList.add('hidden'); return; }
+  if (!wp || game.mode !== 'play') { arrow.classList.add('hidden'); hideWpGroundArrow(); return; }
   const dx = wp.x - player.pos.x, dz = wp.z - player.pos.z;
   const dist = Math.hypot(dx, dz);
   if (dist < 6) { // arrived — retire the flag
     minimap.waypoint = null; minimap.redrawT = 0;
     arrow.classList.add('hidden');
+    hideWpGroundArrow();
     ui.toast('📍 Waypoint reached.', '');
     return;
   }
+  // ground arrow: a couple of steps ahead of the player's feet, facing the flag
+  const ga = ensureWpGroundArrow();
+  const nx = dx / dist, nz = dz / dist;
+  const gx = player.pos.x + nx * 0.7, gz = player.pos.z + nz * 0.7;
+  ga.position.set(gx, world.heightAt(gx, gz) + 0.08, gz);
+  ga.rotation.y = Math.atan2(dx, dz);
+  ga.visible = true;
   camera.getWorldDirection(_wpFwd); _wpFwd.y = 0;
   const fl = Math.hypot(_wpFwd.x, _wpFwd.z) || 1; _wpFwd.x /= fl; _wpFwd.z /= fl;
   // signed angle from camera-forward to the target (0 = dead ahead / up)
