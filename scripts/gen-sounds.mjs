@@ -20,7 +20,7 @@ const SOUNDS = [
   ['snake_attack',  'Snake strike: sharp venomous hiss and quick bite lunge, short, no music', 0.9],
   ['snake_death',   'Large serpent dying: long falling hiss and death rattle, no music', 1.4],
   ['wolf_attack',   'Wolf attack: aggressive snarling growl and biting snap, short, no music', 1.0],
-  ['wolf_death',    'Wolf dying: pained yelp and fading whimper howl, short, no music', 1.3],
+  ['wolf_death',    'A wolf dying: a sharp high canine yelp breaking into a whimpering growl and a final wet snarl, purely a dog-like animal, no human voice, no words, short', 1.3],
   ['beast_attack',  'Large monster beast attack: deep guttural roaring growl, powerful, short, no music', 1.1],
   ['beast_death',   'Large beast dying: deep pained groaning roar collapsing, no music', 1.5],
   ['rat_attack',    'Giant rat attack: high pitched squeaking screech and bite, short, no music', 0.7],

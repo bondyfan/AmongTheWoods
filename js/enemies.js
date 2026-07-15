@@ -26,26 +26,29 @@ const SPAWN_MIN_DIST = 62;   // nothing ever appears closer than this to a playe
 const REPOP_COOLDOWN = 1800; // 30 minutes
 
 class Enemy {
-  constructor(type, x, z, difficulty, bossRank = 0) {
+  constructor(type, x, z, difficulty, bossRank = 0, elite = false) {
     const base = ENEMY_TYPES[type];
     this.id = nextEnemyId++;
     this.type = type;
     this.cfg = base;
     this.bossRank = bossRank; // 0 = normal, 1..3 = skull rank
+    this.elite = elite && bossRank === 0; // a red-badge mini elite (no skull)
     const boss = bossRank > 0 ? BOSS_RANKS[bossRank - 1] : null;
+    // elites: a modest ×2 HP / ×1.3 damage bump — a step below a 1-skull boss
+    const eHp = this.elite ? 2 : 1, eDmg = this.elite ? 1.3 : 1;
 
-    this.hp = base.hp * (1 + difficulty * 1.2) * (boss ? boss.hpMult : 1);
+    this.hp = base.hp * (1 + difficulty * 1.2) * (boss ? boss.hpMult : 1) * eHp;
     this.maxHp = this.hp;
-    this.dmg = base.dmg * (1 + difficulty * 0.8) * (boss ? boss.dmgMult : 1);
-    this.xp = Math.round(base.xp * (boss ? boss.xpMult : 1));
+    this.dmg = base.dmg * (1 + difficulty * 0.8) * (boss ? boss.dmgMult : 1) * eDmg;
+    this.xp = Math.round(base.xp * (boss ? boss.xpMult : this.elite ? 2 : 1));
     this.meat = meatForHp(this.maxHp); // 1 meat / 30 HP — bosses pay out big
-    this.sizeMult = boss ? boss.sizeMult : 1;
+    this.sizeMult = boss ? boss.sizeMult : this.elite ? 1.2 : 1;
     this.hitR = base.hitR * this.sizeMult;
     this.range = base.range * this.sizeMult;
     this.speed = base.speed * (boss ? 0.9 : 1);
     if (boss) this.reinforceT = boss.reinforceInterval;
 
-    this.meleeDmg = (base.meleeDmg ?? base.dmg) * (1 + difficulty * 0.8) * (boss ? boss.dmgMult : 1);
+    this.meleeDmg = (base.meleeDmg ?? base.dmg) * (1 + difficulty * 0.8) * (boss ? boss.dmgMult : 1) * eDmg;
 
     this.pos = new THREE.Vector3(x, 0, z);
     this.mesh = makeEnemyMesh(type);
@@ -100,7 +103,7 @@ export class EnemyManager {
   }
 
   _spawn(type, x, z, difficulty, bossRank = 0, flags = null) {
-    const e = new Enemy(type, x, z, difficulty, bossRank);
+    const e = new Enemy(type, x, z, difficulty, bossRank, !!flags?.elite);
     if (flags) Object.assign(e, flags); // ambush/noReinforce BEFORE the hooks fire
     if (bossRank > 0 && !e.bossName) e.bossName = bossNameFor(type, e.id);
     this.scene.add(e.mesh);
@@ -216,7 +219,7 @@ export class EnemyManager {
       const gid = nextGroupId++;
       const count = lo + Math.floor(Math.random() * (hi - lo + 1));
       for (let i = 0; i < count; i++) pool.push({ type, groupId: gid });
-      if (cfg.guardian) pool.push({ type: cfg.guardian, bossRank: 1, groupId: gid, guardian: true });
+      if (cfg.guardian) pool.push({ type: cfg.guardian, elite: true, groupId: gid, guardian: true });
     }
     return pool;
   }
@@ -278,12 +281,13 @@ export class EnemyManager {
             // repeat announcements are muted; herd guardians are always quiet
             ambush: !!(spec.guardian || spec.announced),
             noReinforce: !!spec.guardian,
+            elite: !!spec.elite,
           });
         e.aggroed = false;
         e.zoneKey = key;
         e.groupId = spec.groupId || 0;
         // remembered when the unit melts back into the pool later
-        e._spec = { type: spec.type, bossRank: spec.bossRank || 0, camp: spec.camp,
+        e._spec = { type: spec.type, bossRank: spec.bossRank || 0, elite: spec.elite, camp: spec.camp,
                     groupId: spec.groupId, guardian: spec.guardian, announced: true };
         if (spec.bossRank && !spec.guardian && !spec.announced) audio.sfx('lane_unlock', 0.45);
       });

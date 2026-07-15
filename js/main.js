@@ -1327,12 +1327,14 @@ const enemyMgr = new EnemyManager(scene, world, {
     const ranged = enemy.cfg.ranged;
     const shotColor = ranged ? '#' + enemy.cfg.shotColor.toString(16).padStart(6, '0') : '';
     const label = enemy.bossName ?? enemy.cfg.name;
+    // elites get a red half-skull badge above the bar — a rank below a boss skull
+    const badge = enemy.elite ? '<div class="elite-badge" title="Elite">☠</div>' : '';
     const html = '<div class="hpbar"><div class="hpbar-fill"></div></div>' +
       (ranged ? `<div class="castbar"><div class="castbar-fill" style="background:${shotColor}"></div></div>` : '') +
-      `<div class="unit-name">${label}</div>`;
+      `<div class="unit-name">${label}</div>` + badge;
     ui.addTracker('hp' + enemy.id,
       () => enemy.mesh.parent ? enemy.mesh.position.clone().setY(enemy.mesh.position.y + 1.5 * enemy.sizeMult + 0.5) : null,
-      html, 'hpwrap' + (enemy.bossRank > 0 ? ' boss' : ''),
+      html, 'hpwrap' + (enemy.bossRank > 0 ? ' boss' : '') + (enemy.elite ? ' elite' : ''),
       (el) => {
         const pct = Math.max(0, enemy.hp / enemy.maxHp);
         const fill = el.children[0].firstChild;
