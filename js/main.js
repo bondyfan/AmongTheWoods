@@ -203,6 +203,9 @@ const panels = new Panels({
     if (id.startsWith('c:')) {
       const cid = id.slice(2);
       player.consumables[cid] = (player.consumables[cid] ?? 0) + 1;
+    } else if (id.startsWith('u:')) {
+      player.upgrades[id.slice(2)] = true; // saddle / torch / bedroll / lining / socks / torch oil
+      player.recompute();
     } else {
       player.invItems.push(id);
     }

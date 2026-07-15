@@ -626,8 +626,14 @@ export class Panels {
       const box = document.createElement('div');
       box.id = 'inv-admin';
       box.className = 'admin-box';
-      const opts = ITEMS.map(i => `<option value="${i.id}">${i.name} (Lv${i.level})</option>`).join('') +
-        CONSUMABLES.map(c => `<option value="c:${c.id}">${c.name} (consumable)</option>`).join('');
+      const opts =
+        `<optgroup label="Gear & weapons">` +
+        ITEMS.map(i => `<option value="${i.id}">${i.name}${i.unique ? ' ★' : ''} (Lv${i.level})</option>`).join('') +
+        `</optgroup><optgroup label="Upgrades">` +
+        SUPPLY_UPGRADES.map(u => `<option value="u:${u.id}">${u.name} (upgrade)</option>`).join('') +
+        `</optgroup><optgroup label="Consumables">` +
+        CONSUMABLES.map(c => `<option value="c:${c.id}">${c.name} (consumable)</option>`).join('') +
+        `</optgroup>`;
       box.innerHTML = `<h4>🛠 Add item</h4>
         <select id="adm-item">${opts}</select>
         <button class="buy-btn" id="adm-add">+ Add</button>
