@@ -895,7 +895,7 @@ function tickTorch(dt) {
   const on = game.kind === 'survival' && inPlay()
     && player.torchGear && !player.dead;
   if (on && !torchLight) {
-    torchLight = new THREE.PointLight(0xffb45a, 2.2, 5, 1.4);
+    torchLight = new THREE.PointLight(0xffc06a, 6, 20, 1.0);
     scene.add(torchLight);
     audio.loopStart('torch_loop', 0.3); // the flame crackles while it's lit
   } else if (!on && torchLight) {
@@ -906,14 +906,18 @@ function tickTorch(dt) {
   }
   if (!torchLight) return;
   torchT += dt;
-  torchLight.distance = player.torchGear.radius ?? 5; // tier bubble, follows swaps live
+  const radius = player.torchGear.radius ?? 5;
+  // reach a good bit PAST the nominal radius so the whole bubble is genuinely
+  // lit (decay 1 = a soft, far-carrying falloff, not a tight 5 m dot)
+  torchLight.distance = radius * 2.8;
   // real fire never burns steady: layered sine flicker + a slow guttering
-  // wave, much stronger in the dark where the flame carries the scene
-  const flick = Math.sin(torchT * 9) * 0.45 + Math.sin(torchT * 23.7) * 0.3
-    + Math.sin(torchT * 3.1) * 0.2;
-  torchLight.intensity = (dark ? 3.2 : 0.9) + flick * (dark ? 1 : 0.4);
+  // wave. Scales with the tier so a 15 m torch blazes far brighter than a 5 m.
+  const flick = Math.sin(torchT * 9) * 0.9 + Math.sin(torchT * 23.7) * 0.6
+    + Math.sin(torchT * 3.1) * 0.4;
+  const base = dark ? 9 + radius * 0.7 : 1.6; // 5m→12.5, 10m→16, 15m→19.5 in the dark
+  torchLight.intensity = Math.max(0.5, base + flick * (dark ? 1.4 : 0.4));
   const p = player.mesh.position;
-  torchLight.position.set(p.x, p.y + 1.5, p.z);
+  torchLight.position.set(p.x, p.y + 1.6, p.z);
   // flicker the HELD flame (mesh lives in the player's hand socket)
   const t = player.mesh.userData.torchRef;
   if (t) {
@@ -3314,11 +3318,11 @@ function updateAtmosphere(dt) {
     const fogC = game.dungeon.lair.theme?.fog ?? 0x0b0d10;
     scene.fog.color.set(fogC);
     scene.background.set(fogC);
-    scene.fog.near = 12;
-    scene.fog.far = 58;
-    hemi.intensity = 0.24; // torchlight carries the scene down here
-    sun.intensity = 0.12;
-    $id('biome-gloom').style.opacity = 0.3; // a soft edge vignette — the REAL dark comes from fog, so torchlight stays visible
+    scene.fog.near = 18;
+    scene.fog.far = 82;   // pulled back so the torch-lit room reads clearly
+    hemi.intensity = 0.34; // a faint base so you're never fully blind…
+    sun.intensity = 0.16;  // …the torch does the real lighting on top
+    $id('biome-gloom').style.opacity = 0.22; // a soft edge vignette only
     setAmbience('cave_ambience');
     envSpeedMult = 1;
     return;
