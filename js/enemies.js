@@ -37,6 +37,7 @@ class Enemy {
     // elites: a modest ×2 HP / ×1.3 damage bump — a step below a 1-skull boss
     const eHp = this.elite ? 2 : 1, eDmg = this.elite ? 1.3 : 1;
 
+    this.difficulty = difficulty; // kept for late spawns (lair-boss brood calls)
     this.hp = base.hp * (1 + difficulty * 1.2) * (boss ? boss.hpMult : 1) * eHp;
     this.maxHp = this.hp;
     this.dmg = base.dmg * (1 + difficulty * 0.8) * (boss ? boss.dmgMult : 1) * eDmg;
@@ -794,6 +795,20 @@ export class EnemyManager {
           this.hooks.popup(e.mesh.position.clone().setY(e.mesh.position.y + 2), 'ENRAGED!', '#ff5030', 'big');
           audio.creature(e.type, 'attack', 0.55, 60);
           e.atkAt = this.world.time;
+        }
+        // NAMED lair bosses call their brood at half health — once
+        if (e.lairBoss && !e.broodCalled && e.hp < e.maxHp * 0.5) {
+          e.broodCalled = true;
+          const n = 4;
+          for (let i = 0; i < n; i++) {
+            const a = (i / n) * Math.PI * 2 + 0.5;
+            const m = this._spawn(e.type, e.pos.x + Math.cos(a) * 3.2, e.pos.z + Math.sin(a) * 3.2, e.difficulty);
+            m.aggroed = true;
+            m.noReinforce = true;
+          }
+          this.hooks.popup(e.mesh.position.clone().setY(e.mesh.position.y + 2.4), 'THE BROOD ANSWERS!', '#ff5030', 'big');
+          this.hooks.onLairBrood?.(e);
+          audio.creature(e.type, 'attack', 0.6, 50);
         }
       }
 

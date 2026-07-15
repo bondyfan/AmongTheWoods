@@ -1361,6 +1361,11 @@ const enemyMgr = new EnemyManager(scene, world, {
     } else if (enemy.bossRank > 0) rollBossDrop(enemy);
   },
   onDiscover: discoverType,
+  onLairBrood: (enemy) => {
+    ui.toast(`💀 ${enemy.bossName} calls the brood — cut them down fast!`, 'boss');
+    ui.hurtFlash();
+    audio.sfx('lane_unlock', 0.5);
+  },
   onBossSpawn: (enemy) => {
     const skulls = '💀'.repeat(enemy.bossRank);
     ui.addTracker('boss' + enemy.id,
@@ -1487,6 +1492,9 @@ function startPlaying() {
         pickups.spawn('item', candidates[Math.floor(Math.random() * candidates.length)].id, at, 0.6);
       }
     };
+    // the starting biome's lair rumor lands after a short grace (the biome
+    // banner never fires for the ring you wake up in)
+    setTimeout(() => { if (game.mode === 'play') hintLair(game.biomeIndex); }, 30_000);
     // crypts, jungle temples and the summit come pre-garrisoned with a
     // silent guard pack — the summit's keeper is a colossal named boss
     world.onPoiSpawned = (poi) => {
@@ -1510,7 +1518,12 @@ function startPlaying() {
         boss.bossName = lair.name;
         boss.lairDrop = lair.drop;   // guaranteed unique on death
         boss.lairId = poi.id;
+        boss.lairBoss = true;        // calls its brood at half health
         boss.aggroed = false; boss.cryptId = poi.id;
+        // the master of the lair stirs — a proper entrance
+        ui.banner(`💀 ${lair.name} 💀`);
+        ui.toast(`💀 You have found the lair of ${lair.name}. Slay the master for a UNIQUE treasure!`, 'boss');
+        audio.creature(lair.type, 'attack', 0.6, 50);
         return;
       }
       if (poi.type === 'summit') {
@@ -3115,6 +3128,18 @@ function tickDayNight(dt) {
   }
 }
 
+// entering a biome spreads a RUMOR of its named boss: the lair's surroundings
+// are revealed on the map so the red skull badge is findable, once per lair
+function hintLair(idx) {
+  const poi = world.pois?.find(p => p.type === 'lair' && p.ring === idx && !p.claimed);
+  if (!poi || poi.rumored) return;
+  poi.rumored = true;
+  minimap.revealArea(poi.x, poi.z, 45);
+  minimap.redrawT = 0;
+  const lair = BIOME_LAIRS[idx];
+  if (lair) ui.toast(`💀 Rumors speak of ${lair.name} — the lair is marked on your map (M).`, 'boss');
+}
+
 function updateAtmosphere(dt) {
   const idx = biomeIndexAt(player.pos.x, player.pos.z);
   if (idx !== game.biomeIndex) {
@@ -3125,6 +3150,7 @@ function updateAtmosphere(dt) {
     audio.playMusic(BIOME_MUSIC[idx] ?? 'level3');
     const note = BIOME_HAZARD_NOTES[biome.name];
     if (note) ui.toast(note, 'boss');
+    if (game.kind === 'survival') hintLair(idx);
   }
   // ambience: the cave near home overrides the biome; open water laps under it
   const rHome = Math.hypot(player.pos.x, player.pos.z);

@@ -314,10 +314,24 @@ export class Minimap {
       const p = toC(poi.x, poi.z);
       if (!inView(p)) continue;
       ctx.textAlign = 'center';
-      ctx.font = '10px sans-serif';
       ctx.globalAlpha = poi.claimed ? 0.35 : 1;
-      ctx.fillStyle = poi.type === 'shrine' ? '#7fd1ff' : poi.type === 'crypt' ? '#f0ead8' : poi.type === 'lair' ? '#ff6a6a' : '#c9b8ff';
-      text(poi.type === 'shrine' ? '✦' : poi.type === 'crypt' ? '☗' : poi.type === 'lair' ? '💀' : '▲', p.x, p.y + 3);
+      if (poi.type === 'lair') {
+        // the biome's NAMED boss: a pulsing blood-red badge under the skull
+        // (emoji ignore fillStyle, so the red must be a drawn disc)
+        const pulse = poi.claimed ? 7 : 7 + Math.sin(performance.now() / 300) * 1.2;
+        ctx.save();
+        if (!poi.claimed) { ctx.shadowColor = '#ff3020'; ctx.shadowBlur = 9; }
+        ctx.fillStyle = '#9e1412';
+        ctx.beginPath(); ctx.arc(p.x, p.y, pulse, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#ff5a4a'; ctx.lineWidth = 1.6; ctx.stroke();
+        ctx.restore();
+        ctx.font = '9px sans-serif';
+        text('💀', p.x, p.y + 3);
+      } else {
+        ctx.font = '10px sans-serif';
+        ctx.fillStyle = poi.type === 'shrine' ? '#7fd1ff' : poi.type === 'crypt' ? '#f0ead8' : '#c9b8ff';
+        text(poi.type === 'shrine' ? '✦' : poi.type === 'crypt' ? '☗' : '▲', p.x, p.y + 3);
+      }
       ctx.globalAlpha = 1;
     }
 
@@ -477,9 +491,23 @@ export class Minimap {
     for (const poi of this.world.pois ?? []) {
       if (!this._isDiscovered(poi.x, poi.z) || !inView(poi.x, poi.z)) continue;
       ctx.globalAlpha = poi.claimed ? 0.35 : 1;
-      ctx.fillStyle = poi.type === 'shrine' ? '#7fd1ff' : poi.type === 'crypt' ? '#f0ead8' : poi.type === 'lair' ? '#ff6a6a' : '#c9b8ff';
-      ctx.fillText(poi.type === 'shrine' ? '✦' : poi.type === 'crypt' ? '☗' : poi.type === 'lair' ? '💀' : '▲',
-        toX(poi.x), toY(poi.z) + 4);
+      if (poi.type === 'lair') {
+        // named-boss lair: blood-red badge behind the skull (emoji stay white)
+        const bx = toX(poi.x), by = toY(poi.z);
+        ctx.save();
+        if (!poi.claimed) { ctx.shadowColor = '#ff3020'; ctx.shadowBlur = 10; }
+        ctx.fillStyle = '#9e1412';
+        ctx.beginPath(); ctx.arc(bx, by, 9, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#ff5a4a'; ctx.lineWidth = 2; ctx.stroke();
+        ctx.restore();
+        ctx.font = '11px sans-serif';
+        ctx.fillText('💀', bx, by + 4);
+        ctx.font = '11px sans-serif';
+      } else {
+        ctx.fillStyle = poi.type === 'shrine' ? '#7fd1ff' : poi.type === 'crypt' ? '#f0ead8' : '#c9b8ff';
+        ctx.fillText(poi.type === 'shrine' ? '✦' : poi.type === 'crypt' ? '☗' : '▲',
+          toX(poi.x), toY(poi.z) + 4);
+      }
       ctx.globalAlpha = 1;
     }
     if (this.waypoint && inView(this.waypoint.x, this.waypoint.z)) {
