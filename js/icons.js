@@ -152,6 +152,16 @@ export const ITEM_ICONS = {
       fill="#c9b8ff" stroke="#6e4fa8" stroke-width="1.4" stroke-linejoin="round"/>`),
   frostSphere: orb('#bfe6ff',
     `<path d="M16 10v12M11 13l10 6M21 13l-10 6" stroke="#e6f7ff" stroke-width="1.3" opacity="0.9"/>`),
+  // ===== unique boss drops =====
+  // Verdant Heart: a living green heart with a leaf-vein motif and a soft glow
+  verdantHeart: S(`
+    <circle cx="16" cy="16" r="11" fill="#3aa85f" opacity="0.22"/>
+    <path d="M16 27C8.5 21.5 5 17.5 5 12.6 5 8.9 7.8 6 11.3 6c2 0 3.8 1 4.7 2.6C16.9 7 18.7 6 20.7 6 24.2 6 27 8.9 27 12.6c0 4.9-3.5 8.9-11 14.4z"
+      fill="#4fc46a" stroke="#1f7a3c" stroke-width="1.6" stroke-linejoin="round"/>
+    <path d="M16 9.5v13.5" stroke="#1f7a3c" stroke-width="1.4" opacity="0.7"/>
+    <path d="M16 13c-1.8-1.4-3.6-1.8-5.4-1.6M16 17c-2-1.6-4-2-6-1.8M16 15c1.8-1.4 3.6-1.8 5.4-1.6M16 19c2-1.6 4-2 6-1.8"
+      fill="none" stroke="#1f7a3c" stroke-width="1.2" opacity="0.6"/>
+    <path d="M12.5 11.5c1.4.6 2.4 1.8 2.6 3.4" fill="none" stroke="#d8ffe4" stroke-width="1.3" stroke-linecap="round" opacity="0.7"/>`),
   // ===== consumables =====
   salve: S(`
     <path d="M12 4h8v3l-2 2v3c3 1.5 5 4.5 5 8 0 4.5-3.5 8-7 8s-7-3.5-7-8c0-3.5 2-6.5 5-8V9l-2-2z"
@@ -345,15 +355,18 @@ export const ITEM_ICONS = {
 
 // ===== resource icons (drawn, not emoji) =====
 export const RES_SVG = {
-  // Ethereal Essence: a glowing green vial — the arcane currency of the deep woods
+  // Ethereal Essence: a glowing green orb wreathed in floating motes of light —
+  // raw arcane power of the deep woods, not a bottled potion
   essence: S(`
-    <path d="M13 3h6v3l-1.6 1.6v3.2c3.2 1.6 5.4 4.9 5.4 8.6 0 5-3.9 8.6-6.8 8.6h-0.2c-2.9 0-6.8-3.6-6.8-8.6 0-3.7 2.2-7 5.4-8.6V7.6L13 6z"
-      fill="#bfe8cc" stroke="#3d8a55" stroke-width="1.4" stroke-linejoin="round" opacity="0.55"/>
-    <path d="M10.6 17c-.4 1-.6 2.1-.6 3.4 0 4 3 6.8 5.6 6.8h.8c2.6 0 5.6-2.8 5.6-6.8 0-1.3-.2-2.4-.6-3.4z"
-      fill="#5fe07f" stroke="#2a8a45" stroke-width="1.2"/>
-    <circle cx="14" cy="21" r="1" fill="#d8ffe4"/>
-    <circle cx="18.4" cy="24" r="0.8" fill="#d8ffe4"/>
-    <rect x="12.2" y="2" width="7.6" height="2.4" rx="1.1" fill="#8a5a2b" stroke="#5f3d1c" stroke-width="1"/>`),
+    <circle cx="16" cy="16" r="10" fill="#3aa85f" opacity="0.28"/>
+    <circle cx="16" cy="16" r="7.2" fill="#5fe07f" stroke="#2a8a45" stroke-width="1.2"/>
+    <circle cx="16" cy="16" r="4" fill="#c8ffd8" opacity="0.9"/>
+    <circle cx="13.6" cy="13.6" r="1.6" fill="#ffffff" opacity="0.85"/>
+    <path d="M16 4.5l1 2.4 2.4 1-2.4 1-1 2.4-1-2.4-2.4-1 2.4-1z" fill="#d8ffe4"/>
+    <circle cx="25" cy="12" r="1.5" fill="#8ff0a8"/>
+    <circle cx="7"  cy="20" r="1.3" fill="#8ff0a8"/>
+    <circle cx="24" cy="23" r="1.1" fill="#b8ffcc" opacity="0.9"/>
+    <circle cx="9"  cy="9"  r="1"   fill="#b8ffcc" opacity="0.8"/>`),
   // a proper tanned hide instead of the brown square emoji
   hide: S(`
     <path d="M16 4c2.8 0 4.2 1.8 6.6 2s4.8 1.6 4.4 4.4c-.3 2.2 1.2 3.4 1 5.6-.2 2.4-2 3-2.2 5.2-.2 2.4 .6 4.8-1.8 6-2.2 1.1-3.6-.4-6-.2-1.4.1-2.6.1-4 0-2.4-.2-3.8 1.3-6 .2-2.4-1.2-1.6-3.6-1.8-6-.2-2.2-2-2.8-2.2-5.2-.2-2.2 1.3-3.4 1-5.6-.4-2.8 2-4.2 4.4-4.4S13.2 4 16 4z"
