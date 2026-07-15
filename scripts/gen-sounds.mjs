@@ -74,6 +74,10 @@ const SOUNDS = [
   ['swamp_ambience', 'Murky humid swamp ambience: layered croaking frogs, buzzing insects and mosquitoes, slow dripping water and lazy bubbling mud plops, thick and damp. Seamless loop with no start or end, no music, no human voice', 16.0],
   ['cave_ambience', 'Dark cavern ambience: sparse echoing water drips into pools, a distant low earth rumble and hollow reverberant air, cold and damp and vast. Seamless loop with no start or end, no music, no human voice', 16.0],
   ['water_lapping', 'Calm lakeshore ambience: gentle water lapping and soft ripples washing against a pebbled shore, a light breeze over the surface, tranquil. Seamless loop with no start or end, no music, no human voice', 14.0],
+  ['bee_attack', 'Angry bees attacking: a swarm of furious buzzing wings droning and darting sharply, insectoid, no music, no voice', 0.9],
+  ['bee_death', 'A single bee squished: a short buzzing sputter cut off with a tiny wet pop, insect, no music, no voice', 0.6],
+  ['cactus_attack', 'A living cactus creature attacking: dry woody creaking and a bristling rustle of sharp spines flicking out, arid and prickly, no music, no voice', 0.9],
+  ['cactus_death', 'A cactus creature dying: a dry splitting crack of fibrous pulp and a soft collapsing thud of spines and flesh, arid, no music, no voice', 1.1],
 ];
 
 const exists = async (p) => { try { await access(p); return true; } catch { return false; } };

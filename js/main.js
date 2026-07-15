@@ -87,6 +87,7 @@ window.addEventListener('resize', () => {
 });
 
 // ---------- game state ----------
+const DEVMODE = /(?:^|[?&])devmode/i.test(location.search); // admin tools only with ?devmode
 const game = {
   mode: 'menu',   // menu | play | dead | won
   kind: 'survival', // survival | moba
@@ -1774,7 +1775,7 @@ const settings = Object.assign(
   // is offered only in singleplayer (it would wreck a shared session)
   $id('settings-btn').addEventListener('click', () => {
     $id('set-mpcode').textContent = (mp?.active && mpCode) ? mpCode : '— (not in a multiplayer game)';
-    $id('admin-row').style.display = (game.kind === 'survival' && !mp?.active) ? '' : 'none';
+    $id('admin-row').style.display = (DEVMODE && game.kind === 'survival' && !mp?.active) ? '' : 'none';
     $id('set-admin').checked = !!game.adminMode;
     // cloud save/load is only offered inside a co-op survival game while signed in
     const canCloud = mp?.active && mp.mode === 'coop' && game.kind === 'survival';
@@ -1797,36 +1798,42 @@ const settings = Object.assign(
   });
 }
 
-// ---------- Google auth + cloud save/load ----------
+// ---------- Google auth GATE (blocks everything until signed in) ----------
 let AuthMod = null, authUser = null;
 async function ensureAuth() {
   if (!AuthMod) AuthMod = (await import('./auth.js')).Auth;
   return AuthMod;
 }
-function refreshAuthUI() {
-  const btn = $id('auth-signin'), lbl = $id('auth-user');
-  if (authUser) {
-    btn.textContent = '🚪 Sign out';
-    lbl.textContent = `☁️ ${authUser.name}`;
-    lbl.classList.remove('hidden');
-  } else {
-    btn.textContent = '🔑 Sign in with Google';
-    lbl.classList.add('hidden');
-  }
+function openGate() { $id('auth-gate').classList.remove('gone'); }
+function passGate() { $id('auth-gate').classList.add('gone'); }
+
+// ?devmode skips the gate entirely (for local testing without Google set up)
+if (DEVMODE) {
+  passGate();
+} else {
+  // watch the session: signed in → drop the gate; signed out → keep it up
+  (async () => {
+    try {
+      (await ensureAuth()).watch((u) => {
+        authUser = u;
+        if (u) passGate(); else openGate();
+      });
+    } catch (e) {
+      $id('gate-msg').textContent = 'Could not reach Google sign-in: ' + (e?.message || e);
+    }
+  })();
+  $id('gate-signin').addEventListener('click', async () => {
+    const msg = $id('gate-msg');
+    msg.textContent = 'Opening Google…';
+    try {
+      const a = await ensureAuth();
+      authUser = await a.signIn();
+      passGate();
+    } catch (e) {
+      msg.textContent = 'Sign-in failed: ' + (e?.message || e);
+    }
+  });
 }
-// restore any existing session so the button reflects it, silently
-(async () => {
-  try { (await ensureAuth()).watch((u) => { authUser = u; refreshAuthUI(); }); } catch {}
-})();
-$id('auth-signin').addEventListener('click', async () => {
-  try {
-    const a = await ensureAuth();
-    if (authUser) { await a.signOutUser(); authUser = null; refreshAuthUI(); return; }
-    authUser = await a.signIn();
-    refreshAuthUI();
-    ui.toast(`☁️ Signed in as ${authUser.name}`, 'level');
-  } catch (e) { ui.toast('Sign-in failed: ' + (e?.message || e), 'boss'); }
-});
 
 // serialize the essentials of the current character + camp
 function serializeState() {
@@ -2000,9 +2007,20 @@ function mpError(err) { $id('mp-error').textContent = err?.message || String(err
 // ---- main menu: pick a mode first, then solo / multiplayer ----
 let selectedMode = 'survival';
 
+function resetLobbyUI() {
+  $id('mp-choose')?.classList.remove('hidden');
+  $id('mp-wait')?.classList.add('hidden');
+  $id('start-btn')?.classList.remove('hidden');
+  const err = $id('mp-error'); if (err) err.textContent = '';
+  mpCode = null;
+  // a room was being hosted but we backed out — tear it down so it doesn't linger
+  if (mp && game.mode !== 'play') { try { mp.dispose?.(); } catch {} mp = null; }
+}
+
 function showModeOptions(mode) {
   audio.sfx('click', 0.4);
   selectedMode = mode;
+  resetLobbyUI();
   $id('mode-select').classList.add('hidden');
   const opts = $id('mode-options');
   opts.classList.remove('hidden');
@@ -2013,9 +2031,9 @@ $id('mode-survival-btn').addEventListener('click', () => showModeOptions('surviv
 $id('mode-moba-btn').addEventListener('click', () => showModeOptions('moba'));
 $id('mode-back-btn').addEventListener('click', () => {
   audio.sfx('click', 0.4);
+  resetLobbyUI();
   $id('mode-options').classList.add('hidden');
   $id('mode-select').classList.remove('hidden');
-  $id('mp-error').textContent = '';
 });
 $id('mp-moba-btn').addEventListener('click', async () => {
   try {

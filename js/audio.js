@@ -32,7 +32,8 @@ class AudioManager {
       'golem_attack', 'golem_death', 'wisp_attack', 'wisp_death',
       'snapper_attack', 'snapper_death', 'scorpion_attack', 'scorpion_death',
       'thornling_attack', 'thornling_death', 'boar_attack', 'boar_death',
-      'elk_attack', 'elk_death', 'bear_attack', 'bear_death'];
+      'elk_attack', 'elk_death', 'bear_attack', 'bear_death',
+      'bee_attack', 'bee_death', 'cactus_attack', 'cactus_death'];
     // nature ambience loops — warmed via HTTP cache, played through loopStart
     const AMB = ['forest_ambience', 'wind_ambience', 'swamp_ambience', 'cave_ambience', 'water_lapping'];
     const MUSIC = ['level1', 'level3', 'mainmenu'];
@@ -172,7 +173,8 @@ class AudioManager {
     if (/snake|serpent|cobra/i.test(type)) return 'snake';
     if (/wolf/i.test(type)) return 'wolf';
     if (type === 'rat') return 'rat';
-    if (type === 'bat' || type === 'bee') return 'bat'; // insect buzz ~ bat screech
+    if (type === 'bat') return 'bat';
+    if (type === 'bee') return 'bee';
     if (type === 'rabbit') return 'rabbit';
     if (type === 'sheep') return 'sheep';
     if (type === 'horse') return 'horse';
@@ -185,7 +187,8 @@ class AudioManager {
     if (/wendigo/i.test(type)) return 'wendigo';
     if (/yeti/i.test(type)) return 'yeti';
     if (/treant/i.test(type)) return 'treant';
-    if (/thornling|cactus/i.test(type)) return 'thornling';
+    if (/cactus/i.test(type)) return 'cactus';
+    if (/thornling/i.test(type)) return 'thornling';
     if (/snapper/i.test(type)) return 'snapper';
     if (/scorpion/i.test(type)) return 'scorpion';
     if (/golem/i.test(type)) return 'golem';             // incl. icegolem

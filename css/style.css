@@ -683,3 +683,21 @@ kbd {
   border: 1px solid rgba(255,255,255,0.15); border-radius: 10px; background: rgba(255,255,255,0.04); }
 .save-row .save-meta { flex: 1; }
 .save-row .save-when { font-size: 12px; color: #9fb884; }
+
+
+/* mandatory Google sign-in gate */
+#auth-gate { position: fixed; inset: 0; z-index: 400; display: flex;
+  align-items: center; justify-content: center;
+  background: radial-gradient(ellipse at 50% 30%, #24361f, #0d140a 70%); }
+#auth-gate.gone { display: none; }
+#auth-gate .gate-inner { text-align: center; color: #e8f0dc; padding: 20px; }
+#auth-gate h1 { font-size: 64px; line-height: 1.02; letter-spacing: 3px;
+  margin-bottom: 14px; text-shadow: 0 4px 18px rgba(0,0,0,0.6); }
+#auth-gate .gate-tag { color: #b9cfa0; margin-bottom: 34px; font-size: 17px; }
+#gate-signin { display: inline-flex; align-items: center; gap: 12px;
+  background: #fff; color: #3c4043; border: none; border-radius: 12px;
+  padding: 16px 30px; font-size: 19px; font-weight: 700; cursor: pointer;
+  box-shadow: 0 8px 26px rgba(0,0,0,0.45); transition: transform 0.12s, box-shadow 0.12s; }
+#gate-signin:hover { transform: translateY(-2px); box-shadow: 0 12px 32px rgba(0,0,0,0.55); }
+#gate-signin:active { transform: translateY(0); }
+#gate-msg { margin-top: 18px; color: #ffb3a0; font-size: 14px; min-height: 18px; }
