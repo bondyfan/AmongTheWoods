@@ -243,42 +243,45 @@ export class Minimap {
       }
     }
 
-    // ---- biome-ring borders + their gate entrances + the road ----
-    // drawn inside the rotated map so they line up with the terrain
-    for (const ring of this.world.rings ?? []) {
-      const c = toC(0, 0);
-      ctx.strokeStyle = ring.type === 'river' ? 'rgba(120,180,230,0.55)' : 'rgba(190,160,115,0.6)';
-      ctx.lineWidth = 1.3;
-      ctx.setLineDash([4, 3]);
-      ctx.beginPath();
-      ctx.arc(c.x, c.y, ring.r * scale, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      for (const gap of ring.gaps ?? []) {
-        const gp = toC(Math.sin(gap.a) * ring.r, Math.cos(gap.a) * ring.r);
-        if (!inView(gp)) continue;
-        ctx.fillStyle = '#f2d24a';
-        ctx.strokeStyle = '#3a2c08'; ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.arc(gp.x, gp.y, 3.2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      }
-    }
-    const drawTrail = (poly, color, width) => {
+    // ---- biome-ring borders + gate entrances + the road ----
+    // EVERYTHING here is part of the discoverable map: only the stretches over
+    // already-explored ground are drawn (contiguous runs of discovered points).
+    const drawClipped = (poly, color, width, dash) => {
       if (!poly || poly.length < 2) return;
-      ctx.strokeStyle = color;
-      ctx.lineWidth = width;
+      ctx.strokeStyle = color; ctx.lineWidth = width;
       ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-      ctx.setLineDash([5, 4]);
+      ctx.setLineDash(dash);
       ctx.beginPath();
-      const p0 = toC(poly[0].x, poly[0].z);
-      ctx.moveTo(p0.x, p0.y);
-      for (let i = 1; i < poly.length; i++) { const p = toC(poly[i].x, poly[i].z); ctx.lineTo(p.x, p.y); }
+      let pen = false;
+      for (const q of poly) {
+        if (this._isDiscovered(q.x, q.z)) {
+          const p = toC(q.x, q.z);
+          if (pen) ctx.lineTo(p.x, p.y); else { ctx.moveTo(p.x, p.y); pen = true; }
+        } else pen = false;
+      }
       ctx.stroke();
       ctx.setLineDash([]);
     };
+    // ring borders (sampled into points so they clip to the fog like the road)
+    for (const ring of this.world.rings ?? []) {
+      const N = 160, circle = [];
+      for (let k = 0; k <= N; k++) { const a = (k / N) * Math.PI * 2; circle.push({ x: Math.sin(a) * ring.r, z: Math.cos(a) * ring.r }); }
+      drawClipped(circle, ring.type === 'river' ? 'rgba(120,180,230,0.5)' : 'rgba(190,160,115,0.55)', 1.3, [4, 3]);
+    }
     // all trails look IDENTICAL — the player can't tell which fork leads where
     for (const br of this.world.branches ?? [])
-      drawTrail(br.pts, 'rgba(236, 210, 146, 0.85)', 2.2);
-    drawTrail(this.world.pathPts, 'rgba(236, 210, 146, 0.85)', 2.2);
+      drawClipped(br.pts, 'rgba(236, 210, 146, 0.85)', 2.2, [5, 4]);
+    drawClipped(this.world.pathPts, 'rgba(236, 210, 146, 0.85)', 2.2, [5, 4]);
+    // gate entrances — bold, only once discovered (bright doorway beacon)
+    for (const ring of this.world.rings ?? []) {
+      for (const gap of ring.gaps ?? []) {
+        const wx = Math.sin(gap.a) * ring.r, wz = Math.cos(gap.a) * ring.r;
+        if (!this._isDiscovered(wx, wz)) continue;
+        const gp = toC(wx, wz);
+        if (!inView(gp)) continue;
+        this._drawGate(ctx, gp.x, gp.y, -rot);
+      }
+    }
 
     // home marker (only when it's inside the view)
     const hc = toC(0, 0);
@@ -441,12 +444,51 @@ export class Minimap {
       }
     }
 
-    ctx.restore(); // end of the rotated map — the player dot stays screen-fixed
+    ctx.restore(); // end of the rotated map — the player marker stays screen-fixed
 
-    // player: always dead center
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath(); ctx.arc(W / 2, H / 2, 3, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = '#000'; ctx.stroke();
+    // player: a bold GREEN arrow at dead center pointing where they're headed.
+    // world facing (fx,fz) shown through the map's rotation:
+    const fx = player.facing?.x ?? 0, fz = player.facing?.z ?? 1;
+    const sx = fx * Math.cos(rot) - fz * Math.sin(rot);
+    const sy = fx * Math.sin(rot) + fz * Math.cos(rot);
+    this._drawPlayerArrow(ctx, W / 2, H / 2, Math.atan2(sy, sx));
+  }
+
+  // a chunky green heading arrow (angle 0 = +x screen); used on both maps
+  _drawPlayerArrow(ctx, cx, cy, angle) {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(angle);
+    ctx.fillStyle = '#4dff5a';
+    ctx.strokeStyle = '#0a2a0c';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(9, 0); ctx.lineTo(-6, -6); ctx.lineTo(-3, 0); ctx.lineTo(-6, 6);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+
+  // a bold biome-gate beacon: a bright gold ring around a dark doorway.
+  // `upright` counter-rotates the glyph so it stays level on a spinning map.
+  _drawGate(ctx, x, y, upright = 0) {
+    ctx.save();
+    ctx.translate(x, y);
+    if (upright) ctx.rotate(upright);
+    ctx.shadowColor = 'rgba(255, 214, 74, 0.9)';
+    ctx.shadowBlur = 7;
+    ctx.fillStyle = '#ffe14a';
+    ctx.strokeStyle = '#5a3d0a';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.arc(0, 0, 5.4, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.shadowBlur = 0;
+    // a little archway/door cut into the middle
+    ctx.fillStyle = '#3a2708';
+    ctx.beginPath();
+    ctx.moveTo(-2.4, 3); ctx.lineTo(-2.4, -0.6);
+    ctx.arc(0, -0.6, 2.4, Math.PI, 0); ctx.lineTo(2.4, 3);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
   }
 
   // Big-map zoom: 1 = whole world; each step halves the visible span and
@@ -499,47 +541,42 @@ export class Minimap {
     }
     const inView = (wx, wz) => wx >= ox && wx <= ox + vspan && wz >= oz && wz <= oz + vspan;
 
-    // ---- ring borders between biomes + the road that threads their gates ----
-    // borders show as faint dashed circles; a gap in the circle = an ENTRANCE.
-    for (const ring of this.world.rings ?? []) {
-      ctx.strokeStyle = ring.type === 'river' ? 'rgba(120,180,230,0.5)' : 'rgba(180,150,110,0.55)';
-      ctx.lineWidth = 1.4;
-      ctx.setLineDash([5, 4]);
-      ctx.beginPath();
-      ctx.arc(toX(0), toY(0), ring.r * scale, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      // each gate: erase the border there and mark it with an entrance chevron
-      for (const gap of ring.gaps ?? []) {
-        const gx = Math.sin(gap.a) * ring.r, gz = Math.cos(gap.a) * ring.r;
-        if (!inView(gx, gz)) continue;
-        const bx = toX(gx), by = toY(gz);
-        ctx.fillStyle = '#f2d24a';
-        ctx.strokeStyle = '#3a2c08';
-        ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.arc(bx, by, 3.6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-        ctx.beginPath(); ctx.arc(bx, by, 1.4, 0, Math.PI * 2);
-        ctx.fillStyle = '#3a2c08'; ctx.fill();
-      }
-    }
-    // the winding road from home out through every gate + the fork spurs
+    // ---- ring borders + road + fork spurs — ALL part of the discoverable
+    // map: only the stretches over explored ground are drawn ----
     const roadW = Math.max(1.6, 2.4 * Math.min(1, scale * 8));
-    const drawTrailBig = (poly, color, width) => {
+    const dash = [Math.max(3, 5 * Math.min(1, scale * 6)), 4];
+    const drawClippedBig = (poly, color, width, dsh) => {
       if (!poly || poly.length < 2) return;
-      ctx.strokeStyle = color;
-      ctx.lineWidth = width;
+      ctx.strokeStyle = color; ctx.lineWidth = width;
       ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-      ctx.setLineDash([Math.max(3, 5 * Math.min(1, scale * 6)), 4]);
+      ctx.setLineDash(dsh);
       ctx.beginPath();
-      ctx.moveTo(toX(poly[0].x), toY(poly[0].z));
-      for (let i = 1; i < poly.length; i++) ctx.lineTo(toX(poly[i].x), toY(poly[i].z));
+      let pen = false;
+      for (const q of poly) {
+        if (this._isDiscovered(q.x, q.z)) {
+          if (pen) ctx.lineTo(toX(q.x), toY(q.z)); else { ctx.moveTo(toX(q.x), toY(q.z)); pen = true; }
+        } else pen = false;
+      }
       ctx.stroke();
       ctx.setLineDash([]);
     };
+    for (const ring of this.world.rings ?? []) {
+      const N = 220, circle = [];
+      for (let k = 0; k <= N; k++) { const a = (k / N) * Math.PI * 2; circle.push({ x: Math.sin(a) * ring.r, z: Math.cos(a) * ring.r }); }
+      drawClippedBig(circle, ring.type === 'river' ? 'rgba(120,180,230,0.5)' : 'rgba(180,150,110,0.55)', 1.4, [5, 4]);
+    }
     // every fork looks the SAME as the main road — no telling where each leads
     for (const br of this.world.branches ?? [])
-      drawTrailBig(br.pts, 'rgba(232, 206, 140, 0.8)', roadW);
-    drawTrailBig(this.world.pathPts, 'rgba(232, 206, 140, 0.8)', roadW);
+      drawClippedBig(br.pts, 'rgba(232, 206, 140, 0.8)', roadW, dash);
+    drawClippedBig(this.world.pathPts, 'rgba(232, 206, 140, 0.8)', roadW, dash);
+    // gate entrances — bold beacons, only once their cell is discovered
+    for (const ring of this.world.rings ?? []) {
+      for (const gap of ring.gaps ?? []) {
+        const gx = Math.sin(gap.a) * ring.r, gz = Math.cos(gap.a) * ring.r;
+        if (!inView(gx, gz) || !this._isDiscovered(gx, gz)) continue;
+        this._drawGate(ctx, toX(gx), toY(gz), 0);
+      }
+    }
 
     ctx.textAlign = 'center';
     ctx.font = '13px sans-serif';
@@ -607,8 +644,8 @@ export class Minimap {
       ctx.fillStyle = '#5fa8e0';
       ctx.beginPath(); ctx.arc(toX(partner.pos.x), toY(partner.pos.z), 4, 0, Math.PI * 2); ctx.fill();
     }
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath(); ctx.arc(toX(player.pos.x), toY(player.pos.z), 4, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = '#000'; ctx.stroke();
+    // player: a bold green heading arrow (no map rotation on the big map)
+    this._drawPlayerArrow(ctx, toX(player.pos.x), toY(player.pos.z),
+      Math.atan2(player.facing?.z ?? 1, player.facing?.x ?? 0));
   }
 }
