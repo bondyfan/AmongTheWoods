@@ -13,6 +13,7 @@ import { audio } from './audio.js';
 import { input } from './input.js';
 import { World, latticeHash } from './world.js';
 import { MobaWorld } from './mobaworld.js';
+import { DungeonWorld } from './dungeon.js';
 import { Moba } from './moba.js';
 import { Player } from './player.js';
 import { EnemyManager } from './enemies.js';
@@ -876,7 +877,8 @@ function tickFireflies(dt) {
 let torchLight = null, torchFlame = null, torchT = 0;
 
 function tickTorch(dt) {
-  const dark = (BIOMES[game.biomeIndex]?.darkness ?? 0) >= 0.35
+  const dark = !!game.dungeon // lair dungeons are always torch-dark
+    || (BIOMES[game.biomeIndex]?.darkness ?? 0) >= 0.35
     || radiusOf(player.pos.x, player.pos.z) < WORLD.caveR + 6;
   const on = game.kind === 'survival' && inPlay()
     && player.torchGear && dark && !player.dead;
@@ -1353,11 +1355,18 @@ const enemyMgr = new EnemyManager(scene, world, {
       // a NAMED lair boss: its unique item is GUARANTEED, plus a fat cache
       pickups.spawn('item', enemy.lairDrop, enemy.pos, 0.4);
       pickups.spawn('essence', 5, enemy.pos, 1.2);
-      const poi = world.pois?.find(p => p.id === enemy.lairId);
+      // in a dungeon the overworld poi list is swapped out — use the door ref
+      const poi = (game.dungeon?.poi.id === enemy.lairId ? game.dungeon.poi : null)
+        ?? world.pois?.find(p => p.id === enemy.lairId);
       if (poi) { poi.claimed = true; minimap.redrawT = 0; }
       ui.banner(`— ${enemy.bossName} falls! —`);
       ui.toast(`🏆 ${enemy.bossName} is slain — its unique treasure is yours!`, 'level');
       audio.sfx('victory', 0.6);
+      if (game.dungeon && game.dungeon.poi.id === enemy.lairId) {
+        world.openExit?.();
+        ui.toast('✨ A green way out shimmers open at the back of the hall — press E there to leave.', 'level');
+        audio.sfx('map_reveal', 0.6);
+      }
     } else if (enemy.bossRank > 0) rollBossDrop(enemy);
   },
   onDiscover: discoverType,
@@ -1464,6 +1473,8 @@ function endStats() {
 // Shared entry into play mode (solo start button + multiplayer session begin).
 function startPlaying() {
   ui.hideMenu();
+  // safety: never carry a half-open lair dungeon into a fresh run
+  if (game.dungeon) { try { exitLair(false); } catch {} game.dungeon = null; enemyMgr.suspend = false; $id('minimap').style.display = ''; }
   game.mode = 'play';
   game.tod = START_TOD; // every run opens at 08:00 (co-op then syncs to the room epoch)
   audio.playMusic('level1');
@@ -1506,7 +1517,10 @@ function startPlaying() {
       const type = biome.enemies[Math.floor(Math.random() * biome.enemies.length)];
       const progress = progressAt(poi.x, poi.z);
       if (poi.type === 'lair') {
-        // a biome's NAMED boss, roosting in its lair with a guaranteed unique drop
+        // Singleplayer: the crypt is a DOOR — the named boss lives inside its
+        // own instanced dungeon (walk up and press E). Co-op keeps the
+        // classic outdoor fight so nothing needs syncing.
+        if (!mp?.active) return;
         const lair = BIOME_LAIRS[poi.ring];
         if (!lair) return;
         for (let i = 0; i < 5; i++) {
@@ -1515,21 +1529,7 @@ function startPlaying() {
           g.aggroed = false; g.cryptId = poi.id;
         }
         const boss = enemyMgr._spawn(lair.type, poi.x, poi.z - 4, progress, 3, { ambush: true });
-        boss.bossName = lair.name;
-        boss.lairDrop = lair.drop;   // guaranteed unique on death
-        boss.lairId = poi.id;
-        boss.lairBoss = true;        // calls its brood at half health
-        // some masters outgrow even a 3-skull frame (Grimfrost the Colossus)
-        if (lair.extraScale) {
-          boss.mesh.scale.multiplyScalar(lair.extraScale);
-          boss.sizeMult *= lair.extraScale;
-          boss.hitR *= lair.extraScale;
-          boss.range *= lair.extraScale;
-        }
-        if (lair.hpMult) {
-          boss.hp *= lair.hpMult;
-          boss.maxHp = boss.hp;
-        }
+        dressLairBoss(boss, lair, poi.id);
         boss.aggroed = false; boss.cryptId = poi.id;
         // the master of the lair stirs — a proper entrance
         ui.banner(`💀 ${lair.name} 💀`);
@@ -1715,6 +1715,8 @@ function survivalRespawn() {
 function reviveAt(where) {
   $id('respawn-choice').classList.add('hidden');
   if (game.mode !== 'play') return;
+  // dying inside a lair throws you back out — your spilled loot waits at the door
+  if (game.dungeon) exitLair(false);
   player.revive(1);
   if (where === 'grave' && camp?.gravePos) player.pos.set(camp.gravePos.x, 0, camp.gravePos.z + 2);
   else player.pos.set(0, 0, -2);
@@ -2502,8 +2504,117 @@ function nearTreasure() {
     && Math.hypot(player.pos.x - player.treasureAt.x, player.pos.z - player.treasureAt.z) < 5;
 }
 
+// ---------- lair dungeons: every named boss lives in its own instance ----------
+// Entering swaps the loop's `world` for a DungeonWorld pocket (the same swap
+// trick the MOBA uses); leaving swaps the untouched overworld right back.
+let dungeonOverworld = null, dungeonReturn = null, dungeonHiddenPickups = [];
+
+function dressLairBoss(boss, lair, poiId) {
+  boss.bossName = lair.name;
+  boss.lairDrop = lair.drop;   // guaranteed unique on death
+  boss.lairId = poiId;
+  boss.lairBoss = true;        // calls its brood at half health
+  // some masters outgrow even a 3-skull frame (Grimfrost the Colossus)
+  if (lair.extraScale) {
+    boss.mesh.scale.multiplyScalar(lair.extraScale);
+    boss.sizeMult *= lair.extraScale;
+    boss.hitR *= lair.extraScale;
+    boss.range *= lair.extraScale;
+  }
+  if (lair.hpMult) {
+    boss.hp *= lair.hpMult;
+    boss.maxHp = boss.hp;
+  }
+}
+
+function populateDungeon(dw, poi, lair, progress) {
+  const mobs = lair.mobs ?? [lair.type];
+  let mi = 0;
+  // three broods barring the corridor
+  for (const s of [26, 48, 70]) {
+    for (let i = 0; i < 3; i++) {
+      const pt = dw.corridorPoint(s + (i === 2 ? 3 : 0), (i - 1) * 3.4);
+      const e = enemyMgr._spawn(mobs[mi++ % mobs.length], pt.x, pt.z, progress);
+      e.aggroed = false; e.dungeonMob = true; e.cryptId = poi.id;
+    }
+  }
+  // two hall wardens flanking the master
+  for (const off of [-7, 7]) {
+    const pt = dw.hallPoint(off);
+    const e = enemyMgr._spawn(mobs[Math.floor(Math.random() * mobs.length)], pt.x, pt.z, progress);
+    e.aggroed = false; e.dungeonMob = true; e.cryptId = poi.id;
+  }
+  const hc = dw.hallCenter();
+  const boss = enemyMgr._spawn(lair.type, hc.x, hc.z, progress, 3, { ambush: true });
+  dressLairBoss(boss, lair, poi.id);
+  boss.dungeonMob = true;
+  boss.aggroed = false;
+}
+
+function enterLair(poi) {
+  if (mp?.active || game.dungeon) return;
+  const lair = BIOME_LAIRS[poi.ring];
+  if (!lair) return;
+  if (player.mounted) dismountHorse();
+  const progress = progressAt(poi.x, poi.z);
+  // freeze the overworld: every creature melts back into its zone pool
+  enemyMgr.suspend = true;
+  enemyMgr.clearAll(true);
+  dungeonOverworld = world;
+  dungeonReturn = { x: player.pos.x, z: player.pos.z };
+  const dw = new DungeonWorld(scene, { entry: { x: poi.x, z: poi.z }, lair });
+  world = dw;
+  pickups.world = dw;
+  enemyMgr.world = dw;
+  // overworld ground loot would sink onto the dungeon floor — hide it
+  dungeonHiddenPickups = pickups.list.slice();
+  for (const p of dungeonHiddenPickups) p.mesh.visible = false;
+  game.dungeon = { poi, lair };
+  const start = dw.startPos();
+  player.pos.set(start.x, 0, start.z);
+  player.y = null; // snap the vertical to the dungeon floor
+  populateDungeon(dw, poi, lair, progress);
+  $id('minimap').style.display = 'none';
+  $id('blizzard').style.opacity = 0; // no surface weather follows you down
+  ui.banner(`— ${lair.den ?? 'The Lair'} —`);
+  ui.toast(`💀 ${lair.name} waits in the far hall. Fight through the brood — or slip back out through the blue arch (E).`, 'boss');
+  audio.sfx('lane_unlock', 0.6);
+}
+
+function exitLair(cleared) {
+  if (!game.dungeon) return;
+  // whatever loot still lies on the dungeon floor comes out WITH you
+  // (the hidden overworld pickups are exactly dungeonHiddenPickups)
+  const hidden = new Set(dungeonHiddenPickups);
+  enemyMgr.clearAll(false); // dungeon dwellers simply vanish
+  world.dispose();
+  world = dungeonOverworld;
+  dungeonOverworld = null;
+  pickups.world = world;
+  enemyMgr.world = world;
+  enemyMgr.suspend = false;
+  for (const p of pickups.list) {
+    if (hidden.has(p)) continue;
+    p.x = dungeonReturn.x + (Math.random() - 0.5) * 3;
+    p.z = dungeonReturn.z + (Math.random() - 0.5) * 3;
+    p.mesh.position.set(p.x, world.heightAt(p.x, p.z) + 0.45, p.z);
+  }
+  for (const p of dungeonHiddenPickups) p.mesh.visible = true;
+  dungeonHiddenPickups = [];
+  game.dungeon = null;
+  player.pos.set(dungeonReturn.x, 0, dungeonReturn.z);
+  player.y = null;
+  $id('minimap').style.display = '';
+  minimap.redrawT = 0;
+  if (cleared) ui.banner('— You emerge victorious —');
+  else ui.toast('🌲 You slip back out into the open air.', '');
+  audio.sfx('click', 0.5);
+}
+
 // landmark rewards: shrines bless, monoliths pay out, crypts must be cleared
 function claimPoi(poi) {
+  // singleplayer lairs are DOORS — E walks you into the boss's dungeon
+  if (poi.type === 'lair' && !mp?.active) { enterLair(poi); return; }
   if (['crypt', 'temple', 'summit', 'lair'].includes(poi.type)) {
     const guards = enemyMgr.alive().filter(e => e.cryptId === poi.id);
     if (guards.length) {
@@ -2640,6 +2751,12 @@ function digTreasure() {
 
 input.onKey('KeyE', () => {
   if (!inPlay()) return;
+  // inside a lair dungeon the only interactions are the two portals
+  if (game.dungeon) {
+    if (world.atExit?.(player.pos)) { exitLair(true); return; }
+    if (world.atEntrance?.(player.pos)) { exitLair(false); return; }
+    return;
+  }
   if (player.mounted) { dismountHorse(); return; } // E or X gets you off the horse
   if (mp?.revivablePartner?.()) { // co-op: helping a downed friend wins
     const t = mp.remote.targetPos;
@@ -3152,6 +3269,21 @@ function hintLair(idx) {
 }
 
 function updateAtmosphere(dt) {
+  // inside a lair dungeon: tight themed fog, deep gloom, cave echo — and none
+  // of the overworld's biome logic
+  if (game.dungeon) {
+    const fogC = game.dungeon.lair.theme?.fog ?? 0x0b0d10;
+    scene.fog.color.set(fogC);
+    scene.background.set(fogC);
+    scene.fog.near = 12;
+    scene.fog.far = 58;
+    hemi.intensity = 0.24; // torchlight carries the scene down here
+    sun.intensity = 0.12;
+    $id('biome-gloom').style.opacity = 0.55;
+    setAmbience('cave_ambience');
+    envSpeedMult = 1;
+    return;
+  }
   const idx = biomeIndexAt(player.pos.x, player.pos.z);
   if (idx !== game.biomeIndex) {
     game.biomeIndex = idx;
@@ -3424,7 +3556,7 @@ function step() {
         pickups.update(dt, [player]);
       }
       companions.update(dt, player, em, projectiles, world);
-      camp?.update(dt, em, projectiles);
+      if (!game.dungeon) camp?.update(dt, em, projectiles); // towers can't shoot through the floor
       world.update(dt, player.pos);
       // co-op: show the partner on the minimap too; in top-down view the
       // minimap turns together with the auto-rotated camera (RPG: north-up)
@@ -3478,22 +3610,24 @@ function step() {
       updateWaves(dt);
 
       updateChannel(dt);
-      tickGraveEvent();
-      tickWisp(dt);
-      tickRace(dt);
-      tickGust(dt);
-      tickTumbleweeds(dt);
-      tickBubbles(dt);
-      tickGlide(dt);
-      tickAvalanche(dt);
-      tickBlizzard(dt);
-      tickTempleTraps(dt);
-      tickGriffin(dt);
-      tickFlight(dt);
-      tickFireflies(dt);
-      tickTorch(dt);
-      tickDustDevil(dt);
-      tickCold(dt);
+      if (!game.dungeon) { // surface weather & events sleep while you're below
+        tickGraveEvent();
+        tickWisp(dt);
+        tickRace(dt);
+        tickGust(dt);
+        tickTumbleweeds(dt);
+        tickBubbles(dt);
+        tickGlide(dt);
+        tickAvalanche(dt);
+        tickBlizzard(dt);
+        tickTempleTraps(dt);
+        tickGriffin(dt);
+        tickFlight(dt);
+        tickFireflies(dt);
+        tickDustDevil(dt);
+        tickCold(dt);
+      }
+      tickTorch(dt); // your torch burns down there too
 
       // contextual E hint: revive > chest > home > landmark > treasure
       const hintEl = $id('home-hint');
@@ -3509,7 +3643,8 @@ function step() {
         liana: '🌿 A vine line — press <kbd>E</kbd> to glide across',
         bonfire: '🔥 A bonfire — press <kbd>E</kbd> to rest (full heal, safe camp)',
         summit: '⛰️ The summit — defeat its keeper, then press <kbd>E</kbd> to claim the peak',
-        lair: '💀 A boss lair — slay its named master for a UNIQUE treasure',
+        lair: mp?.active ? '💀 A boss lair — slay its named master for a UNIQUE treasure'
+          : '💀 A boss lair — press <kbd>E</kbd> to enter its master\'s den',
         statue: '🗿 Cursed statue — press <kbd>E</kbd> to strike a pact (boon + bane)',
       };
       const POI_HINTS = {
@@ -3518,6 +3653,9 @@ function step() {
         crypt: '☗ Forgotten crypt — clear the keepers, then <kbd>E</kbd> to loot',
       };
       const hint = panels.open ? null
+        : game.dungeon ? (world.atExit?.(player.pos) ? '✨ The way out — press <kbd>E</kbd> to leave the lair'
+            : world.atEntrance?.(player.pos) ? '🚪 The entrance arch — press <kbd>E</kbd> to flee the lair'
+            : null)
         : channel ? `✨ ${channel.label} ${Math.min(99, Math.round((channel.t / channel.dur) * 100))}%`
         : mp?.revivablePartner?.() ? '💚 Your partner is DOWN — press <kbd>E</kbd> to revive!'
         : nearChest() ? '📦 Storage chest — press <kbd>E</kbd> to open'

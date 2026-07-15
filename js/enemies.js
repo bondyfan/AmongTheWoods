@@ -120,6 +120,22 @@ export class EnemyManager {
     this.list.splice(index, 1);
   }
 
+  // Despawn EVERY live creature at once (entering/leaving a lair dungeon).
+  // toPools: zone dwellers are remembered and rematerialize later; anything
+  // without a zone (dungeon mobs, crypt guards) simply vanishes.
+  clearAll(toPools = false) {
+    for (let i = this.list.length - 1; i >= 0; i--) {
+      const e = this.list[i];
+      if (toPools && e.zoneKey) {
+        this.zones.get(e.zoneKey)?.pool?.push(e._spec ?? {
+          type: e.type, bossRank: e.bossRank, groupId: e.groupId, announced: true,
+        });
+      }
+      if (e.bossRank > 0) this.hooks.onBossDeath(e);
+      this._remove(e, i);
+    }
+  }
+
   _spawnPoint(anchor, { allSides = false, spread = 0 } = {}) {
     const ar = Math.hypot(anchor.pos.x, anchor.pos.z);
     // bias spawns AWAY from home (outward) most of the time
@@ -522,10 +538,13 @@ export class EnemyManager {
   update(dt, targets, projectiles) {
     const anchor = this._anchor(targets);
 
-    this.zoneTimer -= dt;
-    if (this.zoneTimer <= 0) {
-      this.zoneTimer = 0.8;
-      this._updateZones(targets);
+    // suspended while a lair dungeon is open: no ambient zone spawning
+    if (!this.suspend) {
+      this.zoneTimer -= dt;
+      if (this.zoneTimer <= 0) {
+        this.zoneTimer = 0.8;
+        this._updateZones(targets);
+      }
     }
 
     this._bossReinforcements(dt, targets);
@@ -693,8 +712,9 @@ export class EnemyManager {
       if (!target) dist = Math.hypot(anchor.pos.x - e.pos.x, anchor.pos.z - e.pos.z);
 
       // left far behind → the unit melts back into its zone's pool (it's
-      // REMEMBERED, not killed — it rematerializes when someone returns)
-      if (dist > ZONE_RELEASE) {
+      // REMEMBERED, not killed — it rematerializes when someone returns).
+      // Dungeon dwellers never melt: the instance is small and theirs.
+      if (dist > ZONE_RELEASE && !e.dungeonMob) {
         if (e.zoneKey) {
           const zone = this.zones.get(e.zoneKey);
           zone?.pool?.push(e._spec ?? {

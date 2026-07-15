@@ -465,16 +465,34 @@ export const ITEMS = [
 
 // One named boss per biome ring (7 = Frozen Peak already has the summit Ymir),
 // each roosting in a LAIR landmark and dropping its UNIQUE item, guaranteed.
+// Each entry also describes the boss's DUNGEON: den (instance name), mobs
+// (its themed trash roster) and theme (floor/wall/fog colors + prop dressing).
 export const BIOME_LAIRS = [
-  { name: 'Sythe the Broodmother', type: 'spider',      drop: 'verdantHeart' },
-  { name: 'Kthara Sunfang',        type: 'scorpion',    drop: 'sunfangBlade' },
-  { name: 'Vess the Widow',        type: 'venomspider', drop: 'widowShroud'  },
-  { name: 'The Mire Hydra',        type: 'bogCrawler',  drop: 'mireBoots'    },
-  { name: 'Old Ironhorn',          type: 'elk',         drop: 'ironhornCrown'},
-  { name: 'The Weeping Shade',     type: 'ghost',       drop: 'shadeAmulet'  },
-  { name: 'Old Snapjaw',           type: 'snapper',     drop: 'snapjawMaul'  },
+  { name: 'Sythe the Broodmother', type: 'spider',      drop: 'verdantHeart',
+    den: 'The Brood Warren', mobs: ['spider', 'spider', 'venomspider'],
+    theme: { floor: 0x2a3320, wall: 0x3d4a2c, fog: 0x0a0f08, prop: 'web' } },
+  { name: 'Kthara Sunfang',        type: 'scorpion',    drop: 'sunfangBlade',
+    den: 'The Sunfang Burrow', mobs: ['scorpion', 'cobra'],
+    theme: { floor: 0xb99a63, wall: 0x9a7c48, fog: 0x1a1408, prop: 'sand' } },
+  { name: 'Vess the Widow',        type: 'venomspider', drop: 'widowShroud',
+    den: "The Widow's Hollow", mobs: ['venomspider', 'bat'],
+    theme: { floor: 0x1f2a1c, wall: 0x243020, fog: 0x050805, prop: 'web' } },
+  { name: 'The Mire Hydra',        type: 'bogCrawler',  drop: 'mireBoots',
+    den: 'The Drowned Den', mobs: ['bogCrawler', 'snake'],
+    theme: { floor: 0x424a28, wall: 0x39402a, fog: 0x0b0f08, prop: 'mud' } },
+  { name: 'Old Ironhorn',          type: 'elk',         drop: 'ironhornCrown',
+    den: 'The Bonefield Barrow', mobs: ['elk', 'harpy'],
+    theme: { floor: 0x8a7c4c, wall: 0x6f6340, fog: 0x14120a, prop: 'bone' } },
+  { name: 'The Weeping Shade',     type: 'ghost',       drop: 'shadeAmulet',
+    den: 'The Weeping Crypt', mobs: ['ghost', 'zombie'],
+    theme: { floor: 0x2e2e38, wall: 0x3a3a48, fog: 0x08080e, prop: 'ghost' } },
+  { name: 'Old Snapjaw',           type: 'snapper',     drop: 'snapjawMaul',
+    den: 'The Overgrown Gullet', mobs: ['snapper', 'panther'],
+    theme: { floor: 0x2c5c24, wall: 0x3a6a2e, fog: 0x061006, prop: 'vine' } },
   // ring 7 — Frozen Peak: a COLOSSAL yeti, bigger and tougher than any lair boss
-  { name: 'Grimfrost the Colossus', type: 'yeti',        drop: 'frostMantle', extraScale: 1.5, hpMult: 1.5 },
+  { name: 'Grimfrost the Colossus', type: 'yeti',        drop: 'frostMantle', extraScale: 1.5, hpMult: 1.5,
+    den: 'The Frostfather Cavern', mobs: ['icewolf', 'wendigo'],
+    theme: { floor: 0xdfe9f0, wall: 0xbfd4e2, fog: 0x101820, prop: 'ice' } },
 ];
 
 export const itemById = (id) => ITEMS.find(i => i.id === id);
