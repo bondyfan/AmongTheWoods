@@ -272,7 +272,8 @@ export class Minimap {
       ctx.globalAlpha = 1;
     }
 
-    // player waypoint (📍) — a map is a map, always shown
+    // player waypoint (📍) — a map is a map, always shown. When the flag is
+    // off the minimap, pin a pink arrow to the rim pointing the way to it.
     if (this.waypoint) {
       const p = toC(this.waypoint.x, this.waypoint.z);
       if (inView(p)) {
@@ -280,6 +281,22 @@ export class Minimap {
         ctx.font = 'bold 12px sans-serif';
         ctx.fillStyle = '#ff4dd8';
         text('📍', p.x, p.y + 4);
+      } else {
+        const cxp = W / 2, cyp = H / 2;
+        const dx = p.x - cxp, dy = p.y - cyp;
+        const len = Math.hypot(dx, dy) || 1;
+        const R = W / 2 - 9; // sit just inside the circular rim
+        ctx.save();
+        ctx.translate(cxp + dx / len * R, cyp + dy / len * R);
+        ctx.rotate(Math.atan2(dy, dx));
+        ctx.fillStyle = '#ff4dd8';
+        ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(8, 0); ctx.lineTo(-5, -5.5); ctx.lineTo(-2, 0); ctx.lineTo(-5, 5.5);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        ctx.restore();
       }
     }
 
