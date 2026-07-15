@@ -2826,7 +2826,7 @@ function tickDayNight(dt) {
   const clock = $id('tod-clock');
   if (clock) {
     const icon = game.nightK > 0.75 ? '🌙' : game.nightK > 0.45 ? '🌆' : game.nightK > 0.2 ? '🌤️' : '☀️';
-    const hh = Math.floor(((game.tod + 0.5) % 1) * 24); // tod 0 = 00:00 midnight
+    const hh = Math.floor(game.tod * 24); // tod 0 = 00:00 (midnight), 0.5 = 12:00 (noon)
     clock.textContent = `${icon} ${String(hh).padStart(2, '0')}:00`;
   }
 
