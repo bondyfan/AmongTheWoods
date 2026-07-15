@@ -391,62 +391,93 @@ export class World {
   // ring, gate to gate, so following the trail always leads you deeper ----
   _genPaths() {
     this.pathPts = [];
+    this.branches = [];       // fork spurs: { kind:'lair'|'deadend', pts:[...] }
     this._pathBuckets = new Map();
+    this._pathSegs = [];      // every walkable segment (main road + branches)
     if (!this.rings?.length) return;
     const rng = mulberry32(this.seed ^ 0xf1e1d);
+
+    // A gently-meandering trail between two (angle, radius) endpoints, built in
+    // POLAR space so it always sweeps AROUND the map rather than cutting a
+    // straight chord back through the center. Returns points i=1..n (the far
+    // endpoint is hit dead-on because the meander fades to 0 at both ends).
+    const trail = (sA, sR, eA, eR, meanderAmp) => {
+      let dA = eA - sA;
+      while (dA > Math.PI) dA -= Math.PI * 2;
+      while (dA < -Math.PI) dA += Math.PI * 2;
+      const arcLen = Math.abs(dA) * (sR + eR) * 0.5;
+      const dist = Math.hypot(arcLen, eR - sR);
+      const n = Math.max(4, Math.ceil(dist / 22));
+      const waves = 2 + Math.floor(rng() * 3), phase = rng() * Math.PI * 2;
+      const amp = Math.min(meanderAmp, dist * 0.06);
+      const out = [];
+      for (let i = 1; i <= n; i++) {
+        const t = i / n, fade = Math.sin(t * Math.PI);
+        const off = Math.sin(t * Math.PI * waves + phase) * amp * fade;
+        const a = sA + dA * t, r = sR + (eR - sR) * t + off;
+        out.push({ x: Math.sin(a) * r, z: Math.cos(a) * r });
+      }
+      return out;
+    };
+
     // gates store a as atan2(x, z) → world pos is (r sin a, r cos a)
     let cur = { x: 0, z: 26 };
     let curA = Math.atan2(cur.x, cur.z);
     const pts = [{ x: cur.x, z: cur.z }];
-    for (const ring of this.rings) {
+    for (let i = 0; i < this.rings.length; i++) {
+      const ring = this.rings[i];
       if (!ring.gaps.length) break;
       let gate = ring.gaps[0];
       for (const g of ring.gaps) if (angDiff(g.a, curA) < angDiff(gate.a, curA)) gate = g;
-      // Interpolate in POLAR space (angle + radius), NOT along a straight
-      // Cartesian chord: a chord between two gates far apart in angle cuts
-      // back through the center. Sweeping the angle at a steadily growing
-      // radius keeps the road heading OUTWARD, straight into the gate.
       const startR = Math.hypot(cur.x, cur.z) || 1;
-      const gateR = ring.r;
-      let dA = gate.a - curA;                       // take the SHORT way round
-      while (dA > Math.PI) dA -= Math.PI * 2;
-      while (dA < -Math.PI) dA += Math.PI * 2;
-      const arcLen = Math.abs(dA) * (startR + gateR) * 0.5;
-      const dist = Math.hypot(arcLen, gateR - startR);
-      const n = Math.max(5, Math.ceil(dist / 22));
-      const waves = 2 + Math.floor(rng() * 3), phase = rng() * Math.PI * 2;
-      const amp = Math.min(50, dist * (0.04 + rng() * 0.04));
-      for (let i = 1; i <= n; i++) {
-        const t = i / n;
-        // meander is a RADIAL wobble that fades at both ends, so the gate is
-        // still hit dead-on and the path never swings toward the center
-        const fade = Math.sin(t * Math.PI);
-        const off = Math.sin(t * Math.PI * waves + phase) * amp * fade
-          + (valueNoise(t * 900, 0, 60, this.seed + 777) - 0.5) * 22 * fade;
-        const a = curA + dA * t;
-        const r = startR + (gateR - startR) * t + off;
-        pts.push({ x: Math.sin(a) * r, z: Math.cos(a) * r });
+
+      // From the 2nd biome onward (i >= 1), the entrance opens onto a 3-WAY
+      // FORK: the main road pushes on to the next gate, a spur runs to this
+      // biome's boss lair, and a dead-end trail wanders off to the far side.
+      if (i >= 1) {
+        const lair = this.pois.find(p => p.type === 'lair' && p.ring === i);
+        if (lair) {
+          const lA = Math.atan2(lair.x, lair.z), lR = Math.hypot(lair.x, lair.z) || 1;
+          this.branches.push({ kind: 'lair',
+            pts: [{ x: cur.x, z: cur.z }, ...trail(curA, startR, lA, lR, 40)] });
+        }
+        // a red-herring spur: opposite side from the NEXT gate, ending partway
+        // into the biome at nothing in particular
+        const deadA = gate.a + Math.PI + (rng() - 0.5) * 0.7;
+        const deadR = startR + (ring.r - startR) * (0.4 + rng() * 0.25);
+        this.branches.push({ kind: 'deadend',
+          pts: [{ x: cur.x, z: cur.z }, ...trail(curA, startR, deadA, deadR, 60)] });
       }
-      // step just past the gate so the path re-emerges on the far side
+
+      // main road: sweep on to this ring's gate, then step just past it
+      pts.push(...trail(curA, startR, gate.a, ring.r, 50));
       curA = gate.a;
       const outR = ring.r + 30;
       cur = { x: Math.sin(gate.a) * outR, z: Math.cos(gate.a) * outR };
       pts.push({ x: cur.x, z: cur.z });
     }
     this.pathPts = pts;
-    // bucket segments on an 80 m grid so pathDistance stays cheap per vertex
+
+    // every trail (main road + all fork branches) is walkable dry ground, so
+    // bucket ALL their segments on an 80 m grid for a cheap pathDistance()
     const CELLB = 80;
     const key = (cx, cz) => cx + ',' + cz;
-    for (let i = 0; i < pts.length - 1; i++) {
-      const a = pts[i], b = pts[i + 1];
-      const x0 = Math.floor((Math.min(a.x, b.x) - 8) / CELLB), x1 = Math.floor((Math.max(a.x, b.x) + 8) / CELLB);
-      const z0 = Math.floor((Math.min(a.z, b.z) - 8) / CELLB), z1 = Math.floor((Math.max(a.z, b.z) + 8) / CELLB);
-      for (let cx = x0; cx <= x1; cx++) for (let cz = z0; cz <= z1; cz++) {
-        const k = key(cx, cz);
-        if (!this._pathBuckets.has(k)) this._pathBuckets.set(k, []);
-        this._pathBuckets.get(k).push(i);
+    const addPolyline = (poly) => {
+      for (let i = 0; i < poly.length - 1; i++) {
+        const si = this._pathSegs.length;
+        this._pathSegs.push([poly[i], poly[i + 1]]);
+        const a = poly[i], b = poly[i + 1];
+        const x0 = Math.floor((Math.min(a.x, b.x) - 8) / CELLB), x1 = Math.floor((Math.max(a.x, b.x) + 8) / CELLB);
+        const z0 = Math.floor((Math.min(a.z, b.z) - 8) / CELLB), z1 = Math.floor((Math.max(a.z, b.z) + 8) / CELLB);
+        for (let cx = x0; cx <= x1; cx++) for (let cz = z0; cz <= z1; cz++) {
+          const k = key(cx, cz);
+          if (!this._pathBuckets.has(k)) this._pathBuckets.set(k, []);
+          this._pathBuckets.get(k).push(si);
+        }
       }
-    }
+    };
+    addPolyline(pts);
+    for (const br of this.branches) addPolyline(br.pts);
     this._pathCellB = CELLB;
   }
 
@@ -456,8 +487,8 @@ export class World {
       Math.floor(x / this._pathCellB) + ',' + Math.floor(z / this._pathCellB));
     if (!segs) return Infinity;
     let best = Infinity;
-    for (const i of segs) {
-      const a = this.pathPts[i], b = this.pathPts[i + 1];
+    for (const si of segs) {
+      const [a, b] = this._pathSegs[si];
       const dx = b.x - a.x, dz = b.z - a.z;
       const len2 = dx * dx + dz * dz || 1;
       let t = ((x - a.x) * dx + (z - a.z) * dz) / len2;

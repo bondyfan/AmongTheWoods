@@ -262,19 +262,23 @@ export class Minimap {
         ctx.beginPath(); ctx.arc(gp.x, gp.y, 3.2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
       }
     }
-    const road = this.world.pathPts;
-    if (road && road.length > 1) {
-      ctx.strokeStyle = 'rgba(236, 210, 146, 0.85)';
-      ctx.lineWidth = 2.2;
+    const drawTrail = (poly, color, width) => {
+      if (!poly || poly.length < 2) return;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
       ctx.lineCap = 'round'; ctx.lineJoin = 'round';
       ctx.setLineDash([5, 4]);
       ctx.beginPath();
-      const p0 = toC(road[0].x, road[0].z);
+      const p0 = toC(poly[0].x, poly[0].z);
       ctx.moveTo(p0.x, p0.y);
-      for (let i = 1; i < road.length; i++) { const p = toC(road[i].x, road[i].z); ctx.lineTo(p.x, p.y); }
+      for (let i = 1; i < poly.length; i++) { const p = toC(poly[i].x, poly[i].z); ctx.lineTo(p.x, p.y); }
       ctx.stroke();
       ctx.setLineDash([]);
-    }
+    };
+    // fork spurs first (under the main road): lair = red, dead-end = faded grey
+    for (const br of this.world.branches ?? [])
+      drawTrail(br.pts, br.kind === 'lair' ? 'rgba(226, 96, 80, 0.8)' : 'rgba(150, 146, 130, 0.55)', 1.8);
+    drawTrail(this.world.pathPts, 'rgba(236, 210, 146, 0.85)', 2.2);
 
     // home marker (only when it's inside the view)
     const hc = toC(0, 0);
@@ -518,19 +522,23 @@ export class Minimap {
         ctx.fillStyle = '#3a2c08'; ctx.fill();
       }
     }
-    // the winding road from home out through every gate — a warm dotted trail
-    const road = this.world.pathPts;
-    if (road && road.length > 1) {
-      ctx.strokeStyle = 'rgba(232, 206, 140, 0.8)';
-      ctx.lineWidth = Math.max(1.6, 2.4 * Math.min(1, scale * 8));
+    // the winding road from home out through every gate + the fork spurs
+    const roadW = Math.max(1.6, 2.4 * Math.min(1, scale * 8));
+    const drawTrailBig = (poly, color, width) => {
+      if (!poly || poly.length < 2) return;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
       ctx.lineCap = 'round'; ctx.lineJoin = 'round';
       ctx.setLineDash([Math.max(3, 5 * Math.min(1, scale * 6)), 4]);
       ctx.beginPath();
-      ctx.moveTo(toX(road[0].x), toY(road[0].z));
-      for (let i = 1; i < road.length; i++) ctx.lineTo(toX(road[i].x), toY(road[i].z));
+      ctx.moveTo(toX(poly[0].x), toY(poly[0].z));
+      for (let i = 1; i < poly.length; i++) ctx.lineTo(toX(poly[i].x), toY(poly[i].z));
       ctx.stroke();
       ctx.setLineDash([]);
-    }
+    };
+    for (const br of this.world.branches ?? [])
+      drawTrailBig(br.pts, br.kind === 'lair' ? 'rgba(226, 96, 80, 0.75)' : 'rgba(150, 146, 130, 0.5)', roadW * 0.8);
+    drawTrailBig(this.world.pathPts, 'rgba(232, 206, 140, 0.8)', roadW);
 
     ctx.textAlign = 'center';
     ctx.font = '13px sans-serif';
