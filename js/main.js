@@ -1697,8 +1697,8 @@ function healAtMobaBase(dt) {
 function dropHalfMeat(pos) {
   let totalDropped = 0;
   for (const res of RESOURCES) {
-    const dropped = Math.floor(player[res] / 2); // whole numbers only
-    player[res] = 0;
+    const dropped = Math.floor(player[res] / 2); // spill HALF (whole numbers)
+    player[res] = roundResource(player[res] - dropped); // …and KEEP the rest
     if (dropped <= 0) continue;
     totalDropped += dropped;
     const piles = Math.min(3, Math.max(1, Math.round(dropped / 5)));
