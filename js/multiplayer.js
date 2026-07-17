@@ -564,9 +564,13 @@ export class Multiplayer {
 
   // ---------- lobby ----------
   async host(mode, intervalMin) {
-    const code = await WoodsNet.createGame(mode, intervalMin);
+    const { code, meta } = await WoodsNet.createGame(mode, intervalMin);
     this.isHost = true;
+    this.meta = meta;
     this._watchMeta();
+    // Co-op starts RIGHT AWAY — the host plays solo and friends drop in live
+    // via the join code. (PvP / MOBA still wait in the lobby for their 1 rival.)
+    if (mode === 'coop') this._begin(meta);
     return code;
   }
 
@@ -627,6 +631,7 @@ export class Multiplayer {
     this._campSynced = false; // push them the camp state
     this.ctx.ui.toast('🤝 A new partner joined your world!', 'level');
     audio.sfx('spawn', 0.5);
+    this.ctx.onPartnerJoin?.(); // UI: retire the on-screen join code
   }
 
   // my partner's presence vanished (disconnect) — free the seat, keep the room
@@ -670,7 +675,10 @@ export class Multiplayer {
     }
 
     this.remote = new RemotePlayer(ctx.scene, ctx.world, ctx.ui, this.isHost ? 'P2' : 'P1');
-    if (this.mode === 'coop' || this.mode === 'moba') this.remote.mesh.visible = true;
+    // MOBA shows both seats at once; a co-op host starts SOLO — the partner
+    // avatar only appears once their first state packet arrives (setState)
+    if (this.mode === 'moba') this.remote.mesh.visible = true;
+    else if (this.mode === 'coop' && meta.guest) this.remote.mesh.visible = true;
 
     if (this.mode === 'coop' && !this.isHost) {
       this.shadow = new ShadowWorld(ctx.scene, ctx.world, ctx.ui, {

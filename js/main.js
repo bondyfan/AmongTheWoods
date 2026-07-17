@@ -1499,6 +1499,7 @@ function endStats() {
 // Shared entry into play mode (solo start button + multiplayer session begin).
 function startPlaying() {
   ui.hideMenu();
+  hideJoinCodeHud(); // solo runs show nothing; a co-op host re-shows it after host()
   // safety: never carry a half-open lair dungeon into a fresh run
   if (game.dungeon) { try { exitLair(false); } catch {} game.dungeon = null; enemyMgr.suspend = false; $id('minimap').style.display = ''; }
   game.mode = 'play';
@@ -2109,6 +2110,7 @@ async function ensureMp() {
       grantPickup,
       dropHalfMeat,
       markDeath: (pos) => { minimap.deathAt = { x: pos.x, z: pos.z }; },
+      onPartnerJoin: () => hideJoinCodeHud(), // first friend arrives → code goes to Settings only
       startPlaying,
       showPing: (x, z) => showPing(x, z),
       // shared base: apply the partner's camp levels/storage locally
@@ -2130,6 +2132,7 @@ async function ensureMp() {
         if (game.mode !== 'play') return;
         game.mode = 'won';
         audio.stopMusic(); setAmbience(null);
+        hideJoinCodeHud();
         audio.sfx('victory', 0.6);
         ui.showEnd(true, endStats());
       },
@@ -2166,6 +2169,7 @@ function resetLobbyUI() {
   $id('start-btn')?.classList.remove('hidden');
   const err = $id('mp-error'); if (err) err.textContent = '';
   mpCode = null;
+  hideJoinCodeHud();
   // a room was being hosted but we backed out — tear it down so it doesn't linger
   if (mp && game.mode !== 'play') { try { mp.dispose?.(); } catch {} mp = null; }
 }
@@ -2206,10 +2210,30 @@ function showWaiting(code) {
   $id('start-btn').classList.add('hidden'); // no solo start while hosting
 }
 $id('mp-coop-btn').addEventListener('click', async () => {
+  const btn = $id('mp-coop-btn');
+  btn.disabled = true;
   try {
     const session = await ensureMp();
-    showWaiting(await session.host('coop', null));
+    // co-op launches straight into the world; the code lives in a corner
+    // beacon until the first friend joins, then only in Settings
+    const code = await session.host('coop', null);
+    mpCode = code;
+    showJoinCodeHud(code);
   } catch (e) { mpError(e); }
+  btn.disabled = false;
+});
+
+// corner join-code beacon shown while a co-op host waits for their first friend
+function showJoinCodeHud(code) {
+  const el = $id('mp-joincode');
+  if (!el) return;
+  el.querySelector('.jc-code').textContent = code;
+  el.classList.remove('hidden');
+}
+function hideJoinCodeHud() { $id('mp-joincode')?.classList.add('hidden'); }
+$id('mp-joincode')?.addEventListener('click', async () => {
+  if (!mpCode) return;
+  try { await navigator.clipboard.writeText(mpCode); ui.toast('📋 Join code copied!', 'level'); } catch {}
 });
 $id('mp-pvp-btn').addEventListener('click', async () => {
   try {

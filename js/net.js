@@ -69,18 +69,17 @@ export const WoodsNet = {
 
     async createGame(mode, interval = null) {
         ensureInit();
-        let code = null;
+        let code = null, meta = null;
         for (let attempt = 0; attempt < 6; attempt++) {
             const candidate = genCode();
             const snap = await withTimeout(get(ref(db, roomPath(candidate))), DB_UNREACHABLE);
             if (!snap.exists()) {
-                await withTimeout(set(ref(db, roomPath(candidate)), {
-                    meta: {
-                        host: this.uid, guest: null, mode, interval,
-                        seed: Math.floor(Math.random() * 1e9),
-                        state: "waiting", created: Date.now(),
-                    },
-                }), DB_UNREACHABLE);
+                meta = {
+                    host: this.uid, guest: null, mode, interval,
+                    seed: Math.floor(Math.random() * 1e9),
+                    state: "waiting", created: Date.now(),
+                };
+                await withTimeout(set(ref(db, roomPath(candidate)), { meta }), DB_UNREACHABLE);
                 code = candidate;
                 break;
             }
@@ -92,7 +91,7 @@ export const WoodsNet = {
         // remaining player can take over and keep the code joinable
         onDisconnect(ref(db, roomPath(code) + "/meta/host")).remove();
         onDisconnect(ref(db, roomPath(code) + "/state/" + this.uid)).remove();
-        return code;
+        return { code, meta };
     },
 
     async joinGame(code) {
