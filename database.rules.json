@@ -1,9 +1,7 @@
 {
-  "//": "Realtime Database rules for the era-battle project (shared by Among The Woods).",
-  "//  ": "IMPORTANT: era-battle hosts other apps too — MERGE the `saves` block into",
-  "//   ": "your EXISTING rules, don't blindly replace everything, or you may break them.",
-  "//    ": "Paste in Firebase Console → era-battle → Realtime Database → Rules → Publish.",
   "rules": {
+    ".read": false,
+    ".write": false,
     "games": {
       ".read": true,
       ".write": true
