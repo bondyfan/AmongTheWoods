@@ -11,8 +11,15 @@
 //
 // NOTE for the Firebase console: enable the Google provider under
 // Authentication, add this site to Authentication → Settings → Authorized
-// domains, and allow  saves/$uid  in the Realtime Database rules, e.g.
-//   "saves": { "$uid": { ".read": "$uid === auth.uid", ".write": "$uid === auth.uid" } }
+// domains, and allow  saves/$uid  in the Realtime Database rules. Without the
+// rule below, every save fails with  permission_denied. See database.rules.json
+// in the repo root — MERGE its `saves` block into the existing era-battle rules:
+//   "saves": {
+//     "$uid": {
+//       ".read":  "auth != null && auth.uid === $uid",
+//       ".write": "auth != null && auth.uid === $uid"
+//     }
+//   }
 // ==========================================================================
 
 import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
