@@ -9,11 +9,12 @@
 
 import * as THREE from 'three';
 import { MOBA, CREEP_TYPES, DEN_WAVES, MOBA_BUILDINGS, MOBA_AI_TIMELINE,
-         ENEMY_TYPES, meatForHp, roundResource } from './config.js';
+         ENEMY_TYPES, meatForHp, roundResource, enemyLevelFor } from './config.js';
 import { lanePoint } from './mobaworld.js';
 import { makeEnemyMesh, makeWolf, makeMobaTower, makeMobaBase, makeDenHut,
          makeSmallHut, makeTeamFlag, TEAM_COLORS } from './models.js';
 import { audio } from './audio.js';
+import { mobLevelBadge } from './ui.js';
 
 let nextUnitId = 1;
 const LANES = ['mid', 'top', 'bot'];
@@ -72,12 +73,12 @@ export class Moba {
   }
 
   // ---------- unit factory ----------
-  _makeUnit({ kind, team, type, mesh, x, z, hp, dmg, speed, range, hitR, cd = 1, xp = 0, meat = 0, lane = null, camp = null, cfg = null }) {
+  _makeUnit({ kind, team, type, mesh, x, z, hp, dmg, speed, range, hitR, cd = 1, xp = 0, meat = 0, lane = null, camp = null, cfg = null, level = 0 }) {
     const u = {
       id: nextUnitId++, kind, team, type, cfg,
       pos: new THREE.Vector3(x, 0, z),
       mesh, hp, maxHp: hp, dmg, speed, range, hitR, attackCd: 0, atkInterval: cd,
-      xp, meat, lane, wp: 0, camp, stunT: 0, dying: 0, walkT: Math.random() * 10,
+      xp, meat, level, lane, wp: 0, camp, stunT: 0, dying: 0, walkT: Math.random() * 10,
       lastHitBy: null, spellT: 2,
     };
     mesh.position.set(x, this.world.heightAt(x, z), z);
@@ -90,9 +91,11 @@ export class Moba {
 
   _addHpTracker(u, yOff = null, width = null) {
     const y = yOff ?? (u.kind === 'tower' ? 5.4 : 1.9);
+    const levelBadge = u.level ? mobLevelBadge(u.level) : '';
     this.ui.addTracker('mu' + u.id,
       () => u.mesh.parent && !u.dying ? u.mesh.position.clone().setY(u.mesh.position.y + y) : null,
-      `<div class="hpbar"${width ? ` style="width:${width}px"` : ''}><div class="hpbar-fill"></div></div><div class="unit-name">${u.cfg?.name ?? u.type}</div>`, 'hpwrap',
+      `<div class="hpbar"${width ? ` style="width:${width}px"` : ''}><div class="hpbar-fill"></div></div>`
+        + `<div class="unit-name"><span class="unit-label">${u.cfg?.name ?? u.type}</span>${levelBadge}</div>`, 'hpwrap',
       (el) => {
         const pct = Math.max(0, u.hp / u.maxHp);
         const fill = el.firstChild.firstChild;
@@ -114,6 +117,7 @@ export class Moba {
         hp: cfg.hp * 1.4, dmg: (cfg.meleeDmg ?? cfg.dmg), speed: cfg.speed,
         range: cfg.range, hitR: cfg.hitR, cd: cfg.attackCd,
         xp: cfg.xp, meat: meatForHp(cfg.hp * 1.4), camp,
+        level: enemyLevelFor(type, 0.15),
       });
       camp.unitIds.push(u.id);
       this.hooks.discover?.(type);
@@ -135,6 +139,7 @@ export class Moba {
       x: start.x + (Math.random() - 0.5) * 2, z: start.z + (Math.random() - 0.5) * 2,
       hp: c.hp * forge, dmg: c.dmg * forge, speed: c.speed,
       range: c.range, hitR: c.hitR, cd: c.cd, xp: c.xp, meat: meatForHp(c.hp * forge), lane,
+      level: Math.max(1, Math.round(c.xp / 5) + t.forge),
     });
   }
 
@@ -452,7 +457,7 @@ export class Moba {
     return this.units.filter(u => !u.dying).map(u => ({
       id: u.id, k: u.kind, t: u.type, tm: u.team,
       x: +u.pos.x.toFixed(1), z: +u.pos.z.toFixed(1),
-      hp: Math.round(u.hp), m: Math.round(u.maxHp), ln: u.lane || 0,
+      hp: Math.round(u.hp), m: Math.round(u.maxHp), ln: u.lane || 0, lv: u.level || 0,
     }));
   }
 

@@ -673,8 +673,24 @@ kbd {
 /* unit name under the hp bar */
 .unit-name { font-size: 9px; letter-spacing: 0.4px; color: rgba(255,255,255,0.85);
   text-shadow: 0 1px 2px rgba(0,0,0,0.9); text-align: center; margin-top: 1px;
-  white-space: nowrap; pointer-events: none; }
+  white-space: nowrap; pointer-events: none; display: flex; align-items: center;
+  justify-content: center; gap: 4px; }
 .hpwrap.boss .unit-name { font-size: 11px; font-weight: bold; color: #ffd9a0; }
+.mob-level {
+  display: inline-flex; align-items: center; gap: 1px; min-width: 19px; height: 13px;
+  padding: 0 3px 0 2px; box-sizing: border-box; border-radius: 4px;
+  font-size: 8px; line-height: 1; font-weight: 800; letter-spacing: 0;
+  color: #eef8e8; background: rgba(42, 78, 34, 0.92); border: 1px solid #78ad64;
+  text-shadow: 0 1px 1px rgba(0,0,0,0.9); box-shadow: 0 1px 3px rgba(0,0,0,0.6);
+}
+.mob-level-icon { font-size: 7px; color: #9be07e; }
+.mob-level.tough { color: #fff3bd; background: rgba(101, 77, 24, 0.94); border-color: #d5ad4c; }
+.mob-level.tough .mob-level-icon { color: #f3cf64; }
+.mob-level.dangerous { color: #ffe1c2; background: rgba(116, 55, 21, 0.95); border-color: #e3843c; }
+.mob-level.dangerous .mob-level-icon { color: #ff9b52; }
+.mob-level.deadly { color: #ffe0e0; background: rgba(112, 27, 27, 0.96); border-color: #ef5a5a; }
+.mob-level.deadly .mob-level-icon { color: #ff6b6b; }
+.hpwrap.boss .mob-level { height: 15px; font-size: 9px; }
 
 
 /* blizzard / sandstorm whiteout */

@@ -18,13 +18,14 @@
 import * as THREE from 'three';
 import { WoodsNet } from './net.js';
 import { ARENA, ARENA_RETURN_DELAY, arenaReward, ENEMY_TYPES, BOSS_RANKS,
-         MOBA_BUILDINGS, roundResource, itemById } from './config.js';
+         MOBA_BUILDINGS, roundResource, itemById, enemyLevelFor } from './config.js';
 import { makeMan, makeAxe, makeBow, makePickaxe, makeEnemyMesh, makeMeatDrop, makeWoodDrop,
          makeStoneDrop, makeHideDrop, makeIronDrop, makeBerryDrop, makeSalveDrop, makeRoastDrop,
          makeEssenceDrop, makeWoolDrop, makeItemDrop,
          makeEnemyShot, makeSpear, makeWolf, makeMobaTower, makeMobaBase,
          makeTeamFlag, TEAM_COLORS, mat } from './models.js';
 import { audio } from './audio.js';
+import { mobLevelBadge } from './ui.js';
 
 // ---------- the other player's avatar ----------
 class RemotePlayer {
@@ -180,6 +181,7 @@ class ShadowWorld {
         this.scene.add(mesh);
         s = {
           id: e.id, type: e.t, cfg, mesh, bossRank: e.b, sizeMult,
+          name: e.n ?? cfg.name, level: e.l ?? enemyLevelFor(e.t, 0, e.b),
           pos: new THREE.Vector3(e.x, 0, e.z), target: new THREE.Vector3(e.x, 0, e.z),
           hp: e.hp, maxHp: e.m, hitR: cfg.hitR * sizeMult,
           dying: 0, stunT: 0, walkT: Math.random() * 10,
@@ -191,7 +193,7 @@ class ShadowWorld {
         if (e.b > 0) {
           this.ui.addTracker('sboss' + e.id,
             () => s.mesh.parent ? s.mesh.position.clone().setY(s.mesh.position.y + 2.6 * sizeMult) : null,
-            '💀'.repeat(e.b), 'skulls');
+            `<div class="boss-name">${s.name ?? ''}</div>${'💀'.repeat(e.b)}`, 'skulls');
         }
         if (!this.seenTypes.has(e.t)) { this.seenTypes.add(e.t); this.hooks.discover(e.t); }
       }
@@ -247,7 +249,8 @@ class ShadowWorld {
   _addBars(s) {
     this.ui.addTracker('shp' + s.id,
       () => s.mesh.parent && !s.dying ? s.mesh.position.clone().setY(s.mesh.position.y + 1.5 * s.sizeMult + 0.5) : null,
-      `<div class="hpbar"><div class="hpbar-fill"></div></div><div class="unit-name">${s.cfg?.name ?? s.type}</div>`, 'hpwrap',
+      `<div class="hpbar"><div class="hpbar-fill"></div></div>`
+        + `<div class="unit-name"><span class="unit-label">${s.name ?? s.cfg?.name ?? s.type}</span>${mobLevelBadge(s.level)}</div>`, 'hpwrap',
       (el) => {
         const pct = Math.max(0, s.hp / s.maxHp);
         const fill = el.firstChild.firstChild;
@@ -402,6 +405,7 @@ class MobaShadow {
         const cfg = ENEMY_TYPES[su.t];
         s = {
           id: su.id, kind: su.k, team: su.tm, type: su.t, mesh, cfg,
+          level: su.lv || 0,
           pos: new THREE.Vector3(su.x, 0, su.z), target: new THREE.Vector3(su.x, 0, su.z),
           hp: su.hp, maxHp: su.m, hitR: su.k === 'base' ? 7 : su.k === 'tower' ? 1.4 : (cfg?.hitR ?? 0.8),
           dying: false, stunT: 0, walkT: Math.random() * 10,
@@ -410,7 +414,8 @@ class MobaShadow {
         const y = s.kind === 'base' ? 3.5 : s.kind === 'tower' ? 5.4 : 1.9;
         this.ui.addTracker('mmu' + s.id,
           () => s.mesh.parent && !s.dying ? s.mesh.position.clone().setY(s.mesh.position.y + y) : null,
-          `<div class="hpbar"><div class="hpbar-fill"></div></div><div class="unit-name">${s.cfg?.name ?? s.kind}</div>`, 'hpwrap',
+          `<div class="hpbar"><div class="hpbar-fill"></div></div><div class="unit-name">`
+            + `<span class="unit-label">${s.cfg?.name ?? s.kind}</span>${s.level ? mobLevelBadge(s.level) : ''}</div>`, 'hpwrap',
           (el) => {
             const pct = Math.max(0, s.hp / s.maxHp);
             const fill = el.firstChild.firstChild;

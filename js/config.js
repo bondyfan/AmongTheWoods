@@ -231,6 +231,17 @@ export const ENEMY_TYPES = {
              flying: true },
 };
 
+// A readable threat level for comparing a creature with the player's level.
+// Base XP already follows the hand-balanced creature roster, while the extra
+// terms reflect the real stat multipliers applied by Enemy at spawn time.
+export function enemyLevelFor(type, difficulty = 0, bossRank = 0, elite = false) {
+  const baseLevel = Math.max(1, Math.round((ENEMY_TYPES[type]?.xp ?? 1) / 5));
+  const areaLevels = Math.round(Math.max(0, difficulty) * 4);
+  const eliteLevels = elite ? 2 : 0;
+  const bossLevels = bossRank > 0 ? 2 + bossRank * 3 : 0;
+  return Math.min(30, baseLevel + areaLevels + eliteLevels + bossLevels);
+}
+
 // Pack bosses ("the mother") by skull rank (index 0 = 1 skull).
 // packSize = minions spawned with her; while she lives, reinforceCount minions
 // keep arriving from all directions every reinforceInterval seconds.

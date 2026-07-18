@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { WORLD, ENEMY_TYPES, BOSS_RANKS, BIOMES, biomeAt, biomeIndexAt, progressAt,
-         meatForHp, bossNameFor } from './config.js';
+         meatForHp, bossNameFor, enemyLevelFor } from './config.js';
 import { makeEnemyMesh, makeCobweb, makeHumanCamp, makeCage } from './models.js';
 import { audio } from './audio.js';
 
@@ -33,6 +33,7 @@ class Enemy {
     this.cfg = base;
     this.bossRank = bossRank; // 0 = normal, 1..3 = skull rank
     this.elite = elite && bossRank === 0; // a red-badge mini elite (no skull)
+    this.level = enemyLevelFor(type, difficulty, bossRank, this.elite);
     const boss = bossRank > 0 ? BOSS_RANKS[bossRank - 1] : null;
     // elites: a modest ×2 HP / ×1.3 damage bump — a step below a 1-skull boss
     const eHp = this.elite ? 2 : 1, eDmg = this.elite ? 1.3 : 1;
@@ -1029,7 +1030,7 @@ export class EnemyManager {
 
   snapshot() {
     return this.alive().map(e => ({
-      id: e.id, t: e.type, b: e.bossRank,
+      id: e.id, t: e.type, b: e.bossRank, l: e.level,
       x: +e.pos.x.toFixed(1), z: +e.pos.z.toFixed(1),
       hp: Math.round(e.hp), m: Math.round(e.maxHp),
       ...(this.world.time - (e.atkAt ?? -9) < 0.3 ? { a: 1 } : {}),

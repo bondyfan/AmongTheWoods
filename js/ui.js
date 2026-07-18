@@ -7,6 +7,13 @@ import { audio } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
 
+export function mobLevelBadge(level) {
+  const value = Math.max(1, Math.round(Number(level) || 1));
+  const tier = value >= 12 ? 'deadly' : value >= 8 ? 'dangerous' : value >= 4 ? 'tough' : 'low';
+  return `<span class="mob-level ${tier}" title="Level ${value}" aria-label="Level ${value}">`
+    + `<span class="mob-level-icon" aria-hidden="true">◆</span>${value}</span>`;
+}
+
 export class UI {
   constructor(hooks) {
     this.hooks = hooks; // { onStart, onCastSpell(i) }

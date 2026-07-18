@@ -21,7 +21,7 @@ import { Projectiles } from './projectiles.js';
 import { Companions } from './companions.js';
 import { Pickups, pickupSfx } from './pickups.js';
 import { Minimap, MobaMinimap } from './minimap.js';
-import { UI } from './ui.js';
+import { UI, mobLevelBadge } from './ui.js';
 import { Panels } from './panels.js';
 
 // ---------- renderer / scene ----------
@@ -1423,7 +1423,7 @@ const enemyMgr = new EnemyManager(scene, world, {
     const badge = enemy.elite ? '<div class="elite-badge" title="Elite">☠</div>' : '';
     const html = '<div class="hpbar"><div class="hpbar-fill"></div></div>' +
       (ranged ? `<div class="castbar"><div class="castbar-fill" style="background:${shotColor}"></div></div>` : '') +
-      `<div class="unit-name">${label}</div>` + badge;
+      `<div class="unit-name"><span class="unit-label">${label}</span>${mobLevelBadge(enemy.level)}</div>` + badge;
     ui.addTracker('hp' + enemy.id,
       () => enemy.mesh.parent ? enemy.mesh.position.clone().setY(enemy.mesh.position.y + 1.5 * enemy.sizeMult + 0.5) : null,
       html, 'hpwrap' + (enemy.bossRank > 0 ? ' boss' : '') + (enemy.elite ? ' elite' : ''),
