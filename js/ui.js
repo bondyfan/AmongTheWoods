@@ -11,9 +11,17 @@ export const MOB_INFO_RADIUS = 60;
 
 export function mobLevelBadge(level) {
   const value = Math.max(1, Math.round(Number(level) || 1));
-  const tier = value >= 12 ? 'deadly' : value >= 8 ? 'dangerous' : value >= 4 ? 'tough' : 'low';
-  return `<span class="mob-level ${tier}" title="Level ${value}" aria-label="Level ${value}">`
+  return `<span class="mob-level" data-level="${value}" title="Level ${value}" aria-label="Level ${value}">`
     + `<span class="mob-level-icon" aria-hidden="true">◆</span>${value}</span>`;
+}
+
+function updateMobLevelBadge(el, playerLevel) {
+  const level = Number(el.dataset.level) || 1;
+  const delta = level - playerLevel;
+  const tier = delta <= -2 ? 'low' : delta <= 1 ? 'tough' : delta <= 3 ? 'dangerous' : 'deadly';
+  el.classList.remove('low', 'tough', 'dangerous', 'deadly');
+  el.classList.add(tier);
+  el.title = `Level ${level} · ${delta > 0 ? '+' + delta : delta} vs you`;
 }
 
 export class UI {
@@ -22,6 +30,7 @@ export class UI {
     this.popups = [];
     this.trackers = new Map(); // key -> { el, getPos }
     this.resourceKeys = [];
+    this.playerLevel = 1;
 
     $('start-btn').addEventListener('click', () => {
       audio.sfx('click', 0.5);
@@ -54,6 +63,10 @@ export class UI {
 
   // ---------- HUD ----------
   updateHUD(player, progressPct, biomeName, survival = true) {
+    if (this.playerLevel !== player.level) {
+      this.playerLevel = player.level;
+      document.querySelectorAll('.mob-level').forEach(el => updateMobLevelBadge(el, this.playerLevel));
+    }
     $('hp-bar').style.width = (player.hp / player.maxHp * 100) + '%';
     $('hp-text').textContent = `${Math.ceil(player.hp)} / ${player.maxHp}`;
     $('xp-bar').style.width = (player.xpProgress() * 100) + '%';
@@ -91,7 +104,14 @@ export class UI {
     } else resourceEl.classList.add('hidden');
 
     const weapon = itemById(player.equipment.weapon);
-    $('weapon-display').innerHTML = `${itemIcon(weapon)} ${weapon.name}`;
+    const combat = [];
+    if (player.charging) combat.push(`CHARGE ${Math.round(Math.min(1, player.chargeT / 1.05) * 100)}%`);
+    if (player.blocking) combat.push(player.weapon.parry ? 'PARRY' : 'BLOCK');
+    if (player.weapon.style === 'bow') combat.push(`${player.arrowMode.toUpperCase()} · Z`);
+    if (player.dodgeCd > 0) combat.push(`DODGE ${player.dodgeCd.toFixed(1)}s`);
+    else combat.push('DODGE READY');
+    $('weapon-display').innerHTML = `${itemIcon(weapon)} ${weapon.name}`
+      + `<span class="combat-state">${combat.join(' · ')}</span>`;
 
     // critical health: pulsing bar + red screen edges
     const critHp = !player.dead && player.hp > 0 && player.hp < player.maxHp * 0.2;
@@ -209,6 +229,7 @@ export class UI {
     const el = document.createElement('div');
     el.className = 'tracker ' + cls;
     el.innerHTML = html;
+    el.querySelectorAll('.mob-level').forEach(badge => updateMobLevelBadge(badge, this.playerLevel));
     $('popups').appendChild(el);
     this.trackers.set(key, { el, getPos, onUpdate, worldRadius: options?.worldRadius ?? null });
   }

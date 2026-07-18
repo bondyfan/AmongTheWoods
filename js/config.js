@@ -234,12 +234,31 @@ export const ENEMY_TYPES = {
 // A readable threat level for comparing a creature with the player's level.
 // Base XP already follows the hand-balanced creature roster, while the extra
 // terms reflect the real stat multipliers applied by Enemy at spawn time.
+export function biomeIndexForDifficulty(difficulty = 0) {
+  const distance = Math.max(0, difficulty) * WORLD.goalR;
+  let biomeIndex = BIOMES.findIndex(b => distance <= b.rMax);
+  if (biomeIndex < 0) biomeIndex = BIOMES.length - 1;
+  return biomeIndex;
+}
+
 export function enemyLevelFor(type, difficulty = 0, bossRank = 0, elite = false) {
-  const baseLevel = Math.max(1, Math.round((ENEMY_TYPES[type]?.xp ?? 1) / 5));
-  const areaLevels = Math.round(Math.max(0, difficulty) * 4);
+  const cfg = ENEMY_TYPES[type] ?? {};
+  const biomeIndex = biomeIndexForDifficulty(difficulty);
+  if (cfg.passive) return 1 + Math.round((biomeIndex / (BIOMES.length - 1)) * 4);
+
+  const biome = BIOMES[biomeIndex];
+  const roster = [...new Set([...(biome.enemies ?? []), ...(biome.humanoids ?? []),
+    ...(biome.night?.add ? [biome.night.add] : [])])]
+    .filter(t => !ENEMY_TYPES[t]?.passive)
+    .sort((a, b) => (ENEMY_TYPES[a]?.xp ?? 0) - (ENEMY_TYPES[b]?.xp ?? 0));
+  const xp = cfg.xp ?? 1;
+  const position = Math.max(0, roster.filter(t => (ENEMY_TYPES[t]?.xp ?? 0) <= xp).length - 1);
+  const strengthOffset = roster.length <= 1 ? 1
+    : Math.min(2, Math.floor((position / (roster.length - 1)) * 3));
+  const baseLevel = 1 + biomeIndex * 3 + strengthOffset;
   const eliteLevels = elite ? 2 : 0;
-  const bossLevels = bossRank > 0 ? 2 + bossRank * 3 : 0;
-  return Math.min(30, baseLevel + areaLevels + eliteLevels + bossLevels);
+  const bossLevels = bossRank * 3;
+  return Math.min(36, baseLevel + eliteLevels + bossLevels);
 }
 
 // Pack bosses ("the mother") by skull rank (index 0 = 1 skull).
@@ -284,13 +303,16 @@ export function bossNameFor(type, id) {
 
 // Cumulative XP required to reach each level (index = level).
 export const XP_LEVELS = [0, 0, 40, 110, 220, 380, 600, 880, 1230, 1660, 2200,
-  2850, 3620, 4520, 5560]; // levels 11-14 continue the curve
-export const MAX_LEVEL = 14;
+  2850, 3620, 4520, 5560, 6760, 8140, 9720, 11520, 13560, 15860, 18440,
+  21320, 24520, 28070];
+export const MAX_LEVEL = 24;
 
 // quest XP scale: fraction of the CURRENT level's xp-to-next a quest pays,
 // front-loaded hard (a lvl-1 quest levels you outright, endgame quests are
 // a nudge). Index by player level; past the table it stays at 1%.
-export const QUEST_XP_PCT = [0, 1.2, 1.0, 0.8, 0.6, 0.4, 0.2, 0.1, 0.08, 0.06, 0.05, 0.04, 0.03, 0.02, 0.01];
+export const QUEST_XP_PCT = [0, 1.2, 1.0, 0.8, 0.6, 0.4, 0.25, 0.18, 0.14, 0.12,
+  0.10, 0.09, 0.08, 0.07, 0.06, 0.06, 0.06, 0.06, 0.06, 0.06, 0.06, 0.06,
+  0.06, 0.06, 0.06];
 export function questXpFor(level) {
   const pct = QUEST_XP_PCT[Math.min(level, QUEST_XP_PCT.length - 1)] ?? 0.01;
   const span = (XP_LEVELS[Math.min(level + 1, XP_LEVELS.length - 1)] ?? 0) - (XP_LEVELS[level] ?? 0);
@@ -302,7 +324,7 @@ export function questXpFor(level) {
 export const SLOTS = ['weapon', 'offhand', 'head', 'chest', 'underlayer', 'legs', 'boots', 'back', 'mount', 'charm', 'companion'];
 export const SLOT_LABELS = { weapon: 'Weapon', offhand: 'Off-hand', head: 'Head', chest: 'Chest',
   underlayer: 'Underlayer', legs: 'Legs', boots: 'Boots', back: 'Back', mount: 'Mount',
-  charm: 'Charm', companion: 'Companion' };
+  charm: 'Charm', companion: 'Companion', placeable: 'Placeable' };
 
 // Gear progresses through the ages. `needs` gates an item behind a camp
 // building (survival): 'tent' → Hide Tent, 'cabin' → Wooden Cabin,
@@ -310,53 +332,83 @@ export const SLOT_LABELS = { weapon: 'Weapon', offhand: 'Off-hand', head: 'Head'
 export const ITEMS = [
   // -- weapons: melee (chop = tree felling & rock mining power) --
   { id: 'fists',      slot: 'weapon', level: 1, icon: '🖐️', name: 'Bare Hands',   cost: null, free: true,
-    weapon: { kind: 'melee', dmg: 12, cd: 0.64, range: 1.5, chop: 0, mine: 0, tier: 0 },
-    desc: 'Punch things. Bare hands can\'t fell trees or mine — craft tools!' },
+    weapon: { kind: 'melee', style: 'fists', dmg: 12, cd: 0.64, range: 1.5, chop: 0, mine: 0, tier: 0,
+      combo: [1, 1.08, 1.2] },
+    desc: 'Fast three-hit combo. Bare hands can\'t fell trees or mine — craft tools!' },
   { id: 'club',       slot: 'weapon', level: 2, icon: '🦴', name: 'Bone Club',   cost: { meat: 10 },
-    weapon: { kind: 'melee', dmg: 22, cd: 0.71, range: 1.7, chop: 0.5, mine: 0, tier: 1 },
-    desc: 'A heavy beast bone. Damage 22; fells trees, but SLOWLY.' },
+    weapon: { kind: 'melee', style: 'club', dmg: 22, cd: 0.82, range: 1.7, chop: 0.5, mine: 0, tier: 1,
+      combo: [1, 1.25], stun: 0.35, armorBreak: 0.16 },
+    desc: 'Slow crushing blows stagger enemies and break armour; fells trees slowly.' },
   { id: 'stoneAxe',   slot: 'weapon', level: 3, icon: '🪓', name: 'Stone Axe',     cost: { wood: 12, stone: 10 },
-    weapon: { kind: 'melee', dmg: 38, cd: 0.71, range: 1.8, chop: 2, mine: 0, tier: 1 },
-    desc: 'Knapped stone on a haft. Damage 38, chops trees FAST.' },
+    weapon: { kind: 'melee', style: 'axe', dmg: 38, cd: 0.86, range: 1.8, chop: 2, mine: 0, tier: 1,
+      combo: [1, 1.15], bleed: 4 },
+    desc: 'Wide, deliberate swings cause bleeding and chop trees fast.' },
   { id: 'steelAxe',   slot: 'weapon', level: 6, icon: '⚒️', name: 'Iron Axe',      cost: { wood: 18, iron: 6 }, needs: 'furnace',
-    weapon: { kind: 'melee', dmg: 68, cd: 0.69, range: 1.9, chop: 3, mine: 0, tier: 2 },
-    desc: 'Smelted iron head. Damage 68, tears through any tree.' },
+    weapon: { kind: 'melee', style: 'axe', dmg: 68, cd: 0.9, range: 1.9, chop: 3, mine: 0, tier: 2,
+      combo: [1, 1.18], bleed: 7 },
+    desc: 'Heavy sweeping strikes bleed groups and tear through any tree.' },
   { id: 'warAxe',     slot: 'weapon', level: 8, icon: '🔥', name: 'War Axe',       cost: { wood: 25, iron: 16, hide: 6 }, needs: 'furnace',
-    weapon: { kind: 'melee', dmg: 120, cd: 0.69, range: 2.0, chop: 4, mine: 0, tier: 3 },
-    desc: 'Iron-age battle axe. Damage 120.' },
+    weapon: { kind: 'melee', style: 'axe', dmg: 120, cd: 0.96, range: 2.0, chop: 4, mine: 0, tier: 3,
+      combo: [1, 1.2], bleed: 12 },
+    desc: 'A brutal war axe: very wide swings and severe bleeding.' },
   // -- tools: pickaxes are the ONLY way to mine rock --
   { id: 'bonePick',   slot: 'weapon', level: 3, icon: '⛏️', name: 'Bone Pickaxe',  cost: { wood: 10, hide: 2, meat: 8 },
-    weapon: { kind: 'melee', dmg: 20, cd: 0.79, range: 1.7, chop: 0, mine: 1, tier: 1, pick: true },
-    desc: 'Carved from a beast\'s bones. Mines rock (slowly); a clumsy weapon (20 dmg).' },
+    weapon: { kind: 'melee', style: 'pick', dmg: 20, cd: 0.79, range: 1.7, chop: 0, mine: 1, tier: 1,
+      pick: true, armoredBonus: 1.65, armorBreak: 0.2 },
+    desc: 'Mines rock slowly, but punches through golems and armoured creatures.' },
   { id: 'ironPick',   slot: 'weapon', level: 6, icon: '⚒️', name: 'Iron Pickaxe',  cost: { wood: 15, iron: 8 }, needs: 'furnace',
-    weapon: { kind: 'melee', dmg: 55, cd: 0.71, range: 1.8, chop: 0.5, mine: 2.5, tier: 2, pick: true },
-    desc: 'Bites deep into stone — rocks crack in two swings. Damage 55.' },
+    weapon: { kind: 'melee', style: 'pick', dmg: 55, cd: 0.82, range: 1.8, chop: 0.5, mine: 2.5, tier: 2,
+      pick: true, armoredBonus: 1.8, armorBreak: 0.28 },
+    desc: 'Cracks rocks and armoured hides alike; strong armour-breaking strikes.' },
   { id: 'obsidianPick', slot: 'weapon', level: 9, icon: '⛏️', name: 'Obsidian Pickaxe', cost: { iron: 18, stone: 30, essence: 6 }, needs: 'keep',
-    weapon: { kind: 'melee', dmg: 100, cd: 0.69, range: 1.9, chop: 1, mine: 4, tier: 3, pick: true },
-    desc: 'Volcanic glass edge — rocks SHATTER in one swing. Damage 100.' },
+    weapon: { kind: 'melee', style: 'pick', dmg: 100, cd: 0.88, range: 1.9, chop: 1, mine: 4, tier: 3,
+      pick: true, armoredBonus: 2, armorBreak: 0.35 },
+    desc: 'Volcanic point shatters rock, golems and armour with charged hits.' },
   { id: 'huntSpear',  slot: 'weapon', level: 5, icon: '🔱', name: 'Hunting Spear', cost: { wood: 20, stone: 8, hide: 3 },
-    weapon: { kind: 'melee', dmg: 52, cd: 0.79, range: 2.6, chop: 0, mine: 0, tier: 1 },
-    desc: 'Long reach keeps claws away: damage 52 at 2.6 m.' },
+    weapon: { kind: 'melee', style: 'spear', dmg: 52, cd: 0.82, range: 2.8, chop: 0, mine: 0, tier: 1,
+      combo: [1, 1.2], chargeLunge: 1.25 },
+    desc: 'Safe, narrow reach. Charged attacks lunge forward into exposed weak points.' },
   // -- weapons: ranged (invented with the Wooden Cabin era; train Range to extend) --
   { id: 'huntingBow', slot: 'weapon', level: 4, icon: '🏹', name: 'Hunting Bow',   cost: { wood: 25, hide: 4 }, needs: 'cabin',
-    weapon: { kind: 'bow', dmg: 16, cd: 1.07, range: 3.5, pierce: false, tier: 1 },
-    desc: 'Wood + hide string. Arrows for 16 dmg, barely 3.5 m of reach.' },
+    weapon: { kind: 'bow', style: 'bow', dmg: 16, cd: 1.07, range: 3.5, pierce: false, tier: 1 },
+    desc: 'Hold and release for an accurate weak-point shot. Supports special arrows.' },
   { id: 'longbow',    slot: 'weapon', level: 6, icon: '🎯', name: 'Longbow',       cost: { wood: 40, hide: 8, iron: 4 }, needs: 'furnace',
-    weapon: { kind: 'bow', dmg: 32, cd: 0.89, range: 7, pierce: false, tier: 2 },
-    desc: 'Iron-tipped arrows, damage 32, reach 7 m.' },
+    weapon: { kind: 'bow', style: 'bow', dmg: 32, cd: 0.89, range: 7, pierce: false, tier: 2 },
+    desc: 'Long-ranged precision bow; fully drawn shots find weak points.' },
   { id: 'recurveBow', slot: 'weapon', level: 7, icon: '🏹', name: 'Recurve Bow',   cost: { wood: 45, hide: 10, iron: 6 }, needs: 'furnace',
-    weapon: { kind: 'bow', dmg: 26, cd: 0.69, range: 8.5, pierce: false, tier: 2 },
-    desc: 'Snappy recurve limbs: fast 26-damage arrows, reach 8.5 m.' },
+    weapon: { kind: 'bow', style: 'bow', dmg: 26, cd: 0.69, range: 8.5, pierce: false, tier: 2 },
+    desc: 'Snappy recurve limbs support fast follow-up shots and special arrows.' },
   { id: 'rapidBow',   slot: 'weapon', level: 8, icon: '🌀', name: 'Windstorm Bow', cost: { wood: 45, iron: 14, hide: 10 }, needs: 'furnace',
-    weapon: { kind: 'bow', dmg: 30, cd: 0.5, range: 10, pierce: true, tier: 3 },
-    desc: 'Very fast piercing arrows, reach 10 m.' },
+    weapon: { kind: 'bow', style: 'bow', dmg: 30, cd: 0.5, range: 10, pierce: true, tier: 3 },
+    desc: 'Very fast piercing arrows; charged shots tear through a whole line.' },
   // -- medieval (Age 5, needs the Keep) --
   { id: 'steelSword', slot: 'weapon', level: 9, icon: '⚔️', name: 'Knight\'s Sword', cost: { iron: 25, wood: 10, hide: 8 }, needs: 'keep',
-    weapon: { kind: 'melee', dmg: 150, cd: 0.6, range: 2.1, chop: 1.5, mine: 0, tier: 3 },
-    desc: 'Medieval steel. Damage 150, lightning-fast swings (a poor lumber tool).' },
+    weapon: { kind: 'melee', style: 'sword', dmg: 150, cd: 0.6, range: 2.1, chop: 1.5, mine: 0, tier: 3,
+      combo: [1, 1.18, 1.55], parry: true },
+    desc: 'A fast three-hit combo. Guard at the right moment to parry and stun attackers.' },
   { id: 'crossbow',   slot: 'weapon', level: 9, icon: '🎯', name: 'Crossbow',       cost: { wood: 50, iron: 20 }, needs: 'keep',
-    weapon: { kind: 'bow', dmg: 60, cd: 1.29, range: 12, pierce: true, tier: 3 },
-    desc: 'Medieval war machine. Piercing bolts for 60 damage.' },
+    weapon: { kind: 'bow', style: 'crossbow', dmg: 90, cd: 1.65, range: 12, pierce: true, tier: 3,
+      armorPierce: 0.75, armorBreak: 0.25 },
+    desc: 'Slow to reload, but launches an extremely powerful armour-piercing bolt.' },
+  // -- late-game signature weapons: one memorable choice per deep biome --
+  { id: 'highlandSpear', slot: 'weapon', level: 13, icon: '⚡', name: 'Highland Greatspear',
+    cost: { wood: 55, iron: 38, hide: 18, essence: 14 }, needs: 'runic',
+    weapon: { kind: 'melee', style: 'spear', dmg: 210, cd: 0.92, range: 3.3, chop: 0, mine: 0, tier: 4,
+      combo: [1, 1.25], chargeLunge: 1.5 },
+    desc: 'A storm-tempered reach weapon. Charged attacks lunge deep into exposed weak points.' },
+  { id: 'serpentBow', slot: 'weapon', level: 20, icon: '🐍', name: 'Serpent Bow',
+    cost: { wood: 85, hide: 35, iron: 45, essence: 35 }, needs: 'spirit',
+    weapon: { kind: 'bow', style: 'bow', dmg: 95, cd: 0.62, range: 14, pierce: true, tier: 4 },
+    desc: 'A recurved jungle bow: fast 95-damage arrows pierce through packed enemies.' },
+  { id: 'frostAxe', slot: 'weapon', level: 22, icon: '🧚', name: 'Frostforged Axe',
+    cost: { wood: 90, iron: 70, hide: 30, essence: 55 }, needs: 'primal',
+    weapon: { kind: 'melee', style: 'axe', dmg: 260, cd: 0.82, range: 2.35, chop: 6, mine: 1, tier: 4,
+      combo: [1, 1.25], bleed: 20 },
+    desc: 'Frozen iron with a brutal edge. Wide swings leave severe bleeding wounds.' },
+  { id: 'woodShield', slot: 'offhand', level: 3, icon: '🛡️', name: 'Wooden Shield', cost: { wood: 18, hide: 3 },
+    shield: { block: 0.55 }, desc: 'Hold Ctrl to block 55% incoming damage. Replaces your torch.' },
+  { id: 'ironShield', slot: 'offhand', level: 7, icon: '🛡️', name: 'Iron Shield', cost: { iron: 14, wood: 12, hide: 5 }, needs: 'furnace',
+    shield: { block: 0.72 }, desc: 'Hold Ctrl to block 72% incoming damage. Replaces your torch.' },
   // -- head (crafted from hides at the tent) --
   { id: 'leatherCap', slot: 'head', level: 3, icon: '🧢', name: 'Hide Cap',      cost: { hide: 4, meat: 10 }, needs: 'tent', stats: { hp: 25 },
     desc: '+25 max health.' },
@@ -377,6 +429,12 @@ export const ITEMS = [
     desc: '+135 max health.' },
   { id: 'bearHide',     slot: 'chest', level: 9, icon: '🛡️', name: 'Bearhide Plate', cost: { hide: 24, iron: 12, meat: 45 }, needs: 'furnace', stats: { hp: 170, regen: 0.8 },
     desc: '+170 max health, +0.8 ❤️/s regeneration.' },
+  { id: 'graveplate', slot: 'chest', level: 17, icon: '⚰️', name: 'Graveplate',
+    cost: { iron: 55, hide: 30, essence: 32 }, needs: 'mountain', stats: { hp: 275, regen: 1.1 },
+    desc: 'Spirit-bound plate from the haunted woods. +275 max health, +1.1 ❤️/s.' },
+  { id: 'iceplate', slot: 'chest', level: 23, icon: '🧊', name: 'Iceplate',
+    cost: { iron: 90, hide: 45, essence: 70 }, needs: 'primal', stats: { hp: 390, regen: 1.5 },
+    desc: 'Armor built for the summit. +390 max health, +1.5 ❤️/s.' },
   // -- boots --
   { id: 'swiftBoots',   slot: 'boots', level: 3, icon: '👢', name: 'Hide Wraps',     cost: { hide: 5, meat: 10 }, needs: 'tent', stats: { speed: 1.5 },
     desc: '+1.5 movement speed.' },
@@ -386,6 +444,9 @@ export const ITEMS = [
     desc: '+3 movement speed, +35 max health.' },
   { id: 'windBoots',    slot: 'boots', level: 9, icon: '💨', name: 'Windwalkers',    cost: { hide: 14, iron: 8, meat: 40 }, needs: 'furnace', stats: { speed: 4.5, regen: 0.5 },
     desc: '+4.5 movement speed, +0.5 ❤️/s regeneration.' },
+  { id: 'pantherBoots', slot: 'boots', level: 19, icon: '🐆', name: 'Pantherstep Boots',
+    cost: { hide: 45, iron: 25, essence: 30 }, needs: 'spirit', stats: { speed: 6, hp: 90, regen: 0.8 },
+    desc: 'Silent jungle boots. +6 movement speed, +90 health, +0.8 ❤️/s.' },
   // -- charms (mid-game trinkets — ONE charm slot, pick your bonus) --
   { id: 'wolfPendant', slot: 'charm', level: 5, icon: '🦷', name: 'Wolf-Fang Pendant',
     cost: { hide: 8, meat: 30 }, needs: 'tent', stats: { dmgPct: 0.10 },
@@ -430,18 +491,42 @@ export const ITEMS = [
   { id: 'torchember', slot: 'offhand', level: 8, supply: true, icon: '🔥', name: 'Emberheart Torch',
     cost: { wood: 20, iron: 4, essence: 5 }, torch: { radius: 15 },
     desc: 'A molten ember lashed into a torch head — a blazing ~15 m circle of light. Burns out after 5 minutes.' },
+  { id: 'spiritLantern', slot: 'offhand', level: 16, supply: true, icon: '🏮', name: 'Spirit Lantern',
+    cost: { iron: 25, essence: 28 }, needs: 'mountain', torch: { radius: 20, permanent: true }, stats: { regen: 0.5 },
+    desc: 'A permanent pale flame: lights ~20 m, never burns out, and grants +0.5 ❤️/s.' },
   { id: 'socks',   slot: 'legs', level: 3, supply: true, icon: '🧦', name: 'Thick Wool Socks',
     cost: { wool: 10, meat: 20 }, mudguard: 0.5,
     desc: 'Worn on your legs: swamp mud and spider webs slow you only HALF as much.' },
   { id: 'lining',  slot: 'underlayer', level: 4, supply: true, icon: '🧥', name: 'Quilted Wool Lining',
     cost: { wool: 14, hide: 8 }, dmgCut: 0.08,
     desc: 'Wool padding worn under everything else: all damage taken −8%.' },
+  { id: 'bogscaleLining', slot: 'underlayer', level: 11, supply: true, icon: '🐊', name: 'Bogscale Lining',
+    cost: { hide: 25, wool: 20, essence: 12 }, needs: 'keep', dmgCut: 0.12, poisonCut: 0.5,
+    desc: 'Layered swamp scales: all damage −12% and poison damage −50%.' },
   { id: 'bedroll', slot: 'back', level: 3, supply: true, icon: '🛏️', name: 'Wool Bedroll',
     cost: { wool: 8, hide: 4 }, rest: 6,
     desc: 'Strapped across your back. Stand still for a moment out of combat and you regenerate 6× faster.' },
+  { id: 'stormcloak', slot: 'back', level: 14, supply: true, icon: '🌩️', name: 'Stormcloak',
+    cost: { hide: 30, wool: 28, iron: 15, essence: 20 }, needs: 'runic', stats: { hp: 120, regen: 0.8 }, rest: 5,
+    desc: 'Highland storm wool: +120 health, +0.8 ❤️/s and 5× resting regeneration.' },
   { id: 'saddle',  slot: 'mount', level: 4, supply: true, icon: '🐴', name: 'Riding Saddle',
     cost: { hide: 12, iron: 4, meat: 30 },  saddle: true,
-    desc: 'Carry it and you can saddle a wild horse (E next to one, 3rd biome onward). Riding: +9 speed, but you cannot attack. X to dismount.' },
+    desc: 'Saddle a wild horse (E nearby). Riding grants +9 speed; mounted attacks hit harder but recover slower. X dismounts.' },
+
+  // -- placeable camp items: bought into the backpack, then positioned in
+  // the world by clicking them. They are items, never camp upgrades.
+  { id: 'storageChest', slot: 'placeable', level: 3, supply: true, icon: '📦', name: 'Storage Chest',
+    cost: { wood: 25 }, placeable: { kind: 'chest' },
+    desc: 'Place it on solid ground. Press E beside it to store resources safely through death.' },
+  { id: 'logBoat', slot: 'mount', level: 4, supply: true, icon: '🛶', name: 'Log Boat',
+    cost: { wood: 30, hide: 4 }, placeable: { kind: 'boat' }, boatMount: true,
+    desc: 'Place it on solid ground near the water, then press E beside it to mount. X dismounts and parks it at your position.' },
+  { id: 'guardTower', slot: 'placeable', level: 8, supply: true, icon: '🗼', name: 'Guard Tower',
+    cost: { wood: 60, stone: 40, iron: 10 }, placeable: { kind: 'tower' },
+    desc: 'Place it on solid ground. It automatically shoots enemies within 20 metres.' },
+  { id: 'graveyardItem', slot: 'placeable', level: 5, supply: true, icon: '🪦', name: 'Graveyard',
+    cost: { stone: 30, wood: 20, meat: 20 }, placeable: { kind: 'grave' },
+    desc: 'Place a remote respawn shrine on solid ground. Death lets you choose the cave or this graveyard.' },
 
   // -- griffin nests: dropped by beaten griffins, never sold or looted
   // (free: true keeps them out of every random loot pool). Click one in the
@@ -450,33 +535,36 @@ export const ITEMS = [
   { id: 'desertNest',   slot: 'nest', level: 1, icon: '🪺', name: 'Desert Griffin Nest', cost: null, free: true,
     nest: { biomeMax: 1 },
     desc: 'The Desert griffin\'s nest. Click to place it where you stand (Desert or any earlier ring). Stand by a placed nest to call a griffin and fly between your roosts.' },
-  { id: 'highlandNest', slot: 'nest', level: 5, icon: '🪺', name: 'Highland Griffin Nest', cost: null, free: true,
+  { id: 'highlandNest', slot: 'nest', level: 1, icon: '🪺', name: 'Highland Griffin Nest', cost: null, free: true,
     nest: { biomeMax: 4 },
     desc: 'The Highland griffin\'s nest. Click to place it where you stand (Highlands or any earlier ring). Stand by a placed nest to call a griffin and fly between your roosts.' },
-  { id: 'frozenNest',   slot: 'nest', level: 9, icon: '🪺', name: 'Frozen Griffin Nest', cost: null, free: true,
+  { id: 'frozenNest',   slot: 'nest', level: 1, icon: '🪺', name: 'Frozen Griffin Nest', cost: null, free: true,
     nest: { biomeMax: 7 },
     desc: 'The Frozen Peak griffin\'s nest. Click to place it anywhere on solid ground. Stand by a placed nest to call a griffin and fly between your roosts.' },
 
   // ---- UNIQUE boss drops: guaranteed from each biome's lair boss, never sold ----
   { id: 'verdantHeart', slot: 'charm', level: 3, unique: true, icon: '🌿', name: 'Verdant Heart',
     stats: { regen: 1.0, dmgPct: 0.10 }, desc: 'UNIQUE — dropped by Sythe the Broodmother. +1.0 ❤️/s and +10% damage.' },
-  { id: 'sunfangBlade', slot: 'weapon', level: 5, unique: true, icon: '🗡️', name: 'Sunfang Blade',
-    weapon: { kind: 'melee', dmg: 95, cd: 0.6, range: 2.0, chop: 1, mine: 0, tier: 2 },
-    desc: 'UNIQUE — dropped by Kthara Sunfang. A blistering-fast desert blade.' },
-  { id: 'widowShroud', slot: 'chest', level: 6, unique: true, icon: '🕸️', name: "Widow's Shroud",
-    stats: { hp: 160, regen: 0.6 }, desc: 'UNIQUE — dropped by Vess the Widow. +160 max health, +0.6 ❤️/s.' },
-  { id: 'mireBoots', slot: 'boots', level: 7, unique: true, icon: '🥾', name: 'Mirewalker Boots',
-    stats: { speed: 4, hp: 60 }, desc: 'UNIQUE — dropped by the Mire Hydra. +4 speed, +60 max health.' },
-  { id: 'ironhornCrown', slot: 'head', level: 8, unique: true, icon: '👑', name: 'Ironhorn Crown',
-    stats: { hp: 150, regen: 0.5 }, desc: 'UNIQUE — dropped by Old Ironhorn. +150 max health, +0.5 ❤️/s.' },
-  { id: 'shadeAmulet', slot: 'charm', level: 9, unique: true, icon: '👻', name: 'Amulet of the Shade',
-    stats: { dmgPct: 0.20, regen: 0.8 }, desc: 'UNIQUE — dropped by the Weeping Shade. +20% damage, +0.8 ❤️/s.' },
-  { id: 'snapjawMaul', slot: 'weapon', level: 10, unique: true, icon: '🔨', name: 'Snapjaw Maul',
-    weapon: { kind: 'melee', dmg: 190, cd: 0.9, range: 2.2, chop: 2, mine: 1, tier: 3 },
-    desc: 'UNIQUE — dropped by Old Snapjaw. A crushing jungle maul.' },
-  { id: 'frostMantle', slot: 'back', level: 10, unique: true, icon: '🧊', name: 'Mantle of the Colossus',
-    stats: { hp: 150, regen: 1.0 }, rest: 6, coldproof: true,
-    desc: 'UNIQUE — skinned from Grimfrost the Colossus. +150 ❤️, +1.0 ❤️/s, rests like a bedroll — and the Frozen Peak\'s chill cannot touch you.' },
+  { id: 'sunfangBlade', slot: 'weapon', level: 6, unique: true, icon: '🗡️', name: 'Sunfang Blade',
+    weapon: { kind: 'melee', style: 'sword', dmg: 95, cd: 0.6, range: 2.0, chop: 1, mine: 0, tier: 2,
+      combo: [1, 1.2, 1.5], parry: true, burn: 8 },
+    desc: 'UNIQUE — a blistering three-hit blade that parries and ignites enemies.' },
+  { id: 'widowShroud', slot: 'chest', level: 9, unique: true, icon: '🕸️', name: "Widow's Shroud",
+    stats: { hp: 210, regen: 1.0 }, desc: 'UNIQUE — dropped by Vess the Widow. +210 max health, +1.0 ❤️/s.' },
+  { id: 'mireBoots', slot: 'boots', level: 12, unique: true, icon: '🥾', name: 'Mirewalker Boots',
+    stats: { speed: 5, hp: 110, regen: 0.5 }, mudguard: 0.25,
+    desc: 'UNIQUE — dropped by the Mire Hydra. +5 speed, +110 health, +0.5 ❤️/s; mud barely slows you.' },
+  { id: 'ironhornCrown', slot: 'head', level: 15, unique: true, icon: '👑', name: 'Ironhorn Crown',
+    stats: { hp: 230, regen: 1.0 }, desc: 'UNIQUE — dropped by Old Ironhorn. +230 max health, +1.0 ❤️/s.' },
+  { id: 'shadeAmulet', slot: 'charm', level: 18, unique: true, icon: '👻', name: 'Amulet of the Shade',
+    stats: { dmgPct: 0.30, regen: 1.2 }, desc: 'UNIQUE — dropped by the Weeping Shade. +30% damage, +1.2 ❤️/s.' },
+  { id: 'snapjawMaul', slot: 'weapon', level: 21, unique: true, icon: '🔨', name: 'Snapjaw Maul',
+    weapon: { kind: 'melee', style: 'club', dmg: 320, cd: 1.05, range: 2.35, chop: 3, mine: 2, tier: 4,
+      combo: [1, 1.35], stun: 1.0, armorBreak: 0.55 },
+    desc: 'UNIQUE — a crushing jungle maul that stuns and ruins armour.' },
+  { id: 'frostMantle', slot: 'back', level: 24, unique: true, icon: '🧊', name: 'Mantle of the Colossus',
+    stats: { hp: 300, regen: 2.0 }, rest: 8, coldproof: true,
+    desc: 'UNIQUE — skinned from Grimfrost. +300 ❤️, +2.0 ❤️/s, 8× resting regeneration and complete cold protection.' },
 ];
 
 // One named boss per biome ring (7 = Frozen Peak already has the summit Ymir),
@@ -534,7 +622,9 @@ export function costFor(cost, mobaMode) {
   if (!mobaMode || !cost) return cost;
   const out = { meat: cost.meat || 0 };
   if (cost.wood) out.wood = cost.wood;
-  for (const k of ['stone', 'hide', 'iron']) if (cost[k]) out.meat += cost[k] * 3;
+  for (const k of ['stone', 'hide', 'iron', 'berry', 'wool', 'essence']) {
+    if (cost[k]) out.meat += cost[k] * 3;
+  }
   if (!out.meat) delete out.meat;
   return out;
 }
@@ -557,32 +647,46 @@ export const SPELLS = [
     desc: 'Freeze all nearby enemies for 4 s.' },
   { id: 'rage',      level: 10, icon: '😡', name: 'Rage',        cost: { meat: 120, essence: 10 }, cd: 90,
     desc: '+50% damage for 12 s.' },
+  { id: 'stoneSkin', level: 12, icon: '🪨', name: 'Stone Skin', cost: { meat: 160, stone: 80, essence: 14 }, cd: 80,
+    desc: 'Harden your skin for 12 s, reducing incoming damage by 40%.' },
+  { id: 'whirlwind', level: 15, icon: '🌪️', name: 'Whirlwind', cost: { meat: 210, iron: 25, essence: 20 }, cd: 38,
+    desc: 'Strike every nearby enemy for 75% weapon damage and knock them back.' },
+  { id: 'spiritWard', level: 18, icon: '👻', name: 'Spirit Ward', cost: { meat: 260, essence: 32 }, cd: 75,
+    desc: 'A spectral ward reduces damage by 30% and prevents poison for 15 s.' },
+  { id: 'venomRain', level: 21, icon: '☣️', name: 'Venom Rain', cost: { meat: 330, hide: 30, essence: 45 }, cd: 55,
+    desc: 'Poison every enemy within 9 m: immediate damage plus a vicious 6 s venom.' },
+  { id: 'blizzard', level: 24, icon: '🌨️', name: 'Blizzard', cost: { meat: 450, iron: 50, essence: 70 }, cd: 90,
+    desc: 'A summit storm damages and freezes every enemy within 11 m.' },
 ];
 
 export const spellById = (id) => SPELLS.find(s => s.id === id);
 
-// ---- Trainable stat tracks: 10 tiers each, tier N needs player level N.
-// Costs scale quadratically up to tier 6, then LINEARLY — the late tiers
-// should feel expensive, not like a second full-time job. ----
+// ---- Trainable stat tracks. Core combat tracks continue to tier 15 at biome
+// milestones; pet/gathering continue to tier 8, while Range keeps its original
+// 10 tiers. Costs turn linear after tier 6 so late training stays attainable. ----
 const trainCost = (base) => (t) =>
   t <= 6 ? base * t * t : base * 36 + base * 10 * (t - 6);
+const ADVANCED_TRAINING_LEVELS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 18, 21, 24];
+const DEEP_TRAINING_LEVELS = [1, 2, 3, 4, 5, 12, 18, 24];
 export const STAT_TRACKS = [
   { id: 'range', icon: '📏', name: 'Range Training', max: 10,
     desc: '+2 m bow range, +0.1 m melee reach per level. Level 10 reaches across the whole screen.',
     cost: (t) => ({ meat: trainCost(25)(t), ...(t >= 3 ? { wood: 10 * (t - 2), essence: 2 * (t - 2) } : {}) }) },
-  { id: 'power', icon: '💪', name: 'Power Training', max: 10,
-    desc: '+5% weapon damage per level.',
+  { id: 'power', icon: '💪', name: 'Power Training', max: 15, unlockLevels: ADVANCED_TRAINING_LEVELS,
+    desc: '+5% weapon damage per tier (advanced tiers unlock at biome milestones).',
     cost: (t) => ({ meat: trainCost(28)(t), ...(t >= 3 ? { wood: 12 * (t - 2), essence: 2 * (t - 2) } : {}) }) },
-  { id: 'swift', icon: '🤺', name: 'Swift Hands', max: 10,
-    desc: '+4% attack speed per level.',
+  { id: 'swift', icon: '🤺', name: 'Swift Hands', max: 15, unlockLevels: ADVANCED_TRAINING_LEVELS,
+    desc: '+4% attack speed per tier (advanced tiers unlock at biome milestones).',
     cost: (t) => ({ meat: trainCost(26)(t), ...(t >= 3 ? { wood: 11 * (t - 2), essence: 2 * (t - 2) } : {}) }) },
-  { id: 'pet', icon: '🐾', name: 'Pet Training', max: 5,
-    desc: '+100 pet health and +25% pet damage per level (100 HP base, up to 600 + level bonus).',
+  { id: 'pet', icon: '🐾', name: 'Pet Training', max: 8, unlockLevels: DEEP_TRAINING_LEVELS,
+    desc: '+100 pet health and +25% pet damage per tier.',
     cost: (t) => ({ meat: 40 * t * t, hide: 4 * t, ...(t >= 3 ? { essence: 3 * (t - 2) } : {}) }) },
-  { id: 'gather', icon: '🧺', name: 'Gathering', max: 5,
-    desc: '+15% wood and stone from every felled tree and cracked rock per level.',
+  { id: 'gather', icon: '🧺', name: 'Gathering', max: 8, unlockLevels: DEEP_TRAINING_LEVELS,
+    desc: '+15% wood and stone from every felled tree and cracked rock per tier.',
     cost: (t) => ({ meat: 22 * t * t, wood: 8 * t, ...(t >= 3 ? { essence: 2 * (t - 2) } : {}) }) },
 ];
+
+export const trainingLevelFor = (track, tier) => track.unlockLevels?.[tier - 1] ?? tier;
 
 // ==========================================================================
 // Survival camp — buildings around the cave mouth. Your "home" upgrades
@@ -591,9 +695,10 @@ export const STAT_TRACKS = [
 // ==========================================================================
 export const CAMP_BUILDINGS = [
   // your HOME is the cave itself — upgrading it advances the whole era.
-  // (10 ages planned; the first 5 are in, age 5 = the medieval keep)
-  { id: 'home', icon: '⛺', max: 4,
-    names: ['Hide Tent', 'Wooden Cabin', 'Stone House', 'Medieval Keep'],
+  // Ten ages: each deep-biome age also adds +10% to forged gear stats.
+  { id: 'home', icon: '⛺', max: 9,
+    names: ['Hide Tent', 'Wooden Cabin', 'Stone House', 'Medieval Keep', 'Runic Hall',
+      'Mountain Fortress', 'Spirit Bastion', 'Primal Citadel', 'Frosthold'],
     levels: [
       { level: 2, cost: { hide: 6, wood: 10 },
         desc: 'Age 2 — your cave becomes a hide tent. Unlocks hide clothing. +20 max health.' },
@@ -603,36 +708,22 @@ export const CAMP_BUILDINGS = [
         desc: 'Age 4 — an iron-age stone house. +120 max health, +25% chopping & mining power.' },
       { level: 9, cost: { stone: 200, wood: 150, iron: 30, hide: 20, meat: 100 },
         desc: 'Age 5 — a MEDIEVAL KEEP. Unlocks knightly gear. +180 max health, +15% XP.' },
-    ] },
-  { id: 'chest', icon: '📦', max: 1,
-    names: ['Storage Chest'],
-    levels: [
-      { level: 3, cost: { wood: 25 },
-        desc: 'Store resources safely — whatever is in the chest survives your death.' },
+      { level: 12, cost: { stone: 320, wood: 240, iron: 55, hide: 30, essence: 18 },
+        desc: 'Age 6 — a RUNIC HALL. Unlocks runic gear and Forge Tier I (+10% gear power).' },
+      { level: 15, cost: { stone: 460, wood: 330, iron: 85, hide: 45, essence: 30 },
+        desc: 'Age 7 — a MOUNTAIN FORTRESS. Unlocks storm gear and Forge Tier II (+20%).' },
+      { level: 18, cost: { stone: 620, wood: 430, iron: 120, hide: 60, essence: 48 },
+        desc: 'Age 8 — a SPIRIT BASTION. Unlocks spirit gear and Forge Tier III (+30%).' },
+      { level: 21, cost: { stone: 800, wood: 560, iron: 165, hide: 80, essence: 70 },
+        desc: 'Age 9 — a PRIMAL CITADEL. Unlocks primal gear and Forge Tier IV (+40%).' },
+      { level: 24, cost: { stone: 1050, wood: 720, iron: 230, hide: 110, essence: 105 },
+        desc: 'Age 10 — FROSTHOLD. Unlocks summit gear and Forge Tier V (+50%).' },
     ] },
   { id: 'furnace', icon: '🔥', max: 1,
     names: ['Stone Furnace'],
     levels: [
       { level: 5, cost: { stone: 40, wood: 15 },
         desc: 'Smelts iron: automatically turns 4 🪨 into 1 🔩 every 20 s. Unlocks the iron age.' },
-    ] },
-  { id: 'boat', icon: '🛶', max: 1,
-    names: ['Log Boat'],
-    levels: [
-      { level: 4, cost: { wood: 30, hide: 4 },
-        desc: 'Lets you paddle across lakes — treasure islands await.' },
-    ] },
-  { id: 'tower', icon: '🗼', max: 1,
-    names: ['Guard Tower'],
-    levels: [
-      { level: 8, cost: { wood: 60, stone: 40, iron: 10 },
-        desc: 'Watches over your camp: automatically shoots enemies that come near home.' },
-    ] },
-  { id: 'grave', icon: '🪦', max: 1,
-    names: ['Graveyard'],
-    levels: [
-      { level: 5, cost: { stone: 30, wood: 20, meat: 20 },
-        desc: 'A remote respawn shrine, built WHERE YOU STAND. When you die you choose: wake at the cave or at the graveyard.' },
     ] },
   { id: 'banner', icon: '🚩', max: 3,
     names: ['War Banner', 'Rallying Standard', 'Grand Ensign'],
@@ -646,8 +737,9 @@ export const CAMP_BUILDINGS = [
     ] },
 ];
 
-// era = how far your home has advanced (10 ages planned, 5 coded so far)
-export const ERAS = ['Stone Age', 'Hide Camp', 'Timber Age', 'Iron Age', 'Medieval'];
+// era = how far your home has advanced (base camp + nine upgrades)
+export const ERAS = ['Stone Age', 'Hide Camp', 'Timber Age', 'Iron Age', 'Medieval',
+  'Runic Age', 'Mountain Age', 'Spirit Age', 'Primal Age', 'Frost Age'];
 
 // ---- Multiplayer ----
 // PvP duels happen in an arena parked outside the world circle.
@@ -747,7 +839,8 @@ export const MOBA_AI_TIMELINE = [
 // forgeable gear lives at the BLACKSMITH; only the primitive Bone Club can
 // be lashed together at home
 export const isForgeItem = (i) =>
-  ['weapon', 'head', 'chest', 'boots', 'charm'].includes(i.slot) && !i.free && i.id !== 'club';
+  (['weapon', 'head', 'chest', 'boots', 'charm'].includes(i.slot) || !!i.shield)
+  && !i.free && i.id !== 'club';
 
 // one-time survival comforts sold in the Supplies tab (like the Bag Upgrade)
 // (supply upgrades became real equippable ITEMS — see the `supply: true`
@@ -764,43 +857,88 @@ export const SHOP_GROUPS = [
 export const SMITH_GROUPS = [
   { key: 'quests',  label: '📜 Quests' },
   { key: 'weapons', label: '⚔️ Weapons', items: () => ITEMS.filter(i => i.slot === 'weapon' && !i.free && !i.unique) },
-  { key: 'gear',    label: '🛡️ Gear',    items: () => ITEMS.filter(i => ['head', 'chest', 'boots', 'charm'].includes(i.slot) && !i.unique) },
+  { key: 'gear',    label: '🛡️ Gear',    items: () => ITEMS.filter(i =>
+      (['head', 'chest', 'boots', 'charm'].includes(i.slot) || i.shield) && !i.unique) },
 ];
 
-// ---- blacksmith quest lines: 8 sequential quests per biome, generated from
-// the biome's own enemy roster. One active quest at a time, strictly in order.
+// ---- Quest board: each biome keeps an eight-part line, but the objectives
+// now alternate between story, character, exploration, hunting and contracts.
+// The world-event objectives hook into real landmarks and encounters.
+export const QUEST_CATEGORY_LABELS = {
+  story: '📕 Main story', character: '🧑 Personal quest', exploration: '🧭 Expedition',
+  hunting: '🏹 Hunting contract', contract: '⚒️ Smith contract', repeatable: '♻️ Repeatable job',
+};
+
+const SIGNATURE_QUESTS = [
+  { event: 'farm', name: '🏚️ A roof for the lost', desc: 'Find and restore the abandoned farmstead.' },
+  { event: 'crypt', name: '🗝️ Sand-buried oath', desc: 'Clear and open a crypt in the Scorched Desert.' },
+  { event: 'crypt', name: '🕯️ Light below the roots', desc: 'Clear and open a crypt in the Dark Forest.' },
+  { event: 'tribeAlliance', name: '🪶 Terms with the marsh', desc: 'Earn safe passage from the swamp tribe at their village.' },
+  { event: 'raceWin', name: '🏁 The high road', desc: 'Win a mounted race through the Highlands.' },
+  { event: 'graveyardRest', name: '👻 Let the dead sleep', desc: 'Defend a haunted graveyard until its spirits rest.' },
+  { event: 'temple', name: '🏛️ The broken map', desc: 'Clear a jungle temple and recover its hidden route.' },
+  { event: 'summit', name: '⛰️ Nothing above us', desc: 'Reach and claim the summit of the Frozen Peak.' },
+];
+
 export function questFor(bi, idx) {
   const biome = BIOMES[bi];
   const en = (k) => biome.enemies[k % biome.enemies.length];
-  const k = 1 + bi; // depth scales needs and rewards
+  const signature = SIGNATURE_QUESTS[bi] || SIGNATURE_QUESTS[0];
+  const personal = bi === 7
+    ? { event: 'bonfire', name: '🔥 The last pilgrim', desc: 'Relight a Frozen Peak bonfire and make it a safe refuge.' }
+    : { event: 'rescue', name: '🔓 No one left in a cage', desc: 'Find a captive in this region and set them free.' };
   const defs = [
-    { type: 'kill', target: en(0), need: 5 },
-    { type: 'gather', res: 'wood', need: 15 + bi * 5 },
-    { type: 'kill', target: en(1), need: 8 },
-    { type: 'gather', res: bi >= 1 ? 'essence' : 'berry', need: bi >= 1 ? 2 + bi : 8 },
-    { type: 'kill', target: en(2), need: 10 },
-    { type: 'gather', res: 'hide', need: 6 + bi * 3 },
-    { type: 'killAny', need: 15 },
-    { type: 'boss', need: 1 },
+    { category: 'hunting', type: 'kill', target: en(0), need: 4 + bi,
+      reward: bi === 0 ? { unlock: 'broadheadArrows' } : { resources: { hide: 2 + bi } } },
+    { category: 'exploration', type: 'event', event: 'landmark', need: 1,
+      reward: { reveal: 3 } },
+    { category: 'contract', type: 'gather', res: bi >= 2 ? 'essence' : bi ? 'stone' : 'wood', need: 10 + bi * 3,
+      reward: { resources: bi >= 2 ? { iron: 2 + bi } : { meat: 8 + bi * 2 } } },
+    { category: 'character', type: 'event', event: personal.event, need: 1,
+      name: personal.name, desc: personal.desc,
+      reward: bi === 0 ? { resident: 'hunter', unlock: 'fireArrows' } : { maxHp: 8 + bi * 2 } },
+    { category: 'story', type: 'event', event: signature.event, need: 1,
+      name: signature.name, desc: signature.desc, reward: { reveal: 4, safeRoute: true } },
+    { category: 'hunting', type: 'kill', target: en(2), need: 7 + bi,
+      reward: { questPower: 1 } },
+    { category: 'contract', type: 'killAny', need: 12 + bi * 2,
+      reward: { bagSlots: 1, resources: { iron: 1 + Math.floor(bi / 2) } } },
+    { category: 'story', type: 'boss', need: 1,
+      reward: { questPower: 1, maxHp: 10 + bi * 2 } },
   ];
   const d = defs[idx];
   if (!d) return null;
-  const q = { ...d, biome: bi, idx };
-  q.reward = {}; // quests pay XP ONLY — scaled to your level when you finish
-  if (d.type === 'kill') {
+  const q = { ...d, biome: bi, idx, xpMult: d.category === 'story' ? 1.35 : 1 };
+  if (!q.name && d.type === 'kill') {
     const c = ENEMY_TYPES[d.target];
-    q.name = `${c.icon} Cull: ${c.name}`;
-    q.desc = `Slay ${d.need} ${c.name}s for the smith's stew pot.`;
-  } else if (d.type === 'gather') {
+    q.name = `${c.icon} Hunt: ${c.name}`;
+    q.desc = `Track and slay ${d.need} ${c.name}s in the ${biome.name}.`;
+  } else if (!q.name && d.type === 'gather') {
     q.name = `${RES_ICONS[d.res]} Fetch: ${d.res}`;
-    q.desc = `Bring in ${d.need} ${d.res} — the forge devours materials.`;
-  } else if (d.type === 'killAny') {
-    q.name = '⚔️ Clear the woods';
-    q.desc = `Slay ${d.need} creatures of the ${biome.name}.`;
-  } else {
-    q.name = '💀 Slay a pack mother';
-    q.desc = `Bring down any skull-ranked boss in the ${biome.name}.`;
+    q.desc = `Recover ${d.need} ${d.res} for the forge.`;
+  } else if (!q.name && d.type === 'killAny') {
+    q.name = '⚔️ Break the threat';
+    q.desc = `Slay ${d.need} hostile creatures of the ${biome.name}.`;
+  } else if (!q.name && d.type === 'boss') {
+    q.name = '💀 The heart of the wilds';
+    q.desc = `Bring down a skull-ranked boss in the ${biome.name}.`;
+  } else if (!q.name && d.event === 'landmark') {
+    q.name = '🧭 Leave the beaten path';
+    q.desc = `Find and resolve a landmark encounter in the ${biome.name}.`;
   }
   return q;
+}
+
+export function repeatableQuestFor(bi, completed = 0) {
+  const biome = BIOMES[bi];
+  const target = biome.enemies[(completed + bi) % biome.enemies.length];
+  const cfg = ENEMY_TYPES[target];
+  return {
+    biome: bi, idx: 'repeatable', repeatable: true, category: 'repeatable',
+    type: 'kill', target, need: 5 + Math.floor(bi / 2), count: 0, xpMult: 0.55,
+    name: `${cfg.icon} Open bounty: ${cfg.name}`,
+    desc: `A repeatable smith bounty for ${5 + Math.floor(bi / 2)} ${cfg.name}s.`,
+    reward: { resources: { iron: 1 + Math.floor(bi / 2), meat: 4 + bi } },
+  };
 }
 export const QUESTS_PER_BIOME = 8;

@@ -126,6 +126,71 @@ export function makeBow(tier) {
   return g;
 }
 
+export function makeClub(tier = 1) {
+  const g = new THREE.Group();
+  const shaft = cyl(0.055, 0.075, 0.62, tier >= 3 ? 0x4f3824 : 0x8a7656, 7);
+  shaft.position.y = -0.05;
+  const head = tier >= 3
+    ? box(0.2, 0.28, 0.2, 0x596168)
+    : cyl(0.13, 0.09, 0.3, 0xe3d5b6, 7);
+  head.position.y = 0.3;
+  for (let i = 0; i < (tier >= 3 ? 4 : 2); i++) {
+    const spike = cone(0.035, 0.12, tier >= 3 ? 0xc7d0d6 : 0xf1e6ce, 5);
+    spike.position.set((i % 2 ? 1 : -1) * 0.11, 0.32 + Math.floor(i / 2) * 0.08, 0);
+    spike.rotation.z = (i % 2 ? -1 : 1) * Math.PI / 2;
+    g.add(spike);
+  }
+  g.add(shaft, head);
+  return g;
+}
+
+export function makeSword(tier = 2) {
+  const g = new THREE.Group();
+  const grip = cyl(0.045, 0.05, 0.28, 0x65452a, 7); grip.position.y = -0.28;
+  const guard = box(0.34, 0.055, 0.07, tier >= 3 ? 0xe0b94f : 0xb7c0c7); guard.position.y = -0.12;
+  const blade = box(0.075, 0.68, 0.035, tier >= 3 ? 0xe8f2f7 : 0xc8d1d7); blade.position.y = 0.24;
+  const tip = cone(0.055, 0.18, tier >= 3 ? 0xf3fbff : 0xd5dde2, 4);
+  tip.position.y = 0.67;
+  tip.rotation.y = Math.PI / 4;
+  g.add(grip, guard, blade, tip);
+  return g;
+}
+
+export function makeHandSpear(tier = 1) {
+  const g = new THREE.Group();
+  const shaft = cyl(0.035, 0.04, 1.25, 0x76502d, 7); shaft.position.y = 0.08;
+  const tip = cone(0.095, 0.28, tier >= 2 ? 0xd7e0e5 : 0x9e9e92, 5); tip.position.y = 0.84;
+  const binding = cyl(0.055, 0.055, 0.12, 0x6f4b32, 7); binding.position.y = 0.66;
+  g.add(shaft, tip, binding);
+  return g;
+}
+
+export function makeCrossbow(tier = 3) {
+  const g = new THREE.Group();
+  const stock = box(0.09, 0.7, 0.1, 0x65452a); stock.position.y = 0.02;
+  const bow = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.025, 5, 12, Math.PI), mat(0xaeb7bd));
+  bow.rotation.set(0, Math.PI / 2, Math.PI / 2);
+  bow.position.y = 0.28;
+  bow.castShadow = true;
+  const rail = box(0.04, 0.58, 0.04, tier >= 3 ? 0xd9e2e7 : 0xb7c0c7); rail.position.y = 0.2;
+  g.add(stock, bow, rail);
+  return g;
+}
+
+export function makeShield(tier = 1) {
+  const g = new THREE.Group();
+  const face = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.34, 0.34, 0.09, 10),
+    mat(tier >= 2 ? 0x77838b : 0x79512f),
+  );
+  face.rotation.z = Math.PI / 2;
+  face.castShadow = true;
+  const boss = sphere(0.1, tier >= 2 ? 0xd3dbe0 : 0xb99654, 7);
+  boss.position.x = 0.07;
+  g.add(face, boss);
+  return g;
+}
+
 // ---------- Animals ----------
 function quadruped({ bodyW, bodyH, bodyL, color, headSize, snout, snoutColor, earColor, legH, tail, eyeColor }) {
   const g = new THREE.Group();

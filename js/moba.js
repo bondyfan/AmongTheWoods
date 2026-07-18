@@ -117,7 +117,7 @@ export class Moba {
         hp: cfg.hp * 1.4, dmg: (cfg.meleeDmg ?? cfg.dmg), speed: cfg.speed,
         range: cfg.range, hitR: cfg.hitR, cd: cfg.attackCd,
         xp: cfg.xp, meat: meatForHp(cfg.hp * 1.4), camp,
-        level: enemyLevelFor(type, 0.15),
+        level: enemyLevelFor(type, 0),
       });
       camp.unitIds.push(u.id);
       this.hooks.discover?.(type);

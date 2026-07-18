@@ -17,7 +17,8 @@
 //   "saves": {
 //     "$uid": {
 //       ".read":  "auth != null && auth.uid === $uid",
-//       ".write": "auth != null && auth.uid === $uid"
+//       ".write": "auth != null && auth.uid === $uid",
+//       ".indexOn": "at"
 //     }
 //   }
 // ==========================================================================

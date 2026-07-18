@@ -4,8 +4,9 @@ import * as THREE from 'three';
 import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOBA,
          RESOURCES, RES_ICONS, HIDE_BEARING, VERDANT_HIDE_DROP, hideForHp, radiusOf, costFor,
          biomeIndexAt, progressAt, fmtResource, roundResource, itemById, spellById,
-         consumableById, essenceDropFor, MAX_LEVEL, questFor, questXpFor, BIOME_LAIRS } from './config.js';
-import { makeAimArc, updateAimArc, makeRaft, makeBlacksmith, makeHorse, makeWisp,
+         consumableById, essenceDropFor, MAX_LEVEL, questFor, repeatableQuestFor,
+         questXpFor, BIOME_LAIRS, CAMP_BUILDINGS, trainingLevelFor } from './config.js';
+import { makeAimArc, updateAimArc, makeRaft, makeBlacksmith, makeHorse, makeWisp, makeMan,
          makeGriffin, makeGriffinRoost, makeTumbleweed } from './models.js';
 import { PostFX } from './postfx.js';
 import { Camp } from './camp.js';
@@ -138,7 +139,12 @@ const panels = new Panels({
   onPauseChange: (open) => {
     game.paused = open && !mp?.active;
     ui.setPaused(false);
-    if (open) document.exitPointerLock?.(); // panels need the cursor back
+    if (open) {
+      input.cancelCombat();
+      player.charging = false;
+      player.blocking = false;
+      document.exitPointerLock?.(); // panels need the cursor back
+    }
   },
   onBuyItem: buyItem,
   onBuySpell: buySpell,
@@ -166,6 +172,7 @@ const panels = new Panels({
   onDropRes: (key) => dropResource(key),
   onDropItem: (id) => dropItem(id),
   onPlaceNest: (id) => placeNest(id),
+  onPlaceItem: (id) => placeCampItem(id),
   onDropConsumable: (id) => dropConsumable(id),
   onEatBerry: () => { player.eatBerry(); refreshHud(); },
   onUseConsumable: (id) => { player.useConsumable(id); refreshHud(); },
@@ -217,6 +224,12 @@ let world = new World(scene, game.seed);
 const player = new Player(scene, {
   popup: (pos, text, color, cls) => ui.popup(pos, text, color, cls),
   onHurt: () => ui.hurtFlash(),
+  onParry: (src) => {
+    if (src?.id == null) return;
+    const em = combatMgr();
+    const attacker = em?.alive?.().find(e => e.id === src.id);
+    if (attacker) em.stun?.(attacker, 1.25);
+  },
   onHiveHit: (hive, res) => {
     if (res.firstHit) {
       // the swarm pours out — ONCE
@@ -260,7 +273,14 @@ const player = new Player(scene, {
     ui.goldFlash();
     const freshItems = ITEMS.filter(i => i.level === level).map(i => i.name);
     const freshSpells = SPELLS.filter(s => s.level === level).map(s => s.name);
-    const fresh = [...freshItems, ...freshSpells];
+    const freshTraining = STAT_TRACKS
+      .filter(t => t.max > player.stats[t.id]
+        && trainingLevelFor(t, player.stats[t.id] + 1) === level)
+      .map(t => t.name);
+    const freshBuildings = CAMP_BUILDINGS.flatMap(b => b.levels
+      .map((upgrade, i) => ({ upgrade, name: b.names[i] })))
+      .filter(x => x.upgrade.level === level).map(x => x.name);
+    const fresh = [...freshItems, ...freshSpells, ...freshTraining, ...freshBuildings];
     ui.toast(`⭐ Level ${level}!` + (fresh.length ? ` New: ${fresh.join(', ')}` : ''), 'level');
     audio.sfx('evolve_ready', 0.4);
     ui.pulseShopButton(true);
@@ -306,6 +326,8 @@ function endRace(won) {
     const xp = questXpFor(player.level);
     player.addXp(xp);
     player.essence = roundResource(player.essence + 5);
+    recordQuestEvent('raceWin', race.poi.ring);
+    recordQuestEvent('landmark', race.poi.ring);
     ui.banner('— 🏆 RACE WON —');
     ui.toast(`🏆 Checkered flag! +5 🧪, +${xp} XP.`, 'level');
     audio.sfx('victory', 0.55);
@@ -675,6 +697,8 @@ let pendingNest = null; // { id, ghost }
 function placeNest(id) {
   if (game.kind !== 'survival' || !inPlay()) return;
   if (!player.invItems.includes(id)) return;
+  if (panels.open) panels.toggle(null);
+  if (pendingCampItem) cancelCampItemPlacement();
   if (pendingNest) cancelNestPlacement();
   const ghost = makeGriffinRoost();
   ghost.traverse(o => { if (o.material) { o.material = o.material.clone(); o.material.transparent = true; o.material.opacity = 0.5; } });
@@ -718,6 +742,78 @@ function confirmNestPlacement() {
   cancelNestPlacement();
   ui.toast('🪺 Roost placed! Stand beside it and press E to open the flight map.', 'level');
   audio.sfx('tower_build', 0.55);
+  return true;
+}
+
+// ---- ordinary placeable items (chest, boat, guard tower, graveyard) ----
+let pendingCampItem = null; // { id, kind, ghost, valid }
+function placeCampItem(id) {
+  const item = itemById(id);
+  const kind = item?.placeable?.kind;
+  if (game.kind !== 'survival' || !inPlay() || !camp || !kind) return;
+  if (!player.invItems.includes(id)) return;
+  if (camp.has(kind)) {
+    ui.toast(`${item.icon} ${item.name} is already placed.`, '');
+    audio.sfx('error', 0.4);
+    return;
+  }
+  if (panels.open) panels.toggle(null);
+  if (pendingNest) cancelNestPlacement();
+  if (pendingCampItem) cancelCampItemPlacement();
+  const ghost = camp.makePlaceableMesh(kind);
+  if (!ghost) return;
+  ghost.traverse(o => {
+    if (!o.material) return;
+    o.material = o.material.clone();
+    o.material.transparent = true;
+    o.material.opacity = 0.5;
+  });
+  scene.add(ghost);
+  pendingCampItem = { id, kind, ghost, valid: false };
+  ui.toast(`${item.icon} Aim with the cursor and click solid ground to place ${item.name}. (Esc cancels)`, 'level');
+  audio.sfx('click', 0.5);
+}
+
+function cancelCampItemPlacement() {
+  if (!pendingCampItem) return;
+  scene.remove(pendingCampItem.ghost);
+  pendingCampItem = null;
+}
+
+function updateCampItemGhost() {
+  if (!pendingCampItem) return;
+  const x = aimPoint.x, z = aimPoint.z;
+  pendingCampItem.ghost.position.set(x, world.heightAt(x, z) + (pendingCampItem.kind === 'boat' ? 0.16 : 0), z);
+  pendingCampItem.valid = !world.isWater(x, z)
+    && Math.hypot(x - player.pos.x, z - player.pos.z) < 40;
+}
+
+function confirmCampItemPlacement() {
+  if (!pendingCampItem) return true;
+  const { id, kind } = pendingCampItem;
+  const item = itemById(id);
+  const x = aimPoint.x, z = aimPoint.z;
+  if (world.isWater(x, z)) {
+    ui.toast(`${item.icon} Place ${item.name} on solid ground.`, '');
+    audio.sfx('error', 0.5);
+    return true;
+  }
+  if (Math.hypot(x - player.pos.x, z - player.pos.z) >= 40) {
+    ui.toast(`${item.icon} Too far — choose a spot closer to you.`, '');
+    audio.sfx('error', 0.5);
+    return true;
+  }
+  const ix = player.invItems.indexOf(id);
+  if (ix < 0 || !camp.placeItem(kind, { x, z })) {
+    cancelCampItemPlacement();
+    return true;
+  }
+  player.invItems.splice(ix, 1);
+  cancelCampItemPlacement();
+  minimap.reveal(x, z);
+  minimap.redrawT = 0;
+  panels.refresh();
+  mp?.sendCampSync?.();
   return true;
 }
 
@@ -1117,6 +1213,8 @@ function tickGraveEvent() {
   const poi = graveEvent.poi;
   poi.claimed = true;
   graveEvent = null;
+  recordQuestEvent('graveyardRest', poi.ring);
+  recordQuestEvent('landmark', poi.ring);
   const xp = questXpFor(player.level);
   player.addXp(xp);
   pickups.spawn('essence', 3 + poi.ring, { x: poi.x, z: poi.z }, 1.5);
@@ -1191,7 +1289,8 @@ function usePropNear() {
       pickups.spawn('essence', 1, { x: pr.x, z: pr.z }, 0.8);
       pickups.spawn('hide', 2, { x: pr.x, z: pr.z }, 0.9);
       if (Math.random() < 0.12) {
-        const c = ITEMS.filter(i => !i.free && i.slot !== 'companion' && !i.unique);
+        const c = ITEMS.filter(i => !i.free && i.slot !== 'companion' && !i.unique
+          && i.level <= player.level + 1);
         pickups.spawn('item', c[Math.floor(Math.random() * c.length)].id, { x: pr.x, z: pr.z }, 0.5);
       }
       ui.toast('🕸️ The cocoon splits — someone\'s last belongings.', 'level');
@@ -1225,6 +1324,7 @@ function freePrisoner(pr) {
   const xp = questXpFor(player.level);
   player.addXp(xp);
   player.essence = roundResource(player.essence + 2);
+  recordQuestEvent('rescue', biomeIndexAt(pr.x, pr.z));
   // in thanks he marks landmarks he saw from the cage onto your map
   let revealed = 0;
   for (const poi of world.pois) {
@@ -1241,11 +1341,20 @@ function freePrisoner(pr) {
 // ---------- blacksmith quests: accept, track, auto-complete ----------
 function acceptQuest(bi, idx) {
   if (player.quest) return;
-  if ((player.questDone[bi] ?? 0) !== idx) return; // strictly in order
-  player.quest = { ...questFor(bi, idx), count: 0 };
+  const repeatable = idx === 'repeatable';
+  if (!repeatable && (player.questDone[bi] ?? 0) !== idx) return; // story line stays ordered
+  const q = repeatable
+    ? repeatableQuestFor(bi, player.repeatableDone?.[bi] ?? 0)
+    : questFor(bi, idx);
+  if (!q) return;
+  const prior = q.type === 'event'
+    ? player.questFlags[`${q.event}:${bi}`] || 0
+    : 0;
+  player.quest = { ...q, count: Math.min(q.need, prior) };
   ui.toast(`📜 Quest accepted: ${player.quest.name}`, 'level');
   audio.sfx('click', 0.5);
   panels.refresh();
+  if (player.quest?.count >= player.quest?.need) questProgress(0); // already changed this part of the world
 }
 
 function abandonQuest() {
@@ -1258,18 +1367,97 @@ function abandonQuest() {
 
 function questProgress(n = 1) {
   const q = player.quest;
+  if (!q) return;
   q.count += n;
   if (q.count < q.need) { panels.refresh(); return; }
-  // done — quests pay XP ONLY, scaled to your level at completion
-  player.questDone[q.biome] = (player.questDone[q.biome] ?? 0) + 1;
-  player.questHistory.push({ name: q.name, biome: q.biome });
-  const xp = questXpFor(player.level);
+  if (q.repeatable) {
+    player.repeatableDone[q.biome] = (player.repeatableDone[q.biome] ?? 0) + 1;
+  } else {
+    player.questDone[q.biome] = Math.max(player.questDone[q.biome] ?? 0, Number(q.idx) + 1);
+  }
+  player.questHistory.push({ name: q.name, biome: q.biome, category: q.category });
+  const xp = Math.round(questXpFor(player.level) * (q.xpMult || 1));
   player.addXp(xp);
+  const rewardLine = grantQuestReward(q);
   player.quest = null;
   ui.banner('📜 Quest complete!');
-  ui.toast(`📜 ${q.name} — +${xp} XP. The smith has more work for you.`, 'level');
+  ui.toast(`📜 ${q.name} — +${xp} XP${rewardLine ? ` · ${rewardLine}` : ''}`, 'level');
   audio.sfx('victory', 0.45);
   panels.refresh();
+}
+
+function grantQuestReward(q) {
+  const reward = q.reward || {};
+  const lines = [];
+  if (reward.resources) {
+    for (const [key, amount] of Object.entries(reward.resources)) {
+      player[key] = roundResource((player[key] || 0) + amount);
+      lines.push(`+${fmtResource(amount)} ${RES_ICONS[key] ?? key}`);
+    }
+  }
+  if (reward.unlock) {
+    player.upgrades[reward.unlock] = true;
+    const labels = { broadheadArrows: 'Broadhead arrows unlocked (Z)', fireArrows: 'Fire arrows unlocked (Z)' };
+    lines.push(labels[reward.unlock] || 'new combat recipe');
+  }
+  if (reward.resident === 'hunter' && !player.upgrades.hunterResident) {
+    player.upgrades.hunterResident = true;
+    lines.push('Hunter joins camp: +4% critical chance');
+  }
+  if (reward.maxHp) {
+    player.upgrades.questHp = (player.upgrades.questHp || 0) + reward.maxHp;
+    lines.push(`+${reward.maxHp} permanent max HP`);
+  }
+  if (reward.questPower) {
+    player.upgrades.questPower = (player.upgrades.questPower || 0) + reward.questPower;
+    lines.push('+3% permanent weapon damage');
+  }
+  if (reward.bagSlots) {
+    player.invSlots = Math.min(30, player.invSlots + reward.bagSlots);
+    lines.push(`+${reward.bagSlots} backpack slot`);
+  }
+  if (reward.safeRoute) {
+    player.upgrades.trailblazer = (player.upgrades.trailblazer || 0) + 1;
+    lines.push('safe route: permanent movement bonus');
+  }
+  if (reward.reveal) {
+    let revealed = 0;
+    for (const poi of world.pois.filter(p => p.ring === q.biome && !minimap._isDiscovered(p.x, p.z))) {
+      minimap.revealArea(poi.x, poi.z, 90);
+      if (++revealed >= reward.reveal) break;
+    }
+    if (revealed) lines.push(`${revealed} routes marked on map`);
+  }
+  player.recompute();
+  syncQuestResidents();
+  return lines.join(' · ');
+}
+
+let questHunterMesh = null;
+function syncQuestResidents() {
+  if (!player.upgrades.hunterResident || questHunterMesh || game.kind !== 'survival') return;
+  questHunterMesh = makeMan();
+  const cloak = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.46, 0.12),
+    new THREE.MeshLambertMaterial({ color: 0x355b2d }));
+  cloak.position.set(0, 0.9, 0.2);
+  questHunterMesh.add(cloak);
+  questHunterMesh.position.set(4, world.heightAt(4, 3), 3);
+  questHunterMesh.rotation.y = -2.3;
+  scene.add(questHunterMesh);
+  ui.addTracker('quest-hunter',
+    () => questHunterMesh?.parent ? questHunterMesh.position.clone().setY(questHunterMesh.position.y + 2.1) : null,
+    '<div class="mp-name" style="color:#cfe8a8">Camp Hunter</div>', 'hpwrap', null,
+    { worldRadius: 60 });
+}
+
+function recordQuestEvent(event, bi = game.biomeIndex) {
+  player.questFlags[event] = (player.questFlags[event] || 0) + 1;
+  const scoped = `${event}:${bi}`;
+  player.questFlags[scoped] = (player.questFlags[scoped] || 0) + 1;
+  const q = player.quest;
+  if (!q || q.type !== 'event' || q.event !== event) return;
+  if (q.biome !== bi) return;
+  questProgress();
 }
 
 const QUEST_KILL_SHARE_RADIUS = 20;
@@ -1279,11 +1467,14 @@ function trackQuestKill(enemy, requireNearby = true) {
   if (!q || player.dead) return;
   if (requireNearby
       && Math.hypot(player.pos.x - enemy.pos.x, player.pos.z - enemy.pos.z) > QUEST_KILL_SHARE_RADIUS) return;
-  if (q.type === 'kill' && enemy.type === q.target) questProgress();
+  const killedBiome = Number.isInteger(enemy.questBiome) ? enemy.questBiome
+    : game.dungeon?.poi && enemy.lairId
+      ? game.dungeon.poi.ring : biomeIndexAt(enemy.pos.x, enemy.pos.z);
+  if (q.type === 'kill' && enemy.type === q.target && killedBiome === q.biome) questProgress();
   else if (q.type === 'boss' && enemy.bossRank > 0
-           && biomeIndexAt(enemy.pos.x, enemy.pos.z) === q.biome) questProgress();
+           && killedBiome === q.biome) questProgress();
   else if (q.type === 'killAny' && !enemy.cfg?.passive
-           && biomeIndexAt(enemy.pos.x, enemy.pos.z) === q.biome) questProgress();
+           && killedBiome === q.biome) questProgress();
 }
 
 function grantPickup(kind, payload) {
@@ -1395,7 +1586,12 @@ const enemyMgr = new EnemyManager(scene, world, {
       // in a dungeon the overworld poi list is swapped out — use the door ref
       const poi = (game.dungeon?.poi.id === enemy.lairId ? game.dungeon.poi : null)
         ?? world.pois?.find(p => p.id === enemy.lairId);
-      if (poi) { poi.claimed = true; minimap.redrawT = 0; }
+      if (poi) {
+        poi.claimed = true;
+        recordQuestEvent('lair', poi.ring);
+        recordQuestEvent('landmark', poi.ring);
+        minimap.redrawT = 0;
+      }
       ui.banner(`— ${enemy.bossName} falls! —`);
       ui.toast(`🏆 ${enemy.bossName} is slain — its unique treasure is yours!`, 'level');
       audio.sfx('victory', 0.6);
@@ -1538,7 +1734,8 @@ function startPlaying() {
       pickups.spawn('hide', Math.round(3 * k), at, 1.2);
       if (bi >= 3) pickups.spawn('iron', 2 + bi, at, 1.2);
       if (Math.random() < 0.4 + bi * 0.06) {
-        const candidates = ITEMS.filter(i => !i.free && i.slot !== 'companion' && !i.unique);
+        const candidates = ITEMS.filter(i => !i.free && i.slot !== 'companion' && !i.unique
+          && i.level <= player.level + 1);
         pickups.spawn('item', candidates[Math.floor(Math.random() * candidates.length)].id, at, 0.6);
       }
     };
@@ -1549,7 +1746,7 @@ function startPlaying() {
     // silent guard pack — the summit's keeper is a colossal named boss
     world.onPoiSpawned = (poi) => {
       if (poi.claimed || poi.guarded) return;
-      if (!['crypt', 'temple', 'summit', 'lair'].includes(poi.type)) return;
+      if (!['crypt', 'temple', 'summit', 'lair', 'captive'].includes(poi.type)) return;
       if (mp?.active && !mp.isHost) return; // host simulates the guards
       poi.guarded = true;
       const biome = BIOMES[biomeIndexAt(poi.x, poi.z)];
@@ -1590,17 +1787,19 @@ function startPlaying() {
         return;
       }
       const rank = poi.type === 'temple' ? 3 : (poi.ring < 2 ? 1 : poi.ring < 4 ? 2 : 3);
-      const count = poi.type === 'temple' ? 6 : 4 + rank;
+      const count = poi.type === 'captive' ? 3 : (poi.type === 'temple' ? 6 : 4 + rank);
       for (let i = 0; i < count; i++) {
         const a = (i / count) * Math.PI * 2;
         const g = enemyMgr._spawn(type, poi.x + Math.cos(a) * 4.5, poi.z + Math.sin(a) * 4.5, progress);
         g.aggroed = false;
         g.cryptId = poi.id;
       }
-      const boss = enemyMgr._spawn(type, poi.x + 3, poi.z + 3, progress, rank,
-        { ambush: true, noReinforce: true });
-      boss.aggroed = false;
-      boss.cryptId = poi.id;
+      if (poi.type !== 'captive') {
+        const boss = enemyMgr._spawn(type, poi.x + 3, poi.z + 3, progress, rank,
+          { ambush: true, noReinforce: true });
+        boss.aggroed = false;
+        boss.cryptId = poi.id;
+      }
     };
     // the co-op guest renders the HOST's enemies
     if (!(mp?.active && mp.mode === 'coop' && !mp.isHost)) enemyMgr.spawnInitialWave();
@@ -1631,6 +1830,7 @@ function applyCampPerks() {
   player.campBonus = camp.homeHpBonus();
   player.chopMult = camp.chopMult();
   player.xpMult = camp.xpMult();
+  player.forgeTier = camp.forgeTier();
   pickups.magnetMult = camp.magnetMult();
   player.recompute();
 }
@@ -1733,6 +1933,8 @@ function dropHalfMeat(pos) {
 // full level (XP resets to that level's start) and half your meat spills where
 // you fell.
 function survivalRespawn() {
+  if (boatMounted) dismountBoat();
+  if (player.mounted) dismountHorse();
   minimap.deathAt = { x: player.pos.x, z: player.pos.z }; // mark the death spot
   const dropped = dropHalfMeat(player.pos.clone());
   player.loseLevel();
@@ -1769,7 +1971,7 @@ function mobaRespawn() {
     const bp = MOBA.basePos[mobaSide];
     const inward = mobaSide === 'player' ? 1 : -1;
     player.pos.set(bp.x + 9 * inward, 0, bp.z - 9 * inward);
-  }, 3000 + player.level * 500);
+  }, Math.min(10_000, 3000 + player.level * 500));
 }
 
 // Base tab purchases (solo & multiplayer; the MP guest builds via events).
@@ -2066,9 +2268,12 @@ function serializeState() {
     invSlots: p.invSlots,
     questDone: { ...p.questDone },
     questHistory: [...p.questHistory],
+    questFlags: { ...p.questFlags },
+    repeatableDone: { ...p.repeatableDone },
     quest: p.quest ? { ...p.quest } : null,
     shrineBonus: p.shrineBonus || 0,
-    camp: camp ? { levels: { ...camp.levels }, storage: { ...camp.storage } } : null,
+    camp: camp ? { levels: { ...camp.levels }, storage: { ...camp.storage },
+      positions: JSON.parse(JSON.stringify(camp.positions)) } : null,
     biomeIndex: game.biomeIndex,
     map: minimap.serializeDiscovery(),
   };
@@ -2152,21 +2357,25 @@ function applyLoadedState(d) {
   if (d.invSlots) p.invSlots = d.invSlots;
   p.questDone = { ...(d.questDone || {}) };
   p.questHistory = Array.isArray(d.questHistory) ? d.questHistory : [];
+  p.questFlags = { ...(d.questFlags || {}) };
+  p.repeatableDone = { ...(d.repeatableDone || {}) };
   p.quest = d.quest || null;
   p.shrineBonus = d.shrineBonus || 0;
   if (d.map) minimap.restoreDiscovery(d.map); // old saves simply keep the current fog state
   if (camp && d.camp) {
     Object.assign(camp.levels, d.camp.levels || {});
     Object.assign(camp.storage, d.camp.storage || {});
+    Object.assign(camp.positions, d.camp.positions || {});
     if (camp.levels.home > 0) world.buildHome(camp.levels.home);
     for (const id of ['chest', 'furnace', 'boat', 'tower', 'banner', 'grave']) {
-      if ((camp.levels[id] || 0) > 0) { try { camp._placeMesh(id); } catch {} }
+      if ((camp.levels[id] || 0) > 0) { try { camp._placeMesh(id, camp.positions[id]); } catch {} }
     }
     applyCampPerks();
   }
   p.recompute();
   p.hp = Math.min(p.maxHp, d.hp ?? p.maxHp);
   companions.sync(player);
+  syncQuestResidents();
   panels.refresh();
   ui.banner('☁️ Save loaded');
   ui.toast('☁️ Your character has been restored into this game.', 'level');
@@ -2192,14 +2401,16 @@ async function ensureMp() {
       startPlaying,
       showPing: (x, z) => showPing(x, z),
       // shared base: apply the partner's camp levels/storage locally
-      onCampSync: (lv, st, gp) => {
+      onCampSync: (lv, st, gp, positions) => {
         if (!camp || !lv) return;
         if (gp) camp.gravePos = gp;
+        if (positions) Object.assign(camp.positions, positions);
         for (const [id, v] of Object.entries(lv)) {
           while ((camp.levels[id] ?? 0) < v) {
             camp.levels[id]++;
-            camp._placeMesh(id, id === 'grave' ? gp : undefined);
           }
+          if ((camp.levels[id] ?? 0) > 0)
+            camp._placeMesh(id, camp.positions[id] ?? (id === 'grave' ? gp : undefined));
         }
         if (st) Object.assign(camp.storage, st);
         applyCampPerks();
@@ -2352,7 +2563,9 @@ function buyItem(id) {
   if (!Object.entries(cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
   for (const [k, v] of Object.entries(cost)) player[k] = roundResource(player[k] - v);
   player.ownItem(id);
-  ui.toast(`🎒 ${item.name} is in your bag — equip it in Character (C).`, 'level');
+  ui.toast(item.placeable
+    ? `🎒 ${item.name} is in your bag — click it in Character (C) to place it.`
+    : `🎒 ${item.name} is in your bag — equip it in Character (C).`, 'level');
   audio.sfx('buy', 0.5);
   panels.refresh();
   panels.flashCard(item.name);
@@ -2361,8 +2574,9 @@ function buyItem(id) {
 function buySpell(id) {
   const spell = spellById(id);
   if (!spell || player.spellsOwned.has(id) || player.level < spell.level) return;
-  if (!Object.entries(spell.cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
-  for (const [k, v] of Object.entries(spell.cost)) player[k] = roundResource(player[k] - v);
+  const cost = costFor(spell.cost, game.kind === 'moba');
+  if (!Object.entries(cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
+  for (const [k, v] of Object.entries(cost)) player[k] = roundResource(player[k] - v);
   player.ownSpell(id);
   audio.sfx('upgrade', 0.5);
   panels.refresh();
@@ -2372,8 +2586,8 @@ function buySpell(id) {
 function buyStat(id) {
   const track = STAT_TRACKS.find(t => t.id === id);
   const tier = player.stats[id];
-  if (!track || tier >= track.max || player.level < tier + 1) return;
-  const cost = track.cost(tier + 1);
+  if (!track || tier >= track.max || player.level < trainingLevelFor(track, tier + 1)) return;
+  const cost = costFor(track.cost(tier + 1), game.kind === 'moba');
   if (!Object.entries(cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
   for (const [k, v] of Object.entries(cost)) player[k] = roundResource(player[k] - v);
   player.stats[id]++;
@@ -2436,6 +2650,7 @@ function useBarSlot(i) {
   const id = player.spellSlots[i];
   if (!id) return;
   if (spellById(id)) player.castSpell(i, { enemyMgr: combatMgr() });
+  else if (itemById(id)?.placeable) placeCampItem(id);
   else if (itemById(id)) player.equip(id);
   ui.flashSpell(i);
 }
@@ -2619,8 +2834,9 @@ function nearHome() {
 }
 // E is contextual: revive partner > chest > home > landmark > treasure dig
 function nearChest() {
-  return game.kind === 'survival' && camp?.has('chest')
-    && Math.hypot(player.pos.x - 6, player.pos.z - 16) < 4;
+  const at = camp?.positionOf('chest');
+  return game.kind === 'survival' && camp?.has('chest') && at
+    && Math.hypot(player.pos.x - at.x, player.pos.z - at.z) < 4;
 }
 function nearPoi() {
   if (game.kind !== 'survival') return null;
@@ -2745,7 +2961,7 @@ function exitLair(cleared) {
 function claimPoi(poi) {
   // singleplayer lairs are DOORS — E walks you into the boss's dungeon
   if (poi.type === 'lair' && !mp?.active) { enterLair(poi); return; }
-  if (['crypt', 'temple', 'summit', 'lair'].includes(poi.type)) {
+  if (['crypt', 'temple', 'summit', 'lair', 'captive'].includes(poi.type)) {
     const guards = enemyMgr.alive().filter(e => e.cryptId === poi.id);
     if (guards.length) {
       ui.toast(`☠️ Still guarded — ${guards.length} keeper${guards.length > 1 ? 's' : ''} left!`, 'boss');
@@ -2765,6 +2981,8 @@ function claimPoi(poi) {
     player.meat = roundResource(player.meat - 15);
     player.upgrades.tribePass = true;
     enemyMgr.tribePass = true;
+    recordQuestEvent('tribeAlliance', poi.ring);
+    recordQuestEvent('landmark', poi.ring);
     ui.toast('🪶 Tribute accepted — tribesmen and shamans will no longer attack you!', 'level');
     audio.sfx('victory', 0.45);
     panels.refresh();
@@ -2776,12 +2994,26 @@ function claimPoi(poi) {
     player.hp = player.maxHp;
     if (!world.safeZones.some(sz => sz.x === poi.x && sz.z === poi.z)) {
       world.safeZones.push({ x: poi.x, z: poi.z, r: 10 });
+      recordQuestEvent('bonfire', poi.ring);
+      recordQuestEvent('landmark', poi.ring);
     }
     ui.toast('🔥 You warm up by the bonfire — fully healed, and this camp is safe now.', 'level');
     audio.sfx('evolve_ready', 0.5);
     return;
   }
+  if (poi.type === 'captive') {
+    poi.claimed = true;
+    if (poi.mesh?.userData.prisoner) poi.mesh.userData.prisoner.visible = false;
+    recordQuestEvent('rescue', poi.ring);
+    recordQuestEvent('landmark', poi.ring);
+    player.essence = roundResource(player.essence + 2);
+    ui.toast('🔓 The captive escapes toward camp — +2 🧪.', 'level');
+    audio.sfx('victory', 0.4);
+    return;
+  }
   poi.claimed = true;
+  recordQuestEvent(poi.type, poi.ring);
+  recordQuestEvent('landmark', poi.ring);
   const ring = poi.ring;
   const at = { x: poi.x + 1.8, z: poi.z + 1.8 };
   if (poi.type === 'farm') {
@@ -2796,7 +3028,8 @@ function claimPoi(poi) {
     pickups.spawn('essence', 6, at, 1.6);
     pickups.spawn('iron', 8, at, 1.6);
     pickups.spawn('meat', 25, at, 1.8);
-    const c = ITEMS.filter(i => !i.free && i.slot !== 'companion' && !i.unique);
+    const c = ITEMS.filter(i => !i.free && i.slot !== 'companion' && !i.unique
+      && i.level <= player.level + 1);
     pickups.spawn('item', c[Math.floor(Math.random() * c.length)].id, at, 0.6);
     ui.banner('— The temple treasury is yours —');
     audio.sfx('victory', 0.5);
@@ -2805,7 +3038,8 @@ function claimPoi(poi) {
     player.addXp(xp);
     pickups.spawn('essence', 15, at, 2);
     pickups.spawn('iron', 12, at, 2);
-    const cc = ITEMS.filter(i => !i.free && i.slot !== 'companion' && !i.unique);
+    const cc = ITEMS.filter(i => !i.free && i.slot !== 'companion' && !i.unique
+      && i.level <= player.level + 1);
     for (let i = 0; i < 2; i++) pickups.spawn('item', cc[Math.floor(Math.random() * cc.length)].id, at, 1);
     ui.banner('— ⛰️ THE SUMMIT IS YOURS —');
     ui.toast(`⛰️ You raise your banner over the world: +${xp} XP. There is nothing above you now.`, 'level');
@@ -2814,7 +3048,8 @@ function claimPoi(poi) {
     pickups.spawn('essence', 2 + ring, at, 1.2);
     pickups.spawn('iron', 3 + ring, at, 1.2);
     if (Math.random() < 0.3) {
-      const c = ITEMS.filter(i => !i.free && i.slot !== 'companion' && !i.unique);
+      const c = ITEMS.filter(i => !i.free && i.slot !== 'companion' && !i.unique
+        && i.level <= player.level + 1);
       pickups.spawn('item', c[Math.floor(Math.random() * c.length)].id, at, 0.6);
     }
     for (let i = 0; i < 2; i++) {
@@ -2850,7 +3085,8 @@ function claimPoi(poi) {
   } else { // crypt
     pickups.spawn('meat', 15 + ring * 6, at, 1.7);
     pickups.spawn('hide', 3 + ring * 2, at, 1.4);
-    const candidates = ITEMS.filter(i => !i.free && i.slot !== 'companion' && !i.unique && !player.hasItem(i.id));
+    const candidates = ITEMS.filter(i => !i.free && i.slot !== 'companion' && !i.unique
+      && !player.hasItem(i.id) && i.level <= player.level + 1);
     if (candidates.length) {
       pickups.spawn('item', candidates[Math.floor(Math.random() * candidates.length)].id, at, 0.6);
     }
@@ -2868,7 +3104,8 @@ function digTreasure() {
   pickups.spawn('hide', 4 + ring * 2, t, 1.4);
   if (ring >= 2) pickups.spawn('iron', 3 + ring * 2, t, 1.2);
   if (Math.random() < 0.35) {
-    const candidates = ITEMS.filter(i => !i.free && i.slot !== 'companion' && !i.unique && !player.hasItem(i.id));
+    const candidates = ITEMS.filter(i => !i.free && i.slot !== 'companion' && !i.unique
+      && !player.hasItem(i.id) && i.level <= player.level + 1);
     if (candidates.length) {
       pickups.spawn('item', candidates[Math.floor(Math.random() * candidates.length)].id, t, 0.6);
     }
@@ -2888,12 +3125,14 @@ input.onKey('KeyE', () => {
     return;
   }
   if (player.mounted) { dismountHorse(); return; } // E or X gets you off the horse
+  if (boatMounted) { dismountBoat(); return; }
   if (mp?.revivablePartner?.()) { // co-op: helping a downed friend wins
     const t = mp.remote.targetPos;
     startChannel(2, '💚 Reviving partner…', { x: t.x, z: t.z }, () => mp.tryRevivePartner());
     return;
   }
   if (nearChest()) panels.toggle('chest');
+  else if (nearPlacedBoat()) mountBoat();
   else if (nearHome()) panels.toggle('base');
   else if (nearWildHorse()) tameHorse(nearWildHorse());
   else if (nearParkedHorse()) { mountUp(); audio.sfx('click', 0.5); }
@@ -2953,7 +3192,30 @@ function canResurrectPetHere() {
     && !player.dead && (nearHome() || nearGrave());
 }
 
-input.onKey('KeyX', () => { if (game.mode === 'play' && player.mounted) dismountHorse(); });
+input.onKey('KeyX', () => {
+  if (game.mode !== 'play') return;
+  if (player.mounted) dismountHorse();
+  else if (boatMounted) dismountBoat();
+});
+
+for (const code of ['Space', 'ShiftLeft', 'ShiftRight']) {
+  input.onKey(code, () => {
+    if (!inPlay() || game.paused || player.mounted || boatMounted) return;
+    if (player.startDodge()) ui.toast('💨 Dodge', '');
+  });
+}
+
+input.onKey('KeyZ', () => {
+  if (!inPlay() || game.paused) return;
+  const mode = player.cycleArrowMode();
+  if (!mode) return;
+  const labels = {
+    standard: 'Standard arrows', broadhead: 'Broadhead arrows — bleeding',
+    fire: 'Fire arrows — burning',
+  };
+  ui.toast(`🏹 ${labels[mode]}`, 'level');
+  audio.sfx('click', 0.35);
+});
 
 input.onKey('KeyR', () => {
   if (!inPlay() || !canResurrectPetHere()) return;
@@ -3018,6 +3280,7 @@ for (let i = 0; i < 6; i++) {
 }
 input.onKey('Escape', () => {
   if (!inPlay()) return;
+  if (pendingCampItem) { cancelCampItemPlacement(); ui.toast('Placement cancelled.', ''); return; }
   if (pendingNest) { cancelNestPlacement(); ui.toast('🪺 Placement cancelled.', ''); return; }
   if (flightmapOpen) { toggleFlightMap(false); return; }
   if (bigmapOpen) { toggleBigMap(false); return; }
@@ -3090,7 +3353,7 @@ function tameHorse(e) {
   if (i >= 0) { scene.remove(e.mesh); enemyMgr.list.splice(i, 1); }
   if (!horseMesh) { horseMesh = makeHorse(); scene.add(horseMesh); }
   mountUp();
-  ui.toast('🐴 Saddled! +9 speed while riding — you cannot attack. X to dismount.', 'level');
+  ui.toast('🐴 Saddled! +9 speed — mounted attacks hit harder but recover slower. X to dismount.', 'level');
   audio.sfx('spawn', 0.5);
 }
 function mountUp() {
@@ -3110,6 +3373,36 @@ function dismountHorse() {
   }
   player.mesh.position.y = world.heightAt(player.pos.x, player.pos.z); // back on your feet
   ui.toast('🐴 Dismounted — press E beside the horse to ride again.', '');
+  audio.sfx('click', 0.4);
+}
+
+// The placed Log Boat is a world mount: E picks it up underneath the player,
+// X parks it at the current position. Merely owning/placing it no longer makes
+// every lake passable.
+let boatMounted = false;
+function nearPlacedBoat() {
+  if (boatMounted || game.kind !== 'survival' || !camp?.has('boat')) return false;
+  const at = camp.positionOf('boat');
+  return !!at && Math.hypot(at.x - player.pos.x, at.z - player.pos.z) < 3.6;
+}
+
+function mountBoat() {
+  if (!nearPlacedBoat()) return;
+  boatMounted = true;
+  if (camp.meshes.boat) camp.meshes.boat.visible = false;
+  boatPlaceT = 0;
+  raft.visible = true;
+  ui.toast('🛶 Log Boat mounted — paddle into water, X to dismount and park it.', 'level');
+  audio.sfx('spawn', 0.45);
+}
+
+function dismountBoat() {
+  if (!boatMounted) return;
+  boatMounted = false;
+  raft.visible = false;
+  camp?.moveItem('boat', { x: player.pos.x, z: player.pos.z });
+  mp?.sendCampSync?.();
+  ui.toast('🛶 Log Boat parked — press E beside it to mount again.', '');
   audio.sfx('click', 0.4);
 }
 
@@ -3500,6 +3793,7 @@ let shakeT = 0; // brief tremble on boss entrances
 // fov + fog wall keep the draw load in check
 // free mouse-look: clicking the world (with no panel open) locks the pointer
 renderer.domElement.addEventListener('click', () => {
+  if (pendingCampItem) { confirmCampItemPlacement(); return; }
   if (pendingNest) { confirmNestPlacement(); return; }
   if (game.rpgView && settings.mouseLook && game.mode === 'play'
       && !panels.openSet.size && !document.pointerLockElement) {
@@ -3658,6 +3952,7 @@ function step() {
     game.time += dt;
     updateAim(dt);
     updateNestGhost();
+    updateCampItemGhost();
     const em = combatMgr(); // real mgr / co-op shadow / pvp arena / moba units
     // while a griffin carries you the flight drives your position — the
     // normal walk/attack simulation pauses until touchdown
@@ -3666,7 +3961,8 @@ function step() {
       arenaZone: mp?.active ? mp.arenaZone() : null,
       mobaBounds: game.kind === 'moba' ? MOBA.half : null,
       mouseMove: settings.mouseMove,
-      boat: game.kind === 'survival' && camp?.has('boat'),
+      boat: game.kind === 'survival' && boatMounted,
+      boatMount: game.kind === 'survival' && boatMounted,
       boatPlacing: boatPlaceT > 0,
       rpgView: game.rpgView,
       mounted: player.mounted,
@@ -3730,25 +4026,21 @@ function step() {
         }
       }
 
-      // raft under the hero while paddling — stepping onto water first means
-      // 2 s of setting the raft down (no moving), then a slow paddle with a
-      // simple wake of expanding wave rings
-      const onWater = !player.flying && camp?.has('boat') && world.isWater(player.pos.x, player.pos.z);
-      if (onWater && !wasOnWater) {
-        boatPlaceT = 2;
-        audio.sfx('tower_build', 0.5);
-      }
+      // The Log Boat is an explicit mount. It follows beneath the rider on
+      // land and water, and only a mounted boat makes deep water passable.
+      const onWater = !player.flying && boatMounted && world.isWater(player.pos.x, player.pos.z);
       wasOnWater = !!onWater;
       if (boatPlaceT > 0) boatPlaceT -= dt;
-      raft.visible = !!onWater;
-      if (onWater) {
-        const k = boatPlaceT > 0 ? 1 - boatPlaceT / 2 : 1; // raft settles in
-        raft.position.set(player.pos.x, player.mesh.position.y + 0.12 + (1 - k) * 1.6, player.pos.z);
+      raft.visible = boatMounted;
+      if (boatMounted) {
+        const k = 1;
+        raft.position.set(player.pos.x, player.mesh.position.y + 0.12, player.pos.z);
         raft.rotation.y = player.mesh.rotation.y;
-        raft.scale.setScalar(0.4 + 0.6 * k);
+        raft.scale.setScalar(k);
+        player.mesh.position.y += 0.32;
         // wake rings while actually moving
         waveT -= dt;
-        if (boatPlaceT <= 0 && waveT <= 0
+        if (onWater && waveT <= 0
             && (Math.abs(player.pos.x - lastWaveX) > 0.6 || Math.abs(player.pos.z - lastWaveZ) > 0.6)) {
           waveT = 0.35;
           lastWaveX = player.pos.x; lastWaveZ = player.pos.z;
@@ -3801,6 +4093,7 @@ function step() {
         liana: '🌿 A vine line — press <kbd>E</kbd> to glide across',
         bonfire: '🔥 A bonfire — press <kbd>E</kbd> to rest (full heal, safe camp)',
         summit: '⛰️ The summit — defeat its keeper, then press <kbd>E</kbd> to claim the peak',
+        captive: '🔓 A guarded captive — defeat the guards, then press <kbd>E</kbd> to free them',
         lair: mp?.active ? '💀 A boss lair — slay its named master for a UNIQUE treasure'
           : '💀 A boss lair — press <kbd>E</kbd> to enter its master\'s den',
         statue: '🗿 Cursed statue — press <kbd>E</kbd> to strike a pact (boon + bane)',

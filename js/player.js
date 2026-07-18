@@ -6,7 +6,8 @@
 import * as THREE from 'three';
 import { WORLD, XP_LEVELS, MAX_LEVEL, itemById, spellById, consumableById,
          biomeIndexAt, RESOURCES, MAX_SPELL_SLOTS } from './config.js';
-import { makeMan, makeAxe, makeBow, makePickaxe, makeTorchMesh } from './models.js';
+import { makeMan, makeAxe, makeBow, makePickaxe, makeTorchMesh, makeClub,
+         makeSword, makeHandSpear, makeCrossbow, makeShield } from './models.js';
 import { audio } from './audio.js';
 
 const MAX_CLIMB_SLOPE = 1.0; // steeper ground than this is a wall
@@ -42,7 +43,7 @@ export class Player {
     this.equipment = { weapon: 'fists', offhand: null, head: null, chest: null, underlayer: null,
                        legs: null, boots: null, back: null, mount: null, charm: null, companion: null };
 
-    // -- trainable stat tracks (0..10 each; pet 0..5) --
+    // -- trainable stat tracks (individual caps/unlocks live in config) --
     this.stats = { range: 0, power: 0, swift: 0, pet: 0, gather: 0 };
     this.petDead = false;             // a dead pet stays dead until resurrected
     this.petMode = 'aggressive';      // 'aggressive' | 'defensive' | 'passive'
@@ -59,6 +60,8 @@ export class Player {
     this.quest = null;        // { biome, idx, type, need, count, name, ... }
     this.questDone = {};      // biomeIndex -> completed count (next idx to offer)
     this.questHistory = [];   // [{ name, biome }]
+    this.questFlags = {};     // persistent world-event counters used by narrative quests
+    this.repeatableDone = {}; // biomeIndex -> completed repeatable contracts
     this.roastT = 0;                  // roasted-meat speed buff timer
     this.poisonT = 0;                 // zombie poison DoT
     this.poisonDps = 0;
@@ -75,6 +78,8 @@ export class Player {
     // -- timed effects --
     this.hasteT = 0;
     this.rageT = 0;
+    this.stoneSkinT = 0;
+    this.spiritWardT = 0;
     this.dashT = 0;
     this.dashDir = new THREE.Vector3();
     this.dashHit = new Set();
@@ -83,6 +88,17 @@ export class Player {
     this.attackCd = 0;
     this.attackT = 0;
     this.attackDur = 0.3;
+    this.charging = false;
+    this.chargeT = 0;
+    this.comboStep = 0;
+    this.comboT = 0;
+    this.arrowMode = 'standard';
+    this.blocking = false;
+    this.parryT = 0;
+    this.dodgeT = 0;
+    this.dodgeCd = 0;
+    this.invulnT = 0;
+    this.dodgeDir = new THREE.Vector3();
     this.stunT = 0;
     this.walkT = 0;
     this.dead = false;
@@ -111,6 +127,7 @@ export class Player {
   equip(id) {
     const item = itemById(id);
     if (!item) return;
+    if (item.placeable) return; // world items are used from the bag, never worn
     if (id !== 'fists' && !this.invItems.includes(id)
         && !Object.values(this.equipment).includes(id)) return;
     if (item.level > this.level) { // dropped gear waits until you grow into it
@@ -220,6 +237,35 @@ export class Player {
           if (e.pos.distanceTo(this.pos) < 7) enemyMgr.stun(e, 4);
         }
         break;
+      case 'stoneSkin': this.stoneSkinT = 12; break;
+      case 'spiritWard':
+        this.spiritWardT = 15;
+        this.poisonT = 0;
+        break;
+      case 'whirlwind':
+        for (const e of enemyMgr.alive()) {
+          if (e.pos.distanceTo(this.pos) >= 6) continue;
+          const dir = new THREE.Vector3().subVectors(e.pos, this.pos).normalize();
+          e.pos.addScaledVector(dir, 3);
+          enemyMgr.damage(e, this.dmgMult * this.weapon.dmg * 0.75, null);
+        }
+        break;
+      case 'venomRain':
+        for (const e of enemyMgr.alive()) {
+          if (e.pos.distanceTo(this.pos) < 9) {
+            enemyMgr.damage(e, this.dmgMult * 45, null, 'local',
+              { poison: { dps: 15, dur: 6 } });
+          }
+        }
+        break;
+      case 'blizzard':
+        for (const e of enemyMgr.alive()) {
+          if (e.pos.distanceTo(this.pos) < 11) {
+            enemyMgr.damage(e, this.dmgMult * 120, null);
+            enemyMgr.stun(e, 5);
+          }
+        }
+        break;
     }
   }
 
@@ -227,42 +273,53 @@ export class Player {
   recompute() {
     const equipped = (slot) => itemById(this.equipment[slot]);
     const oldMax = this.maxHp || 100;
-    let hp = 100 + (this.level - 1) * 10 + (this.shrineBonus || 0), speedAdd = 0;
-    for (const slot of ['head', 'chest', 'boots', 'offhand', 'underlayer', 'legs', 'back', 'mount']) {
+    this.gearMult = 1 + 0.1 * (this.forgeTier || 0);
+    let hp = 100 + (this.level - 1) * 10 + (this.shrineBonus || 0)
+      + (this.upgrades.questHp || 0), speedAdd = 0;
+    for (const slot of ['head', 'chest', 'boots', 'charm', 'offhand', 'underlayer', 'legs', 'back', 'mount']) {
       const it = equipped(slot);
-      if (it?.stats?.hp) hp += it.stats.hp;
+      if (it?.stats?.hp) hp += it.stats.hp * this.gearMult;
       if (it?.stats?.speed) speedAdd += it.stats.speed;
     }
-    this.maxHp = hp + (this.campBonus || 0);
+    this.maxHp = Math.round(hp + (this.campBonus || 0));
     if (this.maxHp > oldMax) this.hp += this.maxHp - oldMax;
     this.hp = Math.min(this.hp, this.maxHp);
-    // every level grants +10 hp, +0.1 speed, +0.1 regen and +0.1 attacks/s —
-    // and losing a level on death takes all of it back (it's all derived here)
+    // every level keeps granting +10 hp, +0.1 speed and +0.1 regen; weapon
+    // power gains +1% per level while attack-speed growth softens after Lv14
     const lvl = this.level - 1;
-    this.speed = 5.5 + 0.1 * lvl + speedAdd;
+    this.speed = 5.5 + 0.1 * lvl + speedAdd + (this.upgrades.trailblazer || 0) * 0.2;
     // passive regeneration: everyone knits back slowly; gear can stack it up
     let regen = 0.1 + 0.1 * lvl;
     for (const slot of ['head', 'chest', 'boots', 'charm', 'offhand', 'underlayer', 'legs', 'back', 'mount']) {
       const it = equipped(slot);
-      if (it?.stats?.regen) regen += it.stats.regen;
+      if (it?.stats?.regen) regen += it.stats.regen * this.gearMult;
     }
     this.hpRegen = regen;
 
     // effective weapon = base weapon + training (range/power/swift tracks)
     const base = equipped('weapon')?.weapon || itemById('fists').weapon;
     const s = this.stats;
-    const lvlCd = (cd) => 1 / (1 / cd + 0.1 * lvl); // +0.1 attacks/s per level
+    // Keep the established attack-speed curve through Lv14, then slow it so
+    // late levels do not erase the identity of slow and fast weapons.
+    this.levelAttackSpeedBonus = 0.1 * Math.min(lvl, 13) + 0.025 * Math.max(0, lvl - 13);
+    this.levelDamagePct = 0.01 * lvl; // small +1% weapon power per level
+    const lvlCd = (cd) => 1 / (1 / cd + this.levelAttackSpeedBonus);
     this.weapon = {
       ...base,
-      dmg: base.dmg * (1 + 0.05 * s.power),
+      dmg: base.dmg * (1 + 0.05 * s.power) * (1 + this.levelDamagePct) * this.gearMult,
       cd: lvlCd(base.cd * (1 - 0.04 * s.swift)),
       range: base.range + (base.kind === 'bow' ? 2.0 : 0.1) * s.range,
     };
+    if (this.upgrades.questPower) this.weapon.dmg *= 1 + this.upgrades.questPower * 0.03;
+    this.shield = equipped('offhand')?.shield || null;
+    this.canBlock = !!this.shield || !!this.weapon.parry;
+    this.critChance = CRIT_CHANCE + (this.upgrades.hunterResident ? 0.04 : 0);
     this.gatherMult = 1 + 0.15 * s.gather; // Gathering training: fatter yields
     // expedition gear: each comfort lives in its own slot now (no more flags)
     this.torchGear = equipped('offhand')?.torch || null;   // { radius } while a torch is in hand
     this.dmgCut = equipped('underlayer')?.dmgCut || 0;     // quilted lining soak
-    this.mudguard = equipped('legs')?.mudguard ?? 1;       // socks halve mud/web slows
+    this.poisonCut = equipped('underlayer')?.poisonCut || 0;
+    this.mudguard = Math.min(equipped('legs')?.mudguard ?? 1, equipped('boots')?.mudguard ?? 1);
     this.restMult = equipped('back')?.rest || 1;           // bedroll rest regen
     this.hasSaddle = !!equipped('mount')?.saddle;          // can mount wild horses
     this.coldProof = !!equipped('back')?.coldproof;        // Colossus mantle shrugs off the chill
@@ -276,11 +333,11 @@ export class Player {
     const comp = equipped('companion');
     const petBase = comp?.pet;
     this.pet = petBase
-      ? { dmg: petBase.dmg * (1 + 0.25 * s.pet) * (1 + 0.03 * this.level),
-          maxHp: 100 + 100 * s.pet + 50 * Math.floor(this.level / 2) }
+      ? { dmg: petBase.dmg * (1 + 0.25 * s.pet) * (1 + 0.03 * this.level) * this.gearMult,
+          maxHp: Math.round((100 + 100 * s.pet + 50 * Math.floor(this.level / 2)) * this.gearMult) }
       : null;
     const orbBase = comp?.orb;
-    this.orb = orbBase ? { ...orbBase, dmg: orbBase.dmg * (1 + 0.05 * s.power) } : null;
+    this.orb = orbBase ? { ...orbBase, dmg: orbBase.dmg * (1 + 0.05 * s.power) * this.gearMult } : null;
 
     // cursed-statue pact: a strong boon lashed to a bane, until it expires
     if (this.boon) {
@@ -310,7 +367,8 @@ export class Player {
   _refreshOutfit() {
     const ud = this.mesh.userData;
     if (!ud.torso) return;
-    const chestColors = { leatherArmor: 0x8a5a2b, furCoat: 0x6e5a40, bearHide: 0x4a3a2a };
+    const chestColors = { leatherArmor: 0x8a5a2b, furCoat: 0x6e5a40, bearHide: 0x4a3a2a,
+      widowShroud: 0x273521, graveplate: 0x4d485c, iceplate: 0xa9c8d8 };
     const headColors = { leatherCap: 0x8a5a2b, furHood: 0x6e5a40, bearHelm: 0xb8bec6 };
     const skin = 0xd9a066;
     const chestId = this.equipment.chest;
@@ -331,6 +389,7 @@ export class Player {
 
   applyStun(sec) {
     if (this.dead) return;
+    if (this.invulnT > 0) return;
     this.stunT = Math.max(this.stunT, sec);
     this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.3), '⚡ Stunned!', '#ffe94a');
     this.hooks.onHurt?.();
@@ -339,16 +398,46 @@ export class Player {
   get dmgMult() { return this.rageT > 0 ? 1.5 : 1; }
   get cdMult() { return this.hasteT > 0 ? 0.5 : 1; }
 
+  startDodge() {
+    if (this.dead || this.stunT > 0 || this.dodgeCd > 0 || this.dashT > 0 || this.mounted) return false;
+    const d = this.moveDir ? new THREE.Vector3(this.moveDir.x, 0, this.moveDir.z) : this.facing.clone();
+    if (d.lengthSq() < 0.01) d.set(0, 0, -1);
+    this.dodgeDir.copy(d.normalize());
+    this.dodgeT = 0.22;
+    this.dodgeCd = 1.05;
+    this.invulnT = 0.28;
+    this.charging = false;
+    this.blocking = false;
+    audio.sfx('special', 0.28, 180);
+    return true;
+  }
+
+  cycleArrowMode() {
+    if (this.weapon.style !== 'bow') return null;
+    const modes = ['standard'];
+    if (this.upgrades.broadheadArrows) modes.push('broadhead');
+    if (this.upgrades.fireArrows) modes.push('fire');
+    const i = modes.indexOf(this.arrowMode);
+    this.arrowMode = modes[(i + 1 + modes.length) % modes.length];
+    return this.arrowMode;
+  }
+
   _refreshWeaponMeshes() {
     const { rightSocket, leftSocket } = this.mesh.userData;
     rightSocket.clear();
     leftSocket.clear();
     if (this.weapon.kind === 'melee' && this.weapon.tier > 0) {
-      const tool = this.weapon.pick ? makePickaxe(this.weapon.tier) : makeAxe(this.weapon.tier);
+      const makers = {
+        club: makeClub, sword: makeSword, spear: makeHandSpear,
+        pick: makePickaxe, axe: makeAxe,
+      };
+      const tool = (makers[this.weapon.style] || makeAxe)(this.weapon.tier);
       tool.rotation.x = -0.2;
       rightSocket.add(tool);
     }
-    if (this.weapon.kind === 'bow') leftSocket.add(makeBow(this.weapon.tier));
+    if (this.weapon.kind === 'bow') {
+      leftSocket.add(this.weapon.style === 'crossbow' ? makeCrossbow(this.weapon.tier) : makeBow(this.weapon.tier));
+    }
     // a torch is truly HELD: free hand gets the burning stick (the bow claims
     // the left hand, so archers carry the torch on the right)
     this.mesh.userData.torchRef = null;
@@ -357,6 +446,10 @@ export class Player {
       t.rotation.x = 0.3; // tipped slightly forward, away from the face
       (this.weapon.kind === 'bow' ? rightSocket : leftSocket).add(t);
       this.mesh.userData.torchRef = t;
+    } else if (this.shield) {
+      const shield = makeShield(this.shield.block >= 0.7 ? 2 : 1);
+      shield.rotation.z = -0.3;
+      (this.weapon.kind === 'bow' ? rightSocket : leftSocket).add(shield);
     }
   }
 
@@ -415,7 +508,31 @@ export class Player {
   takeDamage(dmg, src = null) {
     if (this.dead) return;
     if (this.flying) return; // riding a griffin — far out of anyone's reach
+    if (this.invulnT > 0) {
+      this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.1), 'DODGE', '#b8f4ff');
+      return;
+    }
+    const sx = src?.pos?.x, sz = src?.pos?.z;
+    const sl = sx == null ? 0 : Math.hypot(sx - this.pos.x, sz - this.pos.z);
+    const inFront = sx == null || sl < 0.01
+      || ((sx - this.pos.x) / sl) * this.facing.x + ((sz - this.pos.z) / sl) * this.facing.z > 0.05;
+    if (this.blocking && this.canBlock && inFront) {
+      if (this.parryT > 0 && this.weapon.parry) {
+        this.parryT = 0;
+        this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2), '⚔️ PARRY!', '#ffe36e', 'big');
+        this.hooks.onParry?.(src);
+        audio.sfx('base_hit', 0.5, 100);
+        return;
+      }
+      const reduction = this.shield?.block ?? 0.35;
+      dmg *= 1 - reduction;
+      this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.15),
+        `🛡️ blocked ${Math.round(reduction * 100)}%`, '#9fd7ff');
+      audio.sfx('base_hit', 0.35, 120);
+    }
     if (this.dmgCut) dmg *= 1 - this.dmgCut; // quilted wool lining soaks a bit of everything
+    if (this.stoneSkinT > 0) dmg *= 0.6;
+    if (this.spiritWardT > 0) dmg *= 0.7;
     this.hurtT = 0;
     if (src?.name) this.killedBy = src.name; // remember the last thing that hurt us
     this.hp -= dmg;
@@ -425,9 +542,9 @@ export class Player {
         '-' + Math.round(dmg), '#ff5a4a');
     }
     // rotting claws (zombies): a festering DoT — the Haunted Forest hazard
-    if (src?.poison) {
+    if (src?.poison && this.spiritWardT <= 0) {
       this.poisonT = src.poison.dur ?? 4;
-      this.poisonDps = src.poison.dps ?? 2;
+      this.poisonDps = (src.poison.dps ?? 2) * (1 - this.poisonCut);
       this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2), '☠️ poisoned', '#8aff3a');
     }
     audio.sfx('hit', 0.45, 120);
@@ -499,14 +616,20 @@ export class Player {
     // timed effects
     this.hasteT = Math.max(0, this.hasteT - dt);
     this.rageT = Math.max(0, this.rageT - dt);
+    this.stoneSkinT = Math.max(0, this.stoneSkinT - dt);
+    this.spiritWardT = Math.max(0, this.spiritWardT - dt);
     this.roastT = Math.max(0, this.roastT - dt);
     if (this.boon && (this.boon.t -= dt) <= 0) { this.boon = null; this.recompute(); }
     this.venomT = Math.max(0, this.venomT - dt);
+    this.dodgeCd = Math.max(0, this.dodgeCd - dt);
+    this.invulnT = Math.max(0, this.invulnT - dt);
+    this.parryT = Math.max(0, this.parryT - dt);
+    this.comboT = Math.max(0, this.comboT - dt);
     this.hurtT += dt;
     // a held torch BURNS: ~5 real minutes (5 in-game hours) per stick, then
     // it crumbles to ash and leaves your hand empty. Fuel is tracked PER TIER
     // (swapping torches never refills one) and only ticks while it's in hand.
-    if (this.torchGear) {
+    if (this.torchGear && !this.torchGear.permanent) {
       const tid = this.equipment.offhand;
       this.torchFuelById ??= {};
       this.torchFuelById[tid] ??= 300;
@@ -546,16 +669,31 @@ export class Player {
     // stunned: frozen in place, can't move or attack
     if (this.stunT > 0) {
       this.stunT -= dt;
+      this.blocking = false;
+      this.charging = false;
       this.mesh.position.set(this.pos.x, this._updateVertical(dt, world, ctx.devFly), this.pos.z);
       this.attackCd -= dt;
       this._updateSlashes(dt);
       return;
     }
 
+    // A sword can parry during the first instant of its guard; shields sustain
+    // a stronger block. Guarding slows movement and prevents attacking.
+    const wantsBlock = input.block && this.canBlock && !this.charging && this.dodgeT <= 0 && this.dashT <= 0;
+    if (wantsBlock && !this.blocking) this.parryT = 0.22;
+    this.blocking = wantsBlock;
+
     // -- dash overrides normal movement --
     let moving = false;
     this.moveDir = null; // world-space walk direction this frame (auto camera rotate)
-    if (this.dashT > 0) {
+    if (this.dodgeT > 0) {
+      this.dodgeT -= dt;
+      this.pos.addScaledVector(this.dodgeDir, 19 * dt);
+      world.collide(this.pos, 0.45, { boat: ctx.boat });
+      this._applyBounds(ctx);
+      moving = true;
+      this.walkT += dt * 24;
+    } else if (this.dashT > 0) {
       this.dashT -= dt;
       this.pos.addScaledVector(this.dashDir, 34 * dt);
       world.collide(this.pos, 0.45, { boat: ctx.boat });
@@ -615,7 +753,11 @@ export class Player {
         // paddling is a touch slower than running; roast buff speeds you up;
         // the swamp (ctx.envSpeedMult) drags at your boots
         const onWater = !ctx.devFly && ctx.boat && world.isWater?.(this.pos.x, this.pos.z);
-        const speed = (this.speed + (ctx.mounted ? 9 : 0)) * (onWater ? 0.4 : 1)
+        const guardSlow = this.blocking ? 0.48 : 1;
+        const mountBonus = ctx.mounted ? 9 : ctx.boatMount ? 6 : 0;
+        const terrainMult = onWater ? (ctx.boatMount ? 0.65 : 0.4) : (ctx.boatMount ? 0.45 : 1);
+        const speed = (this.speed + mountBonus) * terrainMult
+          * guardSlow
           * (this.roastT > 0 ? 1.1 : 1) * (ctx.devFly ? 1 : (ctx.envSpeedMult ?? 1));
         // cliffs are walls: block any step that climbs too steeply (walking
         // DOWN or falling off is always allowed); sliding along one is fine.
@@ -664,11 +806,26 @@ export class Player {
     // local +z toward the aim point, so arm swings (toward +z) punch forward
     this.mesh.rotation.y = Math.atan2(this.facing.x, this.facing.z);
 
-    // -- attack with the equipped weapon --
+    // -- attack with the equipped weapon: tap LMB for a normal hit, hold and
+    // release for a charged strike. RMB remains quick-repeat in top-down view. --
     this.attackCd -= dt;
-    if (input.attack && this.attackCd <= 0 && this.dashT <= 0 && !ctx.mounted) {
-      if (this.weapon.kind === 'bow') this._doShoot(projectiles);
-      else this._doMelee(world, enemyMgr, ctx.pickups);
+    const pressed = input.takeLeftPressed();
+    const released = input.takeLeftReleased();
+    if (pressed && this.attackCd <= 0 && this.dashT <= 0 && this.dodgeT <= 0 && !this.blocking) {
+      this.charging = true;
+      this.chargeT = 0;
+    }
+    if (this.charging) {
+      if (input.mouse.left) this.chargeT = Math.min(1.2, this.chargeT + dt);
+      if (released || !input.mouse.left) {
+        const charge = Math.min(1, this.chargeT / 1.05);
+        this.charging = false;
+        if (this.weapon.kind === 'bow') this._doShoot(projectiles, charge, ctx.mounted);
+        else this._doMelee(world, enemyMgr, ctx.pickups, charge, moving, ctx.mounted);
+      }
+    } else if (input.quickAttack && this.attackCd <= 0 && this.dashT <= 0 && this.dodgeT <= 0 && !this.blocking) {
+      if (this.weapon.kind === 'bow') this._doShoot(projectiles, 0, ctx.mounted);
+      else this._doMelee(world, enemyMgr, ctx.pickups, 0, moving, ctx.mounted);
     }
 
     this._animate(dt, moving);
@@ -713,6 +870,10 @@ export class Player {
     this.hp = Math.max(1, Math.round(this.maxHp * hpFrac));
     this.stunT = 0;
     this.dashT = 0;
+    this.dodgeT = 0;
+    this.invulnT = 0;
+    this.blocking = false;
+    this.charging = false;
     this.mesh.rotation.z = 0;
   }
 
@@ -723,13 +884,13 @@ export class Player {
     this.xp = XP_LEVELS[this.level];
   }
 
-  _inArc(tx, tz, maxDist, extraR = 0) {
+  _inArc(tx, tz, maxDist, extraR = 0, minDot = 0.55) {
     const dx = tx - this.pos.x, dz = tz - this.pos.z;
     const dist = Math.hypot(dx, dz);
     if (dist > maxDist + extraR) return false;
     if (dist < 0.4) return true;
     const dot = (dx / dist) * this.facing.x + (dz / dist) * this.facing.z;
-    return dot > 0.55; // ~±45° — swings must actually be aimed
+    return dot > minDot;
   }
 
   // Visible swing arc — a crescent that sweeps and fades with the strike.
@@ -848,26 +1009,72 @@ export class Player {
     }
   }
 
-  _doMelee(world, enemyMgr, pickups) {
+  _hitsWeakPoint(enemy, charge) {
+    if (charge < 0.72) return false;
+    if (enemy.stunT > 0 || enemy.windupT > 0) return true;
+    const ry = enemy.mesh?.rotation?.y ?? 0;
+    const fx = -Math.sin(ry), fz = -Math.cos(ry); // enemy model's forward direction
+    const dx = this.pos.x - enemy.pos.x, dz = this.pos.z - enemy.pos.z;
+    const len = Math.hypot(dx, dz) || 1;
+    return fx * (dx / len) + fz * (dz / len) < -0.45; // charged back strike
+  }
+
+  _doMelee(world, enemyMgr, pickups, charge = 0, moving = false, mounted = false) {
     const w = this.weapon;
-    this.attackCd = w.cd * this.cdMult;
-    this.attackDur = Math.min(0.34, w.cd * 0.8);
+    const combo = w.combo || [1];
+    this.comboStep = this.comboT > 0 ? (this.comboStep + 1) % combo.length : 0;
+    this.comboT = Math.max(0.8, w.cd * 1.8);
+    const comboMult = combo[this.comboStep] ?? 1;
+    const charged = charge >= 0.42;
+    const chargeMult = 1 + charge * 1.15;
+    const runMult = moving ? 1.16 : 1;
+    const mountMult = mounted ? 1.28 : 1;
+    const impactMult = comboMult * chargeMult * runMult * mountMult;
+    this.attackCd = w.cd * this.cdMult * (charged ? 1.18 : 1) * (mounted ? 1.25 : 1);
+    this.attackDur = Math.min(0.42, w.cd * 0.8);
     this.attackT = this.attackDur;
     this._spawnSlash();
     audio.sfx('attack_melee', 0.4);
 
-    const crit = Math.random() < CRIT_CHANCE;
+    // Running attacks carry momentum; a charged spear turns that momentum into
+    // a real forward lunge while still respecting terrain collision.
+    const lunge = (moving ? 0.28 : 0) + (w.chargeLunge ? w.chargeLunge * charge : 0);
+    if (lunge > 0) {
+      this.pos.addScaledVector(this.facing, lunge);
+      world.collide(this.pos, 0.45);
+      this._clampToWorld();
+    }
+
+    const arcDot = w.style === 'axe' ? 0.22 : w.style === 'spear' || w.style === 'pick' ? 0.76 : 0.5;
+    const baseCrit = Math.random() < this.critChance;
     for (const e of enemyMgr.alive()) {
-      if (this._inArc(e.pos.x, e.pos.z, w.range, e.hitR)) {
-        enemyMgr.damage(e, this.dmgMult * w.dmg * (crit ? CRIT_MULT : 1), this.facing, 'local',
-          { crit, ...(this.venomT > 0 ? { poison: { dps: 4, dur: 3 } } : {}) });
+      if (this._inArc(e.pos.x, e.pos.z, w.range + (moving ? 0.25 : 0), e.hitR, arcDot)) {
+        const weakPoint = this._hitsWeakPoint(e, charge);
+        const crit = baseCrit || weakPoint;
+        const armored = (e.armor ?? (/golem|snapper|colossus/i.test(e.type) ? 0.3 : 0)) > 0;
+        const armorMult = armored && w.armoredBonus ? w.armoredBonus : 1;
+        const dmg = this.dmgMult * w.dmg * impactMult * armorMult * (crit ? CRIT_MULT : 1);
+        const opts = {
+          crit, weakPoint,
+          ...(w.armorPierce ? { armorPierce: w.armorPierce } : {}),
+          ...(w.armorBreak ? { armorBreak: w.armorBreak * (0.7 + charge * 0.6), breakDur: 6 } : {}),
+          ...(w.bleed ? { bleed: { dps: w.bleed * (0.75 + charge * 0.6), dur: 4 } } : {}),
+          ...(w.burn ? { burn: { dps: w.burn * (0.7 + charge * 0.5), dur: 4 } } : {}),
+          ...(this.venomT > 0 ? { poison: { dps: 4, dur: 3 } } : {}),
+        };
+        enemyMgr.damage(e, dmg, this.facing, 'local', opts);
+        if (w.stun && (charged || this.comboStep === combo.length - 1)) {
+          enemyMgr.stun(e, w.stun * (1 + charge * 0.8));
+        }
+        if (weakPoint) this.hooks.popup(e.mesh.position.clone().setY(e.mesh.position.y + 2),
+          '✦ WEAK POINT', '#fff08a', 'big');
       }
     }
 
     // bash a wild beehive open with any weapon
     for (const hive of (world.hivesNear?.(this.pos, w.range + 0.6) ?? [])) {
       if (!this._inArc(hive.x, hive.z, w.range, hive.radius)) continue;
-      const res = world.hitHive(hive, this.dmgMult * w.dmg);
+      const res = world.hitHive(hive, this.dmgMult * w.dmg * impactMult);
       this.hooks.onHiveHit?.(hive, res);
       break; // one hive per swing
     }
@@ -875,7 +1082,7 @@ export class Player {
     // raid a bandit dwelling — smash it apart for a Scroll of Discovery
     for (const camp of (enemyMgr.campsNear?.(this.pos, w.range + 0.8) ?? [])) {
       if (!this._inArc(camp.x, camp.z, w.range, camp.radius)) continue;
-      const res = enemyMgr.hitCamp(camp, this.dmgMult * w.dmg);
+      const res = enemyMgr.hitCamp(camp, this.dmgMult * w.dmg * impactMult);
       this.hooks.onCampHit?.(camp, res);
       break; // one dwelling per swing
     }
@@ -900,7 +1107,7 @@ export class Player {
 
     if (trees.length && w.chop > 0) {
       const tree = trees[0];
-      const power = w.chop * this.chopMult;
+      const power = w.chop * this.chopMult * (1 + charge * 0.5);
       const wood = world.chop(tree, power, this.pos);
       this.hooks.onChop?.(tree, power); // co-op keeps the partner's forest in sync
       if (wood > 0) {
@@ -915,7 +1122,7 @@ export class Player {
         }
       }
     } else if (rocks.length && w.mine > 0) {
-      const stone = world.mineRock(rocks[0], w.mine * this.chopMult, this.pos);
+      const stone = world.mineRock(rocks[0], w.mine * this.chopMult * (1 + charge * 0.5), this.pos);
       if (stone > 0) {
         const total = Math.max(1, Math.round(stone * this.gatherMult));
         const dropPos = new THREE.Vector3(rocks[0].x, 0, rocks[0].z);
@@ -938,19 +1145,36 @@ export class Player {
     }
   }
 
-  _doShoot(projectiles) {
+  _doShoot(projectiles, charge = 0, mounted = false) {
     const w = this.weapon;
-    this.attackCd = w.cd * this.cdMult;
+    const crossbow = w.style === 'crossbow';
+    const charged = charge >= 0.42;
+    this.attackCd = w.cd * this.cdMult * (mounted ? 1.2 : 1);
     this.attackDur = 0.25;
     this.attackT = 0.25;
     audio.sfx('attack_ranged', 0.4);
-    const speed = 24;
-    const crit = Math.random() < CRIT_CHANCE;
-    const origin = this.pos.clone().add(this.facing.clone().multiplyScalar(0.6)).setY(this.mesh.position.y + 1.1);
+    const speed = crossbow ? 31 : 23 + charge * 9;
+    const weakPoint = !crossbow && charge >= 0.78;
+    const crit = weakPoint || Math.random() < this.critChance;
+    const drawMult = crossbow ? 1 + charge * 0.25 : 0.85 + charge * 1.05;
+    const mountMult = mounted ? 1.18 : 1;
+    const arrowMode = crossbow ? 'bolt' : this.arrowMode;
+    const effects = arrowMode === 'broadhead'
+      ? { bleed: { dps: 5 + w.tier * 2, dur: 5 } }
+      : arrowMode === 'fire'
+        ? { burn: { dps: 6 + w.tier * 2, dur: 4 } }
+        : crossbow
+          ? { armorPierce: w.armorPierce, armorBreak: w.armorBreak, breakDur: 7 }
+          : {};
+    const origin = this.pos.clone().add(this.facing.clone().multiplyScalar(0.6))
+      .setY(this.mesh.position.y + 1.1 + (mounted ? 0.9 : 0));
     projectiles.spawnArrow(origin, this.facing.clone(), {
-      dmg: this.dmgMult * w.dmg * (crit ? CRIT_MULT : 1), pierce: w.pierce, speed, crit,
+      dmg: this.dmgMult * w.dmg * drawMult * mountMult * (crit ? CRIT_MULT : 1),
+      pierce: w.pierce || weakPoint, speed, crit, weakPoint, effects,
       life: w.range / speed, // arrows fall dead at the weapon's max range
     });
+    if (weakPoint) this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
+      '🎯 precision shot', '#fff08a');
   }
 
   _animate(dt, moving) {
@@ -960,7 +1184,20 @@ export class Player {
     rightLeg.rotation.x = -swing;
 
     const bowEquipped = this.weapon.kind === 'bow';
-    if (this.attackT > 0) {
+    if (this.blocking) {
+      leftArm.rotation.x = -1.25;
+      rightArm.rotation.x = -0.75;
+      rightArm.rotation.z = -0.25;
+    } else if (this.charging) {
+      const draw = Math.min(1, this.chargeT / 1.05);
+      if (bowEquipped) {
+        leftArm.rotation.x = -1.45;
+        rightArm.rotation.x = -0.55 - draw * 0.9;
+      } else {
+        rightArm.rotation.x = 0.45 + draw * 0.75;
+        rightArm.rotation.z = -0.2 - draw * 0.25;
+      }
+    } else if (this.attackT > 0) {
       this.attackT -= dt;
       const k = 1 - Math.max(0, this.attackT) / this.attackDur; // 0 → 1 over the swing
       if (bowEquipped) {

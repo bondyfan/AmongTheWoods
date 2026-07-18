@@ -165,6 +165,10 @@ kbd {
   background: rgba(10, 16, 8, 0.55); padding: 6px 14px; border-radius: 8px;
   white-space: nowrap;
 }
+#weapon-display .combat-state {
+  display: block; margin-top: 3px; color: #d6e8b9;
+  font-size: 10px; letter-spacing: 0.7px; text-align: center;
+}
 #spellbar {
   position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
   display: flex; gap: 6px;
@@ -697,9 +701,18 @@ kbd {
   font-size: 11px; color: #cfc4ae; }
 .admin-field input { width: 72px; background: rgba(0,0,0,0.35); color: #ffe8c0;
   border: 1px solid rgba(255,180,60,0.4); border-radius: 6px; padding: 3px 6px; }
-#inv-admin select { max-width: 200px; background: rgba(0,0,0,0.35); color: #ffe8c0;
-  border: 1px solid rgba(255,180,60,0.4); border-radius: 6px; padding: 4px 6px; margin-right: 6px; }
 #inv-admin .buy-btn { margin-right: 6px; margin-top: 6px; }
+.admin-item-grid { display: grid; grid-template-columns: repeat(10, minmax(32px, 1fr)); gap: 5px; }
+.admin-item-cell { min-width: 0; aspect-ratio: 0.82; padding: 3px 2px; position: relative;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  color: #f5e7cb; background: rgba(255,255,255,0.055); border: 1px solid rgba(255,180,60,0.28);
+  border-radius: 7px; cursor: pointer; overflow: hidden; }
+.admin-item-cell:hover { border-color: #ffb554; background: rgba(255,180,60,0.15); transform: translateY(-1px); }
+.admin-item-icon { height: 24px; font-size: 21px; line-height: 24px; }
+.admin-item-icon .item-icon { width: 24px; height: 24px; }
+.admin-item-name { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 7px; line-height: 9px; text-align: center; }
+.admin-item-meta { font-size: 7px; line-height: 8px; color: #b9a68a; }
 
 
 /* ---------- boot loading screen ---------- */
@@ -738,6 +751,8 @@ kbd {
 .quest-card.done { opacity: 0.55; }
 .quest-card.locked { opacity: 0.45; }
 .quest-card h4 { margin: 0 0 4px; font-size: 14px; }
+.quest-category { margin-bottom: 5px; color: #9fbf82; font-size: 10px; font-weight: bold;
+  letter-spacing: 1px; text-transform: uppercase; }
 .quest-card .q-desc { font-size: 12px; color: #b8c4a8; }
 .quest-card .q-meta { font-size: 12px; color: #cfa95f; margin-top: 6px; }
 .quest-bar { height: 8px; border-radius: 5px; background: rgba(255,255,255,0.12);

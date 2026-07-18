@@ -19,7 +19,8 @@ import * as THREE from 'three';
 import { COOP_WORLD_SEED, WoodsNet } from './net.js';
 import { ARENA, ARENA_RETURN_DELAY, arenaReward, ENEMY_TYPES, BOSS_RANKS,
          MOBA_BUILDINGS, roundResource, itemById, enemyLevelFor } from './config.js';
-import { makeMan, makeAxe, makeBow, makePickaxe, makeEnemyMesh, makeMeatDrop, makeWoodDrop,
+import { makeMan, makeAxe, makeBow, makePickaxe, makeClub, makeSword, makeHandSpear,
+         makeCrossbow, makeShield, makeEnemyMesh, makeMeatDrop, makeWoodDrop,
          makeStoneDrop, makeHideDrop, makeIronDrop, makeBerryDrop, makeSalveDrop, makeRoastDrop,
          makeEssenceDrop, makeWoolDrop, makeItemDrop,
          makeEnemyShot, makeSpear, makeWolf, makeMobaTower, makeMobaBase,
@@ -50,6 +51,7 @@ class RemotePlayer {
     this.moving = false;
     this.attackT = 0;
     this.weaponId = 'fists';
+    this.offhandId = null;
     this._shownWeapon = null;
     this.petId = 0;              // partner's pet, mirrored locally
     this.petMesh = null;
@@ -80,7 +82,12 @@ class RemotePlayer {
     if (s.atk && this.attackT <= 0) this.attackT = 0.25;
     this.dead = !!s.dead;
     this.downed = !!s.dn; // co-op: down but revivable
-    if (s.w !== this.weaponId) { this.weaponId = s.w; this._refreshWeapon(); }
+    const nextOffhand = s.oh || null;
+    if (s.w !== this.weaponId || nextOffhand !== this.offhandId) {
+      this.weaponId = s.w;
+      this.offhandId = nextOffhand;
+      this._refreshWeapon();
+    }
 
     // partner's pet: a mirrored wolf trotting at their side
     const pet = s.pet || 0;
@@ -100,12 +107,21 @@ class RemotePlayer {
     const { rightSocket, leftSocket } = this.mesh.userData;
     rightSocket.clear(); leftSocket.clear();
     const w = itemById(this.weaponId)?.weapon;
+    const shield = itemById(this.offhandId)?.shield;
     if (!w) return;
     if (w.kind === 'melee' && w.tier > 0) {
-      const tool = w.pick ? makePickaxe(w.tier) : makeAxe(w.tier);
+      const makers = { club: makeClub, sword: makeSword, spear: makeHandSpear, pick: makePickaxe, axe: makeAxe };
+      const tool = (makers[w.style] || makeAxe)(w.tier);
       tool.rotation.x = -0.2;
       rightSocket.add(tool);
-    } else if (w.kind === 'bow') leftSocket.add(makeBow(w.tier));
+    } else if (w.kind === 'bow') {
+      leftSocket.add(w.style === 'crossbow' ? makeCrossbow(w.tier) : makeBow(w.tier));
+    }
+    if (shield) {
+      const mesh = makeShield(shield.block >= 0.7 ? 2 : 1);
+      mesh.rotation.z = -0.3;
+      (w.kind === 'bow' ? rightSocket : leftSocket).add(mesh);
+    }
   }
 
   update(dt) {
@@ -184,6 +200,7 @@ class ShadowWorld {
           name: e.n ?? cfg.name, level: e.l ?? enemyLevelFor(e.t, 0, e.b),
           pos: new THREE.Vector3(e.x, 0, e.z), target: new THREE.Vector3(e.x, 0, e.z),
           hp: e.hp, maxHp: e.m, hitR: cfg.hitR * sizeMult,
+          armor: cfg.armor ?? (/golem|snapper|colossus/i.test(e.t) ? 0.34 : 0),
           dying: 0, stunT: 0, walkT: Math.random() * 10,
         };
         const flyY = cfg.flying ? 1.5 : 0;
@@ -276,10 +293,19 @@ class ShadowWorld {
 
   // ---- EnemyManager-compatible interface for the guest's combat code ----
   alive() { return [...this.enemies.values()]; }
-  damage(e, dmg, knockDir) {
+  damage(e, dmg, knockDir, srcId = 'local', opts = null) {
     this.hooks.popup(e.mesh.position.clone().setY(e.mesh.position.y + 1.4 * e.sizeMult + 0.4),
-      Math.round(dmg).toString(), '#ffffff');
-    this.hooks.sendEvent({ type: 'ehit', id: e.id, dmg: Math.round(dmg * 10) / 10 });
+      Math.round(dmg).toString(), opts?.crit ? '#ffd23a' : '#ffffff', opts?.crit ? 'big' : '');
+    this.hooks.sendEvent({
+      type: 'ehit', id: e.id, dmg: Math.round(dmg * 10) / 10,
+      ...(opts?.crit ? { cr: 1 } : {}),
+      ...(opts?.weakPoint ? { wp: 1 } : {}),
+      ...(opts?.armorPierce ? { ap: opts.armorPierce } : {}),
+      ...(opts?.armorBreak ? { ab: opts.armorBreak, ad: opts.breakDur || 6 } : {}),
+      ...(opts?.bleed ? { bl: opts.bleed.dps, bt: opts.bleed.dur } : {}),
+      ...(opts?.burn ? { bu: opts.burn.dps, bd: opts.burn.dur } : {}),
+      ...(opts?.poison ? { po: opts.poison.dps, pt: opts.poison.dur } : {}),
+    });
     audio.sfx('hit', 0.25, 90);
   }
   stun(e, sec) { this.hooks.sendEvent({ type: 'ehit', id: e.id, dmg: 0, stun: sec }); }
@@ -532,11 +558,17 @@ export class Multiplayer {
     this.arenaAdapter = {
       alive: () => (this.arena.active && this.remote && !this.remote.dead) ? [this.arenaProxy] : [],
       damage: (e, dmg) => {
-        WoodsNet.sendEvent({ type: 'hit', dmg: Math.round(dmg * 10) / 10 });
+        WoodsNet.sendEvent({
+          type: 'hit', dmg: Math.round(dmg * 10) / 10,
+          ax: +ctx.player.pos.x.toFixed(1), az: +ctx.player.pos.z.toFixed(1),
+        });
         ctx.popup(this.remote.mesh.position.clone().setY(this.remote.mesh.position.y + 2), Math.round(dmg).toString(), '#ffb3b3');
         audio.sfx('hit', 0.3, 90);
       },
-      stun: (e, sec) => WoodsNet.sendEvent({ type: 'hit', dmg: 0, stun: sec }),
+      stun: (e, sec) => WoodsNet.sendEvent({
+        type: 'hit', dmg: 0, stun: sec,
+        ax: +ctx.player.pos.x.toFixed(1), az: +ctx.player.pos.z.toFixed(1),
+      }),
     };
 
     // enemy-attack proxy for co-op host: enemies can chase & hurt the partner.
@@ -751,7 +783,7 @@ export class Multiplayer {
       x: +p.pos.x.toFixed(1), z: +p.pos.z.toFixed(1),
       fx: +p.facing.x.toFixed(2), fz: +p.facing.z.toFixed(2),
       hp: Math.round(p.hp), mhp: p.maxHp, lv: p.level,
-      w: p.equipment.weapon, mv: (ctx.input.moveX || ctx.input.moveZ) ? 1 : 0,
+      w: p.equipment.weapon, oh: p.equipment.offhand || 0, mv: (ctx.input.moveX || ctx.input.moveZ) ? 1 : 0,
       atk: p.attackT > 0 ? 1 : 0, dead: p.dead ? 1 : 0,
       dn: (p.dead && this.downedUntil) ? 1 : 0,
       pet: (p.pet && !p.petDead) ? p.equipment.companion : 0,
@@ -1013,7 +1045,7 @@ export class Multiplayer {
   sendCampSync() {
     if (!this.active || this.mode !== 'coop' || !this.ctx.camp) return;
     const camp = this.ctx.camp;
-    WoodsNet.sendEvent({ type: 'camp', lv: camp.levels, st: camp.storage,
+    WoodsNet.sendEvent({ type: 'camp', lv: camp.levels, st: camp.storage, pos: camp.positions,
       ...(camp.gravePos ? { gp: camp.gravePos } : {}) });
   }
 
@@ -1058,6 +1090,8 @@ export class Multiplayer {
       b: enemy.bossRank || 0,
       x: +enemy.pos.x.toFixed(1),
       z: +enemy.pos.z.toFixed(1),
+      bi: this.ctx.game.dungeon?.poi && enemy.lairId
+        ? this.ctx.game.dungeon.poi.ring : undefined,
       pa: enemy.cfg?.passive ? 1 : 0,
     });
   }
@@ -1112,7 +1146,9 @@ export class Multiplayer {
     switch (ev.type) {
       case 'hit': // pvp arena: opponent's attack landed on me
         if (!this.arena.active || p.dead) break;
-        if (ev.dmg > 0) p.takeDamage(ev.dmg);
+        if (ev.dmg > 0) p.takeDamage(ev.dmg, {
+          pos: ev.ax == null ? null : { x: ev.ax, z: ev.az }, shot: !!ev.sh,
+        });
         if (ev.stun) p.applyStun(ev.stun);
         break;
       case 'arenaDeath': this._onArenaWin(); break;
@@ -1123,14 +1159,26 @@ export class Multiplayer {
         // position — if the attacker is nowhere near where I actually am now,
         // it's a phantom hit and I dodge it.
         if (!this._acceptPartnerDamage(ev, p)) break;
-        if (ev.dmg > 0) p.takeDamage(ev.dmg);
+        if (ev.dmg > 0) p.takeDamage(ev.dmg, {
+          id: ev.ai,
+          pos: ev.ax == null ? null : { x: ev.ax, z: ev.az },
+          range: ev.ar,
+          shot: !!ev.sh,
+        });
         if (ev.stun) p.applyStun(ev.stun);
         break;
       }
       case 'ehit': { // co-op host: partner damaged enemy #id
         const e = ctx.enemyMgr.list.find(x => x.id === ev.id);
         if (e) {
-          if (ev.dmg > 0) ctx.enemyMgr.damage(e, ev.dmg, null, 'partner');
+          if (ev.dmg > 0) ctx.enemyMgr.damage(e, ev.dmg, null, 'partner', {
+            crit: !!ev.cr, weakPoint: !!ev.wp,
+            ...(ev.ap ? { armorPierce: ev.ap } : {}),
+            ...(ev.ab ? { armorBreak: ev.ab, breakDur: ev.ad || 6 } : {}),
+            ...(ev.bl ? { bleed: { dps: ev.bl, dur: ev.bt || 4 } } : {}),
+            ...(ev.bu ? { burn: { dps: ev.bu, dur: ev.bd || 4 } } : {}),
+            ...(ev.po ? { poison: { dps: ev.po, dur: ev.pt || 3 } } : {}),
+          });
           if (ev.stun) ctx.enemyMgr.stun(e, ev.stun);
         }
         break;
@@ -1156,6 +1204,7 @@ export class Multiplayer {
           type: ev.t,
           bossRank: ev.b || 0,
           pos: { x: ev.x, z: ev.z },
+          questBiome: Number.isInteger(ev.bi) ? ev.bi : undefined,
           cfg: { passive: !!ev.pa },
         });
         break;
@@ -1175,7 +1224,7 @@ export class Multiplayer {
         }
         break;
       }
-      case 'camp': ctx.onCampSync?.(ev.lv, ev.st, ev.gp); break; // shared base
+      case 'camp': ctx.onCampSync?.(ev.lv, ev.st, ev.gp, ev.pos); break; // shared base
       case 'ping': ctx.showPing?.(ev.x, ev.z); break;
       case 'drop': // partner dropped loot — the host materializes it
         if (this.isHost) ctx.pickups.spawn(ev.k, ev.p, { x: ev.x, z: ev.z }, 0.5,

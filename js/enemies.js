@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { WORLD, ENEMY_TYPES, BOSS_RANKS, BIOMES, biomeAt, biomeIndexAt, progressAt,
-         meatForHp, bossNameFor, enemyLevelFor } from './config.js';
+         meatForHp, bossNameFor, enemyLevelFor, biomeIndexForDifficulty } from './config.js';
 import { makeEnemyMesh, makeCobweb, makeHumanCamp, makeCage } from './models.js';
 import { audio } from './audio.js';
 
@@ -39,10 +39,17 @@ class Enemy {
     const eHp = this.elite ? 2 : 1, eDmg = this.elite ? 1.3 : 1;
 
     this.difficulty = difficulty; // kept for late spawns (lair-boss brood calls)
-    this.hp = base.hp * (1 + difficulty * 1.2) * (boss ? boss.hpMult : 1) * eHp;
+    const biomeTier = biomeIndexForDifficulty(difficulty);
+    // Each biome is now a real power step, with a little smooth distance
+    // growth inside it. Across all eight rings this stays close to the old
+    // endgame multipliers while making each border matter.
+    const hpScale = 1 + biomeTier * 0.12 + difficulty * 0.2;
+    const dmgScale = 1 + biomeTier * 0.08 + difficulty * 0.16;
+    this.hp = base.hp * hpScale * (boss ? boss.hpMult : 1) * eHp;
     this.maxHp = this.hp;
-    this.dmg = base.dmg * (1 + difficulty * 0.8) * (boss ? boss.dmgMult : 1) * eDmg;
-    this.xp = Math.round(base.xp * (boss ? boss.xpMult : this.elite ? 2 : 1));
+    this.dmg = base.dmg * dmgScale * (boss ? boss.dmgMult : 1) * eDmg;
+    this.xp = Math.round(base.xp * (1 + biomeTier * 0.12)
+      * (boss ? boss.xpMult : this.elite ? 2 : 1));
     this.meat = meatForHp(this.maxHp); // 1 meat / 30 HP — bosses pay out big
     this.sizeMult = boss ? boss.sizeMult : this.elite ? 1.2 : 1;
     this.hitR = base.hitR * this.sizeMult;
@@ -50,7 +57,7 @@ class Enemy {
     this.speed = base.speed * (boss ? 0.9 : 1);
     if (boss) this.reinforceT = boss.reinforceInterval;
 
-    this.meleeDmg = (base.meleeDmg ?? base.dmg) * (1 + difficulty * 0.8) * (boss ? boss.dmgMult : 1) * eDmg;
+    this.meleeDmg = (base.meleeDmg ?? base.dmg) * dmgScale * (boss ? boss.dmgMult : 1) * eDmg;
 
     this.pos = new THREE.Vector3(x, 0, z);
     this.mesh = makeEnemyMesh(type);
@@ -61,6 +68,14 @@ class Enemy {
     this.spellTimer = base.ranged ? base.spellCd * (0.5 + Math.random() * 0.5) : 0;
     this.pauseT = 0;
     this.stunT = 0;
+    this.armor = base.armor ?? (/golem|snapper|colossus/i.test(type) ? 0.34 : 0);
+    this.armorBreak = 0;
+    this.armorBreakT = 0;
+    this.bleedT = 0;
+    this.bleedDps = 0;
+    this.burnT = 0;
+    this.burnDps = 0;
+    this.statusTickT = 0;
     this.windupT = 0;   // heavy attackers telegraph before landing the blow
     this.flashT = 0;    // hit-feedback scale pop
     this.enraged = false;
@@ -466,6 +481,13 @@ export class EnemyManager {
 
   damage(enemy, dmg, knockDir, srcId = 'local', opts = null) {
     if (enemy.dying || enemy.escaping) return; // a beaten griffin is beyond reach
+    if (opts?.armorBreak) {
+      enemy.armorBreak = Math.min(0.65, Math.max(enemy.armorBreak || 0, opts.armorBreak));
+      enemy.armorBreakT = Math.max(enemy.armorBreakT || 0, opts.breakDur || 6);
+    }
+    const armor = Math.max(0, (enemy.armor || 0) - (enemy.armorBreak || 0));
+    const armorPierce = Math.max(0, Math.min(1, opts?.armorPierce || 0));
+    dmg *= 1 - armor * (1 - armorPierce);
     enemy.hp -= dmg;
     enemy.aggroed = true;
     enemy.returning = false; // getting hit re-engages a leashed enemy
@@ -476,6 +498,16 @@ export class EnemyManager {
       enemy.poisonT = opts.poison.dur;
       enemy.poisonDps = opts.poison.dps;
       enemy.poisonSrc = srcId;
+    }
+    if (opts?.bleed) {
+      enemy.bleedT = Math.max(enemy.bleedT || 0, opts.bleed.dur);
+      enemy.bleedDps = Math.max(enemy.bleedDps || 0, opts.bleed.dps);
+      enemy.bleedSrc = srcId;
+    }
+    if (opts?.burn) {
+      enemy.burnT = Math.max(enemy.burnT || 0, opts.burn.dur);
+      enemy.burnDps = Math.max(enemy.burnDps || 0, opts.burn.dps);
+      enemy.burnSrc = srcId;
     }
     if (enemy.cfg.passive && !enemy.spooked) {
       // one hurt rabbit spooks the whole herd
@@ -496,8 +528,13 @@ export class EnemyManager {
       }
     }
     enemy.lastHitBy = srcId; // kill credit (co-op XP attribution)
+    const hitColor = opts?.weakPoint ? '#fff08a' : opts?.crit ? '#ffd23a' : '#ffffff';
     this.hooks.popup(enemy.mesh.position.clone().setY(enemy.mesh.position.y + 1.4 * enemy.sizeMult + 0.4),
-      Math.round(dmg).toString(), opts?.crit ? '#ffd23a' : '#ffffff', opts?.crit ? 'big' : '');
+      Math.round(dmg).toString(), hitColor, opts?.crit ? 'big' : '');
+    if (opts?.armorBreak && enemy.armor > 0) {
+      this.hooks.popup(enemy.mesh.position.clone().setY(enemy.mesh.position.y + 1.8 * enemy.sizeMult + 0.5),
+        '🛡️ armour cracked', '#b9d7e8');
+    }
     if (knockDir && enemy.bossRank === 0) {
       enemy.pos.x += knockDir.x * 0.45;
       enemy.pos.z += knockDir.z * 0.45;
@@ -734,6 +771,41 @@ export class EnemyManager {
         if (e.hp <= 0) {
           e.lastHitBy = e.poisonSrc ?? 'local';
           if (e.cfg.griffin && !e.escaping) this._griffinEscape(e);
+          else { this._kill(e); continue; }
+        }
+      }
+
+      if (e.armorBreakT > 0) {
+        e.armorBreakT -= dt;
+        if (e.armorBreakT <= 0) e.armorBreak = 0;
+      }
+      if (!e.escaping && (e.bleedT > 0 || e.burnT > 0)) {
+        let dot = 0, dotSrc = 'local';
+        const icons = [];
+        if (e.bleedT > 0) {
+          e.bleedT -= dt;
+          dot += e.bleedDps;
+          dotSrc = e.bleedSrc ?? dotSrc;
+          if (e.bleedT <= 0) e.bleedDps = 0;
+          icons.push('🩸');
+        }
+        if (e.burnT > 0) {
+          e.burnT -= dt;
+          dot += e.burnDps;
+          dotSrc = e.burnSrc ?? dotSrc;
+          if (e.burnT <= 0) e.burnDps = 0;
+          icons.push('🔥');
+        }
+        e.hp -= dot * dt;
+        e.statusTickT -= dt;
+        if (e.statusTickT <= 0) {
+          e.statusTickT = 1;
+          this.hooks.popup(e.mesh.position.clone().setY(e.mesh.position.y + 1.6 * e.sizeMult + 0.4),
+            `-${Math.max(1, Math.round(dot))} ${icons.join('')}`, e.burnT > 0 ? '#ff9b45' : '#ff6b68');
+        }
+        if (e.hp <= 0) {
+          e.lastHitBy = dotSrc;
+          if (e.cfg.griffin) this._griffinEscape(e);
           else { this._kill(e); continue; }
         }
       }

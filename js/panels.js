@@ -1,11 +1,14 @@
 // ---- Modal panels: upgrade shop (grouped tabs), character sheet with
 // equipment slots, bestiary of discovered creatures ----
 
-import { SHOP_GROUPS, SMITH_GROUPS, questFor, questXpFor, QUESTS_PER_BIOME, BIOMES, SLOTS, SLOT_LABELS, ENEMY_TYPES, ITEMS, SPELLS,
+import { SHOP_GROUPS, SMITH_GROUPS, questFor, repeatableQuestFor, questXpFor,
+         QUEST_CATEGORY_LABELS, QUESTS_PER_BIOME, BIOMES, SLOTS, SLOT_LABELS, ENEMY_TYPES, ITEMS, SPELLS,
          STAT_TRACKS, MOBA_BUILDINGS, CAMP_BUILDINGS, RES_ICONS, RESOURCES, CONSUMABLES,
-         MAX_SPELL_SLOTS, fmtResource, itemById, spellById, costFor } from './config.js';
+         MAX_SPELL_SLOTS, fmtResource, itemById, spellById, costFor, trainingLevelFor } from './config.js';
 
-const NEED_NAMES = { tent: 'Hide Tent', cabin: 'Wooden Cabin', furnace: 'Stone Furnace' };
+const NEED_NAMES = { tent: 'Hide Tent', cabin: 'Wooden Cabin', furnace: 'Stone Furnace',
+  keep: 'Medieval Keep', runic: 'Runic Hall', mountain: 'Mountain Fortress',
+  spirit: 'Spirit Bastion', primal: 'Primal Citadel', frosthold: 'Frosthold' };
 import { itemIcon, resIcon } from './icons.js';
 import { audio } from './audio.js';
 
@@ -299,9 +302,22 @@ export class Panels {
     const div = document.createElement('div');
     div.className = 'quest-card ' + state;
     const mark = state === 'done' ? '✅ ' : state === 'active' ? '⏳ ' : state === 'locked' ? '🔒 ' : '';
-    div.innerHTML = `<h4>${mark}${q.name}</h4>
+    const reward = q.reward || {};
+    const rewards = [`${Math.round(questXpFor(this.player.level) * (q.xpMult || 1))} XP`];
+    if (reward.resources) rewards.push(Object.entries(reward.resources)
+      .map(([k, v]) => `${fmtResource(v)} ${RES_ICONS[k] ?? k}`).join(' + '));
+    if (reward.unlock) rewards.push(reward.unlock === 'broadheadArrows'
+      ? 'Broadhead arrow recipe' : reward.unlock === 'fireArrows' ? 'Fire arrow recipe' : 'new recipe');
+    if (reward.resident) rewards.push('new camp resident');
+    if (reward.reveal) rewards.push('new routes on the map');
+    if (reward.safeRoute) rewards.push('permanent travel bonus');
+    if (reward.maxHp) rewards.push(`+${reward.maxHp} permanent health`);
+    if (reward.questPower) rewards.push('+3% permanent weapon damage');
+    if (reward.bagSlots) rewards.push(`+${reward.bagSlots} backpack slot`);
+    div.innerHTML = `<div class="quest-category">${QUEST_CATEGORY_LABELS[q.category] ?? '📜 Quest'}</div>
+      <h4>${mark}${q.name}</h4>
       <div class="q-desc">${q.desc}</div>
-      <div class="q-meta">Reward: ${questXpFor(this.player.level)} XP (scales with your level)</div>${extra}`;
+      <div class="q-meta">Reward: ${rewards.join(' · ')}</div>${extra}`;
     return div;
   }
 
@@ -312,7 +328,7 @@ export class Panels {
     const head = document.createElement('div');
     head.className = 'level-band';
     head.innerHTML = `<span class="lb-tier">📜 ${done}/${QUESTS_PER_BIOME}</span>
-      <span class="lb-note">quest line of this biome — strictly in order, one at a time</span>`;
+      <span class="lb-note">story, people, expeditions and hunts — one active quest at a time</span>`;
     wrap.appendChild(head);
     for (let i = 0; i < QUESTS_PER_BIOME; i++) {
       const q = questFor(bi, i);
@@ -335,24 +351,49 @@ export class Panels {
         wrap.appendChild(this._questCard(q, 'locked'));
       }
     }
+
+    const repeatHead = document.createElement('div');
+    repeatHead.className = 'level-band';
+    repeatHead.innerHTML = `<span class="lb-tier">♻️ Open contract</span>
+      <span class="lb-note">repeatable work for resources and reduced XP</span>`;
+    wrap.appendChild(repeatHead);
+    const rq = p.quest?.repeatable && p.quest.biome === bi
+      ? p.quest : repeatableQuestFor(bi, p.repeatableDone?.[bi] ?? 0);
+    if (p.quest === rq) {
+      const pct = Math.min(100, Math.round((rq.count / rq.need) * 100));
+      wrap.appendChild(this._questCard(rq, 'active',
+        `<div class="quest-bar"><div style="width:${pct}%"></div></div>
+         <div class="q-meta">${fmtResource(rq.count)}/${fmtResource(rq.need)}</div>`));
+    } else {
+      const card = this._questCard(rq, '', p.quest
+        ? '<div class="q-meta">Finish (or abandon) your current quest first.</div>'
+        : '<div class="card-foot"><button class="buy-btn" data-repeatable="1">Accept contract</button></div>');
+      card.querySelector('[data-repeatable]')?.addEventListener('click', () =>
+        this.hooks.onAcceptQuest?.(bi, 'repeatable'));
+      wrap.appendChild(card);
+    }
   }
 
   // Consumables: repeatable purchases, used in the field with F / G.
   _renderSupplies(wrap) {
     // expedition gear first: real items now, each worn in its own slot
     for (const it of ITEMS.filter(i => i.supply)) {
-      const owned = this.player.hasItem(it.id);
-      const rebuyable = !!it.torch; // torches burn out — always sell spares
+      const placed = !!it.placeable && !!this.camp?.has(it.placeable.kind);
+      const owned = this.player.hasItem(it.id) || placed;
+      const rebuyable = !!it.torch && !it.torch.permanent; // ordinary torches burn out
       const locked = it.level > this.player.level;
+      const eraLocked = !!it.needs && !!this.camp && !this.camp.has(it.needs);
       const affordable = this._affordable(it.cost);
       const card = document.createElement('div');
-      card.className = 'card' + (owned && !rebuyable ? ' owned' : affordable && !locked ? ' buyable' : ' expensive');
+      card.className = 'card' + (owned && !rebuyable ? ' owned'
+        : affordable && !locked && !eraLocked ? ' buyable' : locked || eraLocked ? ' locked' : ' expensive');
       const foot = locked ? `<span class="tag">🔒 Lv ${it.level}</span>`
-        : (owned && !rebuyable) ? '<span class="tag ok">✔ Owned — equip in Character (C)</span>'
+        : eraLocked ? `<span class="tag">🔒 Needs ${NEED_NAMES[it.needs] ?? it.needs}</span>`
+        : (owned && !rebuyable) ? `<span class="tag ok">✔ ${placed ? 'Placed' : it.placeable ? 'In backpack — click to place' : 'Owned — equip in Character (C)'}</span>`
         : (owned ? '<span class="tag ok">✔ Owned</span> ' : '')
           + `<button class="buy-btn" data-supply="${it.id}">Buy${owned ? ' another' : ''} — ${this._costStr(it.cost)}</button>`;
       card.innerHTML = `
-        <div class="card-head"><span class="icon">${it.icon}</span>
+        <div class="card-head"><span class="icon">${itemIcon(it)}</span>
           <span class="name">${it.name}</span><span class="lv">${SLOT_LABELS[it.slot].toLowerCase()}</span></div>
         <div class="desc">${it.desc}</div>
         <div class="card-foot">${foot}</div>`;
@@ -407,15 +448,16 @@ export class Panels {
     }
   }
 
-  // Trainable stat tracks: 10 tiers, tier N needs player level N.
+  // Training unlocks early tiers level-by-level, then advanced tiers at biome milestones.
   _renderTraining(wrap) {
     const p = this.player;
     for (const track of STAT_TRACKS) {
       const tier = p.stats[track.id];
       const maxed = tier >= track.max;
       const nextTier = tier + 1;
-      const cost = maxed ? null : track.cost(nextTier);
-      const levelLocked = !maxed && p.level < nextTier;
+      const cost = maxed ? null : costFor(track.cost(nextTier), !!this.moba);
+      const requiredLevel = maxed ? null : trainingLevelFor(track, nextTier);
+      const levelLocked = !maxed && p.level < requiredLevel;
       const affordable = cost && this._affordable(cost);
 
       const card = document.createElement('div');
@@ -423,7 +465,7 @@ export class Panels {
 
       let status;
       if (maxed) status = '<span class="tag ok">Fully trained</span>';
-      else if (levelLocked) status = `<span class="tag">Level ${nextTier} needs player Lv ${nextTier}</span>`;
+      else if (levelLocked) status = `<span class="tag">Tier ${nextTier} needs player Lv ${requiredLevel}</span>`;
       else status = `<button class="buy-btn" data-id="${track.id}">Train to ${nextTier} — ${this._costStr(cost)}</button>`;
 
       card.innerHTML = `
@@ -473,21 +515,23 @@ export class Panels {
     const base = itemById(p.equipment.weapon)?.weapon ?? itemById('fists').weapon;
     const charm = itemById(p.equipment.charm);
     const dmgParts = [`${Math.round(base.dmg)} ${itemById(p.equipment.weapon)?.name ?? 'fists'}`];
+    if (p.levelDamagePct) dmgParts.push(`+${Math.round(p.levelDamagePct * 100)}% level`);
     if (s.power) dmgParts.push(`+${s.power * 5}% training`);
+    if (p.forgeTier) dmgParts.push(`+${p.forgeTier * 10}% forge`);
     if (charm?.stats?.dmgPct) dmgParts.push(`+${Math.round(charm.stats.dmgPct * 100)}% ${charm.name}`);
     rows.push(['⚔️ Attack', Math.round(p.weapon.dmg), dmgParts.join(' · ')]);
 
     const asParts = [`${base.cd.toFixed(2)}s ${itemById(p.equipment.weapon)?.name ?? 'fists'}`];
-    if (p.level > 1) asParts.push(`+${((p.level - 1) * 0.1).toFixed(1)}/s level`);
+    if (p.level > 1) asParts.push(`+${p.levelAttackSpeedBonus.toFixed(2)}/s level`);
     if (s.swift) asParts.push(`+${s.swift * 4}% training`);
     if (charm?.stats?.aspd) asParts.push(`+${Math.round(charm.stats.aspd * 100)}% ${charm.name}`);
     rows.push(['⚡ Attacks/s', (1 / p.weapon.cd).toFixed(2), asParts.join(' · ')]);
 
     const hpParts = ['100 base'];
     if (p.level > 1) hpParts.push(`+${(p.level - 1) * 10} level`);
-    for (const slot of ['head', 'chest', 'boots']) {
+    for (const slot of ['head', 'chest', 'boots', 'charm', 'offhand', 'underlayer', 'legs', 'back', 'mount']) {
       const it = itemById(p.equipment[slot]);
-      if (it?.stats?.hp) hpParts.push(`+${it.stats.hp} ${it.name}`);
+      if (it?.stats?.hp) hpParts.push(`+${Math.round(it.stats.hp * p.gearMult)} ${it.name}`);
     }
     if (p.campBonus) hpParts.push(`+${p.campBonus} home`);
     if (p.shrineBonus) hpParts.push(`+${p.shrineBonus} shrines`);
@@ -514,9 +558,9 @@ export class Panels {
     // regen row
     const regenParts = ['0.1 base'];
     if (p.level > 1) regenParts.push(`+${((p.level - 1) * 0.1).toFixed(1)} level`);
-    for (const slot of ['head', 'chest', 'boots', 'charm']) {
+    for (const slot of ['head', 'chest', 'boots', 'charm', 'offhand', 'underlayer', 'legs', 'back', 'mount']) {
       const it = itemById(p.equipment[slot]);
-      if (it?.stats?.regen) regenParts.push(`+${it.stats.regen} ${it.name}`);
+      if (it?.stats?.regen) regenParts.push(`+${(it.stats.regen * p.gearMult).toFixed(1)} ${it.name}`);
     }
     rows.push(['💚 Regen', `${(Math.round(p.hpRegen * 10) / 10)}/s`, regenParts.join(' · ')]);
 
@@ -621,8 +665,8 @@ export class Panels {
       const item = itemById(id);
       if (!item) continue;
       cells.push({ kind: 'item', id, itemRef: item, count: n > 1 ? n : 0,
-        title: item.nest
-          ? `${item.name} — ${item.desc} (click to PLACE it here)`
+        title: item.nest || item.placeable
+          ? `${item.name} — ${item.desc} (click to PLACE it)`
           : `${item.name} — ${item.desc} (click to equip · drag to hotkey or drop)` });
     }
     $('inv-slots-label').textContent = `${cells.length}/${p.invSlots}`;
@@ -644,25 +688,28 @@ export class Panels {
       grid.appendChild(div);
     }
 
-    // admin mode: conjure any item / a pile of resources out of thin air
+    // admin mode: inventory-like 10-column catalog. Every item remains
+    // directly addable in devmode, including placeables and consumables.
     const oldBox = $('inv-admin'); if (oldBox) oldBox.remove();
     if (this.hooks.isAdmin?.()) {
       const box = document.createElement('div');
       box.id = 'inv-admin';
       box.className = 'admin-box';
-      const opts =
-        `<optgroup label="Gear & weapons">` +
-        ITEMS.map(i => `<option value="${i.id}">${i.name}${i.unique ? ' ★' : ''} (Lv${i.level})</option>`).join('') +
-        `</optgroup><optgroup label="Consumables">` +
-        CONSUMABLES.map(c => `<option value="c:${c.id}">${c.name} (consumable)</option>`).join('') +
-        `</optgroup>`;
-      box.innerHTML = `<h4>🛠 Add item</h4>
-        <select id="adm-item">${opts}</select>
-        <button class="buy-btn" id="adm-add">+ Add</button>
+      const entries = [
+        ...ITEMS.map(item => ({ id: item.id, item, meta: `Lv ${item.level}${item.unique ? ' ★' : ''}` })),
+        ...CONSUMABLES.map(item => ({ id: `c:${item.id}`, item, meta: 'Use' })),
+      ];
+      box.innerHTML = `<h4>🛠 Add item <small>click a slot to add one</small></h4>
+        <div class="admin-item-grid">${entries.map(({ id, item, meta }) =>
+          `<button class="admin-item-cell" data-admin-item="${id}" title="${item.name} — ${item.desc}">
+            <span class="admin-item-icon">${itemIcon(item)}</span>
+            <span class="admin-item-name">${item.name}</span>
+            <span class="admin-item-meta">${meta}</span>
+          </button>`).join('')}</div>
         <button class="buy-btn" id="adm-res">+100 all resources</button>`;
       grid.parentElement.insertBefore(box, grid.nextSibling);
-      box.querySelector('#adm-add').addEventListener('click', () =>
-        this.hooks.onAdminAddItem?.(box.querySelector('#adm-item').value));
+      box.querySelectorAll('[data-admin-item]').forEach(cell => cell.addEventListener('click', () =>
+        this.hooks.onAdminAddItem?.(cell.dataset.adminItem)));
       box.querySelector('#adm-res').addEventListener('click', () =>
         this.hooks.onAdminAddRes?.());
     }
@@ -702,7 +749,9 @@ export class Panels {
       const dollSlot = under?.closest?.('.doll-slot');
       if (dollSlot && cell.kind === 'item') {
         const item = itemById(cell.id);
-        if (item && dollSlot.dataset.slot && item.slot !== dollSlot.dataset.slot) {
+        if (item?.placeable) {
+          this.hooks.onToast?.(`${item.name} is placed from the inventory, not equipped.`);
+        } else if (item && dollSlot.dataset.slot && item.slot !== dollSlot.dataset.slot) {
           this.hooks.onToast?.(`${item.name} goes into the ${SLOT_LABELS[item.slot] ?? item.slot} slot`);
         } else {
           this.hooks.onEquip(cell.id);
@@ -731,6 +780,7 @@ export class Panels {
     if (cell.kind === 'item') {
       const item = itemById(cell.id);
       if (item?.nest) this.hooks.onPlaceNest?.(cell.id); // griffin roost, not gear
+      else if (item?.placeable) this.hooks.onPlaceItem?.(cell.id);
       else this.hooks.onEquip(cell.id);
     }
     else if (cell.kind === 'consumable') this.hooks.onUseConsumable?.(cell.id);

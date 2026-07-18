@@ -1,15 +1,16 @@
 // ---- Survival camp: buildings at the cave mouth ----
 // Your HOME advances through the ages (Hide Tent → Wooden Cabin → Stone
 // House) and gates gear; the chest stores resources that survive death; the
-// furnace smelts stone into iron; the boat opens the lakes; the guard tower
-// watches over home. Built things appear physically at fixed camp spots.
+// furnace smelts stone into iron. The chest, log boat, guard tower and
+// graveyard are ordinary inventory items placed wherever the player chooses.
 
 import { CAMP_BUILDINGS, ERAS, RESOURCES, fmtResource, roundResource } from './config.js';
-import { makeFurnace, makeChest, makeBoatRack, makeMobaTower, makeGraveyard, makeBanner } from './models.js';
+import { makeFurnace, makeChest, makeRaft, makeMobaTower, makeGraveyard, makeBanner } from './models.js';
 import { audio } from './audio.js';
 
 const SPOTS = {
   // 'home' has no spot — it IS the center structure (world.buildHome)
+  // Legacy save fallbacks for objects created before free placement existed.
   chest:   { x: 6,  z: 16 },
   furnace: { x: 11, z: 11 },
   boat:    { x: 0,  z: 21 },
@@ -29,6 +30,8 @@ export class Camp {
     this.levels = { home: 0, chest: 0, furnace: 0, boat: 0, tower: 0, grave: 0, banner: 0 };
     this.storage = Object.fromEntries(RESOURCES.map(k => [k, 0])); // incl. wool/essence
     this.meshes = {};
+    this.positions = {}; // player-positioned item buildings (chest/boat/tower/grave)
+    this.obstacles = {};
     this.gravePos = null;
     this.smeltT = 20;
     this.towerCd = 0;
@@ -44,6 +47,11 @@ export class Camp {
     if (need === 'cabin') return this.levels.home >= 2;
     if (need === 'stonehouse') return this.levels.home >= 3;
     if (need === 'keep') return this.levels.home >= 4;
+    if (need === 'runic') return this.levels.home >= 5;
+    if (need === 'mountain') return this.levels.home >= 6;
+    if (need === 'spirit') return this.levels.home >= 7;
+    if (need === 'primal') return this.levels.home >= 8;
+    if (need === 'frosthold') return this.levels.home >= 9;
     return this.levels[need] >= 1;
   }
 
@@ -51,9 +59,11 @@ export class Camp {
 
   // max-hp bonus from the home building — worth building FOR, not box-ticking
   homeHpBonus() {
-    return [0, 20, 60, 120, 180][Math.min(this.levels.home, 4)]
+    return [0, 20, 60, 120, 180, 240, 310, 390, 480, 580][Math.min(this.levels.home, 9)]
       + [0, 0, 40, 90][Math.min(this.levels.banner, 3)];
   }
+
+  forgeTier() { return Math.max(0, Math.min(5, this.levels.home - 4)); }
 
   // secondary era perks: cabin pulls loot from further, the stone house
   // swings harder at trees & rocks, the keep sharpens your wits (+XP)
@@ -86,10 +96,48 @@ export class Camp {
     return true;
   }
 
+  // Placeable camp objects arrive here from ordinary backpack items. Their
+  // level flag preserves all existing feature checks and old-save migration,
+  // while the position is now chosen in the world instead of fixed by an
+  // upgrade card.
+  placeItem(id, spot) {
+    if (!['chest', 'boat', 'tower', 'grave'].includes(id) || this.has(id)) return false;
+    this.levels[id] = 1;
+    this.positions[id] = { x: Math.round(spot.x * 10) / 10, z: Math.round(spot.z * 10) / 10 };
+    this._placeMesh(id, this.positions[id]);
+    const names = { chest: 'Storage Chest', boat: 'Log Boat', tower: 'Guard Tower', grave: 'Graveyard' };
+    audio.sfx('tower_build', 0.55);
+    this.hooks.toast?.(`🏕️ Placed: ${names[id]}!`, 'level');
+    return true;
+  }
+
+  moveItem(id, spot) {
+    if (!this.has(id)) return;
+    this.positions[id] = { x: Math.round(spot.x * 10) / 10, z: Math.round(spot.z * 10) / 10 };
+    this._placeMesh(id, this.positions[id]);
+  }
+
+  positionOf(id) {
+    return this.positions[id] ?? (id === 'grave' ? this.gravePos : SPOTS[id]) ?? null;
+  }
+
+  makePlaceableMesh(id) {
+    if (id === 'chest') return makeChest();
+    if (id === 'boat') return makeRaft();
+    if (id === 'grave') return makeGraveyard();
+    if (id === 'tower') {
+      const tower = makeMobaTower(0x86b45e);
+      tower.scale.setScalar(0.8);
+      return tower;
+    }
+    return null;
+  }
+
   _placeMesh(id, spotOverride = null) {
     if (this.meshes[id]) this.scene.remove(this.meshes[id]);
     // the graveyard is a remote shrine built wherever the player stands
     const spot = spotOverride
+      ?? this.positions[id]
       ?? (id === 'grave'
         ? { x: Math.round(this.player.pos.x), z: Math.round(this.player.pos.z) }
         : SPOTS[id]);
@@ -100,16 +148,19 @@ export class Camp {
       return;
     }
     let mesh;
-    if (id === 'chest') mesh = makeChest();
+    if (['chest', 'boat', 'grave', 'tower'].includes(id)) mesh = this.makePlaceableMesh(id);
     else if (id === 'furnace') mesh = makeFurnace();
-    else if (id === 'boat') mesh = makeBoatRack();
-    else if (id === 'grave') { mesh = makeGraveyard(); this.gravePos = { x: spot.x, z: spot.z }; }
-    else if (id === 'tower') { mesh = makeMobaTower(0x86b45e); mesh.scale.setScalar(0.8); }
     else if (id === 'banner') mesh = makeBanner(this.levels.banner);
-    mesh.position.set(spot.x, this.world.heightAt(spot.x, spot.z), spot.z);
+    if (id === 'grave') this.gravePos = { x: spot.x, z: spot.z };
+    const y = this.world.heightAt(spot.x, spot.z) + (id === 'boat' ? 0.16 : 0);
+    mesh.position.set(spot.x, y, spot.z);
     this.scene.add(mesh);
     this.meshes[id] = mesh;
-    if (id !== 'grave') this.world.obstacles.push({ x: spot.x, z: spot.z, r: id === 'home' ? 3.2 : 1.1 });
+    if (['chest', 'tower', 'furnace', 'banner'].includes(id)) {
+      if (this.obstacles[id]) this.world.obstacles = this.world.obstacles.filter(o => o !== this.obstacles[id]);
+      this.obstacles[id] = { x: spot.x, z: spot.z, r: 1.1 };
+      this.world.obstacles.push(this.obstacles[id]);
+    }
   }
 
   // ---- chest ----
@@ -175,6 +226,7 @@ export class Camp {
       this.towerCd -= dt;
       if (this.towerCd <= 0) {
         const t = this.meshes.tower;
+        if (!t) return;
         let best = null, bd = 20;
         for (const e of enemyMgr.alive()) {
           const d = Math.hypot(e.pos.x - t.position.x, e.pos.z - t.position.z);
@@ -193,7 +245,10 @@ export class Camp {
 
   dispose() {
     this.world.safeZones = this.world.safeZones.filter(z => z !== this.safeZone);
+    const obstacles = new Set(Object.values(this.obstacles));
+    this.world.obstacles = this.world.obstacles.filter(o => !obstacles.has(o));
     for (const m of Object.values(this.meshes)) this.scene.remove(m);
     this.meshes = {};
+    this.obstacles = {};
   }
 }

@@ -38,7 +38,11 @@ no build step, no CDN dependency.
 ## Controls
 
 - **WASD / arrows** — move · **Mouse** — aim
-- **Left click / Space** — attack with the equipped weapon
+- **Left click** — tap to attack; hold and release for a charged strike
+- **Right click** — quick repeating attack in top-down view
+- **Space / Shift** — dodge with a brief invulnerability window
+- **Ctrl / V** — block with a shield or parry with a sword
+- **Z** — cycle unlocked arrow types
 - **Q** — cycle owned weapons (fists / axes / bows — only one wielded at a time)
 - **1–6** — cast slotted spells
 - **U** — upgrade shop · **C** — character sheet · **N** — bestiary
@@ -51,22 +55,22 @@ no build step, no CDN dependency.
 - **Aiming**: a normal free mouse cursor — you face wherever it points. A short
   amber arc (blue for bows) shows a slice of your current weapon's reach in the
   direction you're facing, so you can gauge range at a glance. Bows start very
-  short-ranged — train **Range / Power / Swift Hands** (10 tiers each, shop →
-  Training) to extend reach (level-10 Range reaches across the whole screen),
-  damage and attack speed. Tier N requires player level N and the meat cost
-  scales quadratically (tier 1 ≈ 25 meat, tier 10 ≈ 2500), so it's a long-term
-  investment, not a rush. Item and spell prices are steep too.
+  short-ranged — train **Range / Power / Swift Hands** (shop → Training) to
+  extend reach, damage and attack speed. Range has 10 tiers; Power and Swift
+  Hands continue to tier 15, with advanced tiers unlocked at biome milestones.
 - The world is carved into rooms by **rock ridges with gates** and **rivers
   with wooden bridges** — chokepoints where packs can corner you. Some
   creatures (storm serpents, ice golems) fire shots that **stun** you.
-- **Equipment slots** (WoW-style): weapon, head, chest, boots, pet, orb.
+- **Equipment slots** (WoW-style): weapon, off-hand, armour layers, boots,
+  cloak, mount, charm and one companion.
   Items are bought in the grouped shop (Weapons / Clothing / Companions /
   Spells) or looted from bosses. Manage them in the Character sheet (C).
-- **Spells** (haste, power dash, stun dash, heal, shockwave, frost nova, rage)
-  go into max 6 spell slots, cast with 1–6, each with its own cooldown.
-- Enemy tiers going north: Verdant Forest (spiders) → Dark Forest (+wolves) →
-  Highlands (+boars) → Snowfall Woods (+ice wolves, bears) → Frozen Peak
-  (+yetis). Difficulty also scales with distance. Reach 1500 m to win.
+- **Spells** go into max 6 spell slots and are cast with 1–6. New late-game
+  spells unlock through level 24.
+- Enemy level bands rise by three per biome: Verdant Forest **1–3**, Scorched
+  Desert **4–6**, Dark Forest **7–9**, Murky Swamp **10–12**, Highlands
+  **13–15**, Haunted Forest **16–18**, Jungle **19–21**, Frozen Peak **22–24**.
+  The badge beside every creature name is coloured relative to your level.
 - From the Dark Forest onward, **packs (smečky)** spawn — a burst of one
   creature type, usually led by a **boss mother** marked with 1–3 💀 (stronger
   per skull). Bosses can drop an item near your level: 10% / 25% / 50% drop

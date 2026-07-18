@@ -13,7 +13,7 @@ import { makeTree, makeRock, makeGrassTuft, makeFlower, makeMushroom, makeBush,
          makeFarm, makeTrader, makeBeehive, makeBeehiveBig, makeCocoon, makeGlade, makeGraveyardRuin,
          makeCursedStatue, makeVillage, makeRaceFlag, makeNest, makeLilypad,
          makeTemple, makeLianaPole, makeBonfire, makeSummitCairn, makeCactus,
-         makeLairEntrance } from './models.js';
+         makeLairEntrance, makeCage } from './models.js';
 import { audio } from './audio.js';
 
 const CHUNK = 40;
@@ -553,6 +553,11 @@ export class World {
       }
     };
     for (let ring = 0; ring < 8; ring++) place('lair', ring, 1); // one named boss lair per biome (incl. Frozen Peak)
+    // Quest-critical encounters are deterministic and guaranteed. Random
+    // crypt/camp generation must never be able to block an eight-part line.
+    place('crypt', 1, 1);
+    place('crypt', 2, 1);
+    for (let ring = 0; ring < 7; ring++) place('captive', ring, 1);
     place('village', 3, 2);    // Swamp: tribute buys you peace with the tribes
     place('temple', 6, 2);     // Jungle: trapped step pyramids with a treasury
 
@@ -731,7 +736,8 @@ export class World {
     const y0 = this.heightAt(0, 0);
 
     // interior floor: hides > planks > flagstones > keep stone
-    const floorColor = [0, 0xa8845c, 0x9c6b38, 0x8f8a7c, 0x646b76][level];
+    const floorColor = [0, 0xa8845c, 0x9c6b38, 0x8f8a7c, 0x646b76,
+      0x65527a, 0x656b70, 0x4e4965, 0x405f46, 0x9eb7c7][Math.min(level, 9)];
     const floor = new THREE.Mesh(new THREE.CircleGeometry(R + 1.4, 28),
       new THREE.MeshLambertMaterial({ color: floorColor }));
     floor.rotation.x = -Math.PI / 2;
@@ -741,7 +747,7 @@ export class World {
 
     // wall ring with the door gap toward +z (rotation.y = a makes the
     // segment's local X tangential at that angle)
-    const wallH = [0, 3.0, 3.2, 3.6, 4.8][level];
+    const wallH = [0, 3.0, 3.2, 3.6, 4.8, 5.0, 5.2, 5.4, 5.6, 5.9][Math.min(level, 9)];
     for (let a = OPEN_HALF; a < Math.PI * 2 - OPEN_HALF; a += 2.0 / R) {
       const x = Math.sin(a) * R, z = Math.cos(a) * R;
       const seg = this._homeWallSegment(level, wallH);
@@ -759,7 +765,9 @@ export class World {
         ? new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, wallH + 0.7, 6),
             new THREE.MeshLambertMaterial({ color: 0x6b4a2d }))
         : new THREE.Mesh(new THREE.BoxGeometry(0.7, wallH + 0.6, 0.7),
-            new THREE.MeshLambertMaterial({ color: level >= 4 ? 0x565e6a : level >= 3 ? 0x6e6a60 : 0x5c4326 }));
+            new THREE.MeshLambertMaterial({ color: level >= 8 ? 0x405f46
+              : level >= 7 ? 0x554d6c : level >= 5 ? 0x5d536f
+                : level >= 4 ? 0x565e6a : level >= 3 ? 0x6e6a60 : 0x5c4326 }));
       post.castShadow = true;
       post.position.set(x, this.heightAt(x, z) + (wallH + 0.6) / 2, z);
       group.add(post);
@@ -769,8 +777,9 @@ export class World {
         new THREE.MeshLambertMaterial({ color: 0x4c3520 }));
       const px = Math.sin(OPEN_HALF + 0.06) * R, pz = Math.cos(OPEN_HALF + 0.06) * R;
       pole.position.set(px, this.heightAt(px, pz) + wallH + 1.4, pz);
+      const flagColors = [0, 0, 0, 0, 0xb53a3a, 0x8e63b8, 0x6383a6, 0x7765a8, 0x4f9b62, 0xb8e6ff];
       const flag = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.7, 0.06),
-        new THREE.MeshLambertMaterial({ color: 0xb53a3a }));
+        new THREE.MeshLambertMaterial({ color: flagColors[Math.min(level, 9)] }));
       flag.position.set(px + 0.6, this.heightAt(px, pz) + wallH + 1.7, pz);
       group.add(pole, flag);
     }
@@ -811,9 +820,14 @@ export class World {
     } else if (level === 3) { // stone house: masonry with a darker top course
       g.add(boxMesh(2.3, h, 0.62, 0x8f8a7c));
       g.add(boxMesh(2.3, 0.34, 0.68, 0x6e6a60, h + 0.17));
-    } else { // keep: tall wall + merlon battlement
-      g.add(boxMesh(2.3, h, 0.72, 0x6e7280));
-      g.add(boxMesh(0.95, 0.6, 0.74, 0x5c6670, h + 0.3));
+    } else { // keep and the five late-game fortress eras
+      const palettes = [
+        [0x6e7280, 0x5c6670], [0x746489, 0x5b4d70], [0x69737c, 0x505a64],
+        [0x5c5474, 0x443d5e], [0x4f7458, 0x385440], [0xb8cedb, 0x86a9bc],
+      ];
+      const [wall, merlon] = palettes[Math.min(5, Math.max(0, level - 4))];
+      g.add(boxMesh(2.3, h, 0.72, wall));
+      g.add(boxMesh(0.95, 0.6, 0.74, merlon, h + 0.3));
     }
     return g;
   }
@@ -1287,6 +1301,7 @@ export class World {
     for (const poi of this.pois) {
       if (poi.x < cxw || poi.x >= cxw + CHUNK || poi.z < czw || poi.z >= czw + CHUNK) continue;
       const mesh = poi.type === 'lair' ? makeLairEntrance(poi.ring)
+        : poi.type === 'captive' ? makeCage()
         : poi.type === 'temple' ? makeTemple()
         : poi.type === 'liana' ? makeLianaPole()
         : poi.type === 'bonfire' ? makeBonfire()

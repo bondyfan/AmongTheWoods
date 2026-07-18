@@ -8,6 +8,8 @@ class Input {
     this.dragY = 0;
     this.wheelSteps = 0;    // accumulated wheel, consumed per frame
     this.mouse = { x: 0, y: 0, left: false, right: false }; // x,y = NDC; the
+    this.leftPressed = false;
+    this.leftReleased = false;
     // OS cursor is a normal free cursor — the player just faces wherever it is.
 
     this.keyHandlers = new Map();
@@ -19,7 +21,13 @@ class Input {
       if (h) h();
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    window.addEventListener('blur', () => { this.keys.clear(); this.mouse.left = false; this.mouse.right = false; });
+    window.addEventListener('blur', () => {
+      this.keys.clear();
+      this.mouse.left = false;
+      this.mouse.right = false;
+      this.leftPressed = false;
+      this.leftReleased = false;
+    });
 
     window.addEventListener('mousemove', (e) => {
       this.mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
@@ -40,11 +48,14 @@ class Input {
     }, { passive: true });
     window.addEventListener('mousedown', (e) => {
       if (e.target.closest('button, .panel, .spell-slot, #minimap')) return; // don't attack through UI
-      if (e.button === 0) this.mouse.left = true;
+      if (e.button === 0) { this.mouse.left = true; this.leftPressed = true; }
       if (e.button === 2) this.mouse.right = true;
     });
     window.addEventListener('mouseup', (e) => {
-      if (e.button === 0) this.mouse.left = false;
+      if (e.button === 0) {
+        if (this.mouse.left) this.leftReleased = true;
+        this.mouse.left = false;
+      }
       if (e.button === 2) this.mouse.right = false;
     });
     window.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -60,11 +71,30 @@ class Input {
     return (this.keys.has('KeyS') || this.keys.has('ArrowDown') ? 1 : 0) -
            (this.keys.has('KeyW') || this.keys.has('ArrowUp') ? 1 : 0);
   }
-  // One attack input — the equipped weapon decides what it does. In RPG view
-  // the right button is the camera hand, not a weapon.
-  get attack() {
-    return this.mouse.left || (!this.rpgMode && this.mouse.right)
-      || this.keys.has('Space') || this.keys.has('KeyF');
+  // Right-click remains a quick repeating attack in top-down mode. Left-click
+  // is edge-tracked separately so holding and releasing can charge a strike.
+  get quickAttack() { return !this.rpgMode && this.mouse.right; }
+  get block() {
+    return this.keys.has('ControlLeft') || this.keys.has('ControlRight') || this.keys.has('KeyV');
+  }
+
+  takeLeftPressed() {
+    const pressed = this.leftPressed;
+    this.leftPressed = false;
+    return pressed;
+  }
+
+  takeLeftReleased() {
+    const released = this.leftReleased;
+    this.leftReleased = false;
+    return released;
+  }
+
+  cancelCombat() {
+    this.mouse.left = false;
+    this.mouse.right = false;
+    this.leftPressed = false;
+    this.leftReleased = false;
   }
 
   takeDrag() {

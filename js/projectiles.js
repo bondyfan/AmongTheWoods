@@ -11,15 +11,26 @@ export class Projectiles {
     this.list = [];
   }
 
-  spawnArrow(origin, dir, { dmg, pierce, speed, life, crit }) {
+  spawnArrow(origin, dir, { dmg, pierce, speed, life, crit, weakPoint = false, effects = null }) {
     const mesh = makeArrow();
+    let customMaterials = false;
+    if (effects?.burn || effects?.bleed) {
+      customMaterials = true;
+      const color = effects.burn ? 0xff7a24 : 0xbfd5df;
+      mesh.traverse(part => {
+        if (!part.material) return;
+        part.material = part.material.clone();
+        part.material.color?.setHex(color);
+        if (effects.burn && 'emissive' in part.material) part.material.emissive.setHex(0x662000);
+      });
+    }
     mesh.position.copy(origin);
     mesh.rotation.y = Math.atan2(dir.x, dir.z) + Math.PI;
     this.scene.add(mesh);
     this.list.push({
       id: nextProjectileId++, kind: 'arrow', mesh,
       vel: dir.clone().multiplyScalar(speed),
-      dmg, pierce, life, crit, hit: new Set(),
+      dmg, pierce, life, crit, weakPoint, effects, customMaterials, hit: new Set(),
     });
   }
 
@@ -101,7 +112,9 @@ export class Projectiles {
           const dx = e.pos.x - p.mesh.position.x, dz = e.pos.z - p.mesh.position.z;
           if (dx * dx + dz * dz < (e.hitR + 0.25) ** 2) {
             p.hit.add(e.id);
-            enemyMgr.damage(e, p.dmg, null, 'local', { crit: p.crit });
+            enemyMgr.damage(e, p.dmg, null, 'local', {
+              crit: p.crit, weakPoint: p.weakPoint, ...(p.effects || {}),
+            });
             if (!(p.kind === 'arrow' && p.pierce)) { consumed = true; break; }
           }
         }
@@ -109,6 +122,7 @@ export class Projectiles {
 
       if (consumed || p.life <= 0) {
         this.scene.remove(p.mesh);
+        if (p.customMaterials) p.mesh.traverse(part => part.material?.dispose?.());
         this.list.splice(i, 1);
       }
     }
