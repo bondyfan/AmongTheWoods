@@ -6,6 +6,7 @@ import { itemIcon } from './icons.js';
 import { audio } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
+export const MOB_INFO_RADIUS = 60;
 
 export function mobLevelBadge(level) {
   const value = Math.max(1, Math.round(Number(level) || 1));
@@ -171,12 +172,12 @@ export class UI {
   }
 
   // ---------- persistent world-tracking labels (boss skulls, HP bars) ----------
-  addTracker(key, getPos, html, cls = '', onUpdate = null) {
+  addTracker(key, getPos, html, cls = '', onUpdate = null, options = null) {
     const el = document.createElement('div');
     el.className = 'tracker ' + cls;
     el.innerHTML = html;
     $('popups').appendChild(el);
-    this.trackers.set(key, { el, getPos, onUpdate });
+    this.trackers.set(key, { el, getPos, onUpdate, worldRadius: options?.worldRadius ?? null });
   }
 
   removeTracker(key) {
@@ -184,7 +185,7 @@ export class UI {
     if (t) { t.el.remove(); this.trackers.delete(key); }
   }
 
-  updateOverlays(dt, camera) {
+  updateOverlays(dt, camera, viewerPos = null) {
     const v = new THREE.Vector3();
     for (let i = this.popups.length - 1; i >= 0; i--) {
       const p = this.popups[i];
@@ -201,11 +202,16 @@ export class UI {
       if (!pos) { t.el.style.opacity = 0; continue; }
       // unit frames only show close up (matters in RPG view, where the far
       // plane would otherwise plaster the horizon with names and HP bars)
-      const dist = pos.distanceTo(camera.position);
-      if (dist > 100) { t.el.style.opacity = 0; continue; }
+      const usesWorldRadius = t.worldRadius != null && viewerPos;
+      const dist = usesWorldRadius
+        ? Math.hypot(pos.x - viewerPos.x, pos.z - viewerPos.z)
+        : pos.distanceTo(camera.position);
+      const maxDist = usesWorldRadius ? t.worldRadius : 100;
+      const fadeStart = usesWorldRadius ? Math.max(0, maxDist - 10) : 80;
+      if (dist > maxDist) { t.el.style.opacity = 0; continue; }
       v.copy(pos).project(camera);
       if (v.z > 1) { t.el.style.opacity = 0; continue; } // behind the camera
-      t.el.style.opacity = dist > 80 ? 1 - (dist - 80) / 20 : 1;
+      t.el.style.opacity = dist > fadeStart ? 1 - (dist - fadeStart) / (maxDist - fadeStart) : 1;
       t.el.style.transform = `translate(${(v.x * 0.5 + 0.5) * window.innerWidth}px, ${(-v.y * 0.5 + 0.5) * window.innerHeight}px)`;
       t.onUpdate?.(t.el);
     }

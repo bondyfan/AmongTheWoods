@@ -25,7 +25,7 @@ import { makeMan, makeAxe, makeBow, makePickaxe, makeEnemyMesh, makeMeatDrop, ma
          makeEnemyShot, makeSpear, makeWolf, makeMobaTower, makeMobaBase,
          makeTeamFlag, TEAM_COLORS, mat } from './models.js';
 import { audio } from './audio.js';
-import { mobLevelBadge } from './ui.js';
+import { MOB_INFO_RADIUS, mobLevelBadge } from './ui.js';
 
 // ---------- the other player's avatar ----------
 class RemotePlayer {
@@ -193,7 +193,8 @@ class ShadowWorld {
         if (e.b > 0) {
           this.ui.addTracker('sboss' + e.id,
             () => s.mesh.parent ? s.mesh.position.clone().setY(s.mesh.position.y + 2.6 * sizeMult) : null,
-            `<div class="boss-name">${s.name ?? ''}</div>${'💀'.repeat(e.b)}`, 'skulls');
+            `<div class="boss-name">${s.name ?? ''}</div>${'💀'.repeat(e.b)}`, 'skulls', null,
+            { worldRadius: MOB_INFO_RADIUS });
         }
         if (!this.seenTypes.has(e.t)) { this.seenTypes.add(e.t); this.hooks.discover(e.t); }
       }
@@ -256,7 +257,7 @@ class ShadowWorld {
         const fill = el.firstChild.firstChild;
         fill.style.width = (pct * 100) + '%';
         fill.style.background = pct > 0.5 ? '#5fd35f' : pct > 0.25 ? '#e0c040' : '#e05050';
-      });
+      }, { worldRadius: MOB_INFO_RADIUS });
   }
 
   _killShadow(id, s) {
@@ -422,7 +423,7 @@ class MobaShadow {
             fill.style.width = (pct * 100) + '%';
             // from the GUEST's view: my team is 'enemy' on the host → blue
             fill.style.background = s.team === 'enemy' ? '#5fa8e0' : s.team === 'player' ? '#e05050' : '#e0c040';
-          });
+          }, { worldRadius: MOB_INFO_RADIUS });
       }
       s.target.set(su.x, 0, su.z);
       s.hp = su.hp; s.maxHp = su.m;

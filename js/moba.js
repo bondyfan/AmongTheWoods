@@ -14,7 +14,7 @@ import { lanePoint } from './mobaworld.js';
 import { makeEnemyMesh, makeWolf, makeMobaTower, makeMobaBase, makeDenHut,
          makeSmallHut, makeTeamFlag, TEAM_COLORS } from './models.js';
 import { audio } from './audio.js';
-import { mobLevelBadge } from './ui.js';
+import { MOB_INFO_RADIUS, mobLevelBadge } from './ui.js';
 
 let nextUnitId = 1;
 const LANES = ['mid', 'top', 'bot'];
@@ -101,7 +101,7 @@ export class Moba {
         const fill = el.firstChild.firstChild;
         fill.style.width = (pct * 100) + '%';
         fill.style.background = u.team === 'player' ? '#5fa8e0' : u.team === 'enemy' ? '#e05050' : '#e0c040';
-      });
+      }, { worldRadius: MOB_INFO_RADIUS });
   }
 
   _spawnCamp(camp) {

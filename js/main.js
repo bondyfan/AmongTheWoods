@@ -21,7 +21,7 @@ import { Projectiles } from './projectiles.js';
 import { Companions } from './companions.js';
 import { Pickups, pickupSfx } from './pickups.js';
 import { Minimap, MobaMinimap } from './minimap.js';
-import { UI, mobLevelBadge } from './ui.js';
+import { UI, MOB_INFO_RADIUS, mobLevelBadge } from './ui.js';
 import { Panels } from './panels.js';
 import { DevDistanceRadius } from './dev-distance-radius.js';
 
@@ -1415,7 +1415,8 @@ const enemyMgr = new EnemyManager(scene, world, {
     const skulls = '💀'.repeat(enemy.bossRank);
     ui.addTracker('boss' + enemy.id,
       () => enemy.mesh.parent ? enemy.mesh.position.clone().setY(enemy.mesh.position.y + 2.6 * enemy.sizeMult) : null,
-      `<div class="boss-name">${enemy.bossName ?? ''}</div>${skulls}`, 'skulls');
+      `<div class="boss-name">${enemy.bossName ?? ''}</div>${skulls}`, 'skulls', null,
+      { worldRadius: MOB_INFO_RADIUS });
     // herd-guardian ambush bosses stay quiet — finding them is the surprise
     if (!enemy.ambush) {
       ui.toast(`${skulls} ${enemy.bossName ?? 'A pack mother'} appears! Her children keep coming until she falls.`, 'boss');
@@ -1446,7 +1447,7 @@ const enemyMgr = new EnemyManager(scene, world, {
           const charge = 1 - Math.max(0, enemy.spellTimer) / enemy.cfg.spellCd;
           el.children[1].firstChild.style.width = (charge * 100) + '%';
         }
-      });
+      }, { worldRadius: MOB_INFO_RADIUS });
   },
   onRemove: (enemy) => ui.removeTracker('hp' + enemy.id),
   // a beaten griffin drops its nest and flees; it may return in ~20 minutes
@@ -3836,7 +3837,7 @@ function step() {
 
   updateCamera(dt);
   devDistanceRadius?.update(player, world, game.mode === 'play');
-  ui.updateOverlays(dt, camera);
+  ui.updateOverlays(dt, camera, player.pos);
   renderCharPreview(dt);
   renderSmithPreview(dt);
   if (settings.bloom && postfx) postfx.render(scene, camera);
