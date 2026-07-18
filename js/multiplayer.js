@@ -16,7 +16,7 @@
 // ==========================================================================
 
 import * as THREE from 'three';
-import { WoodsNet } from './net.js';
+import { COOP_WORLD_SEED, WoodsNet } from './net.js';
 import { ARENA, ARENA_RETURN_DELAY, arenaReward, ENEMY_TYPES, BOSS_RANKS,
          MOBA_BUILDINGS, roundResource, itemById, enemyLevelFor } from './config.js';
 import { makeMan, makeAxe, makeBow, makePickaxe, makeEnemyMesh, makeMeatDrop, makeWoodDrop,
@@ -675,7 +675,7 @@ export class Multiplayer {
       }
     } else {
       // world seed: shared in co-op, per-player in pvp (own worlds)
-      const seed = meta.mode === 'coop' ? meta.seed : meta.seed + (this.isHost ? 0 : 1);
+      const seed = meta.mode === 'coop' ? COOP_WORLD_SEED : meta.seed + (this.isHost ? 0 : 1);
       ctx.world.reset(seed);
       ctx.game.seed = seed;
     }

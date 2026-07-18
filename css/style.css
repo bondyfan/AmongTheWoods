@@ -53,7 +53,7 @@ kbd {
 #top-center { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); width: 340px; text-align: center; }
 /* on narrow windows the center column would overlap the HP/XP bars — drop it below them */
 @media (max-width: 1000px) {
-  #top-center { top: 78px; width: min(340px, 70vw); }
+  #top-center { top: 132px; width: min(340px, 70vw); }
 }
 #top-right {
   position: absolute; top: 14px; right: 14px; display: flex; gap: 14px;
@@ -79,6 +79,24 @@ kbd {
   background: rgba(10, 16, 8, 0.6); border-radius: 8px; padding: 4px 10px;
   display: inline-block; text-shadow: 0 1px 2px rgba(0,0,0,0.8);
 }
+#active-quest {
+  padding: 8px 11px; border-radius: 10px; text-align: left;
+  color: #f2e8c9; background: rgba(18, 24, 13, 0.82);
+  border: 1px solid rgba(232, 201, 106, 0.55);
+  font-size: 13px; font-weight: bold; line-height: 1.25;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.85);
+  box-shadow: 0 3px 12px rgba(0,0,0,0.25);
+}
+#resource-hud {
+  width: max-content; max-width: min(620px, calc(100vw - 28px));
+  margin: 7px 0 0 50%; transform: translateX(-50%);
+  display: flex; justify-content: center; flex-wrap: wrap; gap: 5px;
+}
+#resource-hud .hud-resource {
+  padding: 4px 8px; border-radius: 8px; white-space: nowrap;
+  background: rgba(10, 16, 8, 0.72); border: 1px solid rgba(255,255,255,0.14);
+  font-size: 13px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.85);
+}
 
 #hud-buttons {
   position: absolute; bottom: 18px; right: 18px;
@@ -98,7 +116,7 @@ kbd {
 
 /* ---------- ?devmode distance ruler ---------- */
 #dev-distance-tool {
-  position: absolute; top: 78px; left: 14px; width: 248px;
+  position: absolute; top: 116px; left: 14px; width: 248px;
   pointer-events: auto;
 }
 #dev-distance-toggle {
@@ -304,7 +322,7 @@ kbd {
 
 /* ---------- settings panel ---------- */
 #settings { width: min(520px, 94vw); }
-#settings-body { padding: 18px 22px; }
+#settings-body { padding: 18px 22px; overflow-y: auto; }
 .setting-row {
   display: flex; align-items: flex-start; gap: 14px; cursor: pointer;
   padding: 10px 12px; border-radius: 10px;
@@ -315,6 +333,20 @@ kbd {
   flex: 0 0 auto;
 }
 .setting-row small { opacity: 0.7; line-height: 1.45; display: inline-block; margin-top: 3px; }
+.resource-setting { display: block; cursor: default; }
+.resource-setting-grid {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px;
+  margin-top: 9px;
+}
+.resource-setting-grid label {
+  display: flex; align-items: center; gap: 5px; padding: 5px 6px;
+  border-radius: 7px; background: rgba(255,255,255,0.04);
+  cursor: pointer; font-size: 12px;
+}
+.resource-setting-grid input[type="checkbox"] { width: 16px; height: 16px; margin: 0; }
+@media (max-width: 520px) {
+  .resource-setting-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
 /* ---------- big world map ---------- */
 #bigmap { width: min(680px, 94vw); }

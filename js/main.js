@@ -1878,6 +1878,26 @@ const settings = Object.assign(
     audio.sfx('click', 0.4);
   });
 
+  // Players choose which carried resources remain visible during survival.
+  const resourceNames = {
+    meat: 'Meat', wood: 'Wood', stone: 'Stone', hide: 'Hide',
+    iron: 'Iron', berry: 'Berries', wool: 'Wool', essence: 'Essence',
+  };
+  const savedHudResources = Array.isArray(settings.hudResources) ? settings.hudResources : RESOURCES;
+  settings.hudResources = RESOURCES.filter(key => savedHudResources.includes(key));
+  const resourceSettings = $id('set-hud-resources');
+  resourceSettings.innerHTML = RESOURCES.map(key =>
+    `<label><input type="checkbox" value="${key}"${settings.hudResources.includes(key) ? ' checked' : ''}>`
+    + `<span>${RES_ICONS[key]} ${resourceNames[key]}</span></label>`).join('');
+  ui.setTrackedResources(settings.hudResources);
+  resourceSettings.addEventListener('change', () => {
+    settings.hudResources = [...resourceSettings.querySelectorAll('input:checked')].map(input => input.value);
+    ui.setTrackedResources(settings.hudResources);
+    localStorage.setItem('atw-settings', JSON.stringify(settings));
+    refreshHud();
+    audio.sfx('click', 0.35);
+  });
+
   // graphics: only ground texture detail is user-facing now. Bloom is OFF by
   // default (it dulled the image), and the shadow/filmic toggles are gone.
   settings.bloom = false;
@@ -2031,6 +2051,7 @@ function serializeState() {
     shrineBonus: p.shrineBonus || 0,
     camp: camp ? { levels: { ...camp.levels }, storage: { ...camp.storage } } : null,
     biomeIndex: game.biomeIndex,
+    map: minimap.serializeDiscovery(),
   };
   return JSON.parse(JSON.stringify(data)); // strip undefined for Firebase
 }
@@ -2114,6 +2135,7 @@ function applyLoadedState(d) {
   p.questHistory = Array.isArray(d.questHistory) ? d.questHistory : [];
   p.quest = d.quest || null;
   p.shrineBonus = d.shrineBonus || 0;
+  if (d.map) minimap.restoreDiscovery(d.map); // old saves simply keep the current fog state
   if (camp && d.camp) {
     Object.assign(camp.levels, d.camp.levels || {});
     Object.assign(camp.storage, d.camp.storage || {});
@@ -3655,7 +3677,7 @@ function step() {
       const st = document.getElementById('mp-status');
       const line = panels.moba?.statusLine?.();
       if (line) { st.textContent = line; st.classList.remove('hidden'); }
-      ui.updateHUD(player, 0, 'MOBA — destroy the enemy base');
+      ui.updateHUD(player, 0, 'MOBA — destroy the enemy base', false);
     } else {
       if (mp?.active) {
         mp.updateWorldSim(dt);

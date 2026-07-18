@@ -179,6 +179,47 @@ export class Minimap {
     }
   }
 
+  // Pack fog-of-war into one bit per discovery cell. A plain JSON array would
+  // store ~194k numbers; the packed save is only about 32 KB as base64.
+  serializeDiscovery() {
+    const bytes = new Uint8Array(Math.ceil(this.discovered.length / 8));
+    for (let i = 0; i < this.discovered.length; i++) {
+      if (this.discovered[i]) bytes[i >> 3] |= 1 << (i & 7);
+    }
+    let binary = '';
+    const CHUNK = 0x8000;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+    }
+    return { v: 1, cols: this.cols, rows: this.rows, bits: btoa(binary) };
+  }
+
+  restoreDiscovery(saved) {
+    if (!saved?.bits || saved.v !== 1) return false;
+    try {
+      const binary = atob(saved.bits);
+      const savedCols = Number(saved.cols);
+      const savedRows = Number(saved.rows);
+      if (!Number.isInteger(savedCols) || !Number.isInteger(savedRows) || savedCols < 1 || savedRows < 1) return false;
+      if (binary.length < Math.ceil((savedCols * savedRows) / 8)) return false;
+
+      const restored = new Uint8Array(this.discovered.length);
+      const cols = Math.min(this.cols, savedCols);
+      const rows = Math.min(this.rows, savedRows);
+      for (let z = 0; z < rows; z++) {
+        for (let x = 0; x < cols; x++) {
+          const savedIndex = z * savedCols + x;
+          restored[z * this.cols + x] = (binary.charCodeAt(savedIndex >> 3) >> (savedIndex & 7)) & 1;
+        }
+      }
+      this.discovered.set(restored);
+      this.redrawT = 0;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   update(dt, player, enemyMgr, partner = null) {
     this.reveal(player.pos.x, player.pos.z);
     if (partner?.mesh?.visible) this.reveal(partner.pos.x, partner.pos.z);

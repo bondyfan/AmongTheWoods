@@ -1,7 +1,8 @@
 // ---- HUD, spellbar, floating popups, boss labels, toasts, menus ----
 
 import * as THREE from 'three';
-import { WORLD, XP_LEVELS, MAX_LEVEL, MAX_SPELL_SLOTS, fmtResource, itemById, spellById } from './config.js';
+import { WORLD, XP_LEVELS, MAX_LEVEL, MAX_SPELL_SLOTS, ENEMY_TYPES, RES_ICONS,
+         fmtResource, itemById, spellById } from './config.js';
 import { itemIcon } from './icons.js';
 import { audio } from './audio.js';
 
@@ -20,6 +21,7 @@ export class UI {
     this.hooks = hooks; // { onStart, onCastSpell(i) }
     this.popups = [];
     this.trackers = new Map(); // key -> { el, getPos }
+    this.resourceKeys = [];
 
     $('start-btn').addEventListener('click', () => {
       audio.sfx('click', 0.5);
@@ -45,8 +47,13 @@ export class UI {
 
   hideMenu() { $('menu').classList.add('hidden'); $('hud').classList.remove('hidden'); }
 
+  setTrackedResources(keys) {
+    this.resourceKeys = Array.isArray(keys) ? [...keys] : [];
+    this._resourceMarkup = '';
+  }
+
   // ---------- HUD ----------
-  updateHUD(player, progressPct, biomeName) {
+  updateHUD(player, progressPct, biomeName, survival = true) {
     $('hp-bar').style.width = (player.hp / player.maxHp * 100) + '%';
     $('hp-text').textContent = `${Math.ceil(player.hp)} / ${player.maxHp}`;
     $('xp-bar').style.width = (player.xpProgress() * 100) + '%';
@@ -56,6 +63,32 @@ export class UI {
     $('progress-bar').style.width = (progressPct * 100) + '%';
     $('progress-text').textContent = `${Math.round(progressPct * WORLD.goalR)} m / ${WORLD.goalR} m from home`;
     $('biome-name').textContent = biomeName;
+
+    const questEl = $('active-quest');
+    const q = survival ? player.quest : null;
+    if (q) {
+      let target = q.name || 'Quest';
+      if (q.type === 'kill' && ENEMY_TYPES[q.target]) {
+        const enemy = ENEMY_TYPES[q.target];
+        target = `${enemy.icon} ${enemy.name}`;
+      } else if (q.type === 'gather' && q.res) {
+        target = `${RES_ICONS[q.res] ?? '🎒'} ${q.res[0].toUpperCase()}${q.res.slice(1)}`;
+      } else if (q.type === 'killAny') target = '⚔️ Creatures';
+      else if (q.type === 'boss') target = '💀 Pack mother';
+      questEl.textContent = `${target}  ${fmtResource(q.count ?? 0)}/${fmtResource(q.need ?? 0)}`;
+      questEl.classList.remove('hidden');
+    } else questEl.classList.add('hidden');
+
+    const resourceEl = $('resource-hud');
+    if (survival && this.resourceKeys.length) {
+      const markup = this.resourceKeys.map(key =>
+        `<span class="hud-resource" title="${key}">${RES_ICONS[key] ?? ''} ${fmtResource(player[key])}</span>`).join('');
+      if (markup !== this._resourceMarkup) {
+        resourceEl.innerHTML = markup;
+        this._resourceMarkup = markup;
+      }
+      resourceEl.classList.remove('hidden');
+    } else resourceEl.classList.add('hidden');
 
     const weapon = itemById(player.equipment.weapon);
     $('weapon-display').innerHTML = `${itemIcon(weapon)} ${weapon.name}`;

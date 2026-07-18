@@ -23,6 +23,8 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { firebaseConfig } from "../firebase-config.js";
 
+export const COOP_WORLD_SEED = 1;
+
 let app = null;
 let db = null;
 
@@ -76,7 +78,7 @@ export const WoodsNet = {
             if (!snap.exists()) {
                 meta = {
                     host: this.uid, guest: null, mode, interval,
-                    seed: Math.floor(Math.random() * 1e9),
+                    seed: mode === "coop" ? COOP_WORLD_SEED : Math.floor(Math.random() * 1e9),
                     state: "waiting", created: Date.now(),
                 };
                 await withTimeout(set(ref(db, roomPath(candidate)), { meta }), DB_UNREACHABLE);

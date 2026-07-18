@@ -46,11 +46,13 @@
     <div id="top-left">
       <div class="bar-wrap hp"><div id="hp-bar" class="bar"></div><span id="hp-text" class="bar-label"></span></div>
       <div class="bar-wrap xp"><div id="xp-bar" class="bar"></div><span id="level-text" class="bar-label"></span></div>
+      <div id="active-quest" class="hidden"></div>
     </div>
     <div id="top-center">
       <div class="bar-wrap journey"><div id="progress-bar" class="bar"></div><span id="progress-text" class="bar-label"></span></div>
       <div id="biome-name"></div>
       <div id="mp-status" class="hidden"></div>
+      <div id="resource-hud" class="hidden"></div>
     </div>
     <div id="dev-distance-tool" class="hidden">
       <button id="dev-distance-toggle" type="button" aria-expanded="false" aria-controls="dev-distance-panel">
@@ -253,6 +255,11 @@
           where you're going (the minimap turns with it). In RPG view, backing up
           (<kbd>S</kbd>) for 5&nbsp;s spins the camera behind you instead.</small></span>
       </label>
+      <div class="setting-row resource-setting">
+        <span><b>🎒 Resources shown in the HUD</b><br>
+          <small>Choose which resource totals stay visible at the top of the gameplay screen.</small></span>
+        <div id="set-hud-resources" class="resource-setting-grid"></div>
+      </div>
       <label class="setting-row">
         <input type="checkbox" id="set-mute">
         <span><b>Mute audio</b><br>

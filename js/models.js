@@ -45,6 +45,13 @@ export function makeMan() {
   const head = box(0.32, 0.32, 0.32, skin); head.position.y = 1.32;
   const hair = box(0.34, 0.1, 0.34, 0x3a2a1a); hair.position.y = 1.5;
 
+  // +Z is the character's front. Bright eyes and dark pupils make facing
+  // readable from both the top-down camera and the co-op partner's view.
+  const leftEye = box(0.085, 0.075, 0.025, 0xf6f1df); leftEye.position.set(-0.075, 1.35, 0.17);
+  const rightEye = box(0.085, 0.075, 0.025, 0xf6f1df); rightEye.position.set(0.075, 1.35, 0.17);
+  const leftPupil = box(0.034, 0.044, 0.018, 0x201b16); leftPupil.position.set(-0.075, 1.345, 0.19);
+  const rightPupil = box(0.034, 0.044, 0.018, 0x201b16); rightPupil.position.set(0.075, 1.345, 0.19);
+
   // the famous leaf (front and back, at the hips)
   const leaf = new THREE.Group();
   const leafF = box(0.26, 0.22, 0.04, 0x3c7f37); leafF.position.set(0, 0.52, -0.18);
@@ -66,7 +73,7 @@ export function makeMan() {
   // cap slot (filled when head gear is equipped)
   const capSlot = new THREE.Group(); capSlot.position.y = 1.52; g.add(capSlot);
 
-  g.add(leftLeg, rightLeg, torso, head, hair, leftArm, rightArm);
+  g.add(leftLeg, rightLeg, torso, head, hair, leftEye, rightEye, leftPupil, rightPupil, leftArm, rightArm);
   g.userData = { leftLeg, rightLeg, leftArm, rightArm, rightSocket, leftSocket,
                  torso, armL: la, armR: ra, leaf, capSlot, hair };
   return g;
