@@ -23,6 +23,7 @@ import { Pickups, pickupSfx } from './pickups.js';
 import { Minimap, MobaMinimap } from './minimap.js';
 import { UI, mobLevelBadge } from './ui.js';
 import { Panels } from './panels.js';
+import { DevDistanceRadius } from './dev-distance-radius.js';
 
 // ---------- renderer / scene ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -89,6 +90,7 @@ window.addEventListener('resize', () => {
 
 // ---------- game state ----------
 const DEVMODE = /(?:^|[?&])devmode/i.test(location.search); // admin tools only with ?devmode
+const devDistanceRadius = DEVMODE ? new DevDistanceRadius(scene) : null;
 const game = {
   mode: 'menu',   // menu | play | dead | won
   kind: 'survival', // survival | moba
@@ -1776,6 +1778,31 @@ function buildBase(id, lane) {
 
 // ---------- multiplayer lobby ----------
 const $id = (id) => document.getElementById(id);
+
+// ?devmode-only world-space ruler. Opening its small left-side panel also
+// turns the terrain-following circle on; closing the panel removes it.
+if (DEVMODE) {
+  const tool = $id('dev-distance-tool');
+  const toggle = $id('dev-distance-toggle');
+  const panel = $id('dev-distance-panel');
+  const slider = $id('dev-distance-slider');
+  const value = $id('dev-distance-value');
+  tool.classList.remove('hidden');
+  toggle.addEventListener('click', () => {
+    const open = panel.classList.contains('hidden');
+    panel.classList.toggle('hidden', !open);
+    toggle.classList.toggle('active', open);
+    toggle.setAttribute('aria-expanded', String(open));
+    devDistanceRadius.setEnabled(open);
+    if (open) devDistanceRadius.update(player, world, game.mode === 'play');
+  });
+  slider.addEventListener('input', () => {
+    const metres = Number(slider.value);
+    value.textContent = `${metres} m`;
+    devDistanceRadius.setRadius(metres);
+    devDistanceRadius.update(player, world, game.mode === 'play');
+  });
+}
 
 // ---------- settings (persisted in localStorage) ----------
 const settings = Object.assign(
@@ -3799,6 +3826,7 @@ function step() {
   }
 
   updateCamera(dt);
+  devDistanceRadius?.update(player, world, game.mode === 'play');
   ui.updateOverlays(dt, camera);
   renderCharPreview(dt);
   renderSmithPreview(dt);

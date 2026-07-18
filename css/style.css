@@ -96,6 +96,39 @@ kbd {
   50% { box-shadow: 0 0 0 12px rgba(255, 220, 90, 0); }
 }
 
+/* ---------- ?devmode distance ruler ---------- */
+#dev-distance-tool {
+  position: absolute; top: 78px; left: 14px; width: 248px;
+  pointer-events: auto;
+}
+#dev-distance-toggle {
+  width: 100%; padding: 9px 12px; cursor: pointer; text-align: left;
+  color: #d9faff; background: rgba(7, 30, 35, 0.9);
+  border: 1px solid rgba(88, 232, 255, 0.65); border-radius: 10px;
+  font: 700 13px/1.2 inherit; letter-spacing: 0.2px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+}
+#dev-distance-toggle:hover,
+#dev-distance-toggle.active { background: rgba(13, 55, 63, 0.94); border-color: #58e8ff; }
+#dev-distance-panel {
+  margin-top: 6px; padding: 10px 12px 8px;
+  background: rgba(7, 22, 25, 0.92); border: 1px solid rgba(88, 232, 255, 0.42);
+  border-radius: 10px; box-shadow: 0 5px 18px rgba(0,0,0,0.42);
+}
+#dev-distance-panel label {
+  display: flex; align-items: center; justify-content: space-between;
+  color: #bceff5; font-size: 12px; font-weight: bold;
+}
+#dev-distance-value { color: #fff; font-size: 17px; font-variant-numeric: tabular-nums; }
+#dev-distance-slider { width: 100%; margin-top: 8px; cursor: pointer; accent-color: #58e8ff; }
+.dev-distance-scale {
+  display: flex; justify-content: space-between; margin-top: 1px;
+  color: rgba(188, 239, 245, 0.58); font-size: 10px;
+}
+@media (max-width: 1000px) {
+  #dev-distance-tool { top: 138px; }
+}
+
 /* ---------- weapon display & spellbar ---------- */
 #weapon-display {
   position: absolute; bottom: 92px; left: 50%; transform: translateX(-50%);

@@ -52,6 +52,19 @@
       <div id="biome-name"></div>
       <div id="mp-status" class="hidden"></div>
     </div>
+    <div id="dev-distance-tool" class="hidden">
+      <button id="dev-distance-toggle" type="button" aria-expanded="false" aria-controls="dev-distance-panel">
+        ◎ See distance radius
+      </button>
+      <div id="dev-distance-panel" class="hidden">
+        <label for="dev-distance-slider">
+          <span>Radius</span>
+          <output id="dev-distance-value" for="dev-distance-slider">25 m</output>
+        </label>
+        <input id="dev-distance-slider" type="range" min="1" max="200" step="1" value="25">
+        <div class="dev-distance-scale"><span>1 m</span><span>200 m</span></div>
+      </div>
+    </div>
     <div id="tod-clock" title="Time of day"></div>
     <!-- co-op host: the join code sits here until the first friend arrives -->
     <div id="mp-joincode" class="hidden" title="Click to copy the join code">
