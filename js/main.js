@@ -1271,9 +1271,13 @@ function questProgress(n = 1) {
   panels.refresh();
 }
 
-function trackQuestKill(enemy) {
+const QUEST_KILL_SHARE_RADIUS = 20;
+
+function trackQuestKill(enemy, requireNearby = true) {
   const q = player.quest;
-  if (!q) return;
+  if (!q || player.dead) return;
+  if (requireNearby
+      && Math.hypot(player.pos.x - enemy.pos.x, player.pos.z - enemy.pos.z) > QUEST_KILL_SHARE_RADIUS) return;
   if (q.type === 'kill' && enemy.type === q.target) questProgress();
   else if (q.type === 'boss' && enemy.bossRank > 0
            && biomeIndexAt(enemy.pos.x, enemy.pos.z) === q.biome) questProgress();
@@ -1355,7 +1359,11 @@ const enemyMgr = new EnemyManager(scene, world, {
       player.addXp(xp);
       ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2.3), `+${xp} XP`, '#c9a4ff');
     }
+    // Quest kills are proximity-shared in survival co-op. The host owns the
+    // enemy simulation, so it advances its own matching quest here and sends
+    // the same kill to an eligible partner within 20 m.
     trackQuestKill(enemy);
+    mp?.shareQuestKill?.(enemy, QUEST_KILL_SHARE_RADIUS);
     // meat falls to the ground and is magnet-collected (shared in co-op)
     const piles = Math.min(4, Math.max(1, Math.round(enemy.meat / 2)));
     let left = enemy.meat;
@@ -2134,6 +2142,7 @@ async function ensureMp() {
       get petTarget() { return (companions.wolf && !player.petDead) ? petProxy : null; },
       popup: (pos, text, color, cls) => ui.popup(pos, text, color, cls),
       onDiscover: discoverType,
+      onSharedQuestKill: (enemy) => trackQuestKill(enemy, false),
       grantPickup,
       dropHalfMeat,
       markDeath: (pos) => { minimap.deathAt = { x: pos.x, z: pos.z }; },

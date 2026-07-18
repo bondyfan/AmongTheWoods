@@ -1042,6 +1042,25 @@ export class Multiplayer {
     WoodsNet.sendEvent({ type: 'xpkill', xp });
   }
 
+  // Co-op host: share a slain creature with the partner when they were close
+  // enough at the moment of death. The receiving player still decides whether
+  // their currently active quest matches this creature/boss/biome.
+  shareQuestKill(enemy, radius = 20) {
+    if (!this.active || this.mode !== 'coop' || !this.isHost) return;
+    const r = this.remote;
+    if (!r?.mesh?.visible || r.dead || !r.lastSeen) return;
+    const pos = r.targetPos ?? r.pos;
+    if (Math.hypot(pos.x - enemy.pos.x, pos.z - enemy.pos.z) > radius) return;
+    WoodsNet.sendEvent({
+      type: 'questKill',
+      t: enemy.type,
+      b: enemy.bossRank || 0,
+      x: +enemy.pos.x.toFixed(1),
+      z: +enemy.pos.z.toFixed(1),
+      pa: enemy.cfg?.passive ? 1 : 0,
+    });
+  }
+
   // co-op host: a pickup was magnet-collected by the partner's proxy
   onRemoteCollect(pickup) {
     WoodsNet.sendEvent({ type: 'grant', kind: pickup.kind, payload: pickup.payload });
@@ -1130,6 +1149,14 @@ export class Multiplayer {
         p.addXp(ev.xp);
         ctx.popup(p.mesh.position.clone().setY(p.mesh.position.y + 2.1), `+${ev.xp} XP`, '#c9a4ff');
         audio.sfx('kill_gold', 0.3, 100);
+        break;
+      case 'questKill': // co-op guest: matching quest progress shared within 20 m
+        ctx.onSharedQuestKill?.({
+          type: ev.t,
+          bossRank: ev.b || 0,
+          pos: { x: ev.x, z: ev.z },
+          cfg: { passive: !!ev.pa },
+        });
         break;
       case 'chop': { // partner chopped a tree — mirror it
         const trees = ctx.world.treesNear({ x: ev.x, z: ev.z }, 1.5);
