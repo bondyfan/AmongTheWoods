@@ -5,7 +5,7 @@
 
 import * as THREE from 'three';
 import { WORLD, XP_LEVELS, MAX_LEVEL, itemById, spellById, consumableById,
-         biomeIndexAt, RESOURCES, MAX_SPELL_SLOTS } from './config.js';
+         biomeIndexAt, RESOURCES, MAX_SPELL_SLOTS, talentPointsForLevel } from './config.js';
 import { makeMan, makeAxe, makeBow, makePickaxe, makeTorchMesh, makeClub,
          makeSword, makeHandSpear, makeCrossbow, makeShield } from './models.js';
 import { audio } from './audio.js';
@@ -45,8 +45,10 @@ export class Player {
 
     // -- trainable stat tracks (individual caps/unlocks live in config) --
     this.stats = { range: 0, power: 0, swift: 0, pet: 0, gather: 0 };
+    this.talents = {};               // id -> true; first at Lv2, then every three levels
     this.petDead = false;             // a dead pet stays dead until resurrected
     this.petMode = 'aggressive';      // 'aggressive' | 'defensive' | 'passive'
+    this.petCommandTargetId = null;
 
     // -- consumables (F/G), poison, camp era perks --
     this.consumables = { salve: 0, roast: 0, honey: 0 };
@@ -199,28 +201,41 @@ export class Player {
     else if (this.spellsOwned.has(id) && this.spellSlots.length < MAX_SPELL_SLOTS) this.spellSlots.push(id);
   }
 
+  hasTalent(id) { return !!this.talents?.[id]; }
+  spentTalentPoints() { return Object.values(this.talents || {}).filter(Boolean).length; }
+  availableTalentPoints() {
+    return Math.max(0, talentPointsForLevel(this.level) - this.spentTalentPoints());
+  }
+
   castSpell(slotIndex, ctx) {
     const id = this.spellSlots[slotIndex];
     if (!id || this.dead || this.stunT > 0) return;
     if ((this.spellCds[id] || 0) > 0) { audio.sfx('error', 0.35, 300); return; }
     const spell = spellById(id);
-    this.spellCds[id] = spell.cd;
+    this.spellCds[id] = spell.cd * (this.spellCdMult || 1);
     audio.sfx('special', 0.45);
 
     const { enemyMgr } = ctx;
+    const spellPower = this.spellPower || 1;
+    const spellDuration = this.spellDuration || 1;
     switch (id) {
-      case 'haste': this.hasteT = 10; break;
-      case 'rage': this.rageT = 12; break;
+      case 'haste': this.hasteT = 10 * spellDuration; break;
+      case 'rage': this.rageT = 12 * spellDuration; break;
       case 'heal':
-        this.hp = Math.min(this.maxHp, this.hp + 50);
-        this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2), '+50 ❤️', '#7fe07f');
+        {
+          const heal = Math.round(50 * spellPower);
+          this.hp = Math.min(this.maxHp, this.hp + heal);
+          this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2), `+${heal} ❤️`, '#7fe07f');
+        }
         break;
       case 'powerDash':
       case 'stunDash':
         this.dashT = 0.28;
         this.dashDir.copy(this.facing);
         this.dashHit.clear();
-        this.dashSpec = id === 'stunDash' ? { dmg: 30, stun: 3 } : { dmg: 40, stun: 0 };
+        this.dashSpec = id === 'stunDash'
+          ? { dmg: 30 * spellPower, stun: 3 * spellDuration }
+          : { dmg: 40 * spellPower, stun: 0 };
         break;
       case 'shockwave':
         for (const e of enemyMgr.alive()) {
@@ -228,18 +243,18 @@ export class Player {
           if (d < 6.5) {
             const dir = new THREE.Vector3().subVectors(e.pos, this.pos).normalize();
             e.pos.addScaledVector(dir, 4);
-            enemyMgr.damage(e, this.dmgMult * 25, null);
+            enemyMgr.damage(e, this.dmgMult * 25 * spellPower, null);
           }
         }
         break;
       case 'frostNova':
         for (const e of enemyMgr.alive()) {
-          if (e.pos.distanceTo(this.pos) < 7) enemyMgr.stun(e, 4);
+          if (e.pos.distanceTo(this.pos) < 7) enemyMgr.stun(e, 4 * spellDuration);
         }
         break;
-      case 'stoneSkin': this.stoneSkinT = 12; break;
+      case 'stoneSkin': this.stoneSkinT = 12 * spellDuration; break;
       case 'spiritWard':
-        this.spiritWardT = 15;
+        this.spiritWardT = 15 * spellDuration;
         this.poisonT = 0;
         break;
       case 'whirlwind':
@@ -247,22 +262,22 @@ export class Player {
           if (e.pos.distanceTo(this.pos) >= 6) continue;
           const dir = new THREE.Vector3().subVectors(e.pos, this.pos).normalize();
           e.pos.addScaledVector(dir, 3);
-          enemyMgr.damage(e, this.dmgMult * this.weapon.dmg * 0.75, null);
+          enemyMgr.damage(e, this.dmgMult * this.weapon.dmg * 0.75 * spellPower, null);
         }
         break;
       case 'venomRain':
         for (const e of enemyMgr.alive()) {
           if (e.pos.distanceTo(this.pos) < 9) {
-            enemyMgr.damage(e, this.dmgMult * 45, null, 'local',
-              { poison: { dps: 15, dur: 6 } });
+            enemyMgr.damage(e, this.dmgMult * 45 * spellPower, null, 'local',
+              { poison: { dps: 15 * spellPower, dur: 6 * spellDuration } });
           }
         }
         break;
       case 'blizzard':
         for (const e of enemyMgr.alive()) {
           if (e.pos.distanceTo(this.pos) < 11) {
-            enemyMgr.damage(e, this.dmgMult * 120, null);
-            enemyMgr.stun(e, 5);
+            enemyMgr.damage(e, this.dmgMult * 120 * spellPower, null);
+            enemyMgr.stun(e, 5 * spellDuration);
           }
         }
         break;
@@ -281,13 +296,16 @@ export class Player {
       if (it?.stats?.hp) hp += it.stats.hp * this.gearMult;
       if (it?.stats?.speed) speedAdd += it.stats.speed;
     }
-    this.maxHp = Math.round(hp + (this.campBonus || 0));
+    if (this.hasTalent('warriorVitality')) hp = (hp + (this.campBonus || 0)) * 1.15;
+    else hp += this.campBonus || 0;
+    this.maxHp = Math.round(hp);
     if (this.maxHp > oldMax) this.hp += this.maxHp - oldMax;
     this.hp = Math.min(this.hp, this.maxHp);
     // every level keeps granting +10 hp, +0.1 speed and +0.1 regen; weapon
     // power gains +1% per level while attack-speed growth softens after Lv14
     const lvl = this.level - 1;
-    this.speed = 5.5 + 0.1 * lvl + speedAdd + (this.upgrades.trailblazer || 0) * 0.2;
+    this.speed = 5.5 + 0.1 * lvl + speedAdd + (this.upgrades.trailblazer || 0) * 0.2
+      + (this.hasTalent('wandererStride') ? 0.7 : 0);
     // passive regeneration: everyone knits back slowly; gear can stack it up
     let regen = 0.1 + 0.1 * lvl;
     for (const slot of ['head', 'chest', 'boots', 'charm', 'offhand', 'underlayer', 'legs', 'back', 'mount']) {
@@ -310,15 +328,33 @@ export class Player {
       cd: lvlCd(base.cd * (1 - 0.04 * s.swift)),
       range: base.range + (base.kind === 'bow' ? 2.0 : 0.1) * s.range,
     };
+    if (base.kind === 'bow' && base.style !== 'crossbow' && this.hasTalent('hunterBow')) {
+      this.weapon.dmg *= 1.18;
+      this.weapon.range += 3;
+    }
     if (this.upgrades.questPower) this.weapon.dmg *= 1 + this.upgrades.questPower * 0.03;
     this.shield = equipped('offhand')?.shield || null;
     this.canBlock = !!this.shield || !!this.weapon.parry;
     this.critChance = CRIT_CHANCE + (this.upgrades.hunterResident ? 0.04 : 0);
-    this.gatherMult = 1 + 0.15 * s.gather; // Gathering training: fatter yields
+    this.bowCritBonus = this.hasTalent('hunterDeadeye') ? 0.1 : 0;
+    this.weakPointBonus = this.hasTalent('hunterDeadeye') ? 0.35 : 0;
+    this.blockBonus = this.hasTalent('warriorBulwark') ? 0.15 : 0;
+    this.meleeArcBonus = this.hasTalent('warriorCleave') ? 0.18 : 0;
+    this.dodgeCdMult = this.hasTalent('wandererStride') ? 0.75 : 1;
+    this.environmentResist = this.hasTalent('wandererWeathered') ? 0.5 : 0;
+    this.hunterTraps = this.hasTalent('hunterTraps');
+    this.beastCommand = this.hasTalent('beastCommand');
+    this.beastFrenzy = this.hasTalent('beastFrenzy');
+    this.spellCdMult = this.hasTalent('mysticAttunement') ? 0.8 : 1;
+    this.essenceMult = this.hasTalent('mysticEssence') ? 1.35 : 1;
+    this.spellPower = this.hasTalent('mysticOverchannel') ? 1.25 : 1;
+    this.spellDuration = this.hasTalent('mysticOverchannel') ? 1.2 : 1;
+    this.gatherMult = 1 + 0.15 * s.gather + (this.hasTalent('wandererForager') ? 0.25 : 0);
     // expedition gear: each comfort lives in its own slot now (no more flags)
     this.torchGear = equipped('offhand')?.torch || null;   // { radius } while a torch is in hand
     this.dmgCut = equipped('underlayer')?.dmgCut || 0;     // quilted lining soak
-    this.poisonCut = equipped('underlayer')?.poisonCut || 0;
+    this.poisonCut = Math.min(0.9, (equipped('underlayer')?.poisonCut || 0)
+      + (this.hasTalent('wandererWeathered') ? 0.5 : 0));
     this.mudguard = Math.min(equipped('legs')?.mudguard ?? 1, equipped('boots')?.mudguard ?? 1);
     this.restMult = equipped('back')?.rest || 1;           // bedroll rest regen
     this.hasSaddle = !!equipped('mount')?.saddle;          // can mount wild horses
@@ -332,12 +368,15 @@ export class Player {
     // Pets scale with training AND the owner's level; orbs with Power.
     const comp = equipped('companion');
     const petBase = comp?.pet;
+    const companionMult = this.hasTalent('beastBond') ? 1.25 : 1;
     this.pet = petBase
-      ? { dmg: petBase.dmg * (1 + 0.25 * s.pet) * (1 + 0.03 * this.level) * this.gearMult,
-          maxHp: Math.round((100 + 100 * s.pet + 50 * Math.floor(this.level / 2)) * this.gearMult) }
+      ? { dmg: petBase.dmg * (1 + 0.25 * s.pet) * (1 + 0.03 * this.level) * this.gearMult * companionMult,
+          maxHp: Math.round((100 + 100 * s.pet + 50 * Math.floor(this.level / 2)) * this.gearMult * companionMult) }
       : null;
     const orbBase = comp?.orb;
-    this.orb = orbBase ? { ...orbBase, dmg: orbBase.dmg * (1 + 0.05 * s.power) * this.gearMult } : null;
+    this.orb = orbBase
+      ? { ...orbBase, dmg: orbBase.dmg * (1 + 0.05 * s.power) * this.gearMult * companionMult }
+      : null;
 
     // cursed-statue pact: a strong boon lashed to a bane, until it expires
     if (this.boon) {
@@ -404,7 +443,7 @@ export class Player {
     if (d.lengthSq() < 0.01) d.set(0, 0, -1);
     this.dodgeDir.copy(d.normalize());
     this.dodgeT = 0.22;
-    this.dodgeCd = 1.05;
+    this.dodgeCd = 1.05 * (this.dodgeCdMult || 1);
     this.invulnT = 0.28;
     this.charging = false;
     this.blocking = false;
@@ -524,7 +563,7 @@ export class Player {
         audio.sfx('base_hit', 0.5, 100);
         return;
       }
-      const reduction = this.shield?.block ?? 0.35;
+      const reduction = Math.min(0.9, (this.shield?.block ?? 0.35) + (this.blockBonus || 0));
       dmg *= 1 - reduction;
       this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.15),
         `🛡️ blocked ${Math.round(reduction * 100)}%`, '#9fd7ff');
@@ -1045,7 +1084,8 @@ export class Player {
       this._clampToWorld();
     }
 
-    const arcDot = w.style === 'axe' ? 0.22 : w.style === 'spear' || w.style === 'pick' ? 0.76 : 0.5;
+    const baseArcDot = w.style === 'axe' ? 0.22 : w.style === 'spear' || w.style === 'pick' ? 0.76 : 0.5;
+    const arcDot = Math.max(-0.1, baseArcDot - (this.meleeArcBonus || 0));
     const baseCrit = Math.random() < this.critChance;
     for (const e of enemyMgr.alive()) {
       if (this._inArc(e.pos.x, e.pos.z, w.range + (moving ? 0.25 : 0), e.hitR, arcDot)) {
@@ -1155,7 +1195,7 @@ export class Player {
     audio.sfx('attack_ranged', 0.4);
     const speed = crossbow ? 31 : 23 + charge * 9;
     const weakPoint = !crossbow && charge >= 0.78;
-    const crit = weakPoint || Math.random() < this.critChance;
+    const crit = weakPoint || Math.random() < this.critChance + (this.bowCritBonus || 0);
     const drawMult = crossbow ? 1 + charge * 0.25 : 0.85 + charge * 1.05;
     const mountMult = mounted ? 1.18 : 1;
     const arrowMode = crossbow ? 'bolt' : this.arrowMode;
@@ -1169,7 +1209,8 @@ export class Player {
     const origin = this.pos.clone().add(this.facing.clone().multiplyScalar(0.6))
       .setY(this.mesh.position.y + 1.1 + (mounted ? 0.9 : 0));
     projectiles.spawnArrow(origin, this.facing.clone(), {
-      dmg: this.dmgMult * w.dmg * drawMult * mountMult * (crit ? CRIT_MULT : 1),
+      dmg: this.dmgMult * w.dmg * drawMult * mountMult
+        * (crit ? CRIT_MULT + (weakPoint ? (this.weakPointBonus || 0) : 0) : 1),
       pierce: w.pierce || weakPoint, speed, crit, weakPoint, effects,
       life: w.range / speed, // arrows fall dead at the weapon's max range
     });

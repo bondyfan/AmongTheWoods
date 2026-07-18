@@ -5,7 +5,8 @@ import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOB
          RESOURCES, RES_ICONS, HIDE_BEARING, VERDANT_HIDE_DROP, hideForHp, radiusOf, costFor,
          biomeIndexAt, progressAt, fmtResource, roundResource, itemById, spellById,
          consumableById, essenceDropFor, MAX_LEVEL, questFor, repeatableQuestFor,
-         questXpFor, BIOME_LAIRS, CAMP_BUILDINGS, trainingLevelFor } from './config.js';
+         questXpFor, BIOME_LAIRS, CAMP_BUILDINGS, trainingLevelFor, TALENT_TREES,
+         talentPointsForLevel } from './config.js';
 import { makeAimArc, updateAimArc, makeRaft, makeBlacksmith, makeHorse, makeWisp, makeMan,
          makeGriffin, makeGriffinRoost, makeTumbleweed } from './models.js';
 import { PostFX } from './postfx.js';
@@ -149,6 +150,9 @@ const panels = new Panels({
   onBuyItem: buyItem,
   onBuySpell: buySpell,
   onBuyStat: buyStat,
+  onBuyTalent: buyTalent,
+  onRespecTalents: respecTalents,
+  canRespecTalents: () => nearHome(),
   onEquip: (id) => {
     const item = itemById(id);
     if (item && item.level > player.level) {
@@ -280,7 +284,8 @@ const player = new Player(scene, {
     const freshBuildings = CAMP_BUILDINGS.flatMap(b => b.levels
       .map((upgrade, i) => ({ upgrade, name: b.names[i] })))
       .filter(x => x.upgrade.level === level).map(x => x.name);
-    const fresh = [...freshItems, ...freshSpells, ...freshTraining, ...freshBuildings];
+    const freshTalents = level >= 2 && (level - 2) % 3 === 0 ? ['1 talent point'] : [];
+    const fresh = [...freshItems, ...freshSpells, ...freshTraining, ...freshBuildings, ...freshTalents];
     ui.toast(`⭐ Level ${level}!` + (fresh.length ? ` New: ${fresh.join(', ')}` : ''), 'level');
     audio.sfx('evolve_ready', 0.4);
     ui.pulseShopButton(true);
@@ -1490,10 +1495,11 @@ function grantPickup(kind, payload) {
     ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2),
       `+${payload} ${consumableById(kind).icon}`, '#c9e8a4');
   } else {
-    player[kind] = roundResource(player[kind] + payload);
+    const gained = kind === 'essence' ? payload * (player.essenceMult || 1) : payload;
+    player[kind] = roundResource(player[kind] + gained);
     const [icon, color] = RES_POPUP[kind];
-    ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2), `+${fmtResource(payload)} ${icon}`, color);
-    if (player.quest?.type === 'gather' && player.quest.res === kind) questProgress(payload);
+    ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2), `+${fmtResource(gained)} ${icon}`, color);
+    if (player.quest?.type === 'gather' && player.quest.res === kind) questProgress(gained);
   }
   pickupSfx[kind]?.();
 }
@@ -1708,6 +1714,7 @@ function endStats() {
 function startPlaying() {
   ui.hideMenu();
   hideJoinCodeHud(); // solo runs show nothing; a co-op host re-shows it after host()
+  if (game.kind === 'survival') clearHunterTraps();
   // safety: never carry a half-open lair dungeon into a fresh run
   if (game.dungeon) { try { exitLair(false); } catch {} game.dungeon = null; enemyMgr.suspend = false; $id('minimap').style.display = ''; }
   game.mode = 'play';
@@ -2261,6 +2268,7 @@ function serializeState() {
     invItems: [...p.invItems],
     consumables: { ...p.consumables },
     stats: { ...p.stats },
+    talents: { ...p.talents },
     spellsOwned: [...p.spellsOwned],
     spellSlots: p.spellSlots.map(s => s ?? null),
     upgrades: { ...p.upgrades },
@@ -2339,6 +2347,15 @@ function applyLoadedState(d) {
   p.invItems = Array.isArray(d.invItems) ? d.invItems.filter(Boolean) : [];
   p.consumables = { salve: 0, roast: 0, honey: 0, ...(d.consumables || {}) };
   p.stats = { range: 0, power: 0, swift: 0, pet: 0, gather: 0, ...(d.stats || {}) };
+  p.talents = {};
+  let talentPointsLeft = talentPointsForLevel(p.level);
+  const savedTalents = d.talents && typeof d.talents === 'object' ? d.talents : {};
+  for (const tree of TALENT_TREES) for (const node of tree.nodes) {
+    if (talentPointsLeft <= 0 || !savedTalents[node.id]) continue;
+    if (node.requires && !p.talents[node.requires]) continue;
+    p.talents[node.id] = true;
+    talentPointsLeft--;
+  }
   p.spellsOwned = new Set(d.spellsOwned || []);
   p.spellSlots = Array.isArray(d.spellSlots) ? d.spellSlots.map(s => s ?? undefined) : [];
   p.upgrades = { ...(d.upgrades || {}) };
@@ -2595,6 +2612,39 @@ function buyStat(id) {
   audio.sfx('upgrade', 0.5);
   panels.refresh();
   panels.flashCard(track.name);
+}
+
+function buyTalent(id) {
+  const tree = TALENT_TREES.find(t => t.nodes.some(n => n.id === id));
+  const node = tree?.nodes.find(n => n.id === id);
+  if (!node || player.hasTalent(id) || player.availableTalentPoints() <= 0) return;
+  if (node.requires && !player.hasTalent(node.requires)) {
+    ui.toast('🔒 Learn the previous talent in this path first.', 'error');
+    audio.sfx('error', 0.4);
+    return;
+  }
+  player.talents[id] = true;
+  player.recompute();
+  companions.sync(player);
+  ui.toast(`${tree.icon} Learned: ${node.name}`, 'level');
+  audio.sfx('upgrade', 0.55);
+  panels.refresh();
+}
+
+function respecTalents() {
+  if (!nearHome() || player.spentTalentPoints() <= 0) {
+    ui.toast('🏠 Talents can only be reset beside your home at camp.', 'error');
+    audio.sfx('error', 0.4);
+    return;
+  }
+  player.talents = {};
+  player.petCommandTargetId = null;
+  player.recompute();
+  companions.sync(player);
+  clearHunterTraps();
+  ui.toast('🔄 Talent points returned — choose a new path.', 'level');
+  audio.sfx('upgrade', 0.5);
+  panels.refresh();
 }
 
 function buyConsumable(id) {
@@ -2901,6 +2951,7 @@ function enterLair(poi) {
   if (mp?.active || game.dungeon) return;
   const lair = BIOME_LAIRS[poi.ring];
   if (!lair) return;
+  clearHunterTraps(); // surface traps do not follow the player underground
   if (player.mounted) dismountHorse();
   const progress = progressAt(poi.x, poi.z);
   // freeze the overworld: every creature melts back into its zone pool
@@ -2929,6 +2980,7 @@ function enterLair(poi) {
 
 function exitLair(cleared) {
   if (!game.dungeon) return;
+  clearHunterTraps(); // dungeon traps must not remain in the restored overworld scene
   // whatever loot still lies on the dungeon floor comes out WITH you
   // (the hidden overworld pickups are exactly dungeonHiddenPickups)
   const hidden = new Set(dungeonHiddenPickups);
@@ -3166,7 +3218,87 @@ input.onKey('KeyG', () => {
   }
 });
 
-// ---- pet: resurrection (R at home / the graveyard) & mode cycling (P) ----
+// ---- Hunter traps (T) and pet resurrection / commands (R, P, Y) ----
+let hunterTrapCd = 0;
+const hunterTraps = [];
+
+function removeHunterTrap(trap) {
+  const i = hunterTraps.indexOf(trap);
+  if (i >= 0) hunterTraps.splice(i, 1);
+  scene.remove(trap.mesh);
+  trap.mesh.traverse(o => {
+    o.geometry?.dispose?.();
+    if (Array.isArray(o.material)) o.material.forEach(m => m.dispose?.());
+    else o.material?.dispose?.();
+  });
+}
+
+function clearHunterTraps() {
+  while (hunterTraps.length) removeHunterTrap(hunterTraps[0]);
+  hunterTrapCd = 0;
+}
+
+function placeHunterTrap() {
+  if (game.kind !== 'survival' || !player.hunterTraps || player.dead || player.mounted) return;
+  if (hunterTrapCd > 0) {
+    ui.toast(`🪤 Trap ready in ${Math.ceil(hunterTrapCd)} s.`, '');
+    return;
+  }
+  if (player.wood < 2) {
+    ui.toast('🪤 A snare needs 2 🪵.', 'error');
+    audio.sfx('error', 0.4);
+    return;
+  }
+  player.wood = roundResource(player.wood - 2);
+  hunterTrapCd = 7;
+  const mesh = new THREE.Group();
+  const ringMat = new THREE.MeshLambertMaterial({ color: 0x6f5634 });
+  const metalMat = new THREE.MeshLambertMaterial({ color: 0xaeb7ad });
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.72, 0.07, 5, 18), ringMat);
+  ring.rotation.x = Math.PI / 2;
+  mesh.add(ring);
+  for (let i = 0; i < 8; i++) {
+    const a = i / 8 * Math.PI * 2;
+    const tooth = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.35, 4), metalMat);
+    tooth.position.set(Math.cos(a) * 0.52, 0.13, Math.sin(a) * 0.52);
+    tooth.rotation.z = Math.cos(a) * 0.65;
+    tooth.rotation.x = Math.sin(a) * -0.65;
+    mesh.add(tooth);
+  }
+  mesh.position.set(player.pos.x, world.heightAt(player.pos.x, player.pos.z) + 0.07, player.pos.z);
+  scene.add(mesh);
+  hunterTraps.push({ mesh, x: player.pos.x, z: player.pos.z, life: 90, armT: 0.4 });
+  while (hunterTraps.length > 4) removeHunterTrap(hunterTraps[0]);
+  ui.toast('🪤 Snare placed — 2 🪵.', '');
+  audio.sfx('click', 0.45);
+}
+
+function updateHunterTraps(dt, enemyManager) {
+  hunterTrapCd = Math.max(0, hunterTrapCd - dt);
+  for (let i = hunterTraps.length - 1; i >= 0; i--) {
+    const trap = hunterTraps[i];
+    trap.life -= dt;
+    trap.armT -= dt;
+    trap.mesh.rotation.y += dt * 0.35;
+    if (trap.life <= 0) { removeHunterTrap(trap); continue; }
+    if (trap.armT > 0) continue;
+    const target = enemyManager?.alive?.().find(e => !e.cfg?.passive
+      && Math.hypot(e.pos.x - trap.x, e.pos.z - trap.z) < 1.15 + (e.hitR || 0));
+    if (!target) continue;
+    enemyManager.damage(target, Math.max(20, player.weapon.dmg * 0.55), null, 'local',
+      { bleed: { dps: 4 + player.level * 0.4, dur: 4 } });
+    enemyManager.stun?.(target, 3.5);
+    ui.popup(target.mesh.position.clone().setY(target.mesh.position.y + 1.8), '🪤 SNARED', '#d9e88a', 'big');
+    audio.sfx('base_hit', 0.55, 90);
+    removeHunterTrap(trap);
+  }
+}
+
+input.onKey('KeyT', () => {
+  if (!inPlay() || game.paused) return;
+  placeHunterTrap();
+});
+
 function nearGrave() {
   return camp?.gravePos
     && Math.hypot(player.pos.x - camp.gravePos.x, player.pos.z - camp.gravePos.z) < 6;
@@ -3244,6 +3376,21 @@ input.onKey('KeyP', () => {
   player.petMode = PET_MODES[(PET_MODES.indexOf(player.petMode) + 1) % PET_MODES.length];
   ui.toast(`🐺 Pet mode: ${PET_MODE_LABEL[player.petMode]}`, 'level');
   audio.sfx('click', 0.4);
+});
+input.onKey('KeyY', () => {
+  if (!inPlay() || game.paused || !player.beastCommand || !companions.wolf) return;
+  const target = combatMgr()?.alive?.()
+    .filter(e => !e.cfg?.passive && e.pos.distanceToSquared(player.pos) < 32 * 32)
+    .map(e => ({ e, d: Math.hypot(e.pos.x - aimPoint.x, e.pos.z - aimPoint.z) }))
+    .filter(o => o.d < 7)
+    .sort((a, b) => a.d - b.d)[0]?.e;
+  if (!target) {
+    ui.toast('📣 Aim closer to an enemy to issue a hunt command.', '');
+    return;
+  }
+  player.petCommandTargetId = target.id;
+  ui.toast(`📣 Hunt command: ${target.cfg?.name ?? target.type}`, 'level');
+  audio.sfx('aggro', 0.45);
 });
 $id('bigmap').querySelector('.panel-close').addEventListener('click', () => toggleBigMap(false));
 $id('flightmap-close').addEventListener('click', () => toggleFlightMap(false));
@@ -3749,6 +3896,9 @@ function updateAtmosphere(dt) {
   if (player.mudguard < 1) envSpeedMult = 1 - (1 - envSpeedMult) * player.mudguard;
   // Frozen Peak chill: stiff, frozen legs move up to 30% slower
   envSpeedMult *= 1 - 0.3 * coldK;
+  if (player.environmentResist > 0) {
+    envSpeedMult = 1 - (1 - envSpeedMult) * (1 - player.environmentResist);
+  }
   const biome = BIOMES[game.biomeIndex];
 
   // the cave is dark; light floods in as you walk toward the mouth
@@ -3990,6 +4140,7 @@ function step() {
       if (line) { st.textContent = line; st.classList.remove('hidden'); }
       ui.updateHUD(player, 0, 'MOBA — destroy the enemy base', false);
     } else {
+      updateHunterTraps(dt, em);
       if (mp?.active) {
         mp.updateWorldSim(dt);
         mp.update(dt);

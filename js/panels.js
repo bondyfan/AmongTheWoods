@@ -4,7 +4,8 @@
 import { SHOP_GROUPS, SMITH_GROUPS, questFor, repeatableQuestFor, questXpFor,
          QUEST_CATEGORY_LABELS, QUESTS_PER_BIOME, BIOMES, SLOTS, SLOT_LABELS, ENEMY_TYPES, ITEMS, SPELLS,
          STAT_TRACKS, MOBA_BUILDINGS, CAMP_BUILDINGS, RES_ICONS, RESOURCES, CONSUMABLES,
-         MAX_SPELL_SLOTS, fmtResource, itemById, spellById, costFor, trainingLevelFor } from './config.js';
+         MAX_SPELL_SLOTS, fmtResource, itemById, spellById, costFor, trainingLevelFor,
+         TALENT_TREES, talentPointsForLevel } from './config.js';
 
 const NEED_NAMES = { tent: 'Hide Tent', cabin: 'Wooden Cabin', furnace: 'Stone Furnace',
   keep: 'Medieval Keep', runic: 'Runic Hall', mountain: 'Mountain Fortress',
@@ -451,6 +452,14 @@ export class Panels {
   // Training unlocks early tiers level-by-level, then advanced tiers at biome milestones.
   _renderTraining(wrap) {
     const p = this.player;
+    if (this.camp) this._renderTalents(wrap);
+
+    if (this.camp) {
+      const legacy = document.createElement('div');
+      legacy.className = 'talent-section-title';
+      legacy.innerHTML = '<b>📈 Repeatable training</b><span>Resource-funded incremental improvements</span>';
+      wrap.appendChild(legacy);
+    }
     for (const track of STAT_TRACKS) {
       const tier = p.stats[track.id];
       const maxed = tier >= track.max;
@@ -478,6 +487,55 @@ export class Panels {
     wrap.querySelectorAll('.buy-btn').forEach(btn => {
       btn.addEventListener('click', () => this.hooks.onBuyStat(btn.dataset.id));
     });
+  }
+
+  _renderTalents(wrap) {
+    const p = this.player;
+    const total = talentPointsForLevel(p.level);
+    const spent = p.spentTalentPoints();
+    const available = Math.max(0, total - spent);
+    const atCamp = !!this.hooks.canRespecTalents?.();
+    const board = document.createElement('section');
+    board.className = 'talent-board';
+    board.innerHTML = `<div class="talent-board-head">
+      <div><b>🌿 Character paths</b><span>First point at Lv2, then every three levels · ${available} available / ${total} earned</span></div>
+      <button class="buy-btn talent-respec" data-talent-respec="1" ${!atCamp || spent === 0 ? 'disabled' : ''}>
+        🔄 Reset at camp
+      </button>
+    </div>
+    <div class="talent-paths"></div>`;
+    const paths = board.querySelector('.talent-paths');
+    for (const tree of TALENT_TREES) {
+      const branch = document.createElement('div');
+      branch.className = 'talent-path';
+      branch.style.setProperty('--talent-color', tree.color);
+      branch.innerHTML = `<h3>${tree.icon} ${tree.name}</h3>`;
+      for (const node of tree.nodes) {
+        const owned = p.hasTalent(node.id);
+        const prereq = !node.requires || p.hasTalent(node.requires);
+        const canBuy = !owned && prereq && available > 0;
+        const card = document.createElement('div');
+        card.className = `talent-node${owned ? ' owned' : canBuy ? ' buyable' : ' locked'}`;
+        card.innerHTML = `<div class="talent-node-name">${node.icon} ${node.name}</div>
+          <div class="talent-node-desc">${node.desc}</div>
+          ${owned ? '<span>✓ Learned</span>'
+            : canBuy ? `<button class="buy-btn" data-talent="${node.id}">Spend 1 point</button>`
+              : `<span>${!prereq ? 'Requires previous talent' : 'No point available'}</span>`}`;
+        branch.appendChild(card);
+      }
+      paths.appendChild(branch);
+    }
+    if (!atCamp) {
+      const note = document.createElement('div');
+      note.className = 'talent-camp-note';
+      note.textContent = '🏠 Stand beside your home at camp to reset all spent talent points.';
+      board.appendChild(note);
+    }
+    wrap.appendChild(board);
+    board.querySelectorAll('[data-talent]').forEach(btn =>
+      btn.addEventListener('click', () => this.hooks.onBuyTalent?.(btn.dataset.talent)));
+    board.querySelector('[data-talent-respec]')?.addEventListener('click', () =>
+      this.hooks.onRespecTalents?.());
   }
 
   // ---------- character / equipment ----------
@@ -512,11 +570,18 @@ export class Panels {
     // ---- stat breakdown: value first, then base + every named modifier ----
     const s = p.stats;
     const rows = [];
+    const talentSummary = TALENT_TREES
+      .map(tree => ({ tree, count: tree.nodes.filter(n => p.hasTalent(n.id)).length }))
+      .filter(x => x.count > 0)
+      .map(x => `${x.tree.icon} ${x.tree.name} ${x.count}/3`);
+    rows.push(['🌿 Talents', `${p.spentTalentPoints()}/${talentPointsForLevel(p.level)}`,
+      talentSummary.length ? talentSummary.join(' · ') : 'No path chosen yet — Upgrades → Training']);
     const base = itemById(p.equipment.weapon)?.weapon ?? itemById('fists').weapon;
     const charm = itemById(p.equipment.charm);
     const dmgParts = [`${Math.round(base.dmg)} ${itemById(p.equipment.weapon)?.name ?? 'fists'}`];
     if (p.levelDamagePct) dmgParts.push(`+${Math.round(p.levelDamagePct * 100)}% level`);
     if (s.power) dmgParts.push(`+${s.power * 5}% training`);
+    if (base.kind === 'bow' && base.style !== 'crossbow' && p.hasTalent('hunterBow')) dmgParts.push('+18% Bowcraft');
     if (p.forgeTier) dmgParts.push(`+${p.forgeTier * 10}% forge`);
     if (charm?.stats?.dmgPct) dmgParts.push(`+${Math.round(charm.stats.dmgPct * 100)}% ${charm.name}`);
     rows.push(['⚔️ Attack', Math.round(p.weapon.dmg), dmgParts.join(' · ')]);
@@ -535,12 +600,14 @@ export class Panels {
     }
     if (p.campBonus) hpParts.push(`+${p.campBonus} home`);
     if (p.shrineBonus) hpParts.push(`+${p.shrineBonus} shrines`);
+    if (p.hasTalent('warriorVitality')) hpParts.push('+15% Iron Constitution');
     rows.push(['❤️ Max health', p.maxHp, hpParts.join(' · ')]);
 
     const spParts = ['5.5 base'];
     if (p.level > 1) spParts.push(`+${((p.level - 1) * 0.1).toFixed(1)} level`);
     const boots = itemById(p.equipment.boots);
     if (boots?.stats?.speed) spParts.push(`+${boots.stats.speed} ${boots.name}`);
+    if (p.hasTalent('wandererStride')) spParts.push('+0.7 Long Stride');
     if (p.mounted) spParts.push('+9 🐴 horse');
     // the +9 mount bonus is added at move time, not baked into p.speed — show the total
     const shownSpeed = p.speed + (p.mounted ? 9 : 0);
@@ -548,12 +615,15 @@ export class Panels {
 
     const rgParts = [`${base.range} m ${itemById(p.equipment.weapon)?.name ?? 'fists'}`];
     if (s.range) rgParts.push(`+${((base.kind === 'bow' ? 2 : 0.1) * s.range).toFixed(1)} m training`);
+    if (base.kind === 'bow' && base.style !== 'crossbow' && p.hasTalent('hunterBow')) rgParts.push('+3 m Bowcraft');
     rows.push(['🎯 Range', (Math.round(p.weapon.range * 10) / 10) + ' m', rgParts.join(' · ')]);
 
     if (p.pet) rows.push(['🐺 Pet', `${Math.round(p.pet.dmg)} dmg · ${p.pet.maxHp} hp`,
       `training T${s.pet} · your level ${p.level}`]);
     if (p.orb) rows.push(['🔮 Orb', `${Math.round(p.orb.dmg)} dmg ×${p.orb.targets}`,
       s.power ? `+${s.power * 5}% Power training` : 'scales with Power training']);
+    if (p.hasTalent('mysticAttunement')) rows.push(['✨ Spell recovery', '-20%',
+      p.hasTalent('mysticOverchannel') ? 'Attunement · +25% power · +20% duration' : 'Mystic Attunement']);
 
     // regen row
     const regenParts = ['0.1 base'];
@@ -872,6 +942,19 @@ export class Panels {
       <div class="desc">Upgrade your home to advance through the ages and unlock new gear.</div>`;
     wrap.appendChild(era);
     wrap.appendChild(this._campCard(CAMP_BUILDINGS.find(d => d.id === 'home')));
+    const talents = document.createElement('div');
+    talents.className = 'card owned';
+    talents.style.gridColumn = '1 / -1';
+    const spent = this.player.spentTalentPoints();
+    talents.innerHTML = `<div class="card-head"><span class="icon">🌿</span>
+      <span class="name">Retrain character paths</span><span class="lv">${spent} points spent</span></div>
+      <div class="desc">Your camp is the only place where all talent points can be returned. Nothing else is lost.</div>
+      <div class="card-foot"><button class="buy-btn" data-home-respec="1" ${spent ? '' : 'disabled'}>
+        🔄 Reset all talents
+      </button></div>`;
+    wrap.appendChild(talents);
+    talents.querySelector('[data-home-respec]')?.addEventListener('click', () =>
+      this.hooks.onRespecTalents?.());
     this._wireCampButtons(wrap);
   }
 

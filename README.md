@@ -43,6 +43,8 @@ no build step, no CDN dependency.
 - **Space / Shift** — dodge with a brief invulnerability window
 - **Ctrl / V** — block with a shield or parry with a sword
 - **Z** — cycle unlocked arrow types
+- **T** — place a Hunter snare after learning Trapper
+- **Y** — order a Beastmaster's wolf to focus the aimed enemy
 - **Q** — cycle owned weapons (fists / axes / bows — only one wielded at a time)
 - **1–6** — cast slotted spells
 - **U** — upgrade shop · **C** — character sheet · **N** — bestiary

@@ -26,11 +26,18 @@ class PetWolf {
     this.maxHp = player.pet.maxHp; // training upgrades apply live
     this.hp = Math.min(this.hp, this.maxHp);
 
-    // mode: aggressive bites anything near the owner; defensive only what's
-    // already fighting the owner; passive never bites at all
+    // A Beastmaster can issue a direct hunt command. It temporarily outranks
+    // the normal aggressive/defensive/passive stance until that target falls.
     const mode = player.petMode || 'aggressive';
     let target = null, best = 18 * 18;
-    if (mode !== 'passive') {
+    if (player.beastCommand && player.petCommandTargetId != null) {
+      target = enemyMgr.alive().find(e => e.id === player.petCommandTargetId) ?? null;
+      if (!target || target.pos.distanceToSquared(player.pos) > 32 * 32) {
+        player.petCommandTargetId = null;
+        target = null;
+      }
+    }
+    if (!target && mode !== 'passive') {
       for (const e of enemyMgr.alive()) {
         if (mode === 'defensive' && !e.aggroed) continue;
         const d2 = e.pos.distanceToSquared(player.pos);
@@ -56,9 +63,10 @@ class PetWolf {
     }
 
     if (target && dist < 1.5 + target.hitR && this.biteCd <= 0) {
-      this.biteCd = 0.9;
+      this.biteCd = player.beastFrenzy ? 0.68 : 0.9;
       // 'pet' threat id: enemies the wolf bites turn on the WOLF, not you
-      enemyMgr.damage(target, dmg, null, 'pet');
+      const wounded = target.hp < target.maxHp * 0.5;
+      enemyMgr.damage(target, dmg * (player.beastFrenzy && wounded ? 1.35 : 1), null, 'pet');
     }
 
     // (no more magic contact damage — the wolf is a real combat target now:

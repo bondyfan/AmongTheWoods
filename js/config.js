@@ -688,6 +688,53 @@ export const STAT_TRACKS = [
 
 export const trainingLevelFor = (track, tier) => track.unlockLevels?.[tier - 1] ?? tier;
 
+// ---- Character specialisations. The first point arrives at Lv2 and another
+// every three levels: Lv24 has 8 points for 15 sequential talents, forcing a
+// real build choice instead of letting one character master almost everything. ----
+export const talentPointsForLevel = (level) => Math.floor((Math.max(1, level) + 1) / 3);
+export const TALENT_TREES = [
+  { id: 'warrior', icon: '🛡️', name: 'Warrior', color: '#d99b62', nodes: [
+    { id: 'warriorVitality', icon: '❤️', name: 'Iron Constitution',
+      desc: '+15% maximum health.' },
+    { id: 'warriorBulwark', icon: '🛡️', name: 'Bulwark', requires: 'warriorVitality',
+      desc: 'Shields and sword guards block 15% more damage.' },
+    { id: 'warriorCleave', icon: '⚔️', name: 'Cleave', requires: 'warriorBulwark',
+      desc: 'Every melee weapon strikes in a much wider arc.' },
+  ] },
+  { id: 'hunter', icon: '🏹', name: 'Hunter', color: '#9bc56b', nodes: [
+    { id: 'hunterBow', icon: '🏹', name: 'Bowcraft',
+      desc: 'Bows gain +18% damage and +3 m range.' },
+    { id: 'hunterTraps', icon: '🪤', name: 'Trapper', requires: 'hunterBow',
+      desc: 'Press T to place a snare that damages and stuns the first enemy.' },
+    { id: 'hunterDeadeye', icon: '🎯', name: 'Deadeye', requires: 'hunterTraps',
+      desc: 'Bow critical chance +10%; precision weak-point hits deal more damage.' },
+  ] },
+  { id: 'wanderer', icon: '🧭', name: 'Wanderer', color: '#6fc4c8', nodes: [
+    { id: 'wandererStride', icon: '🥾', name: 'Long Stride',
+      desc: '+0.7 movement speed and 25% shorter dodge recovery.' },
+    { id: 'wandererForager', icon: '🧺', name: 'Forager', requires: 'wandererStride',
+      desc: '+25% wood and stone from harvesting.' },
+    { id: 'wandererWeathered', icon: '🌦️', name: 'Weathered', requires: 'wandererForager',
+      desc: 'Halves mud, web, cold and poison penalties.' },
+  ] },
+  { id: 'beastmaster', icon: '🐺', name: 'Beastmaster', color: '#c49a72', nodes: [
+    { id: 'beastBond', icon: '🐾', name: 'Wild Bond',
+      desc: 'Animal and sphere companions gain +25% health and damage.' },
+    { id: 'beastCommand', icon: '📣', name: 'Hunt Command', requires: 'beastBond',
+      desc: 'Press Y while aiming at an enemy to order your wolf to focus it.' },
+    { id: 'beastFrenzy', icon: '🩸', name: 'Pack Instinct', requires: 'beastCommand',
+      desc: 'Your wolf bites faster and savages wounded targets.' },
+  ] },
+  { id: 'mystic', icon: '🔮', name: 'Mystic', color: '#b291df', nodes: [
+    { id: 'mysticAttunement', icon: '⏳', name: 'Attunement',
+      desc: 'Spell cooldowns are 20% shorter.' },
+    { id: 'mysticEssence', icon: '🧪', name: 'Essence Seeker', requires: 'mysticAttunement',
+      desc: 'Collected essence is increased by 35%.' },
+    { id: 'mysticOverchannel', icon: '✨', name: 'Overchannel', requires: 'mysticEssence',
+      desc: 'Spells gain +25% power and +20% duration.' },
+  ] },
+];
+
 // ==========================================================================
 // Survival camp — buildings around the cave mouth. Your "home" upgrades
 // through the ages (Hide Tent → Wooden Cabin → Stone House) and gates gear;

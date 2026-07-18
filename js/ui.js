@@ -108,6 +108,7 @@ export class UI {
     if (player.charging) combat.push(`CHARGE ${Math.round(Math.min(1, player.chargeT / 1.05) * 100)}%`);
     if (player.blocking) combat.push(player.weapon.parry ? 'PARRY' : 'BLOCK');
     if (player.weapon.style === 'bow') combat.push(`${player.arrowMode.toUpperCase()} · Z`);
+    if (player.hunterTraps) combat.push('TRAP · T');
     if (player.dodgeCd > 0) combat.push(`DODGE ${player.dodgeCd.toFixed(1)}s`);
     else combat.push('DODGE READY');
     $('weapon-display').innerHTML = `${itemIcon(weapon)} ${weapon.name}`
@@ -125,7 +126,8 @@ export class UI {
       const MODES = { aggressive: '🗡️ Aggressive', defensive: '🛡️ Defensive', passive: '💤 Passive' };
       petEl.innerHTML = player.petDead
         ? '🐺 💀 <i>down</i> — revive at home/graveyard <kbd>R</kbd>'
-        : `🐺 ${MODES[player.petMode] ?? player.petMode} <kbd>P</kbd>`;
+        : `🐺 ${MODES[player.petMode] ?? player.petMode} <kbd>P</kbd>`
+          + (player.beastCommand ? ' · 📣 focus <kbd>Y</kbd>' : '');
     } else petEl.classList.add('hidden');
 
     // carried supplies (F/G consumables)

@@ -1147,6 +1147,7 @@ export class Multiplayer {
       case 'hit': // pvp arena: opponent's attack landed on me
         if (!this.arena.active || p.dead) break;
         if (ev.dmg > 0) p.takeDamage(ev.dmg, {
+          id: 'partner',
           pos: ev.ax == null ? null : { x: ev.ax, z: ev.az }, shot: !!ev.sh,
         });
         if (ev.stun) p.applyStun(ev.stun);
