@@ -3265,7 +3265,6 @@ function ensureWpGroundArrow() {
 }
 function hideWpGroundArrow() { if (wpGroundArrow) wpGroundArrow.visible = false; }
 
-const _wpFwd = new THREE.Vector3();
 function updateWaypoint() {
   const arrow = $id('waypoint-arrow');
   const wp = minimap.waypoint;
@@ -3286,12 +3285,7 @@ function updateWaypoint() {
   ga.position.set(gx, world.heightAt(gx, gz) + 0.08, gz);
   ga.rotation.y = Math.atan2(dx, dz);
   ga.visible = true;
-  camera.getWorldDirection(_wpFwd); _wpFwd.y = 0;
-  const fl = Math.hypot(_wpFwd.x, _wpFwd.z) || 1; _wpFwd.x /= fl; _wpFwd.z /= fl;
-  // signed angle from camera-forward to the target (0 = dead ahead / up)
-  const ang = Math.atan2(_wpFwd.x * dz - _wpFwd.z * dx, _wpFwd.x * dx + _wpFwd.z * dz);
   arrow.classList.remove('hidden');
-  arrow.querySelector('.wp-tri').style.transform = `rotate(${ang}rad)`;
   arrow.querySelector('.wp-dist').textContent = dist < 1000 ? `${Math.round(dist)} m` : `${(dist / 1000).toFixed(1)} km`;
 }
 

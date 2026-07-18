@@ -793,13 +793,11 @@ kbd {
 }
 
 
-/* waypoint compass arrow — sits above the player, points to the flag */
+/* waypoint distance — the yellow ground arrow still shows the direction */
 #waypoint-arrow { position: fixed; left: 50%; top: 58%; transform: translate(-50%,-50%);
   z-index: 15; pointer-events: none; text-align: center; }
-#waypoint-arrow .wp-tri { display: block; font-size: 26px; color: #ff4dd8;
-  filter: drop-shadow(0 0 4px rgba(255,77,216,0.7)); line-height: 1; }
-#waypoint-arrow .wp-dist { font-size: 12px; color: #ffb8ee; font-weight: bold;
-  text-shadow: 0 1px 2px #000; }
+#waypoint-arrow .wp-dist { font-size: 12px; color: #ffd21a; font-weight: bold;
+  text-shadow: 0 1px 2px #000, 0 0 5px rgba(255,210,26,0.55); }
 
 
 /* auth + cloud save */
