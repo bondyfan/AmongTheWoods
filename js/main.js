@@ -100,6 +100,7 @@ const game = {
   nightK: 0,      // 0 = full day, 1 = deep night (drives lights/spawns/fireflies)
   biomeIndex: 0,
   seed: 20260704,
+  devFly: false,
   // Serializable world snapshot for future multiplayer (host → guests).
   snapshot() {
     return {
@@ -1788,15 +1789,17 @@ function buildBase(id, lane) {
 // ---------- multiplayer lobby ----------
 const $id = (id) => document.getElementById(id);
 
-// ?devmode-only world-space ruler. Opening its small left-side panel also
-// turns the terrain-following circle on; closing the panel removes it.
+// ?devmode-only left-side tools: a world-space ruler and free RPG flight.
+// Opening the ruler panel turns its terrain-following circle on.
 if (DEVMODE) {
   const tool = $id('dev-distance-tool');
   const toggle = $id('dev-distance-toggle');
   const panel = $id('dev-distance-panel');
   const slider = $id('dev-distance-slider');
   const value = $id('dev-distance-value');
+  const fly = $id('dev-fly-toggle');
   tool.classList.remove('hidden');
+  tool.addEventListener('mousedown', (e) => e.stopPropagation());
   toggle.addEventListener('click', () => {
     const open = panel.classList.contains('hidden');
     panel.classList.toggle('hidden', !open);
@@ -1810,6 +1813,22 @@ if (DEVMODE) {
     value.textContent = `${metres} m`;
     devDistanceRadius.setRadius(metres);
     devDistanceRadius.update(player, world, game.mode === 'play');
+  });
+  fly.addEventListener('change', () => {
+    game.devFly = fly.checked;
+    fly.closest('label')?.classList.toggle('active', fly.checked);
+    if (fly.checked) {
+      if (player.mounted) dismountHorse();
+      if (!game.rpgView) {
+        settings.rpgView = true;
+        $id('set-rpgview').checked = true;
+        localStorage.setItem('atw-settings', JSON.stringify(settings));
+        applyViewMode();
+      }
+    }
+    ui.toast(fly.checked
+      ? '🪽 Fly mode ON — W/S follow the camera pitch'
+      : '🪽 Fly mode off', 'level');
   });
 }
 
@@ -3652,6 +3671,8 @@ function step() {
       rpgView: game.rpgView,
       mounted: player.mounted,
       mouseLook: game.rpgView && settings.mouseLook && !!input.locked,
+      devFly: DEVMODE && game.devFly && game.rpgView && !player.flying,
+      devFlyPitch: rpgPitch,
       envSpeedMult,
     });
 

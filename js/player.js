@@ -378,8 +378,15 @@ export class Player {
 
   // Vertical motion: glide smoothly over hills; walking off a cliff means
   // free fall — and a long enough drop costs health on landing.
-  _updateVertical(dt, world) {
+  _updateVertical(dt, world, devFly = false) {
     const ground = world.heightAt(this.pos.x, this.pos.z);
+    if (devFly) {
+      if (!Number.isFinite(this.y)) this.y = ground;
+      this.y = Math.max(ground, this.y);
+      this.vy = 0;
+      this.fallFrom = null;
+      return this.y;
+    }
     if (this.y == null) { this.y = ground; this.vy = 0; this.fallFrom = null; }
     if (this.y > ground + 0.3) {
       if (this.fallFrom == null) { this.fallFrom = this.y; this.vy = 0; }
@@ -470,6 +477,14 @@ export class Player {
   update(dt, ctx) {
     const { input, world, enemyMgr, projectiles, aimPoint } = ctx;
     this._updateLevelFx(dt); // cosmetic — keeps animating regardless of state
+    // Leaving dev flight always returns safely to the terrain instead of
+    // converting the inspection altitude into lethal fall damage.
+    if (this._devFlyActive && !ctx.devFly) {
+      this.y = world.heightAt(this.pos.x, this.pos.z);
+      this.vy = 0;
+      this.fallFrom = null;
+    }
+    this._devFlyActive = !!ctx.devFly;
     if (this.dead) return;
 
     // caught in a dust devil: the tornado owns our position & vertical this
@@ -531,7 +546,7 @@ export class Player {
     // stunned: frozen in place, can't move or attack
     if (this.stunT > 0) {
       this.stunT -= dt;
-      this.mesh.position.set(this.pos.x, this._updateVertical(dt, world), this.pos.z);
+      this.mesh.position.set(this.pos.x, this._updateVertical(dt, world, ctx.devFly), this.pos.z);
       this.attackCd -= dt;
       this._updateSlashes(dt);
       return;
@@ -557,23 +572,29 @@ export class Player {
       this.walkT += dt * 20;
     } else {
       let mx = input.moveX, mz = input.moveZ;
+      let flyY = 0;
       // RPG third-person mode: WoW-style tank controls — A/D TURN the
       // character, W drives forward, S backs up; the camera hangs behind
       if (ctx.rpgView) {
+        const pitch = ctx.devFly ? (ctx.devFlyPitch ?? 0) : 0;
+        const forwardFlat = ctx.devFly ? Math.cos(pitch) : 1;
+        const forwardY = ctx.devFly ? -Math.sin(pitch) : 0;
         if (ctx.mouseLook) {
           // mouse steers the character — A/D become pure strafing
           const fwd = -mz, strafe = mx;
           const dX = this.facing.x, dZ = this.facing.z;
-          mx = dX * fwd - dZ * strafe;
-          mz = dZ * fwd + dX * strafe;
+          mx = dX * fwd * forwardFlat - dZ * strafe;
+          mz = dZ * fwd * forwardFlat + dX * strafe;
+          flyY = fwd * forwardY;
         } else {
           if (mx !== 0) {
             const yaw = Math.atan2(this.facing.x, this.facing.z) - mx * 2.8 * dt;
             this.facing.set(Math.sin(yaw), 0, Math.cos(yaw));
           }
           const drive = -mz; // W = 1, S = -1
-          mx = this.facing.x * drive;
-          mz = this.facing.z * drive;
+          mx = this.facing.x * drive * forwardFlat;
+          mz = this.facing.z * drive * forwardFlat;
+          flyY = drive * forwardY;
         }
       } else if (ctx.mouseMove && (mx !== 0 || mz !== 0)) {
         const fx = aimPoint.x - this.pos.x, fz = aimPoint.z - this.pos.z;
@@ -585,17 +606,17 @@ export class Player {
           mz = dZ * fwd + dX * strafe;
         }
       }
-      moving = (mx !== 0 || mz !== 0) && !ctx.boatPlacing; // raft being set up
+      moving = (mx !== 0 || mz !== 0 || flyY !== 0) && !ctx.boatPlacing; // raft being set up
       this.idleT = moving ? 0 : this.idleT + dt;
       if (moving) {
-        const len = Math.hypot(mx, mz);
-        mx /= len; mz /= len;
+        const len = Math.hypot(mx, mz, flyY);
+        mx /= len; mz /= len; flyY /= len;
         this.moveDir = { x: mx, z: mz };
         // paddling is a touch slower than running; roast buff speeds you up;
         // the swamp (ctx.envSpeedMult) drags at your boots
-        const onWater = ctx.boat && world.isWater?.(this.pos.x, this.pos.z);
+        const onWater = !ctx.devFly && ctx.boat && world.isWater?.(this.pos.x, this.pos.z);
         const speed = (this.speed + (ctx.mounted ? 9 : 0)) * (onWater ? 0.4 : 1)
-          * (this.roastT > 0 ? 1.1 : 1) * (ctx.envSpeedMult ?? 1);
+          * (this.roastT > 0 ? 1.1 : 1) * (ctx.devFly ? 1 : (ctx.envSpeedMult ?? 1));
         // cliffs are walls: block any step that climbs too steeply (walking
         // DOWN or falling off is always allowed); sliding along one is fine.
         // Deep swamp water is a wall too unless you carry the boat — but
@@ -614,10 +635,20 @@ export class Player {
           return (ahead - h0) / 0.9 <= MAX_CLIMB_SLOPE;
         };
         const dx = mx * speed * dt, dz = mz * speed * dt;
-        if (canStep(dx, dz)) { this.pos.x += dx; this.pos.z += dz; }
-        else if (canStep(dx, 0)) this.pos.x += dx;
-        else if (canStep(0, dz)) this.pos.z += dz;
-        world.collide(this.pos, 0.45, { boat: ctx.boat });
+        if (ctx.devFly) {
+          const ground = world.heightAt(this.pos.x, this.pos.z);
+          if (!Number.isFinite(this.y)) this.y = ground;
+          this.pos.x += dx;
+          this.pos.z += dz;
+          this.y = Math.max(ground, this.y + flyY * speed * dt);
+          this.vy = 0;
+          this.fallFrom = null;
+        } else {
+          if (canStep(dx, dz)) { this.pos.x += dx; this.pos.z += dz; }
+          else if (canStep(dx, 0)) this.pos.x += dx;
+          else if (canStep(0, dz)) this.pos.z += dz;
+          world.collide(this.pos, 0.45, { boat: ctx.boat });
+        }
         this._applyBounds(ctx);
         this.walkT += dt * speed;
       }
@@ -629,7 +660,7 @@ export class Player {
       if (this.facing.lengthSq() < 0.01) this.facing.set(0, 0, -1);
       this.facing.normalize();
     }
-    this.mesh.position.set(this.pos.x, this._updateVertical(dt, world), this.pos.z);
+    this.mesh.position.set(this.pos.x, this._updateVertical(dt, world, ctx.devFly), this.pos.z);
     // local +z toward the aim point, so arm swings (toward +z) punch forward
     this.mesh.rotation.y = Math.atan2(this.facing.x, this.facing.z);
 
