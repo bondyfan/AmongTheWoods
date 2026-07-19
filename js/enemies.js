@@ -46,7 +46,9 @@ class Enemy {
     const hpScale = 1 + biomeTier * 0.12 + difficulty * 0.2;
     const dmgScale = 1 + biomeTier * 0.08 + difficulty * 0.16;
     this.hp = base.hp * hpScale * (boss ? boss.hpMult : 1) * eHp
-      + this.level * 30; // +30 HP per level — higher-level mobs felt too flimsy
+      // +30 HP per level, but only from level 3 up — low-level mobs felt fine,
+      // higher-level ones were too flimsy.
+      + (this.level >= 3 ? this.level * 30 : 0);
     this.maxHp = this.hp;
     this.dmg = base.dmg * dmgScale * (boss ? boss.dmgMult : 1) * eDmg;
     this.xp = Math.round(base.xp * (1 + biomeTier * 0.12)

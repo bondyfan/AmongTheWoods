@@ -258,7 +258,11 @@ export function enemyLevelFor(type, difficulty = 0, bossRank = 0, elite = false)
   const baseLevel = 1 + biomeIndex * 3 + strengthOffset;
   const eliteLevels = elite ? 2 : 0;
   const bossLevels = bossRank * 3;
-  return Math.min(36, baseLevel + eliteLevels + bossLevels);
+  let level = Math.min(36, baseLevel + eliteLevels + bossLevels);
+  // Verdant Forest (the starter ring) must stay gentle: its snakes and
+  // spiders never climb above level 2, even as elites.
+  if (biomeIndex === 0 && (type === 'snake' || type === 'spider')) level = Math.min(2, level);
+  return level;
 }
 
 // Pack bosses ("the mother") by skull rank (index 0 = 1 skull).
