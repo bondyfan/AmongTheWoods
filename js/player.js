@@ -1412,6 +1412,14 @@ export class Player {
     }
   }
 
+  // jump straight to a level (used by ?devmode and admin overrides) without
+  // firing 20-odd level-up banners
+  setLevel(lvl) {
+    this.level = Math.max(1, Math.min(MAX_LEVEL, Math.round(lvl)));
+    this.xp = XP_LEVELS[this.level];
+    this.recompute();
+  }
+
   xpProgress() {
     if (this.level >= MAX_LEVEL) return 1;
     const cur = XP_LEVELS[this.level], next = XP_LEVELS[this.level + 1];

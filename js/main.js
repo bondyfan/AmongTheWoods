@@ -1832,6 +1832,8 @@ function startPlaying() {
     // the co-op guest renders the HOST's enemies
     if (!(mp?.active && mp.mode === 'coop' && !mp.isHost)) enemyMgr.spawnInitialWave();
   }
+  // ?devmode boots at max level so class trees and late-game gear are testable
+  if (DEVMODE) player.setLevel(MAX_LEVEL);
 }
 
 function startGame() {
