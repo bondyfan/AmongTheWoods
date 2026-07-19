@@ -15,6 +15,8 @@ class Input {
     this.keyHandlers = new Map();
 
     window.addEventListener('keydown', (e) => {
+      // Space is the keyboard attack button — stop it scrolling the page
+      if (e.code === 'Space' && !/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) e.preventDefault();
       if (e.repeat) return;
       this.keys.add(e.code);
       const h = this.keyHandlers.get(e.code);
@@ -74,6 +76,8 @@ class Input {
   // Right-click remains a quick repeating attack in top-down mode. Left-click
   // is edge-tracked separately so holding and releasing can charge a strike.
   get quickAttack() { return !this.rpgMode && this.mouse.right; }
+  // Hold the attack button (left mouse OR spacebar) to auto-swing.
+  get attackHeld() { return this.mouse.left || this.keys.has('Space'); }
   get block() {
     return this.keys.has('ControlLeft') || this.keys.has('ControlRight') || this.keys.has('KeyV');
   }

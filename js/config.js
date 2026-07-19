@@ -702,9 +702,9 @@ export const CLASS_TREES = [
     passives: [
       P('war_vitality', '❤️', 'Vitality', 2, '+5% maximum health per rank.', { hpPct: 0.05 }),
       P('war_arms', '⚔️', 'Arms Mastery', 3, '+5% melee damage per rank.', { meleeDmg: 0.05 }),
-      P('war_thick_skin', '🪨', 'Thick Skin', 5, '-2% incoming damage per rank.', { damageCut: 0.02 }),
-      P('war_cleave', '🪓', 'Cleave Training', 7, 'Melee attack arcs widen per rank.', { arcBonus: 0.05 }),
-      P('war_executioner', '☠️', 'Executioner', 9, '+8% damage to wounded enemies per rank.', { executeDmg: 0.08 }),
+      P('war_thick_skin', '🪨', 'Thick Skin', 4, '-2% incoming damage per rank.', { damageCut: 0.02 }),
+      P('war_cleave', '🪓', 'Cleave Training', 7, 'Melee swing arcs widen per rank.', { arcBonus: 0.08 }),
+      P('war_executioner', '☠️', 'Executioner', 9, '+8% damage to wounded enemies (below 50% health) per rank.', { executeDmg: 0.08 }),
       P('war_blood_drinker', '🩸', 'Blood Drinker', 11, 'Kills restore 1.5% max health per rank.', { lifeOnKillPct: 0.015 }),
       P('war_heavy_hands', '🔨', 'Heavy Hands', 13, '+4% chance to stagger per rank.', { staggerChance: 0.04 }),
       P('war_unshaken', '⛰️', 'Unshaken', 15, 'Enemy stuns are 12% shorter per rank.', { stunResist: 0.12 }),
@@ -712,14 +712,14 @@ export const CLASS_TREES = [
       P('war_tactician', '📯', 'Battle Tactician', 21, 'Warrior ability cooldowns -4% per rank.', { classCdReduction: 0.04 }),
     ],
     actives: [
-      A('war_rend', '🩸', 'Rend', 2, 'Stab one target; it loses a percentage of max HP over 30 s.', 'target',
+      A('war_heroic_strike', '⚔️', 'Heroic Strike', 2, 'Wind up, then land a crushing single-target strike.', 'target',
+        { cd: 10, range: 3.2, weaponMult: [1.5, 1.9, 2.3], windup: 0.55 }),
+      A('war_rend', '🩸', 'Rend', 4, 'Stab one target; it loses a percentage of max HP over 30 s.', 'target',
         { cd: 24, range: 3.2, weaponMult: [0.7, 0.9, 1.1], bleedPct: [0.12, 0.18, 0.24], bleedDur: 30 }),
-      A('war_heroic_strike', '⚔️', 'Heroic Strike', 4, 'A crushing single-target weapon strike.', 'target',
-        { cd: 10, range: 3.2, weaponMult: [1.5, 1.9, 2.3] }),
       A('war_cry', '📯', 'War Cry', 6, 'Temporarily increases damage and damage reduction.', 'buff',
         { cd: 40, buff: 'warCry', duration: [8, 10, 12], power: [0.15, 0.25, 0.35] }),
-      A('war_ground_slam', '💥', 'Ground Slam', 8, 'Damage and stun all nearby enemies.', 'aoe',
-        { cd: 24, radius: [4.5, 5.2, 6], weaponMult: [0.8, 1.05, 1.3], stun: [1.2, 1.8, 2.4] }),
+      A('war_ground_slam', '💥', 'Ground Slam', 8, 'Slam the earth: damage and stun all nearby enemies.', 'aoe',
+        { cd: 24, radius: [4.5, 5.2, 6], weaponMult: [0.8, 1.05, 1.3], stun: [1.2, 1.8, 2.4], windup: 0.45 }),
       A('war_charge', '🐂', 'Bull Charge', 10, 'Rush forward, striking and stunning enemies in your path.', 'dash',
         { cd: 22, weaponMult: [1, 1.3, 1.6], stun: [1, 1.5, 2], distance: [7, 9, 11] }),
       A('war_whirlwind', '🌪️', 'Whirlwind', 12, 'A powerful circular melee attack.', 'aoe',
@@ -728,8 +728,8 @@ export const CLASS_TREES = [
         { cd: 16, range: [7, 8.5, 10], weaponMult: [1, 1.3, 1.6] }),
       A('war_blood_fury', '🔥', 'Blood Fury', 16, 'Gain attack speed and life steal for a short time.', 'buff',
         { cd: 48, buff: 'bloodFury', duration: [8, 10, 12], power: [0.12, 0.18, 0.25] }),
-      A('war_execute', '🪓', 'Execute', 20, 'Massive damage to a target below 35% health.', 'execute',
-        { cd: 20, range: 3.2, weaponMult: [2.5, 3.3, 4.2], threshold: 0.35 }),
+      A('war_execute', '🪓', 'Execute', 20, 'Wind up a massive killing blow on a target below 35% health.', 'execute',
+        { cd: 20, range: 3.2, weaponMult: [2.5, 3.3, 4.2], threshold: 0.35, windup: 0.6 }),
       A('war_avatar', '🗿', 'Avatar', 24, 'Become a juggernaut with damage, protection and a health shield.', 'buff',
         { cd: 90, buff: 'avatar', duration: [10, 13, 16], power: [0.25, 0.35, 0.45] }),
     ] },
@@ -929,6 +929,104 @@ export function requiredClassForItem(item) {
   if (!item) return null;
   if (item.slot === 'companion' || item.weapon?.kind === 'bow') return 'beastmaster';
   return null;
+}
+
+// ---- Concrete per-rank numbers for the class UI. Every skill can spell out
+// exactly what a given rank does, so nothing stays a vague "increases X". ----
+const pctStr = (v) => `${Math.round(v * 1000) / 10}%`;
+const num1 = (v) => Math.round(v * 10) / 10;
+const CLASS_EFFECT_INFO = {
+  hpPct: v => `+${pctStr(v)} max health (gear & camp included)`,
+  meleeDmg: v => `+${pctStr(v)} melee damage`,
+  meleeSpeed: v => `+${pctStr(v)} melee attack speed`,
+  meleeCrit: v => `+${pctStr(v)} melee crit chance`,
+  damageCut: v => `-${pctStr(v)} damage taken`,
+  // approximate: the exact widening depends on the weapon's own base arc
+  arcBonus: v => `≈+${Math.round(Math.acos(Math.max(-1, 0.5 - v)) * 180 / Math.PI - 60)}° swing arc`,
+  executeDmg: v => `+${pctStr(v)} damage vs wounded (below 50% HP)`,
+  lifeOnKillPct: v => `heal ${pctStr(v)} max HP on every kill`,
+  staggerChance: v => `${pctStr(v)} chance to stagger on every hit`,
+  stunResist: v => `enemy stuns ${pctStr(v)} shorter`,
+  blockBonus: v => `+${pctStr(v)} damage blocked`,
+  classCdReduction: v => `-${pctStr(v)} class ability cooldowns`,
+  speed: v => `+${num1(v)} move speed`,
+  rangedDmg: v => `+${pctStr(v)} ranged damage`,
+  rangedSpeed: v => `+${pctStr(v)} ranged attack speed`,
+  rangedCrit: v => `+${pctStr(v)} ranged crit chance`,
+  arrowBleed: v => `arrows bleed ${pctStr(v)} weapon damage/s for 5 s`,
+  trapPower: v => `+${pctStr(v)} trap damage`,
+  petPower: v => `+${pctStr(v)} companion health & damage`,
+  petSpeed: v => `+${pctStr(v)} companion speed`,
+  petRegen: v => `+${pctStr(v)} companion regeneration`,
+  meatMult: v => `+${pctStr(v)} meat collected`,
+  stealthDuration: v => `+${num1(v)} s stealth duration`,
+  evadeDuration: v => `+${num1(v)} s evade window`,
+  backstab: v => `+${pctStr(v)} damage from behind`,
+  poisonPower: v => `+${pctStr(v)} poison damage`,
+  hurtSpeed: v => `+${num1(v * 5)} speed burst after taking damage`,
+  spellPower: v => `+${pctStr(v)} spell damage`,
+  firePower: v => `+${pctStr(v)} fire damage`,
+  frostPower: v => `+${pctStr(v)} frost damage`,
+  fireRadius: v => `+${pctStr(v)} fire area size`,
+  frostRadius: v => `+${pctStr(v)} frost area size`,
+  spellCrit: v => `+${pctStr(v)} spell crit chance`,
+  zoneDuration: v => `+${pctStr(v)} ground spell duration`,
+  essenceMult: v => `+${pctStr(v)} essence collected`,
+  shieldPower: v => `+${pctStr(v)} shield strength`,
+  healPower: v => `+${pctStr(v)} healing`,
+  hotPower: v => `+${pctStr(v)} healing over time`,
+  poisonCut: v => `-${pctStr(v)} poison damage taken`,
+  lowHpHeal: v => `+${pctStr(v)} healing below half health`,
+  healRadius: v => `+${pctStr(v)} healing area size`,
+  guardianPower: v => `+${pctStr(v)} guardian miracles`,
+  holyPower: v => `+${pctStr(v)} holy damage`,
+};
+// how each timed buff's "power" number actually lands in combat (from player.js)
+const CLASS_BUFF_INFO = {
+  warCry: p => [`+${pctStr(p)} damage`, `-${pctStr(p * 0.5)} damage taken`],
+  bloodFury: p => [`+${pctStr(p)} attack speed`, `${pctStr(p)} lifesteal`],
+  avatar: p => [`+${pctStr(p)} damage`, `-${pctStr(p * 0.45)} damage taken`, `${pctStr(p)} max-HP shield`],
+  arrowHaste: p => [`+${pctStr(p)} ranged attack speed`],
+  poisonBlades: p => [`hits poison ${num1(4 * p)} dps for 5 s`],
+  sprint: p => [`+${num1(p)} move speed`],
+  combustion: p => [`+${pctStr(p)} fire damage`],
+};
+export function classPassiveInfo(skill, rank) {
+  return Object.entries(skill.effects || {}).map(([key, v]) =>
+    (CLASS_EFFECT_INFO[key] || ((x) => `${key} ${x}`))(v * rank));
+}
+export function classActiveInfo(skill, rank) {
+  const rv = (key, fallback = 0) => {
+    const v = skill[key];
+    return Array.isArray(v) ? v[Math.max(0, Math.min(v.length - 1, rank - 1))] : (v ?? fallback);
+  };
+  const out = [];
+  if (skill.weaponMult) out.push(`${Math.round(rv('weaponMult') * 100)}% weapon damage`);
+  if (skill.damage) out.push(`${Math.round(rv('damage'))} damage`);
+  if (skill.bleedPct) out.push(`bleeds ${pctStr(rv('bleedPct'))} of max HP over ${skill.bleedDur} s`);
+  if (skill.burn) out.push(`burns ${Math.round(rv('burn'))} dps for 6 s`);
+  if (skill.poison) out.push(`poisons ${Math.round(rv('poison'))} dps for 6 s`);
+  if (skill.stun) out.push(`stuns ${num1(rv('stun'))} s`);
+  if (skill.radius) out.push(`${num1(rv('radius'))} m radius`);
+  if (skill.action === 'cone' || skill.action === 'magicCone') out.push(`${num1(rv('range'))} m cone`);
+  else if (skill.range && ['target', 'execute', 'magicTarget', 'shadowstep'].includes(skill.action))
+    out.push(`${num1(rv('range'))} m range`);
+  if (skill.distance) out.push(`charges ${num1(rv('distance'))} m`);
+  if (skill.castRange) out.push(`cast up to ${rv('castRange')} m away`);
+  if (skill.count && (Array.isArray(skill.count) || skill.count > 1)) out.push(`×${rv('count')}`);
+  if (skill.petMult) out.push(`${rv('petMult')}× companion damage`);
+  if (skill.duration) out.push(`lasts ${num1(rv('duration'))} s`);
+  if (skill.buff && CLASS_BUFF_INFO[skill.buff]) out.push(...CLASS_BUFF_INFO[skill.buff](rv('power')));
+  if (skill.threshold) out.push(`target below ${pctStr(skill.threshold)} HP only`);
+  if (skill.amount) {
+    const a = rv('amount');
+    out.push(a <= 1 ? `${pctStr(a)} of max HP`
+      : skill.action === 'shield' ? `${Math.round(a)} damage absorbed`
+        : skill.interval ? `${Math.round(a)} healing per tick` : `heals ${Math.round(a)}`);
+  }
+  if (skill.interval) out.push(`ticks every ${num1(rv('interval'))} s`);
+  if (skill.windup) out.push(`${num1(skill.windup)} s windup`);
+  return out;
 }
 
 // ==========================================================================

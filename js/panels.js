@@ -7,12 +7,13 @@ import { SHOP_GROUPS, SMITH_GROUPS, questFor, repeatableQuestFor, questXpFor,
          MAX_SPELL_SLOTS, fmtResource, itemById, spellById, costFor,
          CLASS_TREES, classTreeById, classSkillById, classSkillRequiredLevel,
          classSkillMeatCost, classPathSkills, firstClassSkillId, CLASS_CHOOSE_COST,
-         requiredClassForItem } from './config.js';
+         classActiveInfo, classPassiveInfo, requiredClassForItem } from './config.js';
 
 const NEED_NAMES = { tent: 'Hide Tent', cabin: 'Wooden Cabin', furnace: 'Stone Furnace',
   keep: 'Medieval Keep', runic: 'Runic Hall', mountain: 'Mountain Fortress',
   spirit: 'Spirit Bastion', primal: 'Primal Citadel', frosthold: 'Frosthold' };
 import { itemIcon, resIcon, skillArt } from './icons.js';
+import { attachTip } from './tooltip.js';
 import { audio } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
@@ -152,6 +153,50 @@ export class Panels {
 
   _affordable(cost) {
     return Object.entries(cost).every(([k, v]) => this.player[k] >= v);
+  }
+
+  // ---- rich hover-tooltip HTML builders (custom, not the native title) ----
+  _itemTip(item, { requiredClass, action } = {}) {
+    const stats = [];
+    const w = item.weapon;
+    if (w) {
+      if (w.dmg) stats.push(['Damage', Math.round(w.dmg)]);
+      if (w.cd) stats.push(['Attack speed', (1 / w.cd).toFixed(2) + '/s']);
+      if (w.range) stats.push(['Range', w.range + ' m']);
+      stats.push(['Type', w.kind === 'bow' ? 'Ranged weapon' : 'Melee weapon']);
+    }
+    const st = item.stats || {};
+    if (st.hp) stats.push(['Max health', '+' + st.hp]);
+    if (st.speed) stats.push(['Move speed', '+' + st.speed]);
+    if (st.regen) stats.push(['Regen', '+' + st.regen + '/s']);
+    if (st.dmgPct) stats.push(['Damage', '+' + Math.round(st.dmgPct * 100) + '%']);
+    if (st.aspd) stats.push(['Attack speed', '+' + Math.round(st.aspd * 100) + '%']);
+    if (item.shield?.block) stats.push(['Block', Math.round(item.shield.block * 100) + '%']);
+    const slot = SLOT_LABELS[item.slot] || item.slot;
+    return `<div class="tt-head"><span class="tt-ico">${itemIcon(item)}</span>
+        <span class="tt-title"><b>${item.name}</b><span class="tt-sub">${slot}${item.level > 1 ? ` · Lv ${item.level}` : ''}</span></span></div>
+      <div class="tt-desc">${item.desc}</div>
+      ${stats.length ? `<ul class="tt-stats">${stats.map(([k, v]) => `<li><span>${k}</span><b>${v}</b></li>`).join('')}</ul>` : ''}
+      ${requiredClass ? '<div class="tt-req">🔒 Requires the Beastmaster class to equip</div>' : ''}
+      ${action ? `<div class="tt-hint">${action}</div>` : ''}`;
+  }
+
+  _abilityTip(skill, rank = 0, { hint } = {}) {
+    const rows = Array.from({ length: skill.maxRank || 1 }, (_, i) => {
+      const n = i + 1;
+      const info = skill.type === 'active' ? classActiveInfo(skill, n) : classPassiveInfo(skill, n);
+      return `<div class="rr${n === rank ? ' cur' : ''}"><b>R${n}</b><span>Lv ${classSkillRequiredLevel(skill, n)} · ${info.join(' · ')}</span></div>`;
+    }).join('');
+    const kind = skill.type === 'active' ? `⚡ Active · ${skill.cd}s cooldown` : '🛡️ Passive';
+    return `<div class="tt-head"><span class="tt-ico">${skillArt(skill.id, skill.icon)}</span>
+        <span class="tt-title"><b>${skill.name}</b><span class="tt-sub">${kind} · Lv ${skill.level}</span></span></div>
+      <div class="tt-desc">${skill.desc}</div>
+      <div class="tt-ranks">${rows}</div>
+      ${hint ? `<div class="tt-hint">${hint}</div>` : ''}`;
+  }
+
+  _plainTip(title) {
+    return `<div class="tt-desc" style="margin:0">${title}</div>`;
   }
 
   // ---------- shop ----------
@@ -547,15 +592,25 @@ export class Panels {
       else action = `<button class="buy-btn node-train" data-class-skill="${skill.id}" ${canTrain ? '' : 'disabled'}>
           ${rank ? `Upgrade → R${nextRank}` : 'Train'} · ${fmtResource(meatCost)} ${meatIcon}</button>`;
 
+      // exact numbers for every rank; the trained rank is highlighted
+      const rankRows = Array.from({ length: skill.maxRank }, (_, ri) => {
+        const n = ri + 1;
+        const info = skill.type === 'active' ? classActiveInfo(skill, n) : classPassiveInfo(skill, n);
+        const cls = n === rank ? ' cur' : n === rank + 1 && !maxed ? ' next' : '';
+        return `<div class="rank-row${cls}"><b>R${n}</b><span class="rr-lv">Lv ${classSkillRequiredLevel(skill, n)}</span>
+          <span class="rr-info">${info.join(' · ')}</span></div>`;
+      }).join('');
+
       const node = document.createElement('div');
       node.className = `class-node ${skill.type}${rank ? ' trained' : ''}${maxed ? ' maxed' : ''}${levelLocked ? ' lvl-locked' : ''}`;
       node.style.setProperty('--i', i);
       node.innerHTML = `<div class="node-art">${skillArt(skill.id, skill.icon)}</div>
         <div class="node-info">
           <div class="node-top"><b>${skill.name}</b>
-            <span class="node-kind">${skill.type === 'active' ? `⚡ ${skill.cd}s` : '🛡️ passive'}</span></div>
+            <span class="node-kind">${skill.type === 'active' ? `⚡ ${skill.cd}s cooldown` : '🛡️ passive'} · Lv ${skill.level}</span></div>
           <div class="node-pips">${pips}<span class="node-rank">${rank}/${skill.maxRank}</span></div>
           <p class="node-desc">${skill.desc}</p>
+          <div class="node-ranks">${rankRows}</div>
           <div class="node-action">${action}</div>
         </div>`;
       pathEl.appendChild(node);
@@ -573,18 +628,30 @@ export class Panels {
     }
     container.appendChild(pathEl);
 
-    const canReset = !!this.hooks.canResetClass?.();
     const reset = document.createElement('div');
     reset.className = 'classp-reset';
     reset.innerHTML = `<div><b>🔄 Reset class</b>
-        <span>Clears your class and every trained rank — no meat refunded.${canReset ? '' : ' Stand beside your home at camp to reset.'}</span></div>
-      <button class="buy-btn danger" data-class-reset="1" ${(!p.selectedClass || !canReset) ? 'disabled' : ''}>Reset — no refund</button>`;
+        <span>Clears your class and every trained rank — no meat is refunded.</span></div>
+      <button class="buy-btn danger" data-class-reset="1">Reset — no refund</button>`;
     container.appendChild(reset);
 
     container.querySelectorAll('[data-class-skill]').forEach(btn =>
       btn.addEventListener('click', () => this.hooks.onTrainClassSkill?.(btn.dataset.classSkill)));
-    container.querySelector('[data-class-reset]')?.addEventListener('click', () =>
-      this.hooks.onResetClass?.());
+    // two-click confirm: the first click arms the button, the second resets
+    const resetBtn = container.querySelector('[data-class-reset]');
+    resetBtn?.addEventListener('click', () => {
+      if (resetBtn.dataset.armed) { this.hooks.onResetClass?.(); return; }
+      resetBtn.dataset.armed = '1';
+      resetBtn.textContent = '⚠ Click again to confirm reset';
+      resetBtn.classList.add('armed');
+      clearTimeout(this._resetTimer);
+      this._resetTimer = setTimeout(() => {
+        if (!resetBtn.isConnected) return;
+        delete resetBtn.dataset.armed;
+        resetBtn.textContent = 'Reset — no refund';
+        resetBtn.classList.remove('armed');
+      }, 3500);
+    });
   }
 
   // ---------- character / equipment ----------
@@ -619,9 +686,9 @@ export class Panels {
         const div = document.createElement('div');
         div.className = 'doll-slot' + (item ? ' filled' : '');
         div.dataset.slot = slot;
-        div.title = item
-          ? `${item.name} — ${item.desc}${requiredClass ? ' · Requires Beastmaster class' : ''} (click to unequip)`
-          : SLOT_LABELS[slot];
+        attachTip(div, item
+          ? this._itemTip(item, { requiredClass, action: id === 'fists' ? '' : 'Click to unequip' })
+          : this._plainTip(SLOT_LABELS[slot]));
         div.innerHTML = `<span class="ds-icon">${item ? itemIcon(item) : ''}</span>
           <span class="ds-label">${SLOT_LABELS[slot]}</span>`;
         if (item && !(slot === 'weapon' && id === 'fists')) {
@@ -778,13 +845,16 @@ export class Panels {
       const div = document.createElement('button');
       div.className = 'inv-item' + (slotIdx >= 0 ? ' slotted' : '') + (spell.type === 'active' ? ' class-ability' : '');
       const icon = spell.type === 'active' ? `<span class="inv-art">${skillArt(id, spell.icon)}</span>` : itemIcon(spell);
-      div.innerHTML = `${icon} <b>${spell.name}</b> ${spell.type === 'active' ? `<span class="ability-rank">R${this._classRank(id)}</span>` : ''}<span class="lv">${slotIdx >= 0 ? `key ${slotIdx + 1}` : 'not slotted'}</span>`;
-      div.title = `${spell.desc} (cooldown ${spell.cd}s)${spell.type === 'active' ? ` · ${classTree?.name} ability` : ''}`;
-      div.addEventListener('click', () => this.hooks.onToggleSpell(id));
+      div.innerHTML = `${icon} <b>${spell.name}</b> ${spell.type === 'active' ? `<span class="ability-rank">R${this._classRank(id)}</span>` : ''}<span class="lv">${slotIdx >= 0 ? `key ${slotIdx + 1}` : 'drag to 1–6'}</span>`;
+      const tip = spell.type === 'active'
+        ? this._abilityTip(spell, this._classRank(id), { hint: slotIdx >= 0 ? 'Click to unslot' : 'Drag onto the 1–6 bar (or click to auto-slot)' })
+        : `<div class="tt-head"><span class="tt-ico">${itemIcon(spell)}</span><span class="tt-title"><b>${spell.name}</b></span></div><div class="tt-desc">${spell.desc}</div>`;
+      attachTip(div, tip);
+      this._wireSpellDrag(div, id);
       book.appendChild(div);
     }
     const usedSlots = p.spellSlots.slice(0, MAX_SPELL_SLOTS).filter(Boolean).length;
-    $('spellbook-note').textContent = `${usedSlots}/${MAX_SPELL_SLOTS} action slots used — click a spell or trained class ability to slot/unslot it.`;
+    $('spellbook-note').textContent = `${usedSlots}/${MAX_SPELL_SLOTS} action slots used — drag an ability onto the 1–6 bar (or click to slot/unslot).`;
   }
 
   // ---------- inventory: WoW-style slot grid inside the Armory ----------
@@ -827,9 +897,16 @@ export class Panels {
       }
       div.className = 'inv-cell' + (cell.kind === 'item' ? ' gear' : '') +
         (i >= p.invSlots ? ' overflow' : '');
-      div.title = cell.title;
       div.innerHTML = `<span class="ic">${cell.itemRef ? itemIcon(cell.itemRef) : cell.icon}</span>` +
         (cell.count > 0 ? `<span class="cnt">${fmtResource(cell.count)}</span>` : '');
+      if (cell.kind === 'item') {
+        const requiredClass = this.camp ? requiredClassForItem(cell.itemRef) : null;
+        const action = cell.itemRef.nest || cell.itemRef.placeable
+          ? 'Click to place it' : 'Click to equip · drag to a 1–6 slot or out to drop';
+        attachTip(div, this._itemTip(cell.itemRef, { requiredClass, action }));
+      } else {
+        attachTip(div, this._plainTip(cell.title));
+      }
       this._wireInvCell(div, cell);
       grid.appendChild(div);
     }
@@ -870,6 +947,7 @@ export class Panels {
     const onMove = (e) => {
       if (!dragging && Math.hypot(e.clientX - sx, e.clientY - sy) > 8) {
         dragging = true;
+        if (cell.kind === 'item') document.body.classList.add('slotting');
         ghost = div.cloneNode(true);
         ghost.className = 'inv-cell drag-ghost';
         document.body.appendChild(ghost);
@@ -877,12 +955,17 @@ export class Panels {
       if (ghost) {
         ghost.style.left = (e.clientX - 24) + 'px';
         ghost.style.top = (e.clientY - 24) + 'px';
+        const over = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('.spell-slot');
+        document.querySelectorAll('.spell-slot.drop-hot').forEach(s => s.classList.remove('drop-hot'));
+        over?.classList.add('drop-hot');
       }
     };
     const onUp = (e) => {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       ghost?.remove();
+      document.body.classList.remove('slotting');
+      document.querySelectorAll('.spell-slot.drop-hot').forEach(s => s.classList.remove('drop-hot'));
       if (!dragging) { this._invClick(cell); return; }
       const under = document.elementFromPoint(e.clientX, e.clientY);
       const barSlot = under?.closest?.('.spell-slot');
@@ -910,6 +993,49 @@ export class Panels {
         if (cell.kind === 'res') this.hooks.onDropRes?.(cell.id);
         else if (cell.kind === 'item') this.hooks.onDropItem?.(cell.id);
         else if (cell.kind === 'consumable') this.hooks.onDropConsumable?.(cell.id);
+        this.refresh();
+      }
+    };
+    div.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      dragging = false; ghost = null;
+      sx = e.clientX; sy = e.clientY;
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    });
+  }
+
+  // Spellbook abilities: click toggles in/out of the bar, DRAG drops the
+  // ability onto a specific 1–6 slot (this is what the first-time hint teaches).
+  _wireSpellDrag(div, id) {
+    let ghost = null, dragging = false, sx = 0, sy = 0;
+    const onMove = (e) => {
+      if (!dragging && Math.hypot(e.clientX - sx, e.clientY - sy) > 8) {
+        dragging = true;
+        // lift the 1–6 bar above the modal and enlarge its slots as drop targets
+        document.body.classList.add('slotting');
+        ghost = div.cloneNode(true);
+        ghost.className = 'inv-item drag-ghost spell-drag-ghost';
+        document.body.appendChild(ghost);
+      }
+      if (ghost) {
+        ghost.style.left = (e.clientX - 30) + 'px';
+        ghost.style.top = (e.clientY - 20) + 'px';
+        const over = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('.spell-slot');
+        document.querySelectorAll('.spell-slot.drop-hot').forEach(s => s.classList.remove('drop-hot'));
+        over?.classList.add('drop-hot');
+      }
+    };
+    const onUp = (e) => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      ghost?.remove();
+      document.body.classList.remove('slotting');
+      document.querySelectorAll('.spell-slot.drop-hot').forEach(s => s.classList.remove('drop-hot'));
+      if (!dragging) { this.hooks.onToggleSpell(id); return; }
+      const barSlot = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('.spell-slot');
+      if (barSlot) {
+        this.hooks.onAssignSlot?.(Number(barSlot.dataset.slot), id);
         this.refresh();
       }
     };

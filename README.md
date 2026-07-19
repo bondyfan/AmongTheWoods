@@ -72,8 +72,14 @@ no build step, no CDN dependency.
   cloak, mount, charm and one companion.
   Weapons and companions are bought in the shop's **Arsenal** tab (or looted
   from bosses). Manage them in the Character sheet (C).
-- **Trained active class abilities** fill up to 6 action slots, used with keys
-  1–6. New class ranks unlock through level 24.
+- **Trained active class abilities** are dragged onto the 1–6 action bar (a
+  one-time hint above the bar teaches this on your first ability; drag between
+  slots to reorder, drag off the bar to unslot). Every skill in the path lists
+  its exact numbers for each rank — damage, stuns, radii, buff percentages and
+  the level each rank requires. Heavy strikes (Heroic Strike, Ground Slam,
+  Execute) wind up for half a second before landing, and warrior abilities ship
+  with full effects: ground slashes, shockwave cracks, body-spin Whirlwind,
+  charge dust, buff auras and roars. New class ranks unlock through level 24.
 - Enemy level bands rise by three per biome: Verdant Forest **1–3**, Scorched
   Desert **4–6**, Dark Forest **7–9**, Murky Swamp **10–12**, Highlands
   **13–15**, Haunted Forest **16–18**, Jungle **19–21**, Frozen Peak **22–24**.

@@ -144,6 +144,7 @@ const panels = new Panels({
     if (open) {
       input.cancelCombat();
       player.charging = false;
+      player.castWindup = null;
       player.blocking = false;
       document.exitPointerLock?.(); // panels need the cursor back
     }
@@ -172,12 +173,21 @@ const panels = new Panels({
   },
   onToast: (msg) => ui.toast(msg, 'error'),
   onUnequip: (slot) => { player.unequip(slot); panels.refresh(); },
-  onToggleSpell: (id) => { player.toggleSpellSlot(id); panels.refresh(); },
+  onToggleSpell: (id) => {
+    player.toggleSpellSlot(id);
+    if (player.spellSlots.includes(id)) localStorage.setItem('woods_slot_hint_done', '1');
+    panels.refresh();
+  },
   onBuild: (id, lane) => buildBase(id, lane),
   onCampBuild: (id) => campBuild(id),
   onBuyConsumable: (id) => buyConsumable(id),
   onChestChange: () => mp?.sendCampSync?.(),
-  onAssignSlot: (i, id) => { player.spellSlots[i] = id; audio.sfx('click', 0.4); },
+  onAssignSlot: (i, id) => {
+    while (player.spellSlots.length <= i) player.spellSlots.push(undefined);
+    player.spellSlots[i] = id;
+    localStorage.setItem('woods_slot_hint_done', '1'); // the drag lesson is learned
+    audio.sfx('click', 0.4);
+  },
   onDropRes: (key) => dropResource(key),
   onDropItem: (id) => dropItem(id),
   onPlaceNest: (id) => placeNest(id),
@@ -2702,25 +2712,23 @@ function trainClassSkill(id) {
   player.meat = roundResource(player.meat - meatCost);
   player.selectedClass = skill.classId;
   player.classTraining[id] = nextRank;
-  if (skill.type === 'active') player.assignAbilitySlot(id);
   player.enforceClassEquipment();
   player.recompute();
   companions.sync(player);
   const tree = classTreeById(skill.classId);
-  ui.toast(`${tree.icon} Trained: ${skill.name} — rank ${nextRank}/${skill.maxRank}`, 'level');
+  // New actives are NOT auto-slotted — the player drags them onto the 1–6 bar
+  // (a one-time hint above the bar teaches this on the very first ability).
+  ui.toast(skill.type === 'active' && nextRank === 1 && !player.spellSlots.includes(id)
+    ? `${tree.icon} Learned: ${skill.name} — drag it onto the 1–6 bar!`
+    : `${tree.icon} Trained: ${skill.name} — rank ${nextRank}/${skill.maxRank}`, 'level');
   audio.sfx('upgrade', 0.55);
   panels.refresh();
   panels.flashCard(skill.name);
 }
 
 function resetClassTree() {
-  if (!nearHome() || !player.selectedClass) {
-    ui.toast('🏠 Your class can only be reset beside your home at camp.', 'error');
-    audio.sfx('error', 0.4);
-    return;
-  }
-  const name = classTreeById(player.selectedClass)?.name || 'class';
-  if (!window.confirm(`Reset ${name}? Every trained rank will be lost and spent meat will NOT be refunded.`)) return;
+  if (!player.selectedClass) return;
+  // The panel arms this with a two-click confirm, so no blocking dialog here.
   const oldActives = new Set(player.trainedClassActives().map(skill => skill.id));
   player.clearClassCombatState();
   player.selectedClass = null;

@@ -2,8 +2,9 @@
 
 import * as THREE from 'three';
 import { WORLD, XP_LEVELS, MAX_LEVEL, MAX_SPELL_SLOTS, ENEMY_TYPES, RES_ICONS,
-         fmtResource, itemById, spellById, classSkillById } from './config.js';
+         fmtResource, itemById, spellById, classSkillById, classActiveInfo } from './config.js';
 import { itemIcon, skillArt } from './icons.js';
+import { attachTip } from './tooltip.js';
 import { audio } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
@@ -39,10 +40,49 @@ export class UI {
     });
     $('restart-btn').addEventListener('click', () => location.reload());
 
-    // spellbar clicks
+    // spellbar: click casts, dragging a filled slot reorders (or drags it off)
     $('spellbar').addEventListener('click', (e) => {
+      if (performance.now() < (this._slotClickSuppressUntil || 0)) return; // was a drag
       const slot = e.target.closest('.spell-slot');
       if (slot) hooks.onCastSpell(Number(slot.dataset.slot));
+    });
+    $('spellbar').addEventListener('pointerdown', (e) => {
+      const slot = e.target.closest('.spell-slot');
+      if (!slot) return;
+      const i = Number(slot.dataset.slot);
+      let ghost = null, dragging = false;
+      const sx = e.clientX, sy = e.clientY;
+      const onMove = (ev) => {
+        if (!dragging && Math.hypot(ev.clientX - sx, ev.clientY - sy) > 8) {
+          if (!this._player?.spellSlots?.[i]) return; // empty slots don't drag
+          dragging = true;
+          ghost = slot.cloneNode(true);
+          ghost.classList.add('drag-ghost');
+          document.body.appendChild(ghost);
+        }
+        if (ghost) {
+          ghost.style.left = (ev.clientX - 26) + 'px';
+          ghost.style.top = (ev.clientY - 26) + 'px';
+        }
+      };
+      const onUp = (ev) => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        ghost?.remove();
+        if (!dragging) return;
+        this._slotClickSuppressUntil = performance.now() + 200;
+        const slots = this._player.spellSlots;
+        const other = document.elementFromPoint(ev.clientX, ev.clientY)?.closest?.('.spell-slot');
+        if (other) { // swap the two slots
+          const j = Number(other.dataset.slot);
+          while (slots.length <= Math.max(i, j)) slots.push(undefined);
+          [slots[i], slots[j]] = [slots[j], slots[i]];
+        } else slots[i] = undefined; // dragged off the bar → unslot
+        localStorage.setItem('woods_slot_hint_done', '1');
+        audio.sfx('click', 0.4);
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
     });
 
     // menu music needs a user gesture
@@ -154,7 +194,16 @@ export class UI {
   }
 
   updateSpellbar(player) {
+    this._player = player; // slot drag-reorder needs it
     const bar = $('spellbar');
+    // one-time lesson: an ability is trained but nothing is slotted yet
+    const hintEl = $('slot-hint');
+    if (hintEl) {
+      const need = !localStorage.getItem('woods_slot_hint_done')
+        && (player.trainedClassActives?.().length || 0) > 0
+        && !player.spellSlots?.some(Boolean);
+      hintEl.classList.toggle('hidden', !need);
+    }
     for (let i = 0; i < MAX_SPELL_SLOTS; i++) {
       let el = bar.children[i];
       if (!el) {
@@ -162,6 +211,7 @@ export class UI {
         el.className = 'spell-slot';
         el.dataset.slot = i;
         el.innerHTML = `<span class="spell-icon"></span><span class="spell-key">${i + 1}</span><div class="spell-cd"></div>`;
+        attachTip(el, ' '); // reads el._tipHtml live, refreshed below each frame
         bar.appendChild(el);
       }
       const id = player.spellSlots[i];
@@ -176,7 +226,7 @@ export class UI {
         el.classList.add('empty');
         iconEl.innerHTML = '';
         cdEl.style.height = '0%';
-        el.title = '';
+        el._tipHtml = '<div class="tt-desc" style="margin:0">Empty slot — drag an ability here from the Class tab.</div>';
         el.classList.remove('equipped-slot', 'class-ability-slot');
         continue;
       }
@@ -184,9 +234,16 @@ export class UI {
       iconEl.innerHTML = activeClassAbility
         ? skillArt(id, activeClassAbility.icon)
         : itemIcon(ability ?? item);
-      el.title = ability
-        ? `${ability.name} — ${ability.desc}${activeClassAbility ? ` · Rank ${player.classRank?.(id) ?? player.classTraining?.[id] ?? 1}` : ''}`
-        : `${item.name} — press ${i + 1} to equip`;
+      const rank = activeClassAbility ? (player.classRank?.(id) ?? player.classTraining?.[id] ?? 1) : 0;
+      el._tipHtml = activeClassAbility
+        ? `<div class="tt-head"><span class="tt-ico">${skillArt(id, activeClassAbility.icon)}</span>
+            <span class="tt-title"><b>${activeClassAbility.name}</b><span class="tt-sub">⚡ Active · Rank ${rank} · key ${i + 1}</span></span></div>
+          <div class="tt-desc">${activeClassAbility.desc}</div>
+          <div class="tt-info">${classActiveInfo(activeClassAbility, rank || 1).join(' · ')}</div>
+          <div class="tt-hint">Click or press ${i + 1} to cast · drag to reorder</div>`
+        : ability
+          ? `<div class="tt-head"><span class="tt-ico">${itemIcon(ability)}</span><span class="tt-title"><b>${ability.name}</b></span></div><div class="tt-desc">${ability.desc}</div>`
+          : `<div class="tt-head"><span class="tt-ico">${itemIcon(item)}</span><span class="tt-title"><b>${item.name}</b></span></div><div class="tt-desc">Press ${i + 1} to equip.</div>`;
       const cd = ability ? (player.spellCds?.[id] || player.classCds?.[id] || 0) : 0;
       const maxCd = activeClassAbility
         ? (player.classAbilityCooldown?.(id) ?? activeClassAbility.cd)

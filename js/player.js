@@ -131,6 +131,10 @@ export class Player {
     this.attackDur = 0.3;
     this.charging = false;
     this.chargeT = 0;
+    this.castWindup = null;   // { skill, rank, id, t, dur } — ability charging up
+    this.spinT = 0;           // Whirlwind body-spin animation timer
+    this.spinDur = 0.55;
+    this.classAuraT = 0;      // particle-aura emit accumulator (Blood Fury etc.)
     this.comboStep = 0;
     this.comboT = 0;
     this.arrowMode = 'standard';
@@ -297,6 +301,9 @@ export class Player {
   clearClassCombatState() {
     for (const zone of this.classZones) this._removeClassZone(zone);
     this.classZones.length = 0;
+    this.castWindup = null;
+    this.spinT = 0;
+    this.mesh?.scale?.setScalar(1); // Avatar growth ends with the buff
     this.breakStealth();
     this.evadeT = 0;
     this.classShield = 0;
@@ -310,6 +317,22 @@ export class Player {
       'poisonBladesT', 'sprintT', 'combustionT', 'escapeRushT']) this[key] = 0;
   }
 
+  // Whether the equipped weapon can perform an ability, else the reason why.
+  // Bow abilities need a bow; warrior/rogue weapon strikes need a real melee
+  // weapon in hand (bare hands don't count). Buffs, spells and heals are free.
+  _abilityWeaponError(skill) {
+    const BOW = new Set(['beast_arrow_haste', 'beast_ten_arrows', 'beast_arrow_rain',
+      'beast_piercing_shot', 'beast_explosive_arrow']);
+    if (BOW.has(skill.id) || skill.action === 'multishot') {
+      return this.weapon.kind === 'bow' ? null : 'Equip a bow or crossbow first';
+    }
+    const needsMelee = !!skill.weaponMult && (skill.classId === 'warrior' || skill.classId === 'rogue');
+    if (needsMelee && (this.weapon.kind !== 'melee' || this.weapon.style === 'fists')) {
+      return 'Equip a melee weapon first';
+    }
+    return null;
+  }
+
   castSpell(slotIndex, ctx) {
     const id = this.spellSlots[slotIndex];
     const classSkill = id ? classSkillById(id) : null;
@@ -318,7 +341,24 @@ export class Player {
     if ((this.spellCds[id] || 0) > 0) { audio.sfx('error', 0.35, 300); return false; }
     if (classSkill) {
       if (classSkill.type !== 'active' || !this.hasClassSkill(id)) return false;
+      if (this.castWindup) return false; // already committed to a wind-up
+      const werr = this._abilityWeaponError(classSkill);
+      if (werr) {
+        this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2), werr, '#ffcc66');
+        audio.sfx('error', 0.35, 300);
+        return false;
+      }
       const rank = this.classRank(id);
+      // Abilities with a windup charge for a moment before landing: the player
+      // raises the weapon, a telegraph ring grows underfoot, and the strike
+      // fires from update() once the timer runs out. Cooldown starts on impact.
+      if (classSkill.windup) {
+        this.castWindup = { skill: classSkill, rank, id,
+          t: classSkill.windup, dur: classSkill.windup };
+        this._spawnTelegraph(classSkill.windup);
+        audio.sfx('special', 0.3, 0);
+        return true;
+      }
       if (!this._castClassAbility(classSkill, rank, ctx)) {
         audio.sfx('error', 0.35, 300);
         return false;
@@ -436,7 +476,8 @@ export class Player {
 
   _classWeaponDamage(enemy, mult = 1, forceBackstab = false) {
     let damage = this.weapon.dmg * mult * this.dmgMult;
-    if ((enemy.hp || 0) / Math.max(1, enemy.maxHp || 1) < 0.35) {
+    // "wounded" = below half health (Executioner / Assassin passives)
+    if ((enemy.hp || 0) / Math.max(1, enemy.maxHp || 1) < 0.5) {
       damage *= 1 + (this.classEffects.executeDmg || 0);
     }
     if ((forceBackstab || this._isBehind(enemy)) && this.classEffects.backstab) {
@@ -480,11 +521,9 @@ export class Player {
   _castClassAbility(skill, rank, ctx) {
     const enemyMgr = ctx.enemyMgr;
     const rv = (key, fallback = 0) => rankValue(skill, key, rank, fallback);
-    const bowSkills = new Set(['beast_arrow_haste', 'beast_ten_arrows', 'beast_arrow_rain',
-      'beast_piercing_shot', 'beast_explosive_arrow']);
-    if (bowSkills.has(skill.id) && this.weapon.kind !== 'bow') {
-      this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
-        'Equip a bow or crossbow first', '#ffcc66');
+    const werr = this._abilityWeaponError(skill);
+    if (werr) {
+      this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2), werr, '#ffcc66');
       return false;
     }
     const target = () => {
@@ -523,6 +562,7 @@ export class Player {
       if (skill.stun) enemyMgr.stun?.(enemy, rv('stun'));
       if (skill.bleedPct) this.hooks.popup(enemy.mesh.position.clone().setY(enemy.mesh.position.y + 2),
         `🩸 ${Math.round(rv('bleedPct') * 100)}% bleed / 30s`, '#ff6b68', 'big');
+      this._meleeAbilityFx(skill, enemy);
       if (hostile) this.breakStealth();
       return ok;
     }
@@ -540,6 +580,7 @@ export class Player {
       this[field[0]] = duration;
       this[field[1]] = power;
       if (skill.buff === 'avatar') this.classShield = Math.max(this.classShield, this.maxHp * power);
+      this._buffFx(skill, power, duration);
       return true;
     }
 
@@ -566,6 +607,18 @@ export class Player {
       }
       if (skill.action === 'holyNova') this._healSelf(this._classHeal(rv('amount')));
       this._spawnClassRing(this.pos, radius, skill.element === 'frost' ? 0x75cfff : 0xffc85a);
+      if (skill.id === 'war_ground_slam') {
+        this._fxGroundCracks(this.pos, radius);
+        this._fxBurst(this.pos, 0xd8b48a, 14, 6, 0.5);
+        audio.sfx('rock_crack', 0.85, 0);
+        audio.sfx('base_hit', 0.5, 0);
+      } else if (skill.id === 'war_whirlwind') {
+        this.spinT = this.spinDur; // body-spin animation
+        this._spawnClassRing(this.pos, radius * 0.7, 0xffd27f, 0.4);
+        this._fxBurst(this.pos, 0xffd27f, 12, 6, 0.45);
+        audio.sfx('attack_melee', 0.6, 0);
+        audio.sfx('special', 0.5, 0);
+      }
       if (hostile) this.breakStealth();
       return true;
     }
@@ -585,6 +638,12 @@ export class Player {
         damageTarget(enemy, result.amount, opts);
         hits++;
       }
+      if (skill.id === 'war_cleaving_wave') {
+        this._fxWave(this.pos.clone().addScaledVector(this.facing, 1.2), this.facing,
+          Math.max(3, range - 1.5));
+        audio.sfx('attack_melee', 0.6, 0);
+        audio.sfx('special', 0.45, 0);
+      }
       this.breakStealth();
       return true;
     }
@@ -595,6 +654,10 @@ export class Player {
       this.dashHit.clear();
       this.dashSpec = { dmg: this.weapon.dmg * rv('weaponMult', 1), stun: rv('stun'),
         staggerChance: skill.classId === 'warrior' ? (this.classEffects.staggerChance || 0) : 0 };
+      if (skill.id === 'war_charge') {
+        this._fxBurst(this.pos, 0xd8b48a, 8, 3, 0.4);
+        audio.sfx('boar_attack', 0.7, 0);
+      }
       this.breakStealth();
       return true;
     }
@@ -766,6 +829,55 @@ export class Player {
     return false;
   }
 
+  // per-ability impact effects for single-target melee strikes
+  _meleeAbilityFx(skill, enemy) {
+    const at = enemy.pos;
+    if (skill.id === 'war_rend') {
+      const side = new THREE.Vector3(-this.facing.z, 0, this.facing.x).multiplyScalar(0.9);
+      this._fxGroundSlash({ x: at.x - side.x, z: at.z - side.z },
+        { x: at.x + side.x, z: at.z + side.z }, 0xd23b2f, 0.35, 0.5);
+      this._fxBurst(at, 0xd23b2f, 8, 3, 0.5);
+      audio.sfx('hit', 0.6, 0);
+    } else if (skill.id === 'war_heroic_strike') {
+      this._fxGroundSlash(this.pos, at, 0xffc257, 0.6);
+      this._fxBurst(at, 0xffd27f, 10, 4.5, 0.45);
+      audio.sfx('attack_melee', 0.75, 0);
+      audio.sfx('rock_crack', 0.45, 0);
+    } else if (skill.id === 'war_execute') {
+      this._fxGroundSlash(this.pos, at, 0xff5a3c, 0.85, 0.6);
+      this._fxBurst(at, 0xff5a3c, 14, 5, 0.55);
+      audio.sfx('rock_crack', 0.7, 0);
+      audio.sfx('attack_melee', 0.85, 0);
+    } else {
+      this._fxBurst(at, 0xffd27f, 6, 3, 0.4);
+    }
+  }
+
+  // cast flash + concrete numbers whenever a timed buff goes up
+  _buffFx(skill, power, duration) {
+    const pct = (v) => `${Math.round(v * 100)}%`;
+    const head = this.mesh.position.clone().setY(this.mesh.position.y + 2.3);
+    if (skill.buff === 'warCry') {
+      this._spawnClassRing(this.pos, 4.2, 0xff8a5f, 0.6);
+      this._fxBurst(this.pos, 0xff8a5f, 10, 5, 0.5);
+      this.hooks.popup(head, `📯 +${pct(power)} dmg · -${pct(power * 0.5)} taken · ${duration}s`, '#ffb08a', 'big');
+      audio.sfx('aggro', 0.8, 0);
+    } else if (skill.buff === 'bloodFury') {
+      this._spawnClassRing(this.pos, 2.6, 0xd23b2f, 0.55);
+      this._fxBurst(this.pos, 0xd23b2f, 9, 3.5, 0.5);
+      this.hooks.popup(head, `🔥 +${pct(power)} speed · ${pct(power)} lifesteal · ${duration}s`, '#ff8a7f', 'big');
+      audio.sfx('wolf_attack', 0.65, 0);
+    } else if (skill.buff === 'avatar') {
+      this._spawnClassRing(this.pos, 3.4, 0xd8d8e0, 0.8);
+      this._fxBurst(this.pos, 0xd8d8e0, 14, 4, 0.7);
+      this.hooks.popup(head, `🗿 +${pct(power)} dmg · shield ${pct(power)} HP · ${duration}s`, '#e8e8f0', 'big');
+      audio.sfx('evolve', 0.6, 0);
+    } else {
+      this._spawnClassRing(this.pos, 2.6, 0x9cd8ff, 0.5);
+      this.hooks.popup(head, `✨ ${skill.name} · ${duration}s`, '#bfe0ff');
+    }
+  }
+
   _healSelf(amount) {
     const actual = Math.max(0, Math.min(this.maxHp - this.hp, Math.round(amount)));
     if (actual <= 0) return 0;
@@ -915,6 +1027,96 @@ export class Player {
     this.classFx.push({ mesh, t: life, life, kind: 'ring' });
   }
 
+  // growing ring underfoot that follows the player while an ability winds up
+  _spawnTelegraph(dur) {
+    const geo = new THREE.RingGeometry(0.55, 0.72, 36);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffd27f, transparent: true, opacity: 0.35,
+      side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(this.pos.x, this.mesh.position.y + 0.1, this.pos.z);
+    this.scene.add(mesh);
+    this.classFx.push({ mesh, t: dur, life: dur, kind: 'telegraph' });
+  }
+
+  // glowing slash burned into the ground between two points (Heroic Strike…)
+  _fxGroundSlash(from, to, color = 0xffc257, width = 0.55, life = 0.45) {
+    const dx = to.x - from.x, dz = to.z - from.z;
+    const len = Math.max(1.4, Math.hypot(dx, dz) + 0.8);
+    const geo = new THREE.PlaneGeometry(width, len);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.95, side: THREE.DoubleSide,
+      depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set((from.x + to.x) / 2, this.mesh.position.y + 0.1, (from.z + to.z) / 2);
+    mesh.rotation.y = Math.atan2(dx, dz);
+    this.scene.add(mesh);
+    this.classFx.push({ mesh, t: life, life, kind: 'decal', op0: 0.95 });
+  }
+
+  // shower of small glowing shards flying outward from a point
+  _fxBurst(pos, color, n = 9, speed = 4, life = 0.42, size = 0.16) {
+    for (let i = 0; i < n; i++) {
+      const geo = new THREE.PlaneGeometry(size, size);
+      const mat = new THREE.MeshBasicMaterial({
+        color, transparent: true, opacity: 0.95, side: THREE.DoubleSide,
+        depthWrite: false, blending: THREE.AdditiveBlending,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      const a = Math.random() * Math.PI * 2;
+      mesh.position.set(pos.x, (this.mesh.position.y ?? pos.y) + 0.6 + Math.random() * 0.8, pos.z);
+      mesh.rotation.set(Math.random() * 3, Math.random() * 3, 0);
+      this.scene.add(mesh);
+      this.classFx.push({ mesh, t: life, life, kind: 'riser', op0: 0.95,
+        vel: new THREE.Vector3(Math.cos(a) * speed * (0.4 + Math.random() * 0.6),
+          1.5 + Math.random() * 2.5, Math.sin(a) * speed * (0.4 + Math.random() * 0.6)) });
+    }
+  }
+
+  // one drifting particle (Blood Fury aura, charge dust…)
+  _fxRiser(pos, color, vel, life = 0.5, size = 0.15, opacity = 0.8) {
+    const geo = new THREE.PlaneGeometry(size, size);
+    const mat = new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity, side: THREE.DoubleSide,
+      depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(pos);
+    mesh.rotation.set(Math.random() * 3, Math.random() * 3, 0);
+    this.scene.add(mesh);
+    this.classFx.push({ mesh, t: life, life, kind: 'riser', op0: opacity, vel: vel.clone() });
+  }
+
+  // crescent wave sweeping forward along the facing (Cleaving Wave)
+  _fxWave(pos, dir, range, color = 0xffc257, life = 0.38) {
+    // arc centered on the +Z model-forward once rotation.y = atan2(dir.x, dir.z)
+    const geo = new THREE.RingGeometry(1.7, 2.35, 26, 1, -Math.PI / 2 - 0.75, 1.5);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.9, side: THREE.DoubleSide,
+      depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(pos.x, this.mesh.position.y + 0.35, pos.z);
+    mesh.rotation.y = Math.atan2(dir.x, dir.z);
+    this.scene.add(mesh);
+    this.classFx.push({ mesh, t: life, life, kind: 'wave', op0: 0.9,
+      vel: dir.clone().setY(0).normalize().multiplyScalar(range / life) });
+  }
+
+  // radial ground cracks bursting out of an impact point (Ground Slam)
+  _fxGroundCracks(pos, radius, color = 0xffb35a, n = 6) {
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + Math.random() * 0.5;
+      const to = { x: pos.x + Math.cos(a) * radius * 0.9, z: pos.z + Math.sin(a) * radius * 0.9 };
+      this._fxGroundSlash(pos, to, color, 0.3, 0.6);
+    }
+  }
+
   _spawnArrowRainFx(zone) {
     for (let i = 0; i < 6; i++) {
       const angle = Math.random() * Math.PI * 2;
@@ -936,9 +1138,35 @@ export class Player {
       const fx = this.classFx[i];
       fx.t -= dt;
       const k = 1 - Math.max(0, fx.t) / fx.life;
-      if (fx.kind === 'fallingArrow') fx.mesh.position.y -= dt * 16;
-      else fx.mesh.scale.setScalar(0.65 + k * 0.65);
-      fx.mesh.material.opacity = 0.8 * (1 - k);
+      const op0 = fx.op0 ?? 0.8;
+      switch (fx.kind) {
+        case 'fallingArrow':
+          fx.mesh.position.y -= dt * 16;
+          fx.mesh.material.opacity = op0 * (1 - k);
+          break;
+        case 'telegraph': // follows the caster, grows and brightens
+          fx.mesh.position.set(this.pos.x, this.mesh.position.y + 0.1, this.pos.z);
+          fx.mesh.scale.setScalar(0.8 + k * 1.9);
+          fx.mesh.material.opacity = 0.3 + 0.55 * k;
+          break;
+        case 'riser':
+          if (fx.vel) fx.mesh.position.addScaledVector(fx.vel, dt);
+          fx.mesh.rotation.y += dt * 4;
+          fx.mesh.material.opacity = op0 * (1 - k);
+          break;
+        case 'decal':
+          fx.mesh.scale.setScalar(1 + k * 0.12);
+          fx.mesh.material.opacity = op0 * (1 - k * k);
+          break;
+        case 'wave':
+          if (fx.vel) fx.mesh.position.addScaledVector(fx.vel, dt);
+          fx.mesh.scale.setScalar(1 + k * 0.45);
+          fx.mesh.material.opacity = op0 * (1 - k);
+          break;
+        default: // 'ring'
+          fx.mesh.scale.setScalar(0.65 + k * 0.65);
+          fx.mesh.material.opacity = op0 * (1 - k);
+      }
       if (fx.t > 0) continue;
       this.scene.remove(fx.mesh);
       fx.mesh.geometry?.dispose?.();
@@ -1149,7 +1377,11 @@ export class Player {
         pick: makePickaxe, axe: makeAxe,
       };
       const tool = (makers[this.weapon.style] || makeAxe)(this.weapon.tier);
-      tool.rotation.x = -0.2;
+      // Weapons are modelled with the handle along +Y (blade at the top). Tip
+      // them forward out of the fist (~75°) so they lead away from the body in
+      // a ready stance instead of standing bolt upright in the hand. Spears get
+      // laid almost flat so the point aims ahead.
+      tool.rotation.x = this.weapon.style === 'spear' ? 1.5 : 1.3;
       rightSocket.add(tool);
     }
     if (this.weapon.kind === 'bow') {
@@ -1449,6 +1681,40 @@ export class Player {
     const rest = (this.restMult > 1 && this.idleT > 3 && this.hurtT > 5) ? this.restMult : 1;
     if (this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.hpRegen * rest * dt);
     for (const id in this.spellCds) this.spellCds[id] = Math.max(0, this.spellCds[id] - dt);
+    // ---- ability wind-up: raise the weapon, then land the strike ----
+    if (this.castWindup) {
+      if (this.stunT > 0) {
+        this.castWindup = null; // interrupted — no cooldown burned
+        audio.sfx('error', 0.3, 300);
+      } else {
+        this.castWindup.t -= dt;
+        if (this.castWindup.t <= 0) {
+          const { skill, rank, id } = this.castWindup;
+          this.castWindup = null;
+          if (this._castClassAbility(skill, rank, ctx)) {
+            this.spellCds[id] = this.classAbilityCooldown(id);
+            audio.sfx('special', 0.45);
+          } else audio.sfx('error', 0.3, 300);
+        }
+      }
+    }
+    // ---- visible auras for timed class buffs ----
+    if (this.bloodFuryT > 0) {
+      this.classAuraT -= dt;
+      if (this.classAuraT <= 0) {
+        this.classAuraT = 0.13;
+        const off = new THREE.Vector3((Math.random() - 0.5) * 0.9,
+          0.4 + Math.random() * 1.2, (Math.random() - 0.5) * 0.9);
+        this._fxRiser(this.mesh.position.clone().add(off), 0xd23b2f,
+          new THREE.Vector3(0, 2.2, 0), 0.55, 0.14, 0.75);
+      }
+    }
+    // Avatar: visibly grow into a juggernaut while the buff runs
+    const avatarScale = this.avatarT > 0 ? 1.16 : 1;
+    const curScale = this.mesh.scale.x;
+    if (Math.abs(curScale - avatarScale) > 0.002) {
+      this.mesh.scale.setScalar(curScale + (avatarScale - curScale) * Math.min(1, dt * 6));
+    }
     if (this.hotT > 0) {
       this.hotT = Math.max(0, this.hotT - dt);
       this.hotTickT -= dt;
@@ -1494,7 +1760,7 @@ export class Player {
 
     // A sword can parry during the first instant of its guard; shields sustain
     // a stronger block. Guarding slows movement and prevents attacking.
-    const wantsBlock = input.block && this.canBlock && !this.charging && this.dashT <= 0;
+    const wantsBlock = input.block && this.canBlock && !this.castWindup && this.dashT <= 0;
     if (wantsBlock && !this.blocking) this.parryT = 0.22;
     this.blocking = wantsBlock;
 
@@ -1506,6 +1772,12 @@ export class Player {
       this.pos.addScaledVector(this.dashDir, 34 * dt);
       world.collide(this.pos, 0.45, { boat: ctx.boat });
       this._applyBounds(ctx);
+      // dust kicked up behind a combat charge (Bull Charge, Shadowstep dashes)
+      if (this.dashSpec) {
+        this._fxRiser(this.mesh.position.clone().setY(this.mesh.position.y + 0.25),
+          0xcbb693, new THREE.Vector3((Math.random() - 0.5) * 1.6, 1.6,
+            (Math.random() - 0.5) * 1.6), 0.4, 0.2, 0.5);
+      }
       for (const e of enemyMgr.alive()) {
         if (this.dashHit.has(e.id)) continue;
         if (e.pos.distanceTo(this.pos) < 1.7 + e.hitR) {
@@ -1513,6 +1785,8 @@ export class Player {
           if (this.dashSpec.stun) enemyMgr.stun(e, this.dashSpec.stun);
           if (Math.random() < (this.dashSpec.staggerChance || 0)) enemyMgr.stun?.(e, 0.8);
           enemyMgr.damage(e, this.dmgMult * this.dashSpec.dmg, this.dashDir);
+          this._fxBurst(e.pos, 0xffb08a, 8, 4, 0.4);
+          audio.sfx('hit', 0.5, 0);
         }
       }
       moving = true;
@@ -1566,7 +1840,7 @@ export class Player {
         const mountBonus = ctx.mounted ? 9 : ctx.boatMount ? 6 : 0;
         const terrainMult = onWater ? (ctx.boatMount ? 0.65 : 0.4) : (ctx.boatMount ? 0.45 : 1);
         const speed = (this.speed + this.moveSpeedBonus + mountBonus) * terrainMult
-          * guardSlow
+          * guardSlow * (this.castWindup ? 0.5 : 1)
           * (this.roastT > 0 ? 1.1 : 1) * (ctx.devFly ? 1 : (ctx.envSpeedMult ?? 1));
         // cliffs are walls: block any step that climbs too steeply (walking
         // DOWN or falling off is always allowed); sliding along one is fine.
@@ -1613,7 +1887,10 @@ export class Player {
     }
     this.mesh.position.set(this.pos.x, this._updateVertical(dt, world, ctx.devFly), this.pos.z);
     // local +z toward the aim point, so arm swings (toward +z) punch forward
-    this.mesh.rotation.y = Math.atan2(this.facing.x, this.facing.z);
+    // Whirlwind: spin the whole body two full turns on top of the facing
+    if (this.spinT > 0) this.spinT = Math.max(0, this.spinT - dt);
+    this.mesh.rotation.y = Math.atan2(this.facing.x, this.facing.z)
+      + (this.spinT > 0 ? (1 - this.spinT / this.spinDur) * Math.PI * 4 : 0);
 
     // -- attack with the equipped weapon: hold the attack button (LMB, or RMB in
     // top-down view) to auto-swing repeatedly at the weapon's normal cadence.
@@ -1621,8 +1898,8 @@ export class Player {
     this.attackCd -= dt;
     input.takeLeftPressed();          // consume edge state (charging removed)
     input.takeLeftReleased();
-    const wantAttack = input.mouse.left || input.quickAttack;
-    if (wantAttack && this.attackCd <= 0 && this.dashT <= 0 && !this.blocking) {
+    const wantAttack = input.attackHeld || input.quickAttack;
+    if (wantAttack && this.attackCd <= 0 && this.dashT <= 0 && !this.blocking && !this.castWindup) {
       if (this.weapon.kind === 'bow') this._doShoot(projectiles, 0, ctx.mounted);
       else this._doMelee(world, enemyMgr, ctx.pickups, 0, moving, ctx.mounted);
     }
@@ -1835,14 +2112,8 @@ export class Player {
     this._spawnSlash();
     audio.sfx('attack_melee', 0.4);
 
-    // Running attacks carry momentum; a charged spear turns that momentum into
-    // a real forward lunge while still respecting terrain collision.
-    const lunge = (moving ? 0.28 : 0) + (w.chargeLunge ? w.chargeLunge * charge : 0);
-    if (lunge > 0) {
-      this.pos.addScaledVector(this.facing, lunge);
-      world.collide(this.pos, 0.45);
-      this._clampToWorld();
-    }
+    // (No attack lunge — a forward hop on every moving swing read as a jerky
+    // stutter. Attacks now land in place while you keep moving smoothly.)
 
     const baseArcDot = w.style === 'axe' ? 0.22 : w.style === 'spear' || w.style === 'pick' ? 0.76 : 0.5;
     const arcDot = Math.max(-0.1, baseArcDot - (this.meleeArcBonus || 0));
@@ -1999,14 +2270,15 @@ export class Player {
       leftArm.rotation.x = -1.25;
       rightArm.rotation.x = -0.75;
       rightArm.rotation.z = -0.25;
-    } else if (this.charging) {
-      const draw = Math.min(1, this.chargeT / 1.05);
+    } else if (this.castWindup) {
+      // ability wind-up: haul the weapon arm back further and further
+      const k = 1 - this.castWindup.t / this.castWindup.dur;
       if (bowEquipped) {
         leftArm.rotation.x = -1.45;
-        rightArm.rotation.x = -0.55 - draw * 0.9;
+        rightArm.rotation.x = -0.55 - k * 0.9;
       } else {
-        rightArm.rotation.x = 0.45 + draw * 0.75;
-        rightArm.rotation.z = -0.2 - draw * 0.25;
+        rightArm.rotation.x = 0.5 + k * 1.15;
+        rightArm.rotation.z = -0.2 - k * 0.3;
       }
     } else if (this.attackT > 0) {
       this.attackT -= dt;

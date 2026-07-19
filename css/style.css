@@ -173,6 +173,66 @@ kbd {
   position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
   display: flex; gap: 6px;
 }
+/* one-time drag-and-drop lesson floating above the 1–6 bar. Sits above EVERY
+   panel (z-index 30) so an open modal never hides the lesson. */
+#slot-hint {
+  position: absolute; bottom: 84px; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 8px; pointer-events: none; z-index: 120;
+  background: rgba(20, 28, 14, 0.96); border: 1px solid #e8c96a; border-radius: 12px;
+  padding: 8px 14px; color: #ffe6a0; font-size: 13px; font-weight: bold; white-space: nowrap;
+  box-shadow: 0 0 22px rgba(232, 201, 106, 0.5);
+  animation: hint-bob 1.1s ease-in-out infinite;
+}
+#slot-hint i { font-style: normal; font-size: 17px; }
+@keyframes hint-bob { 0%, 100% { transform: translate(-50%, 0); } 50% { transform: translate(-50%, 7px); } }
+.spell-slot.drag-ghost, .spell-drag-ghost {
+  position: fixed; z-index: 999; pointer-events: none; opacity: 0.85;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.5); background: #223018;
+}
+/* while dragging an ability/item, lift the 1–6 bar above the modal and grow
+   the slots so it is obvious they are drop targets */
+body.slotting #spellbar { z-index: 130; }
+body.slotting .spell-slot {
+  transform: scale(1.22); border-color: #e8c96a;
+  box-shadow: 0 0 16px rgba(232, 201, 106, 0.45); transition: transform 0.1s ease;
+}
+body.slotting .spell-slot.empty {
+  outline: 2px dashed rgba(232, 201, 106, 0.7); outline-offset: 2px;
+}
+.spell-slot.drop-hot {
+  transform: scale(1.4) !important; border-color: #ffe28a !important;
+  box-shadow: 0 0 26px rgba(255, 226, 138, 0.85) !important;
+}
+
+/* ---- custom hover tooltip for items & abilities ---- */
+.game-tooltip {
+  position: fixed; z-index: 500; pointer-events: none; max-width: 300px;
+  background: linear-gradient(160deg, #1c2417, #14180f);
+  border: 1px solid #4a5a38; border-radius: 12px; padding: 11px 13px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55); color: #dfe6d2;
+  font-size: 12px; line-height: 1.45;
+}
+.game-tooltip.hidden { display: none; }
+.tt-head { display: flex; align-items: center; gap: 9px; margin-bottom: 6px; }
+.tt-ico { width: 40px; height: 40px; flex: 0 0 auto; border-radius: 8px; overflow: hidden;
+  display: grid; place-items: center; font-size: 26px;
+  background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.08); }
+.tt-ico .skill-art, .tt-ico .item-icon { width: 100%; height: 100%; }
+.tt-ico .skill-art img { width: 100%; height: 100%; object-fit: cover; }
+.tt-title { min-width: 0; }
+.tt-title b { color: #fff2d6; font-size: 14px; display: block; }
+.tt-sub { color: #9fb389; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.4px; }
+.tt-desc { color: #c3cdb2; margin: 5px 0; }
+.tt-stats { list-style: none; margin: 5px 0 0; padding: 0; }
+.tt-stats li { display: flex; justify-content: space-between; gap: 12px; padding: 1px 0; color: #b8c7a4; }
+.tt-stats li b { color: #eaf1dc; font-weight: bold; }
+.tt-info { color: #d6e0c4; margin: 4px 0 0; }
+.tt-ranks { margin-top: 6px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 5px; }
+.tt-ranks .rr { display: flex; gap: 7px; align-items: baseline; color: #93a184; font-size: 10.5px; padding: 1px 0; }
+.tt-ranks .rr.cur { color: #f2e9cf; }
+.tt-ranks .rr b { color: #e8c96a; flex: 0 0 auto; }
+.tt-req { color: #ff9a6b; margin-top: 5px; font-weight: bold; }
+.tt-hint { color: #e8c96a; margin-top: 5px; font-style: italic; }
 .spell-slot {
   position: relative; width: 52px; height: 52px; border-radius: 10px;
   background: rgba(10, 16, 8, 0.65); border: 2px solid rgba(255,255,255,0.2);
@@ -532,6 +592,21 @@ kbd {
 .node-pips .pip.on { background: var(--class-color); box-shadow: 0 0 6px color-mix(in srgb, var(--class-color) 65%, transparent); }
 .node-rank { color: #9faa96; font-size: 10.5px; margin-left: 5px; }
 .node-desc { margin: 0; color: #b6c1aa; font-size: 11.5px; line-height: 1.4; }
+/* exact numbers per rank — the trained rank glows, the next one is dimmer */
+.node-ranks { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; }
+.rank-row {
+  display: flex; align-items: baseline; gap: 8px; padding: 2px 7px; border-radius: 6px;
+  color: #8f9a87; font-size: 10.5px; line-height: 1.35;
+}
+.rank-row b { color: inherit; font-size: 10px; flex: 0 0 auto; }
+.rank-row .rr-lv { flex: 0 0 auto; opacity: 0.75; font-size: 9.5px; }
+.rank-row .rr-info { min-width: 0; }
+.rank-row.cur {
+  background: color-mix(in srgb, var(--class-color) 14%, transparent);
+  color: #e9eede;
+}
+.rank-row.cur b { color: var(--class-color); }
+.rank-row.next { color: #b0baa6; }
 .node-action { margin-top: 2px; }
 .node-action .buy-btn { width: auto; min-width: 150px; padding: 7px 13px; font-size: 12px; }
 .node-done { color: #9fe07f; font-weight: bold; font-size: 12.5px; }
@@ -548,6 +623,8 @@ kbd {
 .classp-reset .buy-btn { width: auto; min-width: 170px; }
 
 .buy-btn.danger { color: #fff0e8; background: linear-gradient(#9b473b, #6e2d25); }
+.buy-btn.danger.armed { background: linear-gradient(#d85a48, #a23225); animation: arm-pulse 0.7s ease-in-out infinite; }
+@keyframes arm-pulse { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.35); } }
 .class-requirement { display: block; margin-top: 6px; color: #e5c36c; font-size: 11px; font-weight: bold; }
 .inv-item.class-ability { border-color: rgba(156,156,255,0.55); }
 .inv-item .inv-art { position: relative; display: inline-block; width: 26px; height: 26px;
