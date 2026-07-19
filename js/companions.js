@@ -23,17 +23,25 @@ class PetWolf {
   // hooks: { popup, onDeath }
   update(dt, player, enemyMgr, dmg, world, hooks) {
     this.biteCd -= dt;
-    this.maxHp = player.pet.maxHp; // training upgrades apply live
+    const classEffects = player.selectedClass === 'beastmaster'
+      ? (player.classEffects || {})
+      : {};
+    const petPower = player.pet?.classPowerApplied ? 0 : (classEffects.petPower || 0);
+    const petSpeed = Math.max(0.1, 1 + (classEffects.petSpeed || 0));
+    const commandPower = player.petCommandT > 0 ? Math.max(0, player.petCommandPower || 0) : 0;
+    this.maxHp = Math.round(player.pet.maxHp * (1 + petPower)); // training upgrades apply live
     this.hp = Math.min(this.hp, this.maxHp);
 
-    // A Beastmaster can issue a direct hunt command. It temporarily outranks
-    // the normal aggressive/defensive/passive stance until that target falls.
+    // A Beastmaster's timed hunt command temporarily outranks the normal
+    // aggressive/defensive/passive stance until its target falls or time ends.
     const mode = player.petMode || 'aggressive';
     let target = null, best = 18 * 18;
-    if (player.beastCommand && player.petCommandTargetId != null) {
+    if (player.petCommandT > 0 && player.petCommandTargetId != null) {
       target = enemyMgr.alive().find(e => e.id === player.petCommandTargetId) ?? null;
       if (!target || target.pos.distanceToSquared(player.pos) > 32 * 32) {
         player.petCommandTargetId = null;
+        player.petCommandT = 0;
+        player.petCommandPower = 0;
         target = null;
       }
     }
@@ -55,7 +63,7 @@ class PetWolf {
 
     const to = new THREE.Vector3().subVectors(dest, this.pos);
     const dist = to.length();
-    const speed = 5.6;
+    const speed = 5.6 * petSpeed * (1 + commandPower * 0.5);
     if (dist > (target ? 1.2 : 0.4)) {
       this.pos.addScaledVector(to, Math.min(1, (speed * dt) / dist));
       this.walkT += dt * speed;
@@ -63,10 +71,9 @@ class PetWolf {
     }
 
     if (target && dist < 1.5 + target.hitR && this.biteCd <= 0) {
-      this.biteCd = player.beastFrenzy ? 0.68 : 0.9;
+      this.biteCd = 0.9 / (petSpeed * (1 + commandPower * 0.5));
       // 'pet' threat id: enemies the wolf bites turn on the WOLF, not you
-      const wounded = target.hp < target.maxHp * 0.5;
-      enemyMgr.damage(target, dmg * (player.beastFrenzy && wounded ? 1.35 : 1), null, 'pet');
+      enemyMgr.damage(target, dmg * (1 + petPower) * (1 + commandPower), null, 'pet');
     }
 
     // (no more magic contact damage — the wolf is a real combat target now:
@@ -75,7 +82,7 @@ class PetWolf {
     // out of combat the wolf licks its wounds
     this.regenPause -= dt;
     if (this.regenPause <= 0 && this.hp < this.maxHp) {
-      this.hp = Math.min(this.maxHp, this.hp + 4 * dt);
+      this.hp = Math.min(this.maxHp, this.hp + 4 * (1 + (classEffects.petRegen || 0)) * dt);
     }
 
     this.mesh.position.set(this.pos.x, world.heightAt(this.pos.x, this.pos.z), this.pos.z);
@@ -116,7 +123,7 @@ class GuardianSphere {
       .slice(0, orb.targets);
 
     if (inRange.length) {
-      this.shootCd = 1.1;
+      this.shootCd = 1.1 / Math.max(0.1, 1 + (player.classEffects?.petSpeed || 0));
       audio.sfx('attack_ranged', 0.22, 150);
       for (const { e } of inRange) {
         projectiles.spawnBolt(this.mesh.position.clone(), e, {
@@ -141,7 +148,9 @@ export class Companions {
   // Rebuild companions to match the player's pet/orb equipment.
   sync(player) {
     const compItem = player.equipment.companion;
-    const petId = (player.petDead || !player.pet) ? null : compItem;
+    const classAllowsCompanion = player.hooks.classRulesEnabled?.() === false
+      || player.selectedClass === 'beastmaster';
+    const petId = (classAllowsCompanion && !player.petDead && player.pet) ? compItem : null;
     if (petId !== this.wolfItem) {
       if (this.wolf) {
         this.scene.remove(this.wolf.mesh);
@@ -161,7 +170,7 @@ export class Companions {
       }
     }
 
-    const orbId = player.orb ? compItem : null;
+    const orbId = classAllowsCompanion && player.orb ? compItem : null;
     if (orbId !== this.orbItem) {
       for (const s of this.spheres) this.scene.remove(s.mesh);
       this.spheres = [];
@@ -174,6 +183,13 @@ export class Companions {
   }
 
   update(dt, player, enemyMgr, projectiles, world) {
+    if (player.petCommandT > 0) {
+      player.petCommandT = Math.max(0, player.petCommandT - dt);
+      if (player.petCommandT <= 0) {
+        player.petCommandTargetId = null;
+        player.petCommandPower = 0;
+      }
+    }
     if (this.wolf && player.pet) {
       this.wolf.update(dt, player, enemyMgr, player.pet.dmg, world, {
         popup: this.hooks.popup,

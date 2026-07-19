@@ -40,13 +40,10 @@ no build step, no CDN dependency.
 - **WASD / arrows** — move · **Mouse** — aim
 - **Left click** — tap to attack; hold and release for a charged strike
 - **Right click** — quick repeating attack in top-down view
-- **Space / Shift** — dodge with a brief invulnerability window
 - **Ctrl / V** — block with a shield or parry with a sword
 - **Z** — cycle unlocked arrow types
-- **T** — place a Hunter snare after learning Trapper
-- **Y** — order a Beastmaster's wolf to focus the aimed enemy
-- **Q** — cycle owned weapons (fists / axes / bows — only one wielded at a time)
-- **1–6** — cast slotted spells
+- **Q** — cycle owned weapons (bows and crossbows require Beastmaster)
+- **1–6** — use slotted spells and active class abilities
 - **U** — upgrade shop · **C** — character sheet · **N** — bestiary
 - **Esc** — pause · **M** — mute
 
@@ -63,12 +60,19 @@ no build step, no CDN dependency.
 - The world is carved into rooms by **rock ridges with gates** and **rivers
   with wooden bridges** — chokepoints where packs can corner you. Some
   creatures (storm serpents, ice golems) fire shots that **stun** you.
+- **Classes** are trained in the separate **Upgrades → Class** tab. The first
+  passive or active rank locks in exactly one class: **Warrior**,
+  **Beastmaster**, **Rogue**, **Mage**, or **Priest**. Every class has ten
+  upgradeable passives and ten upgradeable active abilities, with three ranks
+  each and player-level requirements. Training costs meat. A class tree can be
+  reset beside home, but spent meat is not refunded and every rank must be
+  trained again. Beastmaster alone can equip bows, crossbows, and companions.
 - **Equipment slots** (WoW-style): weapon, off-hand, armour layers, boots,
   cloak, mount, charm and one companion.
   Items are bought in the grouped shop (Weapons / Clothing / Companions /
   Spells) or looted from bosses. Manage them in the Character sheet (C).
-- **Spells** go into max 6 spell slots and are cast with 1–6. New late-game
-  spells unlock through level 24.
+- **Spells and trained class abilities** share max 6 action slots and are used
+  with 1–6. New late-game spells and class ranks unlock through level 24.
 - Enemy level bands rise by three per biome: Verdant Forest **1–3**, Scorched
   Desert **4–6**, Dark Forest **7–9**, Murky Swamp **10–12**, Highlands
   **13–15**, Haunted Forest **16–18**, Jungle **19–21**, Frozen Peak **22–24**.

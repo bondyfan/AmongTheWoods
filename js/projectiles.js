@@ -59,7 +59,7 @@ export class Projectiles {
     });
   }
 
-  // enemy shots only — streamed to the co-op guest for dodge visibility
+  // enemy shots only — streamed to the co-op guest for projectile visibility
   snapshotShots() {
     return this.list.filter(p => p.kind === 'enemyShot').map(p => ({
       i: p.id, x: +p.mesh.position.x.toFixed(1), z: +p.mesh.position.z.toFixed(1), c: p.color,

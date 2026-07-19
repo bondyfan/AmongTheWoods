@@ -688,52 +688,233 @@ export const STAT_TRACKS = [
 
 export const trainingLevelFor = (track, tier) => track.unlockLevels?.[tier - 1] ?? tier;
 
-// ---- Character specialisations. The first point arrives at Lv2 and another
-// every three levels: Lv24 has 8 points for 15 sequential talents, forcing a
-// real build choice instead of letting one character master almost everything. ----
-export const talentPointsForLevel = (level) => Math.floor((Math.max(1, level) + 1) / 3);
-export const TALENT_TREES = [
-  { id: 'warrior', icon: '🛡️', name: 'Warrior', color: '#d99b62', nodes: [
-    { id: 'warriorVitality', icon: '❤️', name: 'Iron Constitution',
-      desc: '+15% maximum health.' },
-    { id: 'warriorBulwark', icon: '🛡️', name: 'Bulwark', requires: 'warriorVitality',
-      desc: 'Shields and sword guards block 15% more damage.' },
-    { id: 'warriorCleave', icon: '⚔️', name: 'Cleave', requires: 'warriorBulwark',
-      desc: 'Every melee weapon strikes in a much wider arc.' },
-  ] },
-  { id: 'hunter', icon: '🏹', name: 'Hunter', color: '#9bc56b', nodes: [
-    { id: 'hunterBow', icon: '🏹', name: 'Bowcraft',
-      desc: 'Bows gain +18% damage and +3 m range.' },
-    { id: 'hunterTraps', icon: '🪤', name: 'Trapper', requires: 'hunterBow',
-      desc: 'Press T to place a snare that damages and stuns the first enemy.' },
-    { id: 'hunterDeadeye', icon: '🎯', name: 'Deadeye', requires: 'hunterTraps',
-      desc: 'Bow critical chance +10%; precision weak-point hits deal more damage.' },
-  ] },
-  { id: 'wanderer', icon: '🧭', name: 'Wanderer', color: '#6fc4c8', nodes: [
-    { id: 'wandererStride', icon: '🥾', name: 'Long Stride',
-      desc: '+0.7 movement speed and 25% shorter dodge recovery.' },
-    { id: 'wandererForager', icon: '🧺', name: 'Forager', requires: 'wandererStride',
-      desc: '+25% wood and stone from harvesting.' },
-    { id: 'wandererWeathered', icon: '🌦️', name: 'Weathered', requires: 'wandererForager',
-      desc: 'Halves mud, web, cold and poison penalties.' },
-  ] },
-  { id: 'beastmaster', icon: '🐺', name: 'Beastmaster', color: '#c49a72', nodes: [
-    { id: 'beastBond', icon: '🐾', name: 'Wild Bond',
-      desc: 'Animal and sphere companions gain +25% health and damage.' },
-    { id: 'beastCommand', icon: '📣', name: 'Hunt Command', requires: 'beastBond',
-      desc: 'Press Y while aiming at an enemy to order your wolf to focus it.' },
-    { id: 'beastFrenzy', icon: '🩸', name: 'Pack Instinct', requires: 'beastCommand',
-      desc: 'Your wolf bites faster and savages wounded targets.' },
-  ] },
-  { id: 'mystic', icon: '🔮', name: 'Mystic', color: '#b291df', nodes: [
-    { id: 'mysticAttunement', icon: '⏳', name: 'Attunement',
-      desc: 'Spell cooldowns are 20% shorter.' },
-    { id: 'mysticEssence', icon: '🧪', name: 'Essence Seeker', requires: 'mysticAttunement',
-      desc: 'Collected essence is increased by 35%.' },
-    { id: 'mysticOverchannel', icon: '✨', name: 'Overchannel', requires: 'mysticEssence',
-      desc: 'Spells gain +25% power and +20% duration.' },
-  ] },
+// ---- Exclusive class training. Every class has ten upgradeable passives and
+// ten upgradeable active abilities. The first paid rank chooses the class and
+// locks all other trees until a full, non-refundable reset at camp. ----
+const P = (id, icon, name, level, desc, effects) =>
+  ({ id, icon, name, level, desc, effects, type: 'passive', maxRank: 3 });
+const A = (id, icon, name, level, desc, action, spec = {}) =>
+  ({ id, icon, name, level, desc, action, ...spec, type: 'active', maxRank: 3 });
+
+export const CLASS_TREES = [
+  { id: 'warrior', icon: '🛡️', name: 'Warrior', color: '#d99b62',
+    summary: 'Heavy melee fighter with health, brutal weapon skills and lasting bleeds.',
+    passives: [
+      P('war_vitality', '❤️', 'Vitality', 2, '+5% maximum health per rank.', { hpPct: 0.05 }),
+      P('war_arms', '⚔️', 'Arms Mastery', 3, '+5% melee damage per rank.', { meleeDmg: 0.05 }),
+      P('war_thick_skin', '🪨', 'Thick Skin', 5, '-2% incoming damage per rank.', { damageCut: 0.02 }),
+      P('war_cleave', '🪓', 'Cleave Training', 7, 'Melee attack arcs widen per rank.', { arcBonus: 0.05 }),
+      P('war_executioner', '☠️', 'Executioner', 9, '+8% damage to wounded enemies per rank.', { executeDmg: 0.08 }),
+      P('war_blood_drinker', '🩸', 'Blood Drinker', 11, 'Kills restore 1.5% max health per rank.', { lifeOnKillPct: 0.015 }),
+      P('war_heavy_hands', '🔨', 'Heavy Hands', 13, '+4% chance to stagger per rank.', { staggerChance: 0.04 }),
+      P('war_unshaken', '⛰️', 'Unshaken', 15, 'Enemy stuns are 12% shorter per rank.', { stunResist: 0.12 }),
+      P('war_iron_guard', '🛡️', 'Iron Guard', 18, '+4% blocked damage per rank.', { blockBonus: 0.04 }),
+      P('war_tactician', '📯', 'Battle Tactician', 21, 'Warrior ability cooldowns -4% per rank.', { classCdReduction: 0.04 }),
+    ],
+    actives: [
+      A('war_rend', '🩸', 'Rend', 2, 'Stab one target; it loses a percentage of max HP over 30 s.', 'target',
+        { cd: 24, range: 3.2, weaponMult: [0.7, 0.9, 1.1], bleedPct: [0.12, 0.18, 0.24], bleedDur: 30 }),
+      A('war_heroic_strike', '⚔️', 'Heroic Strike', 4, 'A crushing single-target weapon strike.', 'target',
+        { cd: 10, range: 3.2, weaponMult: [1.5, 1.9, 2.3] }),
+      A('war_cry', '📯', 'War Cry', 6, 'Temporarily increases damage and damage reduction.', 'buff',
+        { cd: 40, buff: 'warCry', duration: [8, 10, 12], power: [0.15, 0.25, 0.35] }),
+      A('war_ground_slam', '💥', 'Ground Slam', 8, 'Damage and stun all nearby enemies.', 'aoe',
+        { cd: 24, radius: [4.5, 5.2, 6], weaponMult: [0.8, 1.05, 1.3], stun: [1.2, 1.8, 2.4] }),
+      A('war_charge', '🐂', 'Bull Charge', 10, 'Rush forward, striking and stunning enemies in your path.', 'dash',
+        { cd: 22, weaponMult: [1, 1.3, 1.6], stun: [1, 1.5, 2], distance: [7, 9, 11] }),
+      A('war_whirlwind', '🌪️', 'Whirlwind', 12, 'A powerful circular melee attack.', 'aoe',
+        { cd: 18, radius: [5, 5.5, 6], weaponMult: [1.1, 1.4, 1.8] }),
+      A('war_cleaving_wave', '🌊', 'Cleaving Wave', 14, 'Send a broad damaging wave in front of you.', 'cone',
+        { cd: 16, range: [7, 8.5, 10], weaponMult: [1, 1.3, 1.6] }),
+      A('war_blood_fury', '🔥', 'Blood Fury', 16, 'Gain attack speed and life steal for a short time.', 'buff',
+        { cd: 48, buff: 'bloodFury', duration: [8, 10, 12], power: [0.12, 0.18, 0.25] }),
+      A('war_execute', '🪓', 'Execute', 20, 'Massive damage to a target below 35% health.', 'execute',
+        { cd: 20, range: 3.2, weaponMult: [2.5, 3.3, 4.2], threshold: 0.35 }),
+      A('war_avatar', '🗿', 'Avatar', 24, 'Become a juggernaut with damage, protection and a health shield.', 'buff',
+        { cd: 90, buff: 'avatar', duration: [10, 13, 16], power: [0.25, 0.35, 0.45] }),
+    ] },
+
+  { id: 'beastmaster', icon: '🏹', name: 'Beastmaster', color: '#9bc56b',
+    summary: 'The only class able to equip bows, crossbows and companions; controls traps and arrow storms.',
+    passives: [
+      P('beast_ranged_license', '🏹', 'Ranged Discipline', 2, 'Beastmaster training permits ranged weapons; +2% ranged damage per rank.', { rangedDmg: 0.02 }),
+      P('beast_marksman', '🎯', 'Marksman', 3, '+5% ranged damage per rank.', { rangedDmg: 0.05 }),
+      P('beast_quickdraw', '⚡', 'Quick Draw', 5, '+5% ranged attack speed per rank.', { rangedSpeed: 0.05 }),
+      P('beast_trapper', '🪤', 'Trapper', 7, 'Traps gain +20% damage per rank.', { trapPower: 0.2 }),
+      P('beast_bond', '🐾', 'Wild Bond', 9, 'Companion health and damage +10% per rank.', { petPower: 0.1 }),
+      P('beast_pack_tactics', '🐺', 'Pack Tactics', 11, 'Companions move and attack 8% faster per rank.', { petSpeed: 0.08 }),
+      P('beast_keen_eye', '👁️', 'Keen Eye', 13, '+3.5% ranged critical chance per rank.', { rangedCrit: 0.035 }),
+      P('beast_broadheads', '🩸', 'Broadheads', 15, 'Ranged hits cause stronger bleeding per rank.', { arrowBleed: 0.03 }),
+      P('beast_scavenger', '🍖', 'Scavenger', 18, '+8% meat collected per rank.', { meatMult: 0.08 }),
+      P('beast_handler', '🫶', 'Animal Handler', 21, 'Companion regeneration +25% per rank.', { petRegen: 0.25 }),
+    ],
+    actives: [
+      A('beast_snare', '🪤', 'Snare Trap', 2, 'Place a damaging trap that stuns its first victim.', 'world',
+        { cd: 12, worldAction: 'trap', count: [1, 1, 2], power: [1, 1.35, 1.7] }),
+      A('beast_arrow_haste', '⚡', 'Arrow Haste', 4, 'Greatly increases ranged attack speed.', 'buff',
+        { cd: 38, buff: 'arrowHaste', duration: [8, 11, 14], power: [0.35, 0.48, 0.6] }),
+      A('beast_ten_arrows', '🏹', 'Ten-Arrow Volley', 6, 'Fire ten arrows in a wide fan.', 'multishot',
+        { cd: 16, count: 10, spread: 1.05, weaponMult: [0.3, 0.42, 0.55] }),
+      A('beast_arrow_rain', '🌧️', 'Rain of Arrows', 8, 'Mark the ground; arrows rain over the area for 10 s.', 'zone',
+        { cd: 34, zone: 'arrows', castRange: 18, radius: [5, 6, 7], duration: 10, weaponMult: [0.22, 0.31, 0.4], interval: 1 }),
+      A('beast_piercing_shot', '➶', 'Piercing Shot', 10, 'A high-damage arrow that pierces every enemy in line.', 'multishot',
+        { cd: 14, count: 1, pierce: true, spread: 0, weaponMult: [1.5, 2, 2.6] }),
+      A('beast_explosive_arrow', '💣', 'Explosive Arrow', 12, 'Detonate a burning blast at the aimed location.', 'zoneBurst',
+        { cd: 22, castRange: 18, radius: [3.5, 4.2, 5], weaponMult: [1, 1.35, 1.7], burn: [6, 10, 14] }),
+      A('beast_mend_pet', '🫶', 'Mend Companion', 14, 'Restore companion health and empower its next attacks.', 'world',
+        { cd: 28, worldAction: 'mendPet', power: [0.35, 0.55, 0.8] }),
+      A('beast_hunt_command', '📣', 'Hunt Command', 16, 'Order your companion to focus the aimed enemy.', 'world',
+        { cd: 8, worldAction: 'petCommand', power: [0.15, 0.3, 0.5] }),
+      A('beast_trap_field', '⛓️', 'Trap Field', 20, 'Place several powerful snares around you.', 'world',
+        { cd: 42, worldAction: 'trapField', count: [3, 4, 5], power: [1.2, 1.55, 1.9] }),
+      A('beast_stampede', '🐗', 'Stampede', 24, 'Your living companion calls a stampede through every nearby enemy.', 'petAoe',
+        { cd: 75, radius: [7, 8.5, 10], petMult: [3, 5, 7], stun: [1, 1.5, 2] }),
+    ] },
+
+  { id: 'rogue', icon: '🗡️', name: 'Rogue', color: '#8ec6c9',
+    summary: 'Fast assassin using stealth, poison, evasion and devastating attacks from behind.',
+    passives: [
+      P('rogue_fleet', '🥾', 'Fleet Foot', 2, '+0.3 movement speed per rank.', { speed: 0.3 }),
+      P('rogue_precision', '🎯', 'Precision', 3, '+4% melee critical chance per rank.', { meleeCrit: 0.04 }),
+      P('rogue_light_foot', '🪶', 'Light Foot', 5, '-1.5% incoming damage per rank.', { damageCut: 0.015 }),
+      P('rogue_shadow_training', '🌑', 'Shadow Training', 7, 'Stealth lasts 0.75 s longer per rank.', { stealthDuration: 0.75 }),
+      P('rogue_evasion', '💨', 'Evasion Mastery', 9, 'Evade windows last 0.15 s longer per rank.', { evadeDuration: 0.15 }),
+      P('rogue_backstab', '🔪', 'Backstabber', 11, '+15% damage from behind per rank.', { backstab: 0.15 }),
+      P('rogue_poisoner', '☠️', 'Poisoner', 13, 'Weapon poison damage +20% per rank.', { poisonPower: 0.2 }),
+      P('rogue_combo', '⚔️', 'Combo Mastery', 15, '+5% melee attack speed per rank.', { meleeSpeed: 0.05 }),
+      P('rogue_escape', '🌫️', 'Escape Artist', 18, 'Gain a speed burst after taking damage.', { hurtSpeed: 0.2 }),
+      P('rogue_assassin', '💀', 'Assassin', 21, '+10% damage to wounded targets per rank.', { executeDmg: 0.1 }),
+    ],
+    actives: [
+      A('rogue_stealth', '🌑', 'Stealth', 2, 'Become nearly invisible; attacking breaks stealth.', 'stealth',
+        { cd: 28, duration: [8, 11, 14] }),
+      A('rogue_evade', '💨', 'Evade', 4, 'Avoid every incoming attack during a short glowing window.', 'evade',
+        { cd: 24, duration: [1, 1.3, 1.6] }),
+      A('rogue_backstab_active', '🔪', 'Backstab', 6, 'A brutal strike that is stronger from behind.', 'target',
+        { cd: 11, range: 3.2, weaponMult: [1.7, 2.2, 2.8], backstab: true }),
+      A('rogue_shadowstep', '🌘', 'Shadowstep', 8, 'Teleport behind the aimed enemy and strike.', 'shadowstep',
+        { cd: 20, range: [10, 13, 16], weaponMult: [1.2, 1.6, 2] }),
+      A('rogue_poison_blades', '☠️', 'Poison Blades', 10, 'Coat weapons with powerful poison.', 'buff',
+        { cd: 36, buff: 'poisonBlades', duration: [10, 14, 18], power: [1, 1.5, 2] }),
+      A('rogue_fan_knives', '🗡️', 'Fan of Knives', 12, 'Hit every nearby enemy with poisoned knives.', 'aoe',
+        { cd: 18, radius: [5, 6, 7], weaponMult: [0.8, 1.1, 1.45], poison: [4, 7, 10] }),
+      A('rogue_smoke_bomb', '🌫️', 'Smoke Bomb', 14, 'Create a smoke zone that hides you from enemies.', 'zone',
+        { cd: 42, zone: 'smoke', castRange: 12, radius: [4.5, 5.5, 6.5], duration: [7, 9, 11], interval: 0.5 }),
+      A('rogue_sprint', '🏃', 'Sprint', 16, 'Gain a tremendous burst of movement speed.', 'buff',
+        { cd: 35, buff: 'sprint', duration: [6, 8, 10], power: [2, 3, 4] }),
+      A('rogue_kidney_shot', '⚡', 'Kidney Shot', 20, 'Stun one target and deal weapon damage.', 'target',
+        { cd: 25, range: 3.2, weaponMult: [0.8, 1.1, 1.4], stun: [3, 4, 5] }),
+      A('rogue_assassinate', '💀', 'Assassinate', 24, 'Execute a wounded target with immense damage.', 'execute',
+        { cd: 45, range: 3.2, weaponMult: [3.2, 4.3, 5.5], threshold: 0.4 }),
+    ] },
+
+  { id: 'mage', icon: '🧙', name: 'Mage', color: '#9c9cff',
+    summary: 'Elemental damage dealer wielding fire, frost, barriers and destructive ground spells.',
+    passives: [
+      P('mage_power', '✨', 'Spell Power', 2, '+6% class spell damage per rank.', { spellPower: 0.06 }),
+      P('mage_fire', '🔥', 'Fire Mastery', 3, '+8% fire damage per rank.', { firePower: 0.08 }),
+      P('mage_frost', '❄️', 'Frost Mastery', 5, '+8% frost damage per rank.', { frostPower: 0.08 }),
+      P('mage_focus', '⏳', 'Arcane Focus', 7, 'Mage cooldowns -4% per rank.', { classCdReduction: 0.04 }),
+      P('mage_essence', '🧪', 'Essence Affinity', 9, '+10% essence collected per rank.', { essenceMult: 0.1 }),
+      P('mage_barrier', '🔷', 'Barrier Mastery', 11, 'Magical shields +12% per rank.', { shieldPower: 0.12 }),
+      P('mage_pyromaniac', '🌋', 'Pyromaniac', 13, 'Fire area size +8% per rank.', { fireRadius: 0.08 }),
+      P('mage_winter_reach', '🌨️', 'Winter Reach', 15, 'Frost area size +8% per rank.', { frostRadius: 0.08 }),
+      P('mage_surge', '💫', 'Elemental Surge', 18, '+4% class spell critical chance per rank.', { spellCrit: 0.04 }),
+      P('mage_archmage', '🔮', 'Archmage', 21, 'Ground spells last 10% longer per rank.', { zoneDuration: 0.1 }),
+    ],
+    actives: [
+      A('mage_fireball', '🔥', 'Fireball', 2, 'Blast one target and ignite it.', 'magicTarget',
+        { cd: 7, element: 'fire', range: 15, damage: [45, 75, 110], burn: [5, 9, 14] }),
+      A('mage_frostbolt', '❄️', 'Frostbolt', 4, 'Damage and briefly freeze one target.', 'magicTarget',
+        { cd: 8, element: 'frost', range: 15, damage: [38, 65, 95], stun: [1.2, 1.8, 2.5] }),
+      A('mage_flamestrike', '🌋', 'Flamestrike', 6, 'Burn the aimed ground for several seconds.', 'zone',
+        { cd: 22, zone: 'fire', castRange: 18, radius: [4, 5, 6], duration: [6, 8, 10], damage: [20, 32, 46], interval: 1 }),
+      A('mage_blizzard', '🌨️', 'Blizzard', 8, 'A frost storm damages and slows an aimed area.', 'zone',
+        { cd: 28, zone: 'frost', castRange: 18, radius: [5, 6, 7], duration: [7, 9, 11], damage: [16, 26, 38], interval: 1, stun: 0.35 }),
+      A('mage_frost_nova', '🧊', 'Frost Nova', 10, 'Freeze all enemies around you.', 'magicAoe',
+        { cd: 24, element: 'frost', radius: [5, 6, 7], damage: [25, 42, 62], stun: [2.5, 3.5, 4.5] }),
+      A('mage_meteor', '☄️', 'Meteor', 12, 'Call a devastating burning impact at the aimed point.', 'zoneBurst',
+        { cd: 38, element: 'fire', castRange: 20, radius: [4, 5, 6], damage: [120, 185, 260], burn: [10, 16, 24] }),
+      A('mage_fire_breath', '🐉', 'Dragon Breath', 14, 'Scorch every enemy in a cone.', 'magicCone',
+        { cd: 18, element: 'fire', range: [7, 9, 11], damage: [65, 100, 145], burn: [6, 10, 15] }),
+      A('mage_ice_barrier', '🔷', 'Ice Barrier', 16, 'Gain a large frost shield.', 'shield',
+        { cd: 45, amount: [100, 170, 250] }),
+      A('mage_combustion', '🔥', 'Combustion', 20, 'Greatly empower fire spells for a short time.', 'buff',
+        { cd: 65, buff: 'combustion', duration: [10, 13, 16], power: [0.35, 0.5, 0.7] }),
+      A('mage_elemental_storm', '🌩️', 'Elemental Storm', 24, 'Fire and ice ravage a huge aimed area.', 'zone',
+        { cd: 90, zone: 'elemental', castRange: 20, radius: [7, 8.5, 10], duration: [9, 12, 15], damage: [35, 52, 72], interval: 1, stun: 0.5 }),
+    ] },
+
+  { id: 'priest', icon: '⛪', name: 'Priest', color: '#f0df91',
+    summary: 'Dedicated healer with renewal, holy shields, cleansing and survival miracles.',
+    passives: [
+      P('priest_healing', '💚', 'Greater Healing', 2, '+8% class healing per rank.', { healPower: 0.08 }),
+      P('priest_benediction', '🙏', 'Benediction', 3, 'Priest cooldowns -4% per rank.', { classCdReduction: 0.04 }),
+      P('priest_fortitude', '❤️', 'Fortitude', 5, '+3.5% maximum health per rank.', { hpPct: 0.035 }),
+      P('priest_renewal', '🌿', 'Renewal Mastery', 7, 'Healing-over-time +12% per rank.', { hotPower: 0.12 }),
+      P('priest_shields', '🛡️', 'Divine Aegis', 9, 'Holy shields +12% per rank.', { shieldPower: 0.12 }),
+      P('priest_purity', '✨', 'Purity', 11, 'Poison damage -12% per rank.', { poisonCut: 0.12 }),
+      P('priest_mercy', '🕊️', 'Mercy', 13, 'Healing on targets below half health +10% per rank.', { lowHpHeal: 0.1 }),
+      P('priest_radiance', '☀️', 'Radiance', 15, 'Healing and holy areas +10% per rank.', { healRadius: 0.1 }),
+      P('priest_guardian', '👼', 'Guardian Faith', 18, 'Guardian miracles +15% per rank.', { guardianPower: 0.15 }),
+      P('priest_high_priest', '✝️', 'High Priest', 21, 'Holy damage +7% per rank.', { holyPower: 0.07 }),
+    ],
+    actives: [
+      A('priest_heal', '💚', 'Heal', 2, 'Restore a large amount of health.', 'heal',
+        { cd: 9, amount: [55, 90, 135] }),
+      A('priest_renew', '🌿', 'Renew', 4, 'Regenerate health over time.', 'hot',
+        { cd: 14, duration: [8, 11, 14], amount: [7, 11, 16] }),
+      A('priest_flash_heal', '✨', 'Flash Heal', 6, 'A fast emergency heal with a longer cooldown.', 'heal',
+        { cd: 16, amount: [90, 145, 215] }),
+      A('priest_prayer', '🙏', 'Prayer of Healing', 8, 'Heal yourself and a nearby ally.', 'world',
+        { cd: 25, worldAction: 'groupHeal', amount: [65, 105, 155], radius: [8, 10, 12] }),
+      A('priest_shield', '🛡️', 'Power Word: Shield', 10, 'Absorb incoming damage.', 'shield',
+        { cd: 28, amount: [90, 150, 225] }),
+      A('priest_purify', '🕊️', 'Purify', 12, 'Remove poison and harmful effects; restore some health.', 'cleanse',
+        { cd: 22, amount: [25, 45, 70] }),
+      A('priest_holy_nova', '☀️', 'Holy Nova', 14, 'Heal yourself while damaging nearby enemies.', 'holyNova',
+        { cd: 20, radius: [5, 6.5, 8], amount: [45, 75, 110], damage: [35, 60, 90] }),
+      A('priest_guardian_spirit', '👼', 'Guardian Spirit', 16, 'Prevent one lethal hit and restore health.', 'guardian',
+        { cd: 75, duration: [10, 14, 18], amount: [0.25, 0.4, 0.55] }),
+      A('priest_sanctuary', '⛪', 'Sanctuary', 20, 'Consecrate the aimed ground with sustained healing.', 'zone',
+        { cd: 42, zone: 'healing', castRange: 16, radius: [5, 6.5, 8], duration: [8, 11, 14], amount: [8, 13, 19], interval: 1 }),
+      A('priest_resurrection', '✝️', 'Resurrection', 24, 'Revive a fallen ally or grant yourself a massive heal.', 'world',
+        { cd: 100, worldAction: 'resurrection', amount: [0.45, 0.7, 1] }),
+    ] },
 ];
+
+export const classTreeById = (id) => CLASS_TREES.find(c => c.id === id);
+export const classSkillById = (id) => {
+  for (const tree of CLASS_TREES) {
+    const skill = [...tree.passives, ...tree.actives].find(s => s.id === id);
+    if (skill) return { ...skill, classId: tree.id, className: tree.name };
+  }
+  return null;
+};
+export const classSkillRequiredLevel = (skill, rank) =>
+  Math.min(MAX_LEVEL, skill.level + Math.max(0, rank - 1) * 3);
+export const classSkillMeatCost = (skill, rank) => {
+  const base = (skill.type === 'active' ? 40 : 25) + skill.level * 4;
+  return Math.ceil(base * rank * (1 + 0.3 * Math.max(0, rank - 1)) / 5) * 5;
+};
+export function classEffectsFor(classId, training = {}) {
+  const effects = {};
+  const tree = classTreeById(classId);
+  if (!tree) return effects;
+  for (const skill of tree.passives) {
+    const rank = Math.max(0, Math.min(skill.maxRank, training[skill.id] || 0));
+    if (!rank) continue;
+    for (const [key, value] of Object.entries(skill.effects || {})) {
+      effects[key] = (effects[key] || 0) + value * rank;
+    }
+  }
+  return effects;
+}
+export function requiredClassForItem(item) {
+  if (!item) return null;
+  if (item.slot === 'companion' || item.weapon?.kind === 'bow') return 'beastmaster';
+  return null;
+}
 
 // ==========================================================================
 // Survival camp — buildings around the cave mouth. Your "home" upgrades

@@ -2,7 +2,7 @@
 
 import * as THREE from 'three';
 import { WORLD, XP_LEVELS, MAX_LEVEL, MAX_SPELL_SLOTS, ENEMY_TYPES, RES_ICONS,
-         fmtResource, itemById, spellById } from './config.js';
+         fmtResource, itemById, spellById, classSkillById } from './config.js';
 import { itemIcon } from './icons.js';
 import { audio } from './audio.js';
 
@@ -108,9 +108,6 @@ export class UI {
     if (player.charging) combat.push(`CHARGE ${Math.round(Math.min(1, player.chargeT / 1.05) * 100)}%`);
     if (player.blocking) combat.push(player.weapon.parry ? 'PARRY' : 'BLOCK');
     if (player.weapon.style === 'bow') combat.push(`${player.arrowMode.toUpperCase()} · Z`);
-    if (player.hunterTraps) combat.push('TRAP · T');
-    if (player.dodgeCd > 0) combat.push(`DODGE ${player.dodgeCd.toFixed(1)}s`);
-    else combat.push('DODGE READY');
     $('weapon-display').innerHTML = `${itemIcon(weapon)} ${weapon.name}`
       + `<span class="combat-state">${combat.join(' · ')}</span>`;
 
@@ -126,8 +123,7 @@ export class UI {
       const MODES = { aggressive: '🗡️ Aggressive', defensive: '🛡️ Defensive', passive: '💤 Passive' };
       petEl.innerHTML = player.petDead
         ? '🐺 💀 <i>down</i> — revive at home/graveyard <kbd>R</kbd>'
-        : `🐺 ${MODES[player.petMode] ?? player.petMode} <kbd>P</kbd>`
-          + (player.beastCommand ? ' · 📣 focus <kbd>Y</kbd>' : '');
+        : `🐺 ${MODES[player.petMode] ?? player.petMode} <kbd>P</kbd>`;
     } else petEl.classList.add('hidden');
 
     // carried supplies (F/G consumables)
@@ -173,23 +169,30 @@ export class UI {
       const iconEl = el.querySelector('.spell-icon');
       const cdEl = el.querySelector('.spell-cd');
       const spell = id ? spellById(id) : null;
-      const item = id && !spell ? itemById(id) : null;
-      if (!spell && !item) {
+      const classAbility = id && !spell ? classSkillById(id) : null;
+      const activeClassAbility = classAbility?.type === 'active' ? classAbility : null;
+      const ability = spell ?? activeClassAbility;
+      const item = id && !ability ? itemById(id) : null;
+      if (!ability && !item) {
         el.classList.add('empty');
         iconEl.innerHTML = '';
         cdEl.style.height = '0%';
         el.title = '';
-        el.classList.remove('equipped-slot');
+        el.classList.remove('equipped-slot', 'class-ability-slot');
         continue;
       }
       el.classList.remove('empty');
-      iconEl.innerHTML = itemIcon(spell ?? item);
-      el.title = spell
-        ? `${spell.name} — ${spell.desc}`
+      iconEl.innerHTML = itemIcon(ability ?? item);
+      el.title = ability
+        ? `${ability.name} — ${ability.desc}${activeClassAbility ? ` · Rank ${player.classRank?.(id) ?? player.classTraining?.[id] ?? 1}` : ''}`
         : `${item.name} — press ${i + 1} to equip`;
-      const cd = spell ? (player.spellCds[id] || 0) : 0;
-      cdEl.style.height = spell ? (cd / spell.cd * 100) + '%' : '0%';
-      el.classList.toggle('ready', spell ? cd <= 0 : true);
+      const cd = ability ? (player.spellCds?.[id] || player.classCds?.[id] || 0) : 0;
+      const maxCd = activeClassAbility
+        ? (player.classAbilityCooldown?.(id) ?? activeClassAbility.cd)
+        : spell?.cd;
+      cdEl.style.height = ability && maxCd ? Math.min(100, cd / maxCd * 100) + '%' : '0%';
+      el.classList.toggle('ready', ability ? cd <= 0 : true);
+      el.classList.toggle('class-ability-slot', !!activeClassAbility);
       // hotkeyed gear glows while it's the equipped piece
       el.classList.toggle('equipped-slot', !!item && player.equipment[item.slot] === id);
     }

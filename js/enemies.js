@@ -71,8 +71,16 @@ class Enemy {
     this.armor = base.armor ?? (/golem|snapper|colossus/i.test(type) ? 0.34 : 0);
     this.armorBreak = 0;
     this.armorBreakT = 0;
+    this.poisonT = 0;
+    this.poisonDps = 0;
     this.bleedT = 0;
     this.bleedDps = 0;
+    // Rend is deliberately separate from ordinary weapon bleeds. Combining
+    // their strongest DPS and longest duration could exceed the class skill's
+    // promised percentage of max HP over its exact 30-second window.
+    this.rendT = 0;
+    this.rendDps = 0;
+    this.rendSrc = 'local';
     this.burnT = 0;
     this.burnDps = 0;
     this.statusTickT = 0;
@@ -494,21 +502,23 @@ export class EnemyManager {
     enemy.chaseT = 0;
     enemy.flashT = 0.12;     // brief white-hot scale pop so hits READ
     enemy.threatLog.push({ src: srcId, dmg, t: this.world.time });
-    if (opts?.poison) { // venom-coated weapons fester
-      enemy.poisonT = opts.poison.dur;
-      enemy.poisonDps = opts.poison.dps;
-      enemy.poisonSrc = srcId;
-    }
-    if (opts?.bleed) {
-      enemy.bleedT = Math.max(enemy.bleedT || 0, opts.bleed.dur);
-      enemy.bleedDps = Math.max(enemy.bleedDps || 0, opts.bleed.dps);
-      enemy.bleedSrc = srcId;
-    }
-    if (opts?.burn) {
-      enemy.burnT = Math.max(enemy.burnT || 0, opts.burn.dur);
-      enemy.burnDps = Math.max(enemy.burnDps || 0, opts.burn.dps);
-      enemy.burnSrc = srcId;
-    }
+    const applyDot = (kind, spec) => {
+      if (!spec) return;
+      const currentDamage = Math.max(0, enemy[kind + 'T'] || 0)
+        * Math.max(0, enemy[kind + 'Dps'] || 0);
+      const newDamage = Math.max(0, spec.dur || 0) * Math.max(0, spec.dps || 0);
+      // Keep duration and DPS as one pair. A weaker status must never borrow
+      // a stronger status's DPS (or truncate it); the larger remaining total wins.
+      if (newDamage >= currentDamage) {
+        enemy[kind + 'T'] = Math.max(0, spec.dur || 0);
+        enemy[kind + 'Dps'] = Math.max(0, spec.dps || 0);
+        enemy[kind + 'Src'] = srcId;
+      }
+    };
+    applyDot('poison', opts?.poison); // venom-coated weapons fester
+    applyDot('bleed', opts?.bleed);
+    applyDot('rend', opts?.rend);
+    applyDot('burn', opts?.burn);
     if (enemy.cfg.passive && !enemy.spooked) {
       // one hurt rabbit spooks the whole herd
       enemy.spooked = true;
@@ -718,7 +728,7 @@ export class EnemyManager {
       // with no recent attacker it's the nearest visible target. Creatures
       // never see across a biome border.
       const eBiome = biomeIndexAt(e.pos.x, e.pos.z);
-      const validTarget = (t) => t && !t.dead && t.pos
+      const validTarget = (t) => t && !t.dead && !t.stealthed && t.pos
         && !this.world.isTargetSafe?.(t.pos)
         && biomeIndexAt(t.pos.x, t.pos.z) === eBiome;
       let target = null, dist = Infinity;
@@ -766,8 +776,10 @@ export class EnemyManager {
 
       // festering venom ticks even while it moves (escaping griffins are gone)
       if (e.poisonT > 0 && !e.escaping) {
+        const activeDt = Math.min(dt, e.poisonT);
         e.poisonT -= dt;
-        e.hp -= e.poisonDps * dt;
+        e.hp -= e.poisonDps * activeDt;
+        if (e.poisonT <= 0) e.poisonDps = 0;
         if (e.hp <= 0) {
           e.lastHitBy = e.poisonSrc ?? 'local';
           if (e.cfg.griffin && !e.escaping) this._griffinEscape(e);
@@ -779,24 +791,37 @@ export class EnemyManager {
         e.armorBreakT -= dt;
         if (e.armorBreakT <= 0) e.armorBreak = 0;
       }
-      if (!e.escaping && (e.bleedT > 0 || e.burnT > 0)) {
-        let dot = 0, dotSrc = 'local';
+      if (!e.escaping && (e.bleedT > 0 || e.rendT > 0 || e.burnT > 0)) {
+        let dot = 0, dotDamage = 0, dotSrc = 'local';
         const icons = [];
         if (e.bleedT > 0) {
+          const activeDt = Math.min(dt, e.bleedT);
           e.bleedT -= dt;
           dot += e.bleedDps;
+          dotDamage += e.bleedDps * activeDt;
           dotSrc = e.bleedSrc ?? dotSrc;
           if (e.bleedT <= 0) e.bleedDps = 0;
           icons.push('🩸');
         }
+        if (e.rendT > 0) {
+          const activeDt = Math.min(dt, e.rendT);
+          e.rendT -= dt;
+          dot += e.rendDps;
+          dotDamage += e.rendDps * activeDt;
+          dotSrc = e.rendSrc ?? dotSrc;
+          if (e.rendT <= 0) e.rendDps = 0;
+          icons.push('🩸');
+        }
         if (e.burnT > 0) {
+          const activeDt = Math.min(dt, e.burnT);
           e.burnT -= dt;
           dot += e.burnDps;
+          dotDamage += e.burnDps * activeDt;
           dotSrc = e.burnSrc ?? dotSrc;
           if (e.burnT <= 0) e.burnDps = 0;
           icons.push('🔥');
         }
-        e.hp -= dot * dt;
+        e.hp -= dotDamage;
         e.statusTickT -= dt;
         if (e.statusTickT <= 0) {
           e.statusTickT = 1;

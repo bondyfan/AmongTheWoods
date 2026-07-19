@@ -28,6 +28,35 @@ import { makeMan, makeAxe, makeBow, makePickaxe, makeClub, makeSword, makeHandSp
 import { audio } from './audio.js';
 import { MOB_INFO_RADIUS, mobLevelBadge } from './ui.js';
 
+// Remote avatars must own their materials: model factories intentionally share
+// many materials, so changing opacity without cloning would fade local actors too.
+function setRemoteStealthVisual(root, stealthed) {
+  root.traverse(part => {
+    if (!part.material) return;
+    const materials = Array.isArray(part.material) ? part.material : [part.material];
+    const owned = materials.map(source => {
+      if (source.userData?._remotePlayerMaterial) return source;
+      const material = source.clone();
+      material.userData = {
+        ...(source.userData || {}),
+        _remotePlayerMaterial: true,
+        _remoteBaseOpacity: source.opacity ?? 1,
+        _remoteBaseTransparent: !!source.transparent,
+        _remoteBaseDepthWrite: source.depthWrite,
+      };
+      return material;
+    });
+    part.material = Array.isArray(part.material) ? owned : owned[0];
+    for (const material of owned) {
+      const data = material.userData;
+      material.transparent = stealthed || data._remoteBaseTransparent;
+      material.opacity = data._remoteBaseOpacity * (stealthed ? 0.16 : 1);
+      material.depthWrite = stealthed ? false : data._remoteBaseDepthWrite;
+      material.needsUpdate = true;
+    }
+  });
+}
+
 // ---------- the other player's avatar ----------
 class RemotePlayer {
   constructor(scene, world, ui, name) {
@@ -47,6 +76,7 @@ class RemotePlayer {
     this.facing = new THREE.Vector3(0, 0, -1);
     this.hp = 100; this.maxHp = 100; this.level = 1;
     this.dead = false;
+    this.stealthed = false;
     this.walkT = 0;
     this.moving = false;
     this.attackT = 0;
@@ -56,6 +86,9 @@ class RemotePlayer {
     this.petId = 0;              // partner's pet, mirrored locally
     this.petMesh = null;
     this.petPos = new THREE.Vector3();
+    this.petTargetPos = new THREE.Vector3();
+    this.petHp = 0;
+    this.petMaxHp = 0;
     this.petWalkT = 0;
     this.lastSeen = 0;
 
@@ -82,24 +115,54 @@ class RemotePlayer {
     if (s.atk && this.attackT <= 0) this.attackT = 0.25;
     this.dead = !!s.dead;
     this.downed = !!s.dn; // co-op: down but revivable
+    const nextStealthed = !!s.st;
+    if (nextStealthed !== this.stealthed) {
+      this.stealthed = nextStealthed;
+      setRemoteStealthVisual(this.mesh, this.stealthed);
+    }
     const nextOffhand = s.oh || null;
     if (s.w !== this.weaponId || nextOffhand !== this.offhandId) {
       this.weaponId = s.w;
       this.offhandId = nextOffhand;
       this._refreshWeapon();
+      if (this.stealthed) setRemoteStealthVisual(this.mesh, true);
     }
 
     // partner's pet: a mirrored wolf trotting at their side
     const pet = s.pet || 0;
     if (pet !== this.petId) {
       this.petId = pet;
-      if (this.petMesh) { this.scene.remove(this.petMesh); this.petMesh = null; }
+      if (this.petMesh) {
+        this.scene.remove(this.petMesh);
+        this.ui.removeTracker('mp-partner-pet');
+        this.petMesh = null;
+      }
       if (pet) {
         this.petMesh = makeWolf('tame');
         if (pet === 'alphaWolf') this.petMesh.scale.multiplyScalar(1.45);
         this.scene.add(this.petMesh);
-        this.petPos.copy(this.targetPos).add(new THREE.Vector3(1.4, 0, 1.6));
+        this.petTargetPos.set(Number.isFinite(s.px) ? s.px : this.targetPos.x, 0,
+          Number.isFinite(s.pz) ? s.pz : this.targetPos.z);
+        this.petPos.copy(this.petTargetPos);
+        this.ui.addTracker('mp-partner-pet',
+          () => this.petMesh?.parent && this.petMesh.visible
+            ? this.petMesh.position.clone().setY(this.petMesh.position.y + 1.35) : null,
+          '<div class="hpbar"><div class="hpbar-fill"></div></div>', 'hpwrap',
+          (el) => {
+            el.firstChild.firstChild.style.width = Math.max(0,
+              this.petHp / Math.max(1, this.petMaxHp) * 100) + '%';
+          });
       }
+    }
+    if (pet) {
+      if (Number.isFinite(s.px) && Number.isFinite(s.pz)) this.petTargetPos.set(s.px, 0, s.pz);
+      else this.petTargetPos.copy(this.targetPos).add(new THREE.Vector3(1.4, 0, 1.6));
+      this.petHp = Math.max(0, s.php ?? this.petHp);
+      this.petMaxHp = Math.max(1, s.pmhp ?? this.petMaxHp ?? 1);
+      if (this.petPos.distanceTo(this.petTargetPos) > 20) this.petPos.copy(this.petTargetPos);
+    } else {
+      this.petHp = 0;
+      this.petMaxHp = 0;
     }
   }
 
@@ -125,7 +188,10 @@ class RemotePlayer {
   }
 
   update(dt) {
-    if (!this.mesh.visible) return;
+    if (!this.mesh.visible) {
+      if (this.petMesh) this.petMesh.visible = false;
+      return;
+    }
     this.pos.lerp(this.targetPos, Math.min(1, dt * 10));
     this.mesh.position.set(this.pos.x, this.world.heightAt(this.pos.x, this.pos.z), this.pos.z);
     this.mesh.rotation.y = Math.atan2(this.facing.x, this.facing.z);
@@ -142,7 +208,7 @@ class RemotePlayer {
     // the mirrored pet trots after its owner
     if (this.petMesh) {
       this.petMesh.visible = this.mesh.visible;
-      const dest = this.pos.clone().add(new THREE.Vector3(1.4, 0, 1.6));
+      const dest = this.petTargetPos.clone();
       const to = dest.sub(this.petPos);
       const d = to.length();
       if (d > 0.35) {
@@ -150,8 +216,8 @@ class RemotePlayer {
         this.petWalkT += dt * 9.5;
         this.petMesh.rotation.y = Math.atan2(to.x, to.z) + Math.PI;
         this.world.collide?.(this.petPos, 0.35);
-        if (this.petPos.distanceTo(this.pos) > 40) // owner teleported far away
-          this.petPos.copy(this.pos).add(new THREE.Vector3(1.4, 0, 1.6));
+        if (this.petPos.distanceTo(this.petTargetPos) > 40) // pet teleported with its owner
+          this.petPos.copy(this.petTargetPos);
       }
       this.petMesh.position.set(this.petPos.x,
         this.world.heightAt(this.petPos.x, this.petPos.z), this.petPos.z);
@@ -163,6 +229,7 @@ class RemotePlayer {
 
   dispose() {
     this.ui.removeTracker('mp-partner');
+    this.ui.removeTracker('mp-partner-pet');
     this.scene.remove(this.mesh);
     if (this.petMesh) this.scene.remove(this.petMesh);
   }
@@ -245,7 +312,7 @@ class ShadowWorld {
       if (!pickIds.has(id)) { this.scene.remove(s.mesh); this.pickups.delete(id); this.pendingCollect.delete(id); }
     }
 
-    // --- enemy shots (dodge visibility) ---
+    // --- enemy shots (projectile visibility) ---
     const shotIds = new Set();
     for (const sh of snap.s || []) {
       shotIds.add(sh.i);
@@ -303,8 +370,10 @@ class ShadowWorld {
       ...(opts?.armorPierce ? { ap: opts.armorPierce } : {}),
       ...(opts?.armorBreak ? { ab: opts.armorBreak, ad: opts.breakDur || 6 } : {}),
       ...(opts?.bleed ? { bl: opts.bleed.dps, bt: opts.bleed.dur } : {}),
+      ...(opts?.rend ? { rd: opts.rend.dps, rt: opts.rend.dur } : {}),
       ...(opts?.burn ? { bu: opts.burn.dps, bd: opts.burn.dur } : {}),
       ...(opts?.poison ? { po: opts.poison.dps, pt: opts.poison.dur } : {}),
+      ...(srcId === 'pet' ? { ps: 1 } : {}),
     });
     audio.sfx('hit', 0.25, 90);
   }
@@ -551,24 +620,46 @@ export class Multiplayer {
       get mesh() { return self.remote.mesh; },
       get dying() { return self.remote.dead; },
       get dead() { return self.remote.dead; },
+      get stealthed() { return self.remote.stealthed; },
+      get hp() { return self.remote.hp; },
+      get maxHp() { return self.remote.maxHp; },
       hitR: 0.6, sizeMult: 1, stunT: 0,
       cfg: { hitR: 0.6 },
       takeDamage: () => {}, applyStun: () => {},
     };
     this.arenaAdapter = {
-      alive: () => (this.arena.active && this.remote && !this.remote.dead) ? [this.arenaProxy] : [],
-      damage: (e, dmg) => {
+      alive: () => {
+        if (!this.arena.active || !this.remote) return [];
+        const targets = this.remote.dead ? [] : [this.arenaProxy];
+        if (!this.coopPetProxy.dead) targets.push(this.coopPetProxy);
+        return targets;
+      },
+      damage: (e, dmg, knockDir = null, srcId = 'local', opts = null) => {
+        if (e?.id === 'partnerPet') {
+          this.coopPetProxy.takeDamage(dmg, ctx.player);
+          ctx.popup(this.remote.petMesh.position.clone().setY(this.remote.petMesh.position.y + 1.4),
+            Math.round(dmg).toString(), '#ffb3b3');
+          audio.sfx('hit', 0.3, 110);
+          return;
+        }
         WoodsNet.sendEvent({
           type: 'hit', dmg: Math.round(dmg * 10) / 10,
           ax: +ctx.player.pos.x.toFixed(1), az: +ctx.player.pos.z.toFixed(1),
+          ...(opts?.bleed ? { bl: opts.bleed.dps, bt: opts.bleed.dur } : {}),
+          ...(opts?.rend ? { rd: opts.rend.dps, rt: opts.rend.dur } : {}),
+          ...(opts?.burn ? { bu: opts.burn.dps, bd: opts.burn.dur } : {}),
+          ...(opts?.poison ? { po: opts.poison.dps, pt: opts.poison.dur } : {}),
         });
         ctx.popup(this.remote.mesh.position.clone().setY(this.remote.mesh.position.y + 2), Math.round(dmg).toString(), '#ffb3b3');
         audio.sfx('hit', 0.3, 90);
       },
-      stun: (e, sec) => WoodsNet.sendEvent({
-        type: 'hit', dmg: 0, stun: sec,
-        ax: +ctx.player.pos.x.toFixed(1), az: +ctx.player.pos.z.toFixed(1),
-      }),
+      stun: (e, sec) => {
+        if (e?.id === 'partnerPet') return;
+        WoodsNet.sendEvent({
+          type: 'hit', dmg: 0, stun: sec,
+          ax: +ctx.player.pos.x.toFixed(1), az: +ctx.player.pos.z.toFixed(1),
+        });
+      },
     };
 
     // enemy-attack proxy for co-op host: enemies can chase & hurt the partner.
@@ -581,6 +672,7 @@ export class Multiplayer {
       get pos() { return self.remote.targetPos; },
       get mesh() { return self.remote.mesh; },
       get dead() { return self.remote.dead; },
+      get stealthed() { return self.remote.stealthed; },
       takeDamage: (dmg, src) => WoodsNet.sendEvent({
         type: 'pdmg', dmg: Math.round(dmg * 10) / 10,
         ai: src?.id,
@@ -597,6 +689,24 @@ export class Multiplayer {
         ar: src?.range != null ? +src.range.toFixed(1) : undefined,
         sh: src?.shot ? 1 : undefined,
       }),
+    };
+    // Host-side combat body for the guest's Beastmaster companion. Its real
+    // HP and position are streamed by the owner; hits travel back to that
+    // owner, so the pet can genuinely pull threat, tank and die in co-op.
+    this.coopPetProxy = {
+      id: 'partnerPet', isPet: true, hitR: 0.5, sizeMult: 1, stunT: 0,
+      get pos() { return self.remote?.petTargetPos ?? null; },
+      get mesh() { return self.remote?.petMesh ?? null; },
+      get hp() { return self.remote?.petHp ?? 0; },
+      get maxHp() { return self.remote?.petMaxHp ?? 0; },
+      get dead() { return !self.remote?.petId || (self.remote?.petHp ?? 0) <= 0; },
+      takeDamage: (dmg, src) => WoodsNet.sendEvent({
+        type: 'petDmg', dmg: Math.round(dmg * 10) / 10,
+        ai: src?.id,
+        ax: src?.pos ? +src.pos.x.toFixed(1) : undefined,
+        az: src?.pos ? +src.pos.z.toFixed(1) : undefined,
+      }),
+      applyStun: () => {},
     };
   }
 
@@ -654,8 +764,10 @@ export class Multiplayer {
     this.remote.lastSeen = 0;
     if (this.remote.petMesh) {
       this.ctx.scene.remove(this.remote.petMesh);
+      this.ctx.ui.removeTracker('mp-partner-pet');
       this.remote.petMesh = null;
       this.remote.petId = 0;
+      this.remote.petHp = this.remote.petMaxHp = 0;
     }
     this._campSynced = false;
     this._promoting = false;
@@ -679,8 +791,10 @@ export class Multiplayer {
     this.remote.lastSeen = 0;
     if (this.remote.petMesh) {
       this.ctx.scene.remove(this.remote.petMesh);
+      this.ctx.ui.removeTracker('mp-partner-pet');
       this.remote.petMesh = null;
       this.remote.petId = 0;
+      this.remote.petHp = this.remote.petMaxHp = 0;
     }
     WoodsNet.setPartner(null);
     WoodsNet.updateMeta({ guest: null });
@@ -779,6 +893,7 @@ export class Multiplayer {
     // broadcast own state (fast in co-op/moba/arena so proxy lag stays small)
     const arenaHot = this.arena.active;
     const rate = this.mode === 'coop' ? 70 : this.mode === 'moba' ? 80 : (arenaHot ? 70 : 500);
+    const localPet = ctx.petTarget && !ctx.petTarget.dead ? ctx.petTarget : null;
     WoodsNet.sendState({
       x: +p.pos.x.toFixed(1), z: +p.pos.z.toFixed(1),
       fx: +p.facing.x.toFixed(2), fz: +p.facing.z.toFixed(2),
@@ -786,7 +901,14 @@ export class Multiplayer {
       w: p.equipment.weapon, oh: p.equipment.offhand || 0, mv: (ctx.input.moveX || ctx.input.moveZ) ? 1 : 0,
       atk: p.attackT > 0 ? 1 : 0, dead: p.dead ? 1 : 0,
       dn: (p.dead && this.downedUntil) ? 1 : 0,
-      pet: (p.pet && !p.petDead) ? p.equipment.companion : 0,
+      st: p.stealthed ? 1 : 0,
+      pet: ((p.hooks.classRulesEnabled?.() === false || p.selectedClass === 'beastmaster')
+        && p.pet && !p.petDead && localPet)
+        ? p.equipment.companion : 0,
+      ...(localPet?.pos ? {
+        px: +localPet.pos.x.toFixed(1), pz: +localPet.pos.z.toFixed(1),
+        php: Math.max(0, Math.round(localPet.hp)), pmhp: Math.max(1, Math.round(localPet.maxHp)),
+      } : {}),
     }, rate);
 
     this.remote?.update(dt);
@@ -926,6 +1048,8 @@ export class Multiplayer {
     this.arena.active = false;
     ctx.world.removeArena();
     if (p.dead) p.revive(0.5);
+    p.combatDots = {};
+    p.combatDotTickT = 0;
     p.pos.copy(this.arena.prevPos);
     if (this.mode === 'pvp') this.remote.mesh.visible = false;
     if (this.isHost) {
@@ -961,11 +1085,14 @@ export class Multiplayer {
     }
     if (this.mode === 'coop') {
       if (this.isHost) {
-        const targets = this.remote.lastSeen ? [ctx.player, this.coopProxy] : [ctx.player];
-        if (ctx.petTarget) targets.push(ctx.petTarget);
-        ctx.enemyMgr.update(dt, targets, ctx.projectiles);
-        ctx.pickups.update(dt, targets);
-        ctx.projectiles.update(dt, ctx.enemyMgr, targets);
+        const playerTargets = this.remote.lastSeen ? [ctx.player, this.coopProxy] : [ctx.player];
+        const combatTargets = [...playerTargets];
+        if (ctx.petTarget) combatTargets.push(ctx.petTarget);
+        if (this.remote.lastSeen && !this.coopPetProxy.dead) combatTargets.push(this.coopPetProxy);
+        ctx.enemyMgr.update(dt, combatTargets, ctx.projectiles);
+        // Pets fight, but never magnet-collect their owner's or partner's loot.
+        ctx.pickups.update(dt, playerTargets);
+        ctx.projectiles.update(dt, ctx.enemyMgr, combatTargets);
       } else {
         // shadow world handles enemy/pickup rendering; local projectiles hit
         // shadow enemies, and locally-chopped wood still drops locally
@@ -1039,6 +1166,24 @@ export class Multiplayer {
     WoodsNet.sendEvent({ type: 'revive' });
     this.ctx.ui.toast('💚 You pull your partner back to their feet!', 'level');
     audio.sfx('purchase', 0.5, 200);
+    return true;
+  }
+
+  sendClassHeal(amount, radius = 12, center = null) {
+    if (!this.active || this.mode !== 'coop' || !this.remote?.lastSeen || this.remote.dead) return false;
+    const from = center || this.ctx.player.pos;
+    const to = this.remote.targetPos || this.remote.pos;
+    if (!to || Math.hypot(from.x - to.x, from.z - to.z) > radius) return false;
+    WoodsNet.sendEvent({ type: 'classHeal', a: Math.max(1, Math.round(amount)) });
+    return true;
+  }
+
+  sendClassRevive(hpFrac = 0.5, radius = 14) {
+    if (!this.active || this.mode !== 'coop' || !this.remote?.lastSeen || !this.remote.dead) return false;
+    const from = this.ctx.player.pos;
+    const to = this.remote.targetPos || this.remote.pos;
+    if (!to || Math.hypot(from.x - to.x, from.z - to.z) > radius) return false;
+    WoodsNet.sendEvent({ type: 'classRevive', hp: Math.max(0.1, Math.min(1, hpFrac)) });
     return true;
   }
 
@@ -1116,7 +1261,7 @@ export class Multiplayer {
   // against where I am NOW rejects nearly every hit on a moving player, so
   // instead the attacker is checked against my recent PATH: if it was within
   // reach of any spot I stood on in the last ~0.6 s, the hit is honest and
-  // lands; a true phantom (attacker never near my path) is still dodged.
+  // lands; a true phantom (attacker never near my path) is still rejected.
   _acceptPartnerDamage(ev, player) {
     const wasNear = (x, z, r) => {
       if (x === undefined) return true; // no attacker info → fail open
@@ -1146,11 +1291,22 @@ export class Multiplayer {
     switch (ev.type) {
       case 'hit': // pvp arena: opponent's attack landed on me
         if (!this.arena.active || p.dead) break;
-        if (ev.dmg > 0) p.takeDamage(ev.dmg, {
+        {
+          const evaded = p.evadeT > 0 || p.flying;
+          const source = {
           id: 'partner',
+          name: 'your arena opponent',
           pos: ev.ax == null ? null : { x: ev.ax, z: ev.az }, shot: !!ev.sh,
-        });
-        if (ev.stun) p.applyStun(ev.stun);
+          };
+          if (ev.dmg > 0) p.takeDamage(ev.dmg, source);
+          if (!evaded && !p.dead) {
+            if (ev.bl) p.applyCombatDot?.('bleed', ev.bl, ev.bt || 4, source);
+            if (ev.rd) p.applyCombatDot?.('rend', ev.rd, ev.rt || 30, source);
+            if (ev.bu) p.applyCombatDot?.('burn', ev.bu, ev.bd || 4, source);
+            if (ev.po) p.applyCombatDot?.('poison', ev.po, ev.pt || 3, source);
+          }
+          if (ev.stun) p.applyStun(ev.stun);
+        }
         break;
       case 'arenaDeath': this._onArenaWin(); break;
 
@@ -1158,7 +1314,7 @@ export class Multiplayer {
         if (p.dead) break;
         // lag compensation: the host computed this hit against my STALE proxy
         // position — if the attacker is nowhere near where I actually am now,
-        // it's a phantom hit and I dodge it.
+        // it's a phantom hit and I reject it.
         if (!this._acceptPartnerDamage(ev, p)) break;
         if (ev.dmg > 0) p.takeDamage(ev.dmg, {
           id: ev.ai,
@@ -1169,14 +1325,24 @@ export class Multiplayer {
         if (ev.stun) p.applyStun(ev.stun);
         break;
       }
+      case 'petDmg': { // host-authoritative enemy hit on my streamed companion
+        const pet = ctx.petTarget;
+        if (!pet || pet.dead || !(ev.dmg > 0)) break;
+        pet.takeDamage(ev.dmg, {
+          id: ev.ai,
+          pos: ev.ax == null ? null : { x: ev.ax, z: ev.az },
+        });
+        break;
+      }
       case 'ehit': { // co-op host: partner damaged enemy #id
         const e = ctx.enemyMgr.list.find(x => x.id === ev.id);
         if (e) {
-          if (ev.dmg > 0) ctx.enemyMgr.damage(e, ev.dmg, null, 'partner', {
+          if (ev.dmg > 0) ctx.enemyMgr.damage(e, ev.dmg, null, ev.ps ? 'partnerPet' : 'partner', {
             crit: !!ev.cr, weakPoint: !!ev.wp,
             ...(ev.ap ? { armorPierce: ev.ap } : {}),
             ...(ev.ab ? { armorBreak: ev.ab, breakDur: ev.ad || 6 } : {}),
             ...(ev.bl ? { bleed: { dps: ev.bl, dur: ev.bt || 4 } } : {}),
+            ...(ev.rd ? { rend: { dps: ev.rd, dur: ev.rt || 30 } } : {}),
             ...(ev.bu ? { burn: { dps: ev.bu, dur: ev.bd || 4 } } : {}),
             ...(ev.po ? { poison: { dps: ev.po, dur: ev.pt || 3 } } : {}),
           });
@@ -1197,6 +1363,7 @@ export class Multiplayer {
       case 'xpkill': // co-op guest: shared kill XP (within 100 m of the kill)
         p.kills++;
         p.addXp(ev.xp);
+        if (p.classEffects?.lifeOnKillPct) p._healSelf?.(p.maxHp * p.classEffects.lifeOnKillPct);
         ctx.popup(p.mesh.position.clone().setY(p.mesh.position.y + 2.1), `+${ev.xp} XP`, '#c9a4ff');
         audio.sfx('kill_gold', 0.3, 100);
         break;
@@ -1208,6 +1375,21 @@ export class Multiplayer {
           questBiome: Number.isInteger(ev.bi) ? ev.bi : undefined,
           cfg: { passive: !!ev.pa },
         });
+        break;
+      case 'classHeal':
+        if (!p.dead) {
+          p._healSelf?.(Math.max(0, ev.a || 0));
+          ctx.ui.toast('💚 Your Priest ally healed you.', 'level');
+        }
+        break;
+      case 'classRevive':
+        if (p.dead) {
+          this.downedUntil = null;
+          p.revive(Math.max(0.1, Math.min(1, ev.hp || 0.5)));
+          p.mesh.rotation.z = 0;
+          ctx.ui.toast('✝️ Your Priest ally resurrected you!', 'level');
+          audio.sfx('evolve_ready', 0.55);
+        }
         break;
       case 'chop': { // partner chopped a tree — mirror it
         const trees = ctx.world.treesNear({ x: ev.x, z: ev.z }, 1.5);

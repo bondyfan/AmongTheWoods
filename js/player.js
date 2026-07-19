@@ -5,7 +5,8 @@
 
 import * as THREE from 'three';
 import { WORLD, XP_LEVELS, MAX_LEVEL, itemById, spellById, consumableById,
-         biomeIndexAt, RESOURCES, MAX_SPELL_SLOTS, talentPointsForLevel } from './config.js';
+         biomeIndexAt, RESOURCES, MAX_SPELL_SLOTS, classSkillById,
+         classEffectsFor, requiredClassForItem } from './config.js';
 import { makeMan, makeAxe, makeBow, makePickaxe, makeTorchMesh, makeClub,
          makeSword, makeHandSpear, makeCrossbow, makeShield } from './models.js';
 import { audio } from './audio.js';
@@ -15,6 +16,12 @@ const GRAVITY = 34;
 const SAFE_FALL = 5.5;       // meters of free fall before damage kicks in
 const CRIT_CHANCE = 0.1;     // every attack can crit for CRIT_MULT damage
 const CRIT_MULT = 1.6;
+
+const rankValue = (skill, key, rank, fallback = 0) => {
+  const value = skill?.[key];
+  if (Array.isArray(value)) return value[Math.max(0, Math.min(value.length - 1, rank - 1))] ?? fallback;
+  return value ?? fallback;
+};
 
 export class Player {
   constructor(scene, hooks) {
@@ -45,10 +52,14 @@ export class Player {
 
     // -- trainable stat tracks (individual caps/unlocks live in config) --
     this.stats = { range: 0, power: 0, swift: 0, pet: 0, gather: 0 };
-    this.talents = {};               // id -> true; first at Lv2, then every three levels
+    this.selectedClass = null;        // first trained rank locks one exclusive class
+    this.classTraining = {};          // class skill id -> rank (1..3)
+    this.classEffects = {};
     this.petDead = false;             // a dead pet stays dead until resurrected
     this.petMode = 'aggressive';      // 'aggressive' | 'defensive' | 'passive'
     this.petCommandTargetId = null;
+    this.petCommandT = 0;
+    this.petCommandPower = 0;
 
     // -- consumables (F/G), poison, camp era perks --
     this.consumables = { salve: 0, roast: 0, honey: 0 };
@@ -86,6 +97,34 @@ export class Player {
     this.dashDir = new THREE.Vector3();
     this.dashHit = new Set();
     this.dashSpec = null;
+    this.classZones = [];
+    this.classFx = [];
+    this.stealthT = 0;
+    this.stealthed = false;
+    this.evadeT = 0;
+    this.classShield = 0;
+    this.hotT = 0;
+    this.hotRate = 0;
+    this.hotTickT = 0;
+    this.guardianSpiritT = 0;
+    this.guardianSpiritHeal = 0;
+    this.combatDots = {};            // PvP bleed/burn/poison/Rend received over the network
+    this.combatDotTickT = 0;
+    this.escapeRushT = 0;
+    this.warCryT = 0;
+    this.warCryPower = 0;
+    this.bloodFuryT = 0;
+    this.bloodFuryPower = 0;
+    this.avatarT = 0;
+    this.avatarPower = 0;
+    this.arrowHasteT = 0;
+    this.arrowHastePower = 0;
+    this.poisonBladesT = 0;
+    this.poisonBladesPower = 0;
+    this.sprintT = 0;
+    this.sprintPower = 0;
+    this.combustionT = 0;
+    this.combustionPower = 0;
 
     this.attackCd = 0;
     this.attackT = 0;
@@ -97,10 +136,6 @@ export class Player {
     this.arrowMode = 'standard';
     this.blocking = false;
     this.parryT = 0;
-    this.dodgeT = 0;
-    this.dodgeCd = 0;
-    this.invulnT = 0;
-    this.dodgeDir = new THREE.Vector3();
     this.stunT = 0;
     this.walkT = 0;
     this.dead = false;
@@ -128,17 +163,24 @@ export class Player {
 
   equip(id) {
     const item = itemById(id);
-    if (!item) return;
-    if (item.placeable) return; // world items are used from the bag, never worn
+    if (!item) return false;
+    if (item.placeable) return false; // world items are used from the bag, never worn
     if (id !== 'fists' && !this.invItems.includes(id)
-        && !Object.values(this.equipment).includes(id)) return;
+        && !Object.values(this.equipment).includes(id)) return false;
+    const requiredClass = this.hooks.classRulesEnabled?.() === false ? null : requiredClassForItem(item);
+    if (requiredClass && this.selectedClass !== requiredClass) {
+      this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
+        'Requires Beastmaster class to equip', '#ffcc66');
+      audio.sfx('error', 0.4);
+      return false;
+    }
     if (item.level > this.level) { // dropped gear waits until you grow into it
       this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
         `${item.name} needs level ${item.level}`, '#ffcc66');
       audio.sfx('error', 0.4);
-      return;
+      return false;
     }
-    if (this.equipment[item.slot] === id) return; // already worn
+    if (this.equipment[item.slot] === id) return true; // already worn
     // take one copy out of the backpack; the replaced piece goes back in
     const idx = this.invItems.indexOf(id);
     if (idx >= 0) this.invItems.splice(idx, 1);
@@ -147,6 +189,27 @@ export class Player {
     this.equipment[item.slot] = id;
     this.recompute();
     this.hooks.onEquipChange?.(item.slot);
+    return true;
+  }
+
+  enforceClassEquipment() {
+    if (this.hooks.classRulesEnabled?.() === false) return false;
+    let changed = false;
+    for (const [slot, id] of Object.entries(this.equipment)) {
+      const item = itemById(id);
+      const required = requiredClassForItem(item);
+      if (!required || this.selectedClass === required) continue;
+      if (id && id !== 'fists') this.invItems.push(id);
+      this.equipment[slot] = slot === 'weapon' ? 'fists' : null;
+      changed = true;
+    }
+    if (changed) {
+      this.petDead = false;
+      this.petCommandTargetId = null;
+      this.petCommandT = 0;
+      this.hooks.onEquipChange?.('class');
+    }
+    return changed;
   }
 
   unequip(slot) {
@@ -191,33 +254,88 @@ export class Player {
   ownSpell(id) {
     if (this.spellsOwned.has(id)) return false;
     this.spellsOwned.add(id);
-    if (this.spellSlots.length < MAX_SPELL_SLOTS) this.spellSlots.push(id);
+    this.assignAbilitySlot(id);
+    return true;
+  }
+
+  assignAbilitySlot(id) {
+    if (this.spellSlots.includes(id)) return true;
+    let open = this.spellSlots.findIndex(v => !v);
+    if (open < 0 && this.spellSlots.length < MAX_SPELL_SLOTS) open = this.spellSlots.length;
+    if (open < 0 || open >= MAX_SPELL_SLOTS) return false;
+    this.spellSlots[open] = id;
     return true;
   }
 
   toggleSpellSlot(id) {
     const i = this.spellSlots.indexOf(id);
-    if (i >= 0) this.spellSlots.splice(i, 1);
-    else if (this.spellsOwned.has(id) && this.spellSlots.length < MAX_SPELL_SLOTS) this.spellSlots.push(id);
+    if (i >= 0) this.spellSlots[i] = undefined;
+    else if (this.spellsOwned.has(id) || this.hasClassSkill(id)) this.assignAbilitySlot(id);
   }
 
-  hasTalent(id) { return !!this.talents?.[id]; }
-  spentTalentPoints() { return Object.values(this.talents || {}).filter(Boolean).length; }
-  availableTalentPoints() {
-    return Math.max(0, talentPointsForLevel(this.level) - this.spentTalentPoints());
+  classRank(id) {
+    return Math.max(0, Math.min(classSkillById(id)?.maxRank || 0, this.classTraining?.[id] || 0));
+  }
+
+  hasClassSkill(id) {
+    const skill = classSkillById(id);
+    return !!skill && skill.classId === this.selectedClass && this.classRank(id) > 0;
+  }
+
+  trainedClassActives() {
+    return Object.keys(this.classTraining || {})
+      .map(id => classSkillById(id))
+      .filter(skill => skill?.type === 'active' && skill.classId === this.selectedClass && this.classRank(skill.id) > 0);
+  }
+
+  classAbilityCooldown(id) {
+    const skill = classSkillById(id);
+    if (!skill || skill.type !== 'active') return 0;
+    return skill.cd * Math.max(0.35, 1 - (this.classEffects?.classCdReduction || 0));
+  }
+
+  clearClassCombatState() {
+    for (const zone of this.classZones) this._removeClassZone(zone);
+    this.classZones.length = 0;
+    this.breakStealth();
+    this.evadeT = 0;
+    this.classShield = 0;
+    this.hotT = this.hotRate = 0;
+    this.guardianSpiritT = 0;
+    this.combatDots = {};
+    this.combatDotTickT = 0;
+    this.petCommandTargetId = null;
+    this.petCommandT = this.petCommandPower = 0;
+    for (const key of ['warCryT', 'bloodFuryT', 'avatarT', 'arrowHasteT',
+      'poisonBladesT', 'sprintT', 'combustionT', 'escapeRushT']) this[key] = 0;
   }
 
   castSpell(slotIndex, ctx) {
     const id = this.spellSlots[slotIndex];
-    if (!id || this.dead || this.stunT > 0) return;
-    if ((this.spellCds[id] || 0) > 0) { audio.sfx('error', 0.35, 300); return; }
+    const classSkill = id ? classSkillById(id) : null;
+    const canCleanseStun = classSkill?.action === 'cleanse';
+    if (!id || this.dead || (this.stunT > 0 && !canCleanseStun)) return false;
+    if ((this.spellCds[id] || 0) > 0) { audio.sfx('error', 0.35, 300); return false; }
+    if (classSkill) {
+      if (classSkill.type !== 'active' || !this.hasClassSkill(id)) return false;
+      const rank = this.classRank(id);
+      if (!this._castClassAbility(classSkill, rank, ctx)) {
+        audio.sfx('error', 0.35, 300);
+        return false;
+      }
+      this.spellCds[id] = this.classAbilityCooldown(id);
+      audio.sfx('special', 0.45);
+      return true;
+    }
     const spell = spellById(id);
+    if (!spell || !this.spellsOwned.has(id)) return false;
     this.spellCds[id] = spell.cd * (this.spellCdMult || 1);
     audio.sfx('special', 0.45);
 
     const { enemyMgr } = ctx;
     const spellPower = this.spellPower || 1;
     const spellDuration = this.spellDuration || 1;
+    if (!['haste', 'rage', 'heal', 'stoneSkin', 'spiritWard'].includes(id)) this.breakStealth();
     switch (id) {
       case 'haste': this.hasteT = 10 * spellDuration; break;
       case 'rage': this.rageT = 12 * spellDuration; break;
@@ -282,12 +400,558 @@ export class Player {
         }
         break;
     }
+    return true;
+  }
+
+  _findClassTarget(enemyMgr, aimPoint, range = 12) {
+    const list = enemyMgr?.alive?.() || [];
+    const point = aimPoint || this.pos.clone().addScaledVector(this.facing, range);
+    return list
+      .filter(e => !e.dying && e.pos && e.pos.distanceTo(this.pos) <= range + (e.hitR || 0))
+      .map(e => ({ e, score: Math.hypot(e.pos.x - point.x, e.pos.z - point.z) }))
+      .sort((a, b) => a.score - b.score)[0]?.e || null;
+  }
+
+  _classAimPoint(aimPoint, maxRange = 18, useFacing = false) {
+    const out = useFacing
+      ? this.pos.clone().addScaledVector(this.facing, maxRange)
+      : aimPoint?.clone?.() || this.pos.clone().addScaledVector(this.facing, maxRange);
+    out.y = 0;
+    const dx = out.x - this.pos.x, dz = out.z - this.pos.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist > maxRange) {
+      out.x = this.pos.x + dx / dist * maxRange;
+      out.z = this.pos.z + dz / dist * maxRange;
+    }
+    return out;
+  }
+
+  _isBehind(enemy) {
+    const ry = enemy.mesh?.rotation?.y ?? 0;
+    const fx = -Math.sin(ry), fz = -Math.cos(ry);
+    const dx = this.pos.x - enemy.pos.x, dz = this.pos.z - enemy.pos.z;
+    const len = Math.hypot(dx, dz) || 1;
+    return fx * dx / len + fz * dz / len < -0.35;
+  }
+
+  _classWeaponDamage(enemy, mult = 1, forceBackstab = false) {
+    let damage = this.weapon.dmg * mult * this.dmgMult;
+    if ((enemy.hp || 0) / Math.max(1, enemy.maxHp || 1) < 0.35) {
+      damage *= 1 + (this.classEffects.executeDmg || 0);
+    }
+    if ((forceBackstab || this._isBehind(enemy)) && this.classEffects.backstab) {
+      damage *= 1 + this.classEffects.backstab;
+    }
+    return damage;
+  }
+
+  _classMagicMultiplier(element = null) {
+    let mult = 1 + (this.classEffects.spellPower || 0);
+    const fire = (this.classEffects.firePower || 0)
+      + (this.combustionT > 0 ? this.combustionPower : 0);
+    const frost = this.classEffects.frostPower || 0;
+    if (element === 'fire') mult *= 1 + fire;
+    if (element === 'frost') mult *= 1 + frost;
+    // Elemental Storm is half fire and half frost, so both mastery paths
+    // contribute without either one being counted twice.
+    if (element === 'elemental') mult *= 1 + (fire + frost) * 0.5;
+    if (element === 'holy') mult *= 1 + (this.classEffects.holyPower || 0);
+    return mult;
+  }
+
+  _classMagicDamage(base, element = null) {
+    const amount = base * this._classMagicMultiplier(element);
+    const crit = Math.random() < (this.classEffects.spellCrit || 0);
+    return { amount: amount * (crit ? CRIT_MULT : 1), crit };
+  }
+
+  _classBurnDamage(base) {
+    return base * this._classMagicMultiplier('fire');
+  }
+
+  _classHeal(base, target = this) {
+    let amount = base * (1 + (this.classEffects.healPower || 0));
+    if ((target?.hp ?? target?.maxHp ?? 1) / Math.max(1, target?.maxHp || 1) < 0.5) {
+      amount *= 1 + (this.classEffects.lowHpHeal || 0);
+    }
+    return Math.round(amount);
+  }
+
+  _castClassAbility(skill, rank, ctx) {
+    const enemyMgr = ctx.enemyMgr;
+    const rv = (key, fallback = 0) => rankValue(skill, key, rank, fallback);
+    const bowSkills = new Set(['beast_arrow_haste', 'beast_ten_arrows', 'beast_arrow_rain',
+      'beast_piercing_shot', 'beast_explosive_arrow']);
+    if (bowSkills.has(skill.id) && this.weapon.kind !== 'bow') {
+      this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
+        'Equip a bow or crossbow first', '#ffcc66');
+      return false;
+    }
+    const target = () => {
+      const range = rv('range', 12);
+      const targetAim = ctx.rpgView
+        ? this.pos.clone().addScaledVector(this.facing, range) : ctx.aimPoint;
+      return this._findClassTarget(enemyMgr, targetAim, range);
+    };
+    const damageTarget = (enemy, amount, opts = null) => {
+      if (!enemy) return false;
+      enemyMgr.damage(enemy, amount, this.facing, 'local', opts);
+      if (skill.classId === 'warrior' && Math.random() < (this.classEffects.staggerChance || 0)) {
+        enemyMgr.stun?.(enemy, 0.8);
+      }
+      return true;
+    };
+    const hostile = !['buff', 'stealth', 'evade', 'shield', 'heal', 'hot', 'cleanse', 'guardian', 'world'].includes(skill.action)
+      || ['trap', 'trapField', 'petCommand'].includes(skill.worldAction);
+
+    if (skill.action === 'target' || skill.action === 'execute') {
+      const enemy = target();
+      if (!enemy) return false;
+      if (skill.action === 'execute' && enemy.hp / Math.max(1, enemy.maxHp) > skill.threshold) {
+        this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
+          `Target must be below ${Math.round(skill.threshold * 100)}% health`, '#ffcc66');
+        return false;
+      }
+      const opts = {};
+      if (skill.bleedPct) opts.rend = {
+        dps: enemy.maxHp * rv('bleedPct') / Math.max(1, skill.bleedDur), dur: skill.bleedDur,
+      };
+      if (skill.poison) opts.poison = { dps: rv('poison') * (1 + (this.classEffects.poisonPower || 0)), dur: 6 };
+      let amount = this._classWeaponDamage(enemy, rv('weaponMult', 1));
+      if (skill.backstab && this._isBehind(enemy)) amount *= 1.35 + rank * 0.15;
+      const ok = damageTarget(enemy, amount, opts);
+      if (skill.stun) enemyMgr.stun?.(enemy, rv('stun'));
+      if (skill.bleedPct) this.hooks.popup(enemy.mesh.position.clone().setY(enemy.mesh.position.y + 2),
+        `🩸 ${Math.round(rv('bleedPct') * 100)}% bleed / 30s`, '#ff6b68', 'big');
+      if (hostile) this.breakStealth();
+      return ok;
+    }
+
+    if (skill.action === 'buff') {
+      const duration = rv('duration');
+      const power = rv('power');
+      const field = {
+        warCry: ['warCryT', 'warCryPower'], bloodFury: ['bloodFuryT', 'bloodFuryPower'],
+        avatar: ['avatarT', 'avatarPower'], arrowHaste: ['arrowHasteT', 'arrowHastePower'],
+        poisonBlades: ['poisonBladesT', 'poisonBladesPower'], sprint: ['sprintT', 'sprintPower'],
+        combustion: ['combustionT', 'combustionPower'],
+      }[skill.buff];
+      if (!field) return false;
+      this[field[0]] = duration;
+      this[field[1]] = power;
+      if (skill.buff === 'avatar') this.classShield = Math.max(this.classShield, this.maxHp * power);
+      return true;
+    }
+
+    if (skill.action === 'aoe' || skill.action === 'magicAoe' || skill.action === 'holyNova') {
+      const radius = rv('radius', 5) * (skill.action === 'holyNova'
+        ? 1 + (this.classEffects.healRadius || 0)
+        : skill.element === 'fire' ? 1 + (this.classEffects.fireRadius || 0)
+          : skill.element === 'frost' ? 1 + (this.classEffects.frostRadius || 0) : 1);
+      let hits = 0;
+      for (const enemy of enemyMgr?.alive?.() || []) {
+        if (enemy.pos.distanceTo(this.pos) > radius + (enemy.hitR || 0)) continue;
+        const result = skill.damage
+          ? this._classMagicDamage(rv('damage'), skill.action === 'holyNova' ? 'holy' : skill.element)
+          : { amount: this._classWeaponDamage(enemy, rv('weaponMult', 1)), crit: false };
+        const opts = {
+          ...(result.crit ? { crit: true } : {}),
+          ...(skill.poison
+            ? { poison: { dps: rv('poison') * (1 + (this.classEffects.poisonPower || 0)), dur: 6 } }
+            : {}),
+        };
+        damageTarget(enemy, result.amount, Object.keys(opts).length ? opts : null);
+        if (skill.stun) enemyMgr.stun?.(enemy, rv('stun'));
+        hits++;
+      }
+      if (skill.action === 'holyNova') this._healSelf(this._classHeal(rv('amount')));
+      this._spawnClassRing(this.pos, radius, skill.element === 'frost' ? 0x75cfff : 0xffc85a);
+      if (hostile) this.breakStealth();
+      return true;
+    }
+
+    if (skill.action === 'cone' || skill.action === 'magicCone') {
+      const range = rv('range', 7) * (skill.element === 'fire'
+        ? 1 + (this.classEffects.fireRadius || 0)
+        : skill.element === 'frost' ? 1 + (this.classEffects.frostRadius || 0) : 1);
+      let hits = 0;
+      for (const enemy of enemyMgr?.alive?.() || []) {
+        if (!this._inArc(enemy.pos.x, enemy.pos.z, range, enemy.hitR || 0, 0.15)) continue;
+        const result = skill.damage
+          ? this._classMagicDamage(rv('damage'), skill.element)
+          : { amount: this._classWeaponDamage(enemy, rv('weaponMult', 1)) };
+        const opts = skill.burn ? { burn: { dps: skill.element === 'fire'
+          ? this._classBurnDamage(rv('burn')) : rv('burn'), dur: 6 } } : null;
+        damageTarget(enemy, result.amount, opts);
+        hits++;
+      }
+      this.breakStealth();
+      return true;
+    }
+
+    if (skill.action === 'dash') {
+      this.dashT = rv('distance', 8) / 34;
+      this.dashDir.copy(this.facing);
+      this.dashHit.clear();
+      this.dashSpec = { dmg: this.weapon.dmg * rv('weaponMult', 1), stun: rv('stun'),
+        staggerChance: skill.classId === 'warrior' ? (this.classEffects.staggerChance || 0) : 0 };
+      this.breakStealth();
+      return true;
+    }
+
+    if (skill.action === 'multishot') {
+      if (!ctx.projectiles || this.weapon.kind !== 'bow') {
+        this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
+          'Equip a bow or crossbow first', '#ffcc66');
+        return false;
+      }
+      const count = rv('count', 1), spread = rv('spread', 0), speed = this.weapon.style === 'crossbow' ? 31 : 26;
+      const origin = this.pos.clone().addScaledVector(this.facing, 0.6).setY(this.mesh.position.y + 1.1);
+      for (let i = 0; i < count; i++) {
+        const crit = Math.random() < this.critChance + (this.bowCritBonus || 0);
+        const angle = count <= 1 ? 0 : -spread / 2 + spread * i / (count - 1);
+        const cos = Math.cos(angle), sin = Math.sin(angle);
+        const dir = new THREE.Vector3(
+          this.facing.x * cos + this.facing.z * sin, 0,
+          -this.facing.x * sin + this.facing.z * cos,
+        ).normalize();
+        ctx.projectiles.spawnArrow(origin, dir, {
+          dmg: this.weapon.dmg * rv('weaponMult', 1) * this.dmgMult * (crit ? CRIT_MULT : 1),
+          crit,
+          pierce: !!skill.pierce, speed, life: this.weapon.range / speed,
+          effects: this.classEffects.arrowBleed
+            ? { bleed: { dps: this.weapon.dmg * this.classEffects.arrowBleed, dur: 5 } } : null,
+        });
+      }
+      this.breakStealth();
+      return true;
+    }
+
+    if (skill.action === 'zone') {
+      const castRange = rv('castRange', 18);
+      const at = this._classAimPoint(ctx.aimPoint, castRange, !!ctx.rpgView);
+      this._addClassZone(skill, rank, at);
+      if (skill.zone !== 'healing' && skill.zone !== 'smoke') this.breakStealth();
+      return true;
+    }
+
+    if (skill.action === 'zoneBurst') {
+      const castRange = rv('castRange', 18);
+      const at = this._classAimPoint(ctx.aimPoint, castRange, !!ctx.rpgView);
+      const radius = rv('radius', 4) * (skill.element === 'fire'
+        ? 1 + (this.classEffects.fireRadius || 0)
+        : skill.element === 'frost' ? 1 + (this.classEffects.frostRadius || 0) : 1);
+      let hits = 0;
+      for (const enemy of enemyMgr?.alive?.() || []) {
+        if (enemy.pos.distanceTo(at) > radius + (enemy.hitR || 0)) continue;
+        let result = skill.damage
+          ? this._classMagicDamage(rv('damage'), skill.element)
+          : { amount: this._classWeaponDamage(enemy, rv('weaponMult', 1)) };
+        if (skill.classId === 'beastmaster') {
+          const crit = Math.random() < this.critChance + (this.bowCritBonus || 0);
+          result = { amount: result.amount * (crit ? CRIT_MULT : 1), crit };
+        }
+        const opts = {
+          ...(result.crit ? { crit: true } : {}),
+          ...(skill.burn ? { burn: { dps: skill.element === 'fire'
+            ? this._classBurnDamage(rv('burn')) : rv('burn'), dur: 6 } } : {}),
+          ...(skill.classId === 'beastmaster' && this.classEffects.arrowBleed
+            ? { bleed: { dps: this.weapon.dmg * this.classEffects.arrowBleed, dur: 5 } } : {}),
+        };
+        damageTarget(enemy, result.amount, Object.keys(opts).length ? opts : null);
+        hits++;
+      }
+      this._spawnClassRing(at, radius, skill.element === 'fire' || skill.burn ? 0xff6b2f : 0xd9e88a);
+      this.breakStealth();
+      return true;
+    }
+
+    if (skill.action === 'petAoe') {
+      if (!this.pet || this.petDead) {
+        this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
+          'You need a living animal companion', '#ffcc66');
+        return false;
+      }
+      const radius = rv('radius', 7);
+      const petPower = this.pet.classPowerApplied ? 0 : (this.classEffects.petPower || 0);
+      const damage = this.pet.dmg * (1 + petPower) * rv('petMult', 3);
+      for (const enemy of enemyMgr?.alive?.() || []) {
+        if (enemy.pos.distanceTo(this.pos) > radius + (enemy.hitR || 0)) continue;
+        damageTarget(enemy, damage);
+        if (skill.stun) enemyMgr.stun?.(enemy, rv('stun'));
+      }
+      this._spawnClassRing(this.pos, radius, 0xd6a94f, 0.9);
+      this.breakStealth();
+      return true;
+    }
+
+    if (skill.action === 'stealth') {
+      this.stealthT = rv('duration') + (this.classEffects.stealthDuration || 0);
+      this._setStealth(true);
+      return true;
+    }
+
+    if (skill.action === 'evade') {
+      this.evadeT = rv('duration') + (this.classEffects.evadeDuration || 0);
+      this._spawnClassRing(this.pos, 2.3, 0x7ee8ff, this.evadeT);
+      return true;
+    }
+
+    if (skill.action === 'shadowstep') {
+      const enemy = target();
+      if (!enemy) return false;
+      const ry = enemy.mesh?.rotation?.y ?? 0;
+      const enemyForward = new THREE.Vector3(-Math.sin(ry), 0, -Math.cos(ry));
+      this.pos.copy(enemy.pos).addScaledVector(enemyForward, -1.4);
+      this.facing.copy(enemyForward);
+      damageTarget(enemy, this._classWeaponDamage(enemy, rv('weaponMult', 1), true));
+      this.breakStealth();
+      return true;
+    }
+
+    if (skill.action === 'magicTarget') {
+      const enemy = target();
+      if (!enemy) return false;
+      const result = this._classMagicDamage(rv('damage'), skill.element);
+      const opts = skill.burn
+        ? { burn: { dps: skill.element === 'fire' ? this._classBurnDamage(rv('burn')) : rv('burn'), dur: 6 } }
+        : null;
+      damageTarget(enemy, result.amount, opts);
+      if (skill.stun) enemyMgr.stun?.(enemy, rv('stun'));
+      this.breakStealth();
+      return true;
+    }
+
+    if (skill.action === 'shield') {
+      this.classShield = Math.max(this.classShield,
+        rv('amount') * (1 + (this.classEffects.shieldPower || 0)));
+      this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
+        `🛡️ ${Math.round(this.classShield)} shield`, '#8ed8ff');
+      return true;
+    }
+
+    if (skill.action === 'heal') {
+      this._healSelf(this._classHeal(rv('amount')));
+      this.hooks.onClassWorldAction?.('healAlly', skill, rank, ctx);
+      return true;
+    }
+
+    if (skill.action === 'hot') {
+      this.hotT = rv('duration');
+      this.hotRate = this._classHeal(rv('amount') * (1 + (this.classEffects.hotPower || 0)));
+      this.hotTickT = 0;
+      return true;
+    }
+
+    if (skill.action === 'cleanse') {
+      this.poisonT = this.poisonDps = 0;
+      this.combatDots = {};
+      this.combatDotTickT = 0;
+      this.stunT = 0;
+      this._healSelf(this._classHeal(rv('amount')));
+      return true;
+    }
+
+    if (skill.action === 'guardian') {
+      this.guardianSpiritT = rv('duration');
+      this.guardianSpiritHeal = Math.min(1, rv('amount') * (1 + (this.classEffects.guardianPower || 0)));
+      return true;
+    }
+
+    if (skill.action === 'world') {
+      const used = this.hooks.onClassWorldAction?.(skill.worldAction, skill, rank, ctx) !== false;
+      if (used && ['trap', 'trapField', 'petCommand'].includes(skill.worldAction)) this.breakStealth();
+      return used;
+    }
+    return false;
+  }
+
+  _healSelf(amount) {
+    const actual = Math.max(0, Math.min(this.maxHp - this.hp, Math.round(amount)));
+    if (actual <= 0) return 0;
+    this.hp += actual;
+    this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
+      `+${actual} ❤️`, '#7fe07f');
+    return actual;
+  }
+
+  _setStealth(active) {
+    this.stealthed = !!active;
+    this.mesh.traverse(part => {
+      if (!part.material) return;
+      const materials = Array.isArray(part.material) ? part.material : [part.material];
+      const changed = materials.map(material => {
+        let mat = material;
+        if (!mat.userData?.classVisualCopy) {
+          mat = material.clone();
+          mat.userData.classVisualCopy = true;
+          mat.userData.classBaseOpacity = material.opacity ?? 1;
+          mat.userData.classBaseTransparent = !!material.transparent;
+        }
+        const baseOpacity = mat.userData.classBaseOpacity ?? 1;
+        mat.transparent = active || !!mat.userData.classBaseTransparent;
+        mat.opacity = active ? Math.min(baseOpacity, 0.22) : baseOpacity;
+        mat.depthWrite = !active;
+        mat.needsUpdate = true;
+        return mat;
+      });
+      part.material = Array.isArray(part.material) ? changed : changed[0];
+    });
+  }
+
+  breakStealth() {
+    this.stealthT = 0;
+    if (this.stealthed) this._setStealth(false);
+  }
+
+  _zoneColor(kind) {
+    return ({ arrows: 0xe7d16f, fire: 0xff6b2f, frost: 0x75cfff, elemental: 0xb58aff,
+      smoke: 0x65707d, healing: 0x8ee87f })[kind] || 0xffffff;
+  }
+
+  _addClassZone(skill, rank, pos) {
+    const rv = (key, fallback = 0) => rankValue(skill, key, rank, fallback);
+    let radius = rv('radius', 5);
+    if (skill.zone === 'fire') radius *= 1 + (this.classEffects.fireRadius || 0);
+    if (skill.zone === 'frost') radius *= 1 + (this.classEffects.frostRadius || 0);
+    if (skill.zone === 'elemental') radius *= 1
+      + ((this.classEffects.fireRadius || 0) + (this.classEffects.frostRadius || 0)) * 0.5;
+    if (skill.zone === 'healing') radius *= 1 + (this.classEffects.healRadius || 0);
+    const duration = rv('duration', 8) * (1 + (this.classEffects.zoneDuration || 0));
+    const geo = new THREE.RingGeometry(Math.max(0.1, radius - 0.18), radius, 48);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({
+      color: this._zoneColor(skill.zone), transparent: true, opacity: 0.42,
+      side: THREE.DoubleSide, depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(pos.x, this.mesh.position.y + 0.08, pos.z);
+    this.scene.add(mesh);
+    const castSnapshot = skill.zone === 'arrows' ? {
+      weaponDmg: this.weapon.dmg,
+      damageMult: this.dmgMult,
+      critChance: this.critChance + (this.bowCritBonus || 0),
+      bleedDps: this.classEffects.arrowBleed
+        ? this.weapon.dmg * this.classEffects.arrowBleed : 0,
+    } : null;
+    this.classZones.push({ skill, rank, pos: pos.clone(), radius, t: duration,
+      duration, tickT: 0, interval: rv('interval', 1), mesh, castSnapshot });
+  }
+
+  _removeClassZone(zone) {
+    if (!zone?.mesh) return;
+    this.scene.remove(zone.mesh);
+    zone.mesh.geometry?.dispose?.();
+    zone.mesh.material?.dispose?.();
+  }
+
+  _updateClassZones(dt, enemyMgr, ctx) {
+    for (let i = this.classZones.length - 1; i >= 0; i--) {
+      const zone = this.classZones[i];
+      zone.t -= dt;
+      zone.tickT -= dt;
+      zone.mesh.position.y = (ctx.world?.heightAt?.(zone.pos.x, zone.pos.z) ?? this.mesh.position.y) + 0.08;
+      zone.mesh.rotation.z += dt * 0.12;
+      zone.mesh.material.opacity = 0.22 + 0.2 * Math.abs(Math.sin(zone.t * 3));
+      const inside = Math.hypot(this.pos.x - zone.pos.x, this.pos.z - zone.pos.z) <= zone.radius;
+      if (zone.skill.zone === 'smoke' && inside) {
+        this.stealthT = Math.max(this.stealthT, 0.6);
+        this._setStealth(true);
+      }
+      if (zone.tickT <= 0) {
+        zone.tickT = Math.max(0.2, zone.interval);
+        const skill = zone.skill;
+        const rv = (key, fallback = 0) => rankValue(skill, key, zone.rank, fallback);
+        if (skill.zone === 'healing') {
+          if (inside) this._healSelf(this._classHeal(rv('amount')));
+          this.hooks.onClassWorldAction?.('zoneHeal', skill, zone.rank, { ...ctx, zone });
+        } else if (skill.zone !== 'smoke') {
+          if (skill.zone === 'arrows') this._spawnArrowRainFx(zone);
+          for (const enemy of enemyMgr?.alive?.() || []) {
+            if (enemy.pos.distanceTo(zone.pos) > zone.radius + (enemy.hitR || 0)) continue;
+            let result;
+            if (skill.zone === 'arrows' && zone.castSnapshot) {
+              const crit = Math.random() < zone.castSnapshot.critChance;
+              result = { amount: zone.castSnapshot.weaponDmg * zone.castSnapshot.damageMult
+                * rv('weaponMult', 1) * (crit ? CRIT_MULT : 1), crit };
+            } else if (skill.weaponMult) {
+              const crit = skill.classId === 'beastmaster'
+                && Math.random() < this.critChance + (this.bowCritBonus || 0);
+              result = { amount: this._classWeaponDamage(enemy, rv('weaponMult', 1))
+                * (crit ? CRIT_MULT : 1), crit };
+            } else result = this._classMagicDamage(rv('damage'),
+              skill.zone === 'fire' ? 'fire' : skill.zone === 'frost' ? 'frost'
+                : skill.zone === 'elemental' ? 'elemental' : null);
+            const opts = {
+              ...(result.crit ? { crit: true } : {}),
+              ...(skill.zone === 'fire'
+                ? { burn: { dps: Math.max(2, result.amount * 0.12), dur: 3 } } : {}),
+              ...(skill.zone === 'arrows' && zone.castSnapshot?.bleedDps
+                ? { bleed: { dps: zone.castSnapshot.bleedDps, dur: 5 } } : {}),
+            };
+            enemyMgr.damage(enemy, result.amount, null, 'local', Object.keys(opts).length ? opts : null);
+            if (skill.zone === 'frost' || skill.zone === 'elemental') {
+              enemyMgr.stun?.(enemy, rv('stun', 0.25));
+            }
+          }
+        }
+      }
+      if (zone.t <= 0) {
+        this._removeClassZone(zone);
+        this.classZones.splice(i, 1);
+      }
+    }
+  }
+
+  _spawnClassRing(pos, radius, color, life = 0.55) {
+    const geo = new THREE.RingGeometry(Math.max(0.1, radius * 0.72), radius, 40);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(pos.x, this.mesh.position.y + 0.12, pos.z);
+    this.scene.add(mesh);
+    this.classFx.push({ mesh, t: life, life, kind: 'ring' });
+  }
+
+  _spawnArrowRainFx(zone) {
+    for (let i = 0; i < 6; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const radius = Math.sqrt(Math.random()) * zone.radius;
+      const mesh = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.025, 0.025, 1.1, 5),
+        new THREE.MeshBasicMaterial({ color: 0xe8dfb0, transparent: true, opacity: 0.9 }),
+      );
+      mesh.position.set(zone.pos.x + Math.cos(angle) * radius,
+        zone.mesh.position.y + 7 + Math.random() * 3, zone.pos.z + Math.sin(angle) * radius);
+      mesh.rotation.z = 0.18;
+      this.scene.add(mesh);
+      this.classFx.push({ mesh, t: 0.65, life: 0.65, kind: 'fallingArrow' });
+    }
+  }
+
+  _updateClassFx(dt) {
+    for (let i = this.classFx.length - 1; i >= 0; i--) {
+      const fx = this.classFx[i];
+      fx.t -= dt;
+      const k = 1 - Math.max(0, fx.t) / fx.life;
+      if (fx.kind === 'fallingArrow') fx.mesh.position.y -= dt * 16;
+      else fx.mesh.scale.setScalar(0.65 + k * 0.65);
+      fx.mesh.material.opacity = 0.8 * (1 - k);
+      if (fx.t > 0) continue;
+      this.scene.remove(fx.mesh);
+      fx.mesh.geometry?.dispose?.();
+      fx.mesh.material?.dispose?.();
+      this.classFx.splice(i, 1);
+    }
   }
 
   // ---------- derived stats ----------
   recompute() {
     const equipped = (slot) => itemById(this.equipment[slot]);
     const oldMax = this.maxHp || 100;
+    this.classEffects = classEffectsFor(this.selectedClass, this.classTraining);
     this.gearMult = 1 + 0.1 * (this.forgeTier || 0);
     let hp = 100 + (this.level - 1) * 10 + (this.shrineBonus || 0)
       + (this.upgrades.questHp || 0), speedAdd = 0;
@@ -296,8 +960,7 @@ export class Player {
       if (it?.stats?.hp) hp += it.stats.hp * this.gearMult;
       if (it?.stats?.speed) speedAdd += it.stats.speed;
     }
-    if (this.hasTalent('warriorVitality')) hp = (hp + (this.campBonus || 0)) * 1.15;
-    else hp += this.campBonus || 0;
+    hp = (hp + (this.campBonus || 0)) * (1 + (this.classEffects.hpPct || 0));
     this.maxHp = Math.round(hp);
     if (this.maxHp > oldMax) this.hp += this.maxHp - oldMax;
     this.hp = Math.min(this.hp, this.maxHp);
@@ -305,7 +968,7 @@ export class Player {
     // power gains +1% per level while attack-speed growth softens after Lv14
     const lvl = this.level - 1;
     this.speed = 5.5 + 0.1 * lvl + speedAdd + (this.upgrades.trailblazer || 0) * 0.2
-      + (this.hasTalent('wandererStride') ? 0.7 : 0);
+      + (this.classEffects.speed || 0);
     // passive regeneration: everyone knits back slowly; gear can stack it up
     let regen = 0.1 + 0.1 * lvl;
     for (const slot of ['head', 'chest', 'boots', 'charm', 'offhand', 'underlayer', 'legs', 'back', 'mount']) {
@@ -328,33 +991,36 @@ export class Player {
       cd: lvlCd(base.cd * (1 - 0.04 * s.swift)),
       range: base.range + (base.kind === 'bow' ? 2.0 : 0.1) * s.range,
     };
-    if (base.kind === 'bow' && base.style !== 'crossbow' && this.hasTalent('hunterBow')) {
-      this.weapon.dmg *= 1.18;
-      this.weapon.range += 3;
+    if (base.kind === 'bow') {
+      this.weapon.dmg *= 1 + (this.classEffects.rangedDmg || 0);
+      this.weapon.cd *= Math.max(0.35, 1 - (this.classEffects.rangedSpeed || 0));
+    } else {
+      this.weapon.dmg *= 1 + (this.classEffects.meleeDmg || 0);
+      this.weapon.cd *= Math.max(0.35, 1 - (this.classEffects.meleeSpeed || 0));
     }
     if (this.upgrades.questPower) this.weapon.dmg *= 1 + this.upgrades.questPower * 0.03;
     this.shield = equipped('offhand')?.shield || null;
     this.canBlock = !!this.shield || !!this.weapon.parry;
-    this.critChance = CRIT_CHANCE + (this.upgrades.hunterResident ? 0.04 : 0);
-    this.bowCritBonus = this.hasTalent('hunterDeadeye') ? 0.1 : 0;
-    this.weakPointBonus = this.hasTalent('hunterDeadeye') ? 0.35 : 0;
-    this.blockBonus = this.hasTalent('warriorBulwark') ? 0.15 : 0;
-    this.meleeArcBonus = this.hasTalent('warriorCleave') ? 0.18 : 0;
-    this.dodgeCdMult = this.hasTalent('wandererStride') ? 0.75 : 1;
-    this.environmentResist = this.hasTalent('wandererWeathered') ? 0.5 : 0;
-    this.hunterTraps = this.hasTalent('hunterTraps');
-    this.beastCommand = this.hasTalent('beastCommand');
-    this.beastFrenzy = this.hasTalent('beastFrenzy');
-    this.spellCdMult = this.hasTalent('mysticAttunement') ? 0.8 : 1;
-    this.essenceMult = this.hasTalent('mysticEssence') ? 1.35 : 1;
-    this.spellPower = this.hasTalent('mysticOverchannel') ? 1.25 : 1;
-    this.spellDuration = this.hasTalent('mysticOverchannel') ? 1.2 : 1;
-    this.gatherMult = 1 + 0.15 * s.gather + (this.hasTalent('wandererForager') ? 0.25 : 0);
+    this.critChance = CRIT_CHANCE + (this.upgrades.hunterResident ? 0.04 : 0)
+      + (base.kind === 'bow' ? 0 : (this.classEffects.meleeCrit || 0));
+    this.bowCritBonus = this.classEffects.rangedCrit || 0;
+    this.weakPointBonus = this.classEffects.rangedCrit ? 0.2 : 0;
+    this.blockBonus = this.classEffects.blockBonus || 0;
+    this.meleeArcBonus = this.classEffects.arcBonus || 0;
+    // Class recovery/power passives affect only the abilities in that class
+    // tree; legacy world spells remain neutral and available to every class.
+    this.spellCdMult = 1;
+    this.essenceMult = 1 + (this.classEffects.essenceMult || 0);
+    this.meatMult = 1 + (this.classEffects.meatMult || 0);
+    this.spellPower = 1;
+    this.spellDuration = 1;
+    this.gatherMult = 1 + 0.15 * s.gather;
     // expedition gear: each comfort lives in its own slot now (no more flags)
     this.torchGear = equipped('offhand')?.torch || null;   // { radius } while a torch is in hand
-    this.dmgCut = equipped('underlayer')?.dmgCut || 0;     // quilted lining soak
+    this.dmgCut = Math.min(0.8, (equipped('underlayer')?.dmgCut || 0)
+      + (this.classEffects.damageCut || 0));               // gear + class mitigation
     this.poisonCut = Math.min(0.9, (equipped('underlayer')?.poisonCut || 0)
-      + (this.hasTalent('wandererWeathered') ? 0.5 : 0));
+      + (this.classEffects.poisonCut || 0));
     this.mudguard = Math.min(equipped('legs')?.mudguard ?? 1, equipped('boots')?.mudguard ?? 1);
     this.restMult = equipped('back')?.rest || 1;           // bedroll rest regen
     this.hasSaddle = !!equipped('mount')?.saddle;          // can mount wild horses
@@ -366,16 +1032,18 @@ export class Player {
     this.attackRange = this.weapon.range; // aim marker clamps to this
     // ONE companion slot: a wolf (pet) or a sphere (orb), never both.
     // Pets scale with training AND the owner's level; orbs with Power.
-    const comp = equipped('companion');
+    const comp = (this.hooks.classRulesEnabled?.() === false || this.selectedClass === 'beastmaster')
+      ? equipped('companion') : null;
     const petBase = comp?.pet;
-    const companionMult = this.hasTalent('beastBond') ? 1.25 : 1;
+    const petPower = this.classEffects.petPower || 0;
     this.pet = petBase
-      ? { dmg: petBase.dmg * (1 + 0.25 * s.pet) * (1 + 0.03 * this.level) * this.gearMult * companionMult,
-          maxHp: Math.round((100 + 100 * s.pet + 50 * Math.floor(this.level / 2)) * this.gearMult * companionMult) }
+      ? { dmg: petBase.dmg * (1 + 0.25 * s.pet) * (1 + 0.03 * this.level) * this.gearMult * (1 + petPower),
+          maxHp: Math.round((100 + 100 * s.pet + 50 * Math.floor(this.level / 2)) * this.gearMult * (1 + petPower)),
+          classPowerApplied: true }
       : null;
     const orbBase = comp?.orb;
     this.orb = orbBase
-      ? { ...orbBase, dmg: orbBase.dmg * (1 + 0.05 * s.power) * this.gearMult * companionMult }
+      ? { ...orbBase, dmg: orbBase.dmg * (1 + 0.05 * s.power) * this.gearMult * (1 + petPower) }
       : null;
 
     // cursed-statue pact: a strong boon lashed to a bane, until it expires
@@ -428,27 +1096,37 @@ export class Player {
 
   applyStun(sec) {
     if (this.dead) return;
-    if (this.invulnT > 0) return;
+    if (this.evadeT > 0) return;
+    sec *= Math.max(0.1, 1 - (this.classEffects.stunResist || 0));
     this.stunT = Math.max(this.stunT, sec);
     this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.3), '⚡ Stunned!', '#ffe94a');
     this.hooks.onHurt?.();
   }
 
-  get dmgMult() { return this.rageT > 0 ? 1.5 : 1; }
-  get cdMult() { return this.hasteT > 0 ? 0.5 : 1; }
+  get dmgMult() {
+    let mult = this.rageT > 0 ? 1.5 : 1;
+    if (this.warCryT > 0) mult *= 1 + this.warCryPower;
+    if (this.avatarT > 0) mult *= 1 + this.avatarPower;
+    return mult;
+  }
 
-  startDodge() {
-    if (this.dead || this.stunT > 0 || this.dodgeCd > 0 || this.dashT > 0 || this.mounted) return false;
-    const d = this.moveDir ? new THREE.Vector3(this.moveDir.x, 0, this.moveDir.z) : this.facing.clone();
-    if (d.lengthSq() < 0.01) d.set(0, 0, -1);
-    this.dodgeDir.copy(d.normalize());
-    this.dodgeT = 0.22;
-    this.dodgeCd = 1.05 * (this.dodgeCdMult || 1);
-    this.invulnT = 0.28;
-    this.charging = false;
-    this.blocking = false;
-    audio.sfx('special', 0.28, 180);
-    return true;
+  get cdMult() {
+    let mult = this.hasteT > 0 ? 0.5 : 1;
+    if (this.weapon?.kind === 'bow' && this.arrowHasteT > 0) mult *= Math.max(0.2, 1 - this.arrowHastePower);
+    if (this.weapon?.kind !== 'bow' && this.bloodFuryT > 0) mult *= Math.max(0.35, 1 - this.bloodFuryPower);
+    return mult;
+  }
+
+  get moveSpeedBonus() {
+    return (this.sprintT > 0 ? this.sprintPower : 0)
+      + (this.escapeRushT > 0 ? (this.classEffects.hurtSpeed || 0) * 5 : 0);
+  }
+
+  get activeDamageCut() {
+    let cut = 0;
+    if (this.warCryT > 0) cut += this.warCryPower * 0.5;
+    if (this.avatarT > 0) cut += this.avatarPower * 0.45;
+    return Math.min(0.65, cut);
   }
 
   cycleArrowMode() {
@@ -547,8 +1225,8 @@ export class Player {
   takeDamage(dmg, src = null) {
     if (this.dead) return;
     if (this.flying) return; // riding a griffin — far out of anyone's reach
-    if (this.invulnT > 0) {
-      this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.1), 'DODGE', '#b8f4ff');
+    if (this.evadeT > 0) {
+      this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.1), 'EVADE', '#7ee8ff', 'big');
       return;
     }
     const sx = src?.pos?.x, sz = src?.pos?.z;
@@ -570,9 +1248,20 @@ export class Player {
       audio.sfx('base_hit', 0.35, 120);
     }
     if (this.dmgCut) dmg *= 1 - this.dmgCut; // quilted wool lining soaks a bit of everything
+    if (this.activeDamageCut) dmg *= 1 - this.activeDamageCut;
     if (this.stoneSkinT > 0) dmg *= 0.6;
     if (this.spiritWardT > 0) dmg *= 0.7;
+    if (this.classShield > 0) {
+      const absorbed = Math.min(this.classShield, dmg);
+      this.classShield -= absorbed;
+      dmg -= absorbed;
+      this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.1),
+        `🛡️ ${Math.round(absorbed)} absorbed`, '#8ed8ff');
+      if (dmg <= 0.01) return;
+    }
+    this.breakStealth();
     this.hurtT = 0;
+    if (this.classEffects.hurtSpeed) this.escapeRushT = 3;
     if (src?.name) this.killedBy = src.name; // remember the last thing that hurt us
     this.hp -= dmg;
     // every hit shows its number — incoming damage floats red above you
@@ -589,10 +1278,73 @@ export class Player {
     audio.sfx('hit', 0.45, 120);
     this.hooks.onHurt?.();
     if (this.hp <= 0) {
+      if (this.guardianSpiritT > 0) {
+        this.guardianSpiritT = 0;
+        this.hp = Math.min(this.maxHp, Math.max(1, Math.round(this.maxHp * this.guardianSpiritHeal)));
+        this.poisonT = this.poisonDps = 0;
+        this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.35),
+          `👼 Guardian Spirit +${this.hp} ❤️`, '#fff0a5', 'big');
+        audio.sfx('evolve', 0.55);
+        return;
+      }
       this.hp = 0;
       this.dead = true;
       this.hooks.onDeath();
     }
+  }
+
+  applyCombatDot(kind, dps, duration, src = null) {
+    if (this.dead || !(dps > 0) || !(duration > 0)) return false;
+    if (kind === 'poison') dps *= Math.max(0, 1 - (this.poisonCut || 0));
+    if (!(dps > 0)) return false;
+    const current = this.combatDots[kind];
+    const currentDamage = (current?.t || 0) * (current?.dps || 0);
+    const newDamage = duration * dps;
+    if (!current || newDamage >= currentDamage) {
+      this.combatDots[kind] = { t: duration, dps, src };
+      this.combatDotTickT = 0;
+    }
+    return true;
+  }
+
+  _updateCombatDots(dt) {
+    const icons = { bleed: '🩸', rend: '🩸', burn: '🔥', poison: '☠️' };
+    let damage = 0, shownDps = 0, lastSrc = null;
+    const activeIcons = [];
+    for (const [kind, dot] of Object.entries(this.combatDots)) {
+      if (!(dot.t > 0) || !(dot.dps > 0)) { delete this.combatDots[kind]; continue; }
+      const activeDt = Math.min(dt, dot.t);
+      dot.t = Math.max(0, dot.t - dt);
+      damage += dot.dps * activeDt;
+      shownDps += dot.dps;
+      lastSrc = dot.src || lastSrc;
+      activeIcons.push(icons[kind] || '•');
+      if (dot.t <= 0) delete this.combatDots[kind];
+    }
+    if (!(damage > 0)) return false;
+    this.hp -= damage;
+    this.combatDotTickT -= dt;
+    if (this.combatDotTickT <= 0) {
+      this.combatDotTickT = 1;
+      this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2),
+        `-${Math.max(1, Math.round(shownDps))} ${activeIcons.join('')}`, '#ff6b68');
+    }
+    if (lastSrc?.name) this.killedBy = lastSrc.name;
+    if (this.hp > 0) return false;
+    if (this.guardianSpiritT > 0) {
+      this.guardianSpiritT = 0;
+      this.hp = Math.min(this.maxHp, Math.max(1, Math.round(this.maxHp * this.guardianSpiritHeal)));
+      this.combatDots = {};
+      this.combatDotTickT = 0;
+      this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.35),
+        `👼 Guardian Spirit +${this.hp} ❤️`, '#fff0a5', 'big');
+      audio.sfx('evolve', 0.55);
+      return false;
+    }
+    this.hp = 0;
+    this.dead = true;
+    this.hooks.onDeath();
+    return true;
   }
 
   eatBerry() {
@@ -633,6 +1385,7 @@ export class Player {
   update(dt, ctx) {
     const { input, world, enemyMgr, projectiles, aimPoint } = ctx;
     this._updateLevelFx(dt); // cosmetic — keeps animating regardless of state
+    this._updateClassFx(dt);
     // Leaving dev flight always returns safely to the terrain instead of
     // converting the inspection altitude into lethal fall damage.
     if (this._devFlyActive && !ctx.devFly) {
@@ -660,8 +1413,12 @@ export class Player {
     this.roastT = Math.max(0, this.roastT - dt);
     if (this.boon && (this.boon.t -= dt) <= 0) { this.boon = null; this.recompute(); }
     this.venomT = Math.max(0, this.venomT - dt);
-    this.dodgeCd = Math.max(0, this.dodgeCd - dt);
-    this.invulnT = Math.max(0, this.invulnT - dt);
+    this.evadeT = Math.max(0, this.evadeT - dt);
+    this.guardianSpiritT = Math.max(0, this.guardianSpiritT - dt);
+    this.escapeRushT = Math.max(0, this.escapeRushT - dt);
+    for (const key of ['warCryT', 'bloodFuryT', 'avatarT', 'arrowHasteT',
+      'poisonBladesT', 'sprintT', 'combustionT']) this[key] = Math.max(0, this[key] - dt);
+    this.stealthT = Math.max(0, this.stealthT - dt);
     this.parryT = Math.max(0, this.parryT - dt);
     this.comboT = Math.max(0, this.comboT - dt);
     this.hurtT += dt;
@@ -692,6 +1449,17 @@ export class Player {
     const rest = (this.restMult > 1 && this.idleT > 3 && this.hurtT > 5) ? this.restMult : 1;
     if (this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.hpRegen * rest * dt);
     for (const id in this.spellCds) this.spellCds[id] = Math.max(0, this.spellCds[id] - dt);
+    if (this.hotT > 0) {
+      this.hotT = Math.max(0, this.hotT - dt);
+      this.hotTickT -= dt;
+      if (this.hotTickT <= 0) {
+        this.hotTickT = 1;
+        this._healSelf(this.hotRate);
+      }
+    }
+    this._updateClassZones(dt, enemyMgr, ctx);
+    this._setStealth(this.stealthT > 0);
+    if (this._updateCombatDots(dt)) return;
 
     // poison ticks in whole numbers once a second so the popups stay readable
     if (this.poisonT > 0) {
@@ -701,7 +1469,15 @@ export class Player {
         this.poisonTickT = 1;
         this.hp -= this.poisonDps;
         this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 1.9), `-${this.poisonDps} ☠️`, '#8aff3a');
-        if (this.hp <= 0) { this.hp = 0; this.dead = true; this.hooks.onDeath(); return; }
+        if (this.hp <= 0 && this.guardianSpiritT > 0) {
+          this.guardianSpiritT = 0;
+          this.hp = Math.min(this.maxHp, Math.max(1, Math.round(this.maxHp * this.guardianSpiritHeal)));
+          this.poisonT = this.poisonDps = 0;
+          this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.35),
+            `👼 Guardian Spirit +${this.hp} ❤️`, '#fff0a5', 'big');
+        } else if (this.hp <= 0) {
+          this.hp = 0; this.dead = true; this.hooks.onDeath(); return;
+        }
       }
     }
 
@@ -718,21 +1494,14 @@ export class Player {
 
     // A sword can parry during the first instant of its guard; shields sustain
     // a stronger block. Guarding slows movement and prevents attacking.
-    const wantsBlock = input.block && this.canBlock && !this.charging && this.dodgeT <= 0 && this.dashT <= 0;
+    const wantsBlock = input.block && this.canBlock && !this.charging && this.dashT <= 0;
     if (wantsBlock && !this.blocking) this.parryT = 0.22;
     this.blocking = wantsBlock;
 
     // -- dash overrides normal movement --
     let moving = false;
     this.moveDir = null; // world-space walk direction this frame (auto camera rotate)
-    if (this.dodgeT > 0) {
-      this.dodgeT -= dt;
-      this.pos.addScaledVector(this.dodgeDir, 19 * dt);
-      world.collide(this.pos, 0.45, { boat: ctx.boat });
-      this._applyBounds(ctx);
-      moving = true;
-      this.walkT += dt * 24;
-    } else if (this.dashT > 0) {
+    if (this.dashT > 0) {
       this.dashT -= dt;
       this.pos.addScaledVector(this.dashDir, 34 * dt);
       world.collide(this.pos, 0.45, { boat: ctx.boat });
@@ -742,6 +1511,7 @@ export class Player {
         if (e.pos.distanceTo(this.pos) < 1.7 + e.hitR) {
           this.dashHit.add(e.id);
           if (this.dashSpec.stun) enemyMgr.stun(e, this.dashSpec.stun);
+          if (Math.random() < (this.dashSpec.staggerChance || 0)) enemyMgr.stun?.(e, 0.8);
           enemyMgr.damage(e, this.dmgMult * this.dashSpec.dmg, this.dashDir);
         }
       }
@@ -795,7 +1565,7 @@ export class Player {
         const guardSlow = this.blocking ? 0.48 : 1;
         const mountBonus = ctx.mounted ? 9 : ctx.boatMount ? 6 : 0;
         const terrainMult = onWater ? (ctx.boatMount ? 0.65 : 0.4) : (ctx.boatMount ? 0.45 : 1);
-        const speed = (this.speed + mountBonus) * terrainMult
+        const speed = (this.speed + this.moveSpeedBonus + mountBonus) * terrainMult
           * guardSlow
           * (this.roastT > 0 ? 1.1 : 1) * (ctx.devFly ? 1 : (ctx.envSpeedMult ?? 1));
         // cliffs are walls: block any step that climbs too steeply (walking
@@ -850,7 +1620,7 @@ export class Player {
     this.attackCd -= dt;
     const pressed = input.takeLeftPressed();
     const released = input.takeLeftReleased();
-    if (pressed && this.attackCd <= 0 && this.dashT <= 0 && this.dodgeT <= 0 && !this.blocking) {
+    if (pressed && this.attackCd <= 0 && this.dashT <= 0 && !this.blocking) {
       this.charging = true;
       this.chargeT = 0;
     }
@@ -862,7 +1632,7 @@ export class Player {
         if (this.weapon.kind === 'bow') this._doShoot(projectiles, charge, ctx.mounted);
         else this._doMelee(world, enemyMgr, ctx.pickups, charge, moving, ctx.mounted);
       }
-    } else if (input.quickAttack && this.attackCd <= 0 && this.dashT <= 0 && this.dodgeT <= 0 && !this.blocking) {
+    } else if (input.quickAttack && this.attackCd <= 0 && this.dashT <= 0 && !this.blocking) {
       if (this.weapon.kind === 'bow') this._doShoot(projectiles, 0, ctx.mounted);
       else this._doMelee(world, enemyMgr, ctx.pickups, 0, moving, ctx.mounted);
     }
@@ -906,11 +1676,10 @@ export class Player {
   // Bring a dead player back (multiplayer respawn / post-duel return).
   revive(hpFrac = 1) {
     this.dead = false;
+    this.clearClassCombatState();
     this.hp = Math.max(1, Math.round(this.maxHp * hpFrac));
     this.stunT = 0;
     this.dashT = 0;
-    this.dodgeT = 0;
-    this.invulnT = 0;
     this.blocking = false;
     this.charging = false;
     this.mesh.rotation.z = 0;
@@ -1060,6 +1829,7 @@ export class Player {
 
   _doMelee(world, enemyMgr, pickups, charge = 0, moving = false, mounted = false) {
     const w = this.weapon;
+    this.breakStealth();
     const combo = w.combo || [1];
     this.comboStep = this.comboT > 0 ? (this.comboStep + 1) % combo.length : 0;
     this.comboT = Math.max(0.8, w.cd * 1.8);
@@ -1093,16 +1863,21 @@ export class Player {
         const crit = baseCrit || weakPoint;
         const armored = (e.armor ?? (/golem|snapper|colossus/i.test(e.type) ? 0.3 : 0)) > 0;
         const armorMult = armored && w.armoredBonus ? w.armoredBonus : 1;
-        const dmg = this.dmgMult * w.dmg * impactMult * armorMult * (crit ? CRIT_MULT : 1);
+        const dmg = this._classWeaponDamage(e, impactMult) * armorMult * (crit ? CRIT_MULT : 1);
+        const poisonActive = this.poisonBladesT > 0
+          ? 4 * this.poisonBladesPower * (1 + (this.classEffects.poisonPower || 0))
+          : this.venomT > 0 ? 4 * (1 + (this.classEffects.poisonPower || 0)) : 0;
         const opts = {
           crit, weakPoint,
           ...(w.armorPierce ? { armorPierce: w.armorPierce } : {}),
           ...(w.armorBreak ? { armorBreak: w.armorBreak * (0.7 + charge * 0.6), breakDur: 6 } : {}),
           ...(w.bleed ? { bleed: { dps: w.bleed * (0.75 + charge * 0.6), dur: 4 } } : {}),
           ...(w.burn ? { burn: { dps: w.burn * (0.7 + charge * 0.5), dur: 4 } } : {}),
-          ...(this.venomT > 0 ? { poison: { dps: 4, dur: 3 } } : {}),
+          ...(poisonActive ? { poison: { dps: poisonActive, dur: 5 } } : {}),
         };
         enemyMgr.damage(e, dmg, this.facing, 'local', opts);
+        if (this.bloodFuryT > 0) this._healSelf(dmg * this.bloodFuryPower);
+        if (Math.random() < (this.classEffects.staggerChance || 0)) enemyMgr.stun?.(e, 0.8);
         if (w.stun && (charged || this.comboStep === combo.length - 1)) {
           enemyMgr.stun(e, w.stun * (1 + charge * 0.8));
         }
@@ -1187,6 +1962,7 @@ export class Player {
 
   _doShoot(projectiles, charge = 0, mounted = false) {
     const w = this.weapon;
+    this.breakStealth();
     const crossbow = w.style === 'crossbow';
     const charged = charge >= 0.42;
     this.attackCd = w.cd * this.cdMult * (mounted ? 1.2 : 1);
@@ -1206,6 +1982,10 @@ export class Player {
         : crossbow
           ? { armorPierce: w.armorPierce, armorBreak: w.armorBreak, breakDur: 7 }
           : {};
+    if (this.classEffects.arrowBleed) {
+      const passiveBleed = w.dmg * this.classEffects.arrowBleed;
+      effects.bleed = { dps: Math.max(effects.bleed?.dps || 0, passiveBleed), dur: 5 };
+    }
     const origin = this.pos.clone().add(this.facing.clone().multiplyScalar(0.6))
       .setY(this.mesh.position.y + 1.1 + (mounted ? 0.9 : 0));
     projectiles.spawnArrow(origin, this.facing.clone(), {
@@ -1268,7 +2048,8 @@ export class Player {
       fx: +this.facing.x.toFixed(2), fz: +this.facing.z.toFixed(2),
       hp: Math.round(this.hp), xp: this.xp, level: this.level,
       meat: this.meat, wood: this.wood, stats: { ...this.stats },
-      eq: { ...this.equipment }, items: [...this.itemsOwned], spells: [...this.spellSlots],
+      eq: { ...this.equipment }, items: [...this.invItems], spells: [...this.spellSlots],
+      classId: this.selectedClass, classTraining: { ...this.classTraining }, stealthed: this.stealthed,
     };
   }
 }

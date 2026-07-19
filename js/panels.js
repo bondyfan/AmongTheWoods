@@ -5,7 +5,8 @@ import { SHOP_GROUPS, SMITH_GROUPS, questFor, repeatableQuestFor, questXpFor,
          QUEST_CATEGORY_LABELS, QUESTS_PER_BIOME, BIOMES, SLOTS, SLOT_LABELS, ENEMY_TYPES, ITEMS, SPELLS,
          STAT_TRACKS, MOBA_BUILDINGS, CAMP_BUILDINGS, RES_ICONS, RESOURCES, CONSUMABLES,
          MAX_SPELL_SLOTS, fmtResource, itemById, spellById, costFor, trainingLevelFor,
-         TALENT_TREES, talentPointsForLevel } from './config.js';
+         CLASS_TREES, classTreeById, classSkillById, classSkillRequiredLevel,
+         classSkillMeatCost, requiredClassForItem } from './config.js';
 
 const NEED_NAMES = { tent: 'Hide Tent', cabin: 'Wooden Cabin', furnace: 'Stone Furnace',
   keep: 'Medieval Keep', runic: 'Runic Hall', mountain: 'Mountain Fortress',
@@ -149,11 +150,12 @@ export class Panels {
     const p = this.player;
     $('shop-res').innerHTML = this._resLine();
 
-    // tabs (+ Base tab in MOBA, + Camp tab in survival)
+    // tabs (+ Base tab in MOBA, + Camp and the exclusive Class tree in survival)
     const groups = this.moba
       ? [...SHOP_GROUPS, { key: 'base', label: '🏰 Base' }]
       : this.camp
-        ? [{ key: 'camp', label: '🏕️ Camp' }, ...SHOP_GROUPS, { key: 'supplies', label: '🧪 Supplies' }]
+        ? [{ key: 'camp', label: '🏕️ Camp' }, { key: 'class', label: '🧬 Class' },
+           ...SHOP_GROUPS, { key: 'supplies', label: '🧪 Supplies' }]
         : SHOP_GROUPS;
     const tabs = $('shop-tabs');
     tabs.innerHTML = '';
@@ -172,6 +174,10 @@ export class Panels {
 
     if (this.shopTab === 'training') {
       this._renderTraining(wrap);
+      return;
+    }
+    if (this.shopTab === 'class') {
+      this._renderClass(wrap);
       return;
     }
     if (this.shopTab === 'base') {
@@ -207,6 +213,7 @@ export class Panels {
       const levelLocked = p.level < entry.level;
       // era gating: some gear needs a camp building (survival only)
       const needMissing = entry.needs && this.camp && !this.camp.has(entry.needs);
+      const requiredClass = this.camp ? requiredClassForItem(entry) : null;
       const cost = costFor(entry.cost, !!this.moba);
       const affordable = cost && this._affordable(cost);
 
@@ -228,7 +235,8 @@ export class Panels {
       card.innerHTML = `
         <div class="card-head"><span class="icon">${itemIcon(entry)}</span>
           <span class="name">${entry.name}</span><span class="lv">${slotTag}</span></div>
-        <div class="desc">${entry.desc}</div>
+        <div class="desc">${entry.desc}${requiredClass
+          ? `<span class="class-requirement">🔒 Requires Beastmaster class to equip</span>` : ''}</div>
         <div class="card-foot">${status}</div>`;
       wrap.appendChild(card);
     }
@@ -277,6 +285,7 @@ export class Panels {
       const owned = p.hasItem(entry.id);
       const levelLocked = p.level < entry.level;
       const needMissing = entry.needs && this.camp && !this.camp.has(entry.needs);
+      const requiredClass = this.camp ? requiredClassForItem(entry) : null;
       const cost = costFor(entry.cost, false);
       const affordable = cost && this._affordable(cost);
       const card = document.createElement('div');
@@ -291,7 +300,8 @@ export class Panels {
       card.innerHTML = `
         <div class="card-head"><span class="icon">${itemIcon(entry)}</span>
           <span class="name">${entry.name}</span><span class="lv">${SLOT_LABELS[entry.slot].toLowerCase()}</span></div>
-        <div class="desc">${entry.desc}</div>
+        <div class="desc">${entry.desc}${requiredClass
+          ? `<span class="class-requirement">🔒 Requires Beastmaster class to equip</span>` : ''}</div>
         <div class="card-foot">${status}</div>`;
       wrap.appendChild(card);
     }
@@ -452,14 +462,6 @@ export class Panels {
   // Training unlocks early tiers level-by-level, then advanced tiers at biome milestones.
   _renderTraining(wrap) {
     const p = this.player;
-    if (this.camp) this._renderTalents(wrap);
-
-    if (this.camp) {
-      const legacy = document.createElement('div');
-      legacy.className = 'talent-section-title';
-      legacy.innerHTML = '<b>📈 Repeatable training</b><span>Resource-funded incremental improvements</span>';
-      wrap.appendChild(legacy);
-    }
     for (const track of STAT_TRACKS) {
       const tier = p.stats[track.id];
       const maxed = tier >= track.max;
@@ -467,13 +469,15 @@ export class Panels {
       const cost = maxed ? null : costFor(track.cost(nextTier), !!this.moba);
       const requiredLevel = maxed ? null : trainingLevelFor(track, nextTier);
       const levelLocked = !maxed && p.level < requiredLevel;
+      const classLocked = !!this.camp && track.id === 'pet' && p.selectedClass !== 'beastmaster';
       const affordable = cost && this._affordable(cost);
 
       const card = document.createElement('div');
-      card.className = 'card' + (maxed ? ' owned' : levelLocked ? ' locked' : affordable ? ' buyable' : ' expensive');
+      card.className = 'card' + (maxed ? ' owned' : (levelLocked || classLocked) ? ' locked' : affordable ? ' buyable' : ' expensive');
 
       let status;
       if (maxed) status = '<span class="tag ok">Fully trained</span>';
+      else if (classLocked) status = '<span class="tag">🔒 Requires Beastmaster class</span>';
       else if (levelLocked) status = `<span class="tag">Tier ${nextTier} needs player Lv ${requiredLevel}</span>`;
       else status = `<button class="buy-btn" data-id="${track.id}">Train to ${nextTier} — ${this._costStr(cost)}</button>`;
 
@@ -489,53 +493,95 @@ export class Panels {
     });
   }
 
-  _renderTalents(wrap) {
+  _classRank(id) {
+    return Math.max(0, Number(this.player.classRank?.(id) ?? this.player.classTraining?.[id] ?? 0) || 0);
+  }
+
+  _renderClass(wrap) {
     const p = this.player;
-    const total = talentPointsForLevel(p.level);
-    const spent = p.spentTalentPoints();
-    const available = Math.max(0, total - spent);
-    const atCamp = !!this.hooks.canRespecTalents?.();
+    const selected = classTreeById(p.selectedClass);
+    const spentRanks = Object.values(p.classTraining || {}).reduce((sum, rank) => sum + (Number(rank) || 0), 0);
+
     const board = document.createElement('section');
-    board.className = 'talent-board';
-    board.innerHTML = `<div class="talent-board-head">
-      <div><b>🌿 Character paths</b><span>First point at Lv2, then every three levels · ${available} available / ${total} earned</span></div>
-      <button class="buy-btn talent-respec" data-talent-respec="1" ${!atCamp || spent === 0 ? 'disabled' : ''}>
-        🔄 Reset at camp
-      </button>
+    board.className = 'class-board';
+    board.innerHTML = `<div class="class-board-head">
+      <div><b>🧬 Choose your class</b>
+        <span>${selected
+          ? `${selected.icon} ${selected.name} is locked in · ${spentRanks} trained ranks`
+          : 'Your first trained rank permanently chooses one class until you reset at camp.'}</span></div>
+      <span class="class-currency">${fmtResource(p.meat)} ${resIcon('meat', RES_ICONS.meat ?? '🍖')}</span>
     </div>
-    <div class="talent-paths"></div>`;
-    const paths = board.querySelector('.talent-paths');
-    for (const tree of TALENT_TREES) {
-      const branch = document.createElement('div');
-      branch.className = 'talent-path';
-      branch.style.setProperty('--talent-color', tree.color);
-      branch.innerHTML = `<h3>${tree.icon} ${tree.name}</h3>`;
-      for (const node of tree.nodes) {
-        const owned = p.hasTalent(node.id);
-        const prereq = !node.requires || p.hasTalent(node.requires);
-        const canBuy = !owned && prereq && available > 0;
-        const card = document.createElement('div');
-        card.className = `talent-node${owned ? ' owned' : canBuy ? ' buyable' : ' locked'}`;
-        card.innerHTML = `<div class="talent-node-name">${node.icon} ${node.name}</div>
-          <div class="talent-node-desc">${node.desc}</div>
-          ${owned ? '<span>✓ Learned</span>'
-            : canBuy ? `<button class="buy-btn" data-talent="${node.id}">Spend 1 point</button>`
-              : `<span>${!prereq ? 'Requires previous talent' : 'No point available'}</span>`}`;
-        branch.appendChild(card);
-      }
+    <p class="class-intro">Each class contains 10 passives and 10 active abilities. Every skill has three ranks; later ranks require a higher player level and cost more meat. Trained active abilities can be placed on keys 1–6 in the Armory.</p>
+    <div class="class-trees"></div>`;
+    const paths = board.querySelector('.class-trees');
+
+    for (const tree of CLASS_TREES) {
+      const classLocked = !!selected && selected.id !== tree.id;
+      const treeRanks = [...tree.passives, ...tree.actives]
+        .reduce((sum, skill) => sum + this._classRank(skill.id), 0);
+      const branch = document.createElement('details');
+      branch.className = `class-tree${classLocked ? ' locked' : ''}${selected?.id === tree.id ? ' selected' : ''}`;
+      branch.style.setProperty('--class-color', tree.color);
+      if (!selected || selected.id === tree.id) branch.open = true;
+      branch.innerHTML = `<summary>
+        <span class="class-title">${tree.icon} <b>${tree.name}</b></span>
+        <span class="class-summary">${tree.summary}</span>
+        <span class="class-ranks">${treeRanks}/60 ranks${classLocked ? ` · 🔒 ${selected.name} selected` : ''}</span>
+      </summary>
+      <div class="class-skill-groups">
+        <section><h3>🛡️ Passive skills <small>10 skills</small></h3><div class="class-skills passive"></div></section>
+        <section><h3>⚡ Active abilities <small>10 abilities</small></h3><div class="class-skills active"></div></section>
+      </div>`;
+
+      const renderSkills = (skills, container) => {
+        for (const skill of skills) {
+          const rank = this._classRank(skill.id);
+          const maxed = rank >= skill.maxRank;
+          const nextRank = Math.min(skill.maxRank, rank + 1);
+          const requiredLevel = classSkillRequiredLevel(skill, nextRank);
+          const meatCost = classSkillMeatCost(skill, nextRank);
+          const levelLocked = !maxed && p.level < requiredLevel;
+          const affordable = p.meat >= meatCost;
+          const canTrain = !classLocked && !maxed && !levelLocked && affordable;
+          let status;
+          if (classLocked) status = `<span>🔒 Locked by ${selected.name}</span>`;
+          else if (maxed) status = '<span class="ok">✓ Fully trained</span>';
+          else if (levelLocked) status = `<span>🔒 Rank ${nextRank} requires Lv ${requiredLevel}</span>`;
+          else status = `<button class="buy-btn" data-class-skill="${skill.id}" ${canTrain ? '' : 'disabled'}>
+            Train rank ${nextRank} · ${fmtResource(meatCost)} ${resIcon('meat', RES_ICONS.meat ?? '🍖')}
+          </button>`;
+
+          const card = document.createElement('article');
+          card.className = `class-skill${rank ? ' trained' : ''}${maxed ? ' maxed' : ''}${classLocked || levelLocked ? ' locked' : ''}${!affordable && !maxed ? ' expensive' : ''}`;
+          card.innerHTML = `<div class="class-skill-head">
+              <span class="class-skill-icon">${skill.icon}</span>
+              <b>${skill.name}</b>
+              <span>Rank ${rank}/${skill.maxRank}</span>
+            </div>
+            <p>${skill.desc}</p>
+            <div class="class-skill-meta"><span>${skill.type === 'active' ? `⚡ Active · ${skill.cd}s cooldown` : '🛡️ Passive'}</span><span>${maxed ? 'Max rank' : `Required Lv ${requiredLevel}`}</span></div>
+            <div class="class-skill-action">${status}</div>`;
+          container.appendChild(card);
+        }
+      };
+      renderSkills(tree.passives, branch.querySelector('.class-skills.passive'));
+      renderSkills(tree.actives, branch.querySelector('.class-skills.active'));
       paths.appendChild(branch);
     }
-    if (!atCamp) {
-      const note = document.createElement('div');
-      note.className = 'talent-camp-note';
-      note.textContent = '🏠 Stand beside your home at camp to reset all spent talent points.';
-      board.appendChild(note);
-    }
+
+    const canReset = !!this.hooks.canResetClass?.();
+    const reset = document.createElement('section');
+    reset.className = 'class-reset';
+    reset.innerHTML = `<div><b>🔄 Reset class tree</b>
+        <span>This clears your selected class and every trained rank. Spent meat is not refunded, and every skill must be trained again.</span>
+        ${canReset ? '' : '<em>Stand beside your home at camp to reset.</em>'}</div>
+      <button class="buy-btn danger" data-class-reset="1" ${!spentRanks || !canReset ? 'disabled' : ''}>Reset class — no refund</button>`;
+    board.appendChild(reset);
     wrap.appendChild(board);
-    board.querySelectorAll('[data-talent]').forEach(btn =>
-      btn.addEventListener('click', () => this.hooks.onBuyTalent?.(btn.dataset.talent)));
-    board.querySelector('[data-talent-respec]')?.addEventListener('click', () =>
-      this.hooks.onRespecTalents?.());
+    board.querySelectorAll('[data-class-skill]').forEach(btn =>
+      btn.addEventListener('click', () => this.hooks.onTrainClassSkill?.(btn.dataset.classSkill)));
+    board.querySelector('[data-class-reset]')?.addEventListener('click', () =>
+      this.hooks.onResetClass?.());
   }
 
   // ---------- character / equipment ----------
@@ -554,10 +600,13 @@ export class Panels {
       for (const slot of DOLL[side]) {
         const id = p.equipment[slot];
         const item = id ? itemById(id) : null;
+        const requiredClass = this.camp ? requiredClassForItem(item) : null;
         const div = document.createElement('div');
         div.className = 'doll-slot' + (item ? ' filled' : '');
         div.dataset.slot = slot;
-        div.title = item ? `${item.name} — ${item.desc} (click to unequip)` : SLOT_LABELS[slot];
+        div.title = item
+          ? `${item.name} — ${item.desc}${requiredClass ? ' · Requires Beastmaster class' : ''} (click to unequip)`
+          : SLOT_LABELS[slot];
         div.innerHTML = `<span class="ds-icon">${item ? itemIcon(item) : ''}</span>
           <span class="ds-label">${SLOT_LABELS[slot]}</span>`;
         if (item && !(slot === 'weapon' && id === 'fists')) {
@@ -570,18 +619,20 @@ export class Panels {
     // ---- stat breakdown: value first, then base + every named modifier ----
     const s = p.stats;
     const rows = [];
-    const talentSummary = TALENT_TREES
-      .map(tree => ({ tree, count: tree.nodes.filter(n => p.hasTalent(n.id)).length }))
-      .filter(x => x.count > 0)
-      .map(x => `${x.tree.icon} ${x.tree.name} ${x.count}/3`);
-    rows.push(['🌿 Talents', `${p.spentTalentPoints()}/${talentPointsForLevel(p.level)}`,
-      talentSummary.length ? talentSummary.join(' · ') : 'No path chosen yet — Upgrades → Training']);
+    const classTree = classTreeById(p.selectedClass);
+    const passiveRanks = classTree?.passives.reduce((sum, skill) => sum + this._classRank(skill.id), 0) ?? 0;
+    const activeRanks = classTree?.actives.reduce((sum, skill) => sum + this._classRank(skill.id), 0) ?? 0;
+    rows.push(['🧬 Class', classTree ? `${classTree.icon} ${classTree.name}` : 'Unchosen', classTree
+      ? `${passiveRanks}/30 passive ranks · ${activeRanks}/30 active ranks · Upgrades → Class`
+      : 'Train your first rank in Upgrades → Class to choose one class']);
     const base = itemById(p.equipment.weapon)?.weapon ?? itemById('fists').weapon;
     const charm = itemById(p.equipment.charm);
     const dmgParts = [`${Math.round(base.dmg)} ${itemById(p.equipment.weapon)?.name ?? 'fists'}`];
     if (p.levelDamagePct) dmgParts.push(`+${Math.round(p.levelDamagePct * 100)}% level`);
     if (s.power) dmgParts.push(`+${s.power * 5}% training`);
-    if (base.kind === 'bow' && base.style !== 'crossbow' && p.hasTalent('hunterBow')) dmgParts.push('+18% Bowcraft');
+    const classEffects = p.classEffects || {};
+    const classDamage = base.kind === 'bow' ? classEffects.rangedDmg : classEffects.meleeDmg;
+    if (classDamage) dmgParts.push(`+${Math.round(classDamage * 100)}% ${classTree?.name ?? 'class'}`);
     if (p.forgeTier) dmgParts.push(`+${p.forgeTier * 10}% forge`);
     if (charm?.stats?.dmgPct) dmgParts.push(`+${Math.round(charm.stats.dmgPct * 100)}% ${charm.name}`);
     rows.push(['⚔️ Attack', Math.round(p.weapon.dmg), dmgParts.join(' · ')]);
@@ -600,14 +651,14 @@ export class Panels {
     }
     if (p.campBonus) hpParts.push(`+${p.campBonus} home`);
     if (p.shrineBonus) hpParts.push(`+${p.shrineBonus} shrines`);
-    if (p.hasTalent('warriorVitality')) hpParts.push('+15% Iron Constitution');
+    if (classEffects.hpPct) hpParts.push(`+${Math.round(classEffects.hpPct * 100)}% ${classTree?.name ?? 'class'}`);
     rows.push(['❤️ Max health', p.maxHp, hpParts.join(' · ')]);
 
     const spParts = ['5.5 base'];
     if (p.level > 1) spParts.push(`+${((p.level - 1) * 0.1).toFixed(1)} level`);
     const boots = itemById(p.equipment.boots);
     if (boots?.stats?.speed) spParts.push(`+${boots.stats.speed} ${boots.name}`);
-    if (p.hasTalent('wandererStride')) spParts.push('+0.7 Long Stride');
+    if (classEffects.speed) spParts.push(`+${classEffects.speed.toFixed(1)} ${classTree?.name ?? 'class'}`);
     if (p.mounted) spParts.push('+9 🐴 horse');
     // the +9 mount bonus is added at move time, not baked into p.speed — show the total
     const shownSpeed = p.speed + (p.mounted ? 9 : 0);
@@ -615,15 +666,14 @@ export class Panels {
 
     const rgParts = [`${base.range} m ${itemById(p.equipment.weapon)?.name ?? 'fists'}`];
     if (s.range) rgParts.push(`+${((base.kind === 'bow' ? 2 : 0.1) * s.range).toFixed(1)} m training`);
-    if (base.kind === 'bow' && base.style !== 'crossbow' && p.hasTalent('hunterBow')) rgParts.push('+3 m Bowcraft');
     rows.push(['🎯 Range', (Math.round(p.weapon.range * 10) / 10) + ' m', rgParts.join(' · ')]);
 
     if (p.pet) rows.push(['🐺 Pet', `${Math.round(p.pet.dmg)} dmg · ${p.pet.maxHp} hp`,
       `training T${s.pet} · your level ${p.level}`]);
     if (p.orb) rows.push(['🔮 Orb', `${Math.round(p.orb.dmg)} dmg ×${p.orb.targets}`,
       s.power ? `+${s.power * 5}% Power training` : 'scales with Power training']);
-    if (p.hasTalent('mysticAttunement')) rows.push(['✨ Spell recovery', '-20%',
-      p.hasTalent('mysticOverchannel') ? 'Attunement · +25% power · +20% duration' : 'Mystic Attunement']);
+    if (classEffects.classCdReduction) rows.push(['✨ Class recovery', `-${Math.round(classEffects.classCdReduction * 100)}%`,
+      `${classTree?.name ?? 'Class'} passive training`]);
 
     // regen row
     const regenParts = ['0.1 base'];
@@ -695,21 +745,30 @@ export class Panels {
 
 
 
-    // spellbook
+    // spellbook: purchased world spells and trained active class abilities share 1–6.
     const book = $('spellbook');
     book.innerHTML = '';
-    if (!p.spellsOwned.size) book.innerHTML = '<div class="empty-note">No spells learned yet — see the Spells tab in the shop.</div>';
-    for (const id of p.spellsOwned) {
-      const spell = spellById(id);
+    const classActives = classTree?.actives
+      .filter(skill => this._classRank(skill.id) > 0)
+      .map(skill => classSkillById(skill.id))
+      .filter(Boolean) ?? [];
+    const abilities = [
+      ...[...(p.spellsOwned || [])].map(id => spellById(id)).filter(Boolean),
+      ...classActives,
+    ];
+    if (!abilities.length) book.innerHTML = '<div class="empty-note">No spells or class abilities learned yet — see Upgrades → Spells or Class.</div>';
+    for (const spell of abilities) {
+      const id = spell.id;
       const slotIdx = p.spellSlots.indexOf(id);
       const div = document.createElement('button');
-      div.className = 'inv-item' + (slotIdx >= 0 ? ' slotted' : '');
-      div.innerHTML = `${itemIcon(spell)} <b>${spell.name}</b> <span class="lv">${slotIdx >= 0 ? `key ${slotIdx + 1}` : 'not slotted'}</span>`;
-      div.title = spell.desc + ` (cooldown ${spell.cd}s)`;
+      div.className = 'inv-item' + (slotIdx >= 0 ? ' slotted' : '') + (spell.type === 'active' ? ' class-ability' : '');
+      div.innerHTML = `${itemIcon(spell)} <b>${spell.name}</b> ${spell.type === 'active' ? `<span class="ability-rank">R${this._classRank(id)}</span>` : ''}<span class="lv">${slotIdx >= 0 ? `key ${slotIdx + 1}` : 'not slotted'}</span>`;
+      div.title = `${spell.desc} (cooldown ${spell.cd}s)${spell.type === 'active' ? ` · ${classTree?.name} ability` : ''}`;
       div.addEventListener('click', () => this.hooks.onToggleSpell(id));
       book.appendChild(div);
     }
-    $('spellbook-note').textContent = `${p.spellSlots.length}/${MAX_SPELL_SLOTS} spell slots used — click a spell to slot/unslot it.`;
+    const usedSlots = p.spellSlots.slice(0, MAX_SPELL_SLOTS).filter(Boolean).length;
+    $('spellbook-note').textContent = `${usedSlots}/${MAX_SPELL_SLOTS} action slots used — click a spell or trained class ability to slot/unslot it.`;
   }
 
   // ---------- inventory: WoW-style slot grid inside the Armory ----------
@@ -734,10 +793,11 @@ export class Panels {
     for (const [id, n] of Object.entries(counts)) {
       const item = itemById(id);
       if (!item) continue;
+      const requiredClass = this.camp ? requiredClassForItem(item) : null;
       cells.push({ kind: 'item', id, itemRef: item, count: n > 1 ? n : 0,
         title: item.nest || item.placeable
           ? `${item.name} — ${item.desc} (click to PLACE it)`
-          : `${item.name} — ${item.desc} (click to equip · drag to hotkey or drop)` });
+          : `${item.name} — ${item.desc}${requiredClass ? ' · Requires Beastmaster class to equip' : ''} (click to equip · drag to hotkey or drop)` });
     }
     $('inv-slots-label').textContent = `${cells.length}/${p.invSlots}`;
     const total = Math.max(p.invSlots, cells.length);
@@ -942,19 +1002,20 @@ export class Panels {
       <div class="desc">Upgrade your home to advance through the ages and unlock new gear.</div>`;
     wrap.appendChild(era);
     wrap.appendChild(this._campCard(CAMP_BUILDINGS.find(d => d.id === 'home')));
-    const talents = document.createElement('div');
-    talents.className = 'card owned';
-    talents.style.gridColumn = '1 / -1';
-    const spent = this.player.spentTalentPoints();
-    talents.innerHTML = `<div class="card-head"><span class="icon">🌿</span>
-      <span class="name">Retrain character paths</span><span class="lv">${spent} points spent</span></div>
-      <div class="desc">Your camp is the only place where all talent points can be returned. Nothing else is lost.</div>
-      <div class="card-foot"><button class="buy-btn" data-home-respec="1" ${spent ? '' : 'disabled'}>
-        🔄 Reset all talents
+    const classReset = document.createElement('div');
+    classReset.className = 'card owned';
+    classReset.style.gridColumn = '1 / -1';
+    const spent = Object.values(this.player.classTraining || {}).reduce((sum, rank) => sum + (Number(rank) || 0), 0);
+    const selected = classTreeById(this.player.selectedClass);
+    classReset.innerHTML = `<div class="card-head"><span class="icon">🧬</span>
+      <span class="name">Reset class tree</span><span class="lv">${selected ? `${selected.icon} ${selected.name} · ` : ''}${spent} ranks</span></div>
+      <div class="desc">Clears the selected class and all trained skills. Spent meat is not refunded; every rank must be trained again.</div>
+      <div class="card-foot"><button class="buy-btn danger" data-home-class-reset="1" ${spent ? '' : 'disabled'}>
+        🔄 Reset class — no refund
       </button></div>`;
-    wrap.appendChild(talents);
-    talents.querySelector('[data-home-respec]')?.addEventListener('click', () =>
-      this.hooks.onRespecTalents?.());
+    wrap.appendChild(classReset);
+    classReset.querySelector('[data-home-class-reset]')?.addEventListener('click', () =>
+      this.hooks.onResetClass?.());
     this._wireCampButtons(wrap);
   }
 

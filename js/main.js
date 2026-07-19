@@ -5,8 +5,8 @@ import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOB
          RESOURCES, RES_ICONS, HIDE_BEARING, VERDANT_HIDE_DROP, hideForHp, radiusOf, costFor,
          biomeIndexAt, progressAt, fmtResource, roundResource, itemById, spellById,
          consumableById, essenceDropFor, MAX_LEVEL, questFor, repeatableQuestFor,
-         questXpFor, BIOME_LAIRS, CAMP_BUILDINGS, trainingLevelFor, TALENT_TREES,
-         talentPointsForLevel } from './config.js';
+         questXpFor, BIOME_LAIRS, CAMP_BUILDINGS, trainingLevelFor, CLASS_TREES,
+         classTreeById, classSkillById, classSkillRequiredLevel, classSkillMeatCost } from './config.js';
 import { makeAimArc, updateAimArc, makeRaft, makeBlacksmith, makeHorse, makeWisp, makeMan,
          makeGriffin, makeGriffinRoost, makeTumbleweed } from './models.js';
 import { PostFX } from './postfx.js';
@@ -150,9 +150,9 @@ const panels = new Panels({
   onBuyItem: buyItem,
   onBuySpell: buySpell,
   onBuyStat: buyStat,
-  onBuyTalent: buyTalent,
-  onRespecTalents: respecTalents,
-  canRespecTalents: () => nearHome(),
+  onTrainClassSkill: trainClassSkill,
+  onResetClass: resetClassTree,
+  canResetClass: () => nearHome(),
   onEquip: (id) => {
     const item = itemById(id);
     if (item && item.level > player.level) {
@@ -160,7 +160,10 @@ const panels = new Panels({
       audio.sfx('error', 0.4);
       return;
     }
-    player.equip(id);
+    if (!player.equip(id)) {
+      panels.refresh();
+      return;
+    }
     // a burning torch lights with a whoomp; everything else buckles on
     audio.sfx(item?.torch ? 'torch_equip' : 'equip_gear', 0.5);
     panels.refresh();
@@ -226,6 +229,7 @@ const panels = new Panels({
 let world = new World(scene, game.seed);
 
 const player = new Player(scene, {
+  classRulesEnabled: () => game.kind === 'survival',
   popup: (pos, text, color, cls) => ui.popup(pos, text, color, cls),
   onHurt: () => ui.hurtFlash(),
   onParry: (src) => {
@@ -284,8 +288,11 @@ const player = new Player(scene, {
     const freshBuildings = CAMP_BUILDINGS.flatMap(b => b.levels
       .map((upgrade, i) => ({ upgrade, name: b.names[i] })))
       .filter(x => x.upgrade.level === level).map(x => x.name);
-    const freshTalents = level >= 2 && (level - 2) % 3 === 0 ? ['1 talent point'] : [];
-    const fresh = [...freshItems, ...freshSpells, ...freshTraining, ...freshBuildings, ...freshTalents];
+    const trees = player.selectedClass ? [classTreeById(player.selectedClass)].filter(Boolean) : CLASS_TREES;
+    const freshClass = trees.some(tree => [...tree.passives, ...tree.actives]
+      .some(skill => [1, 2, 3].some(rank => classSkillRequiredLevel(skill, rank) === level)))
+      ? ['new class training'] : [];
+    const fresh = [...freshItems, ...freshSpells, ...freshTraining, ...freshBuildings, ...freshClass];
     ui.toast(`⭐ Level ${level}!` + (fresh.length ? ` New: ${fresh.join(', ')}` : ''), 'level');
     audio.sfx('evolve_ready', 0.4);
     ui.pulseShopButton(true);
@@ -296,6 +303,7 @@ const player = new Player(scene, {
     survivalRespawn();                                      // solo: wake at the cabin
   },
   onEquipChange: () => companions.sync(player),
+  onClassWorldAction: (action, skill, rank, ctx) => handleClassWorldAction(action, skill, rank, ctx),
   onChop: (tree, power) => mp?.sendChop(tree, power),
   onBerry: (key) => mp?.sendBerry(key),
 });
@@ -1495,7 +1503,8 @@ function grantPickup(kind, payload) {
     ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2),
       `+${payload} ${consumableById(kind).icon}`, '#c9e8a4');
   } else {
-    const gained = kind === 'essence' ? payload * (player.essenceMult || 1) : payload;
+    const gained = kind === 'essence' ? payload * (player.essenceMult || 1)
+      : kind === 'meat' ? payload * (player.meatMult || 1) : payload;
     player[kind] = roundResource(player[kind] + gained);
     const [icon, color] = RES_POPUP[kind];
     ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2), `+${fmtResource(gained)} ${icon}`, color);
@@ -1524,6 +1533,8 @@ const petProxy = {
   id: 'pet', isPet: true, hitR: 0.5, sizeMult: 1, stunT: 0,
   get pos() { return companions.wolf?.pos ?? null; },
   get mesh() { return companions.wolf?.mesh ?? null; },
+  get hp() { return companions.wolf?.hp ?? 0; },
+  get maxHp() { return companions.wolf?.maxHp ?? 0; },
   get dead() { return !companions.wolf || player.petDead; },
   takeDamage: (dmg, src) => companions.damagePet(dmg, player),
   applyStun: () => {},
@@ -1555,6 +1566,9 @@ const enemyMgr = new EnemyManager(scene, world, {
     if (meGot) {
       player.kills++;
       player.addXp(xp);
+      if (player.classEffects.lifeOnKillPct) {
+        player._healSelf(player.maxHp * player.classEffects.lifeOnKillPct);
+      }
       ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2.3), `+${xp} XP`, '#c9a4ff');
     }
     // Quest kills are proximity-shared in survival co-op. The host owns the
@@ -2268,7 +2282,8 @@ function serializeState() {
     invItems: [...p.invItems],
     consumables: { ...p.consumables },
     stats: { ...p.stats },
-    talents: { ...p.talents },
+    selectedClass: p.selectedClass,
+    classTraining: { ...p.classTraining },
     spellsOwned: [...p.spellsOwned],
     spellSlots: p.spellSlots.map(s => s ?? null),
     upgrades: { ...p.upgrades },
@@ -2338,6 +2353,7 @@ async function doLoad(id) {
 
 function applyLoadedState(d) {
   const p = player;
+  clearHunterTraps();
   p.level = Math.max(1, Math.min(MAX_LEVEL, d.level ?? 1));
   p.xp = d.xp ?? 0;
   for (const k of RESOURCES) p[k] = d.res?.[k] ?? 0;
@@ -2347,17 +2363,25 @@ function applyLoadedState(d) {
   p.invItems = Array.isArray(d.invItems) ? d.invItems.filter(Boolean) : [];
   p.consumables = { salve: 0, roast: 0, honey: 0, ...(d.consumables || {}) };
   p.stats = { range: 0, power: 0, swift: 0, pet: 0, gather: 0, ...(d.stats || {}) };
-  p.talents = {};
-  let talentPointsLeft = talentPointsForLevel(p.level);
-  const savedTalents = d.talents && typeof d.talents === 'object' ? d.talents : {};
-  for (const tree of TALENT_TREES) for (const node of tree.nodes) {
-    if (talentPointsLeft <= 0 || !savedTalents[node.id]) continue;
-    if (node.requires && !p.talents[node.requires]) continue;
-    p.talents[node.id] = true;
-    talentPointsLeft--;
+  const savedTree = classTreeById(d.selectedClass);
+  p.selectedClass = savedTree?.id || null;
+  p.classTraining = {};
+  if (savedTree && d.classTraining && typeof d.classTraining === 'object') {
+    for (const skill of [...savedTree.passives, ...savedTree.actives]) {
+      const savedRank = Math.max(0, Math.min(skill.maxRank, Math.floor(Number(d.classTraining[skill.id]) || 0)));
+      for (let rank = 1; rank <= savedRank; rank++) {
+        if (p.level >= classSkillRequiredLevel(skill, rank)) p.classTraining[skill.id] = rank;
+      }
+    }
   }
   p.spellsOwned = new Set(d.spellsOwned || []);
-  p.spellSlots = Array.isArray(d.spellSlots) ? d.spellSlots.map(s => s ?? undefined) : [];
+  p.spellSlots = Array.isArray(d.spellSlots) ? d.spellSlots.slice(0, 6).map(s => s ?? undefined) : [];
+  p.spellSlots = p.spellSlots.map(id => {
+    const classSkill = classSkillById(id);
+    if (classSkill) return classSkill.type === 'active' && classSkill.classId === p.selectedClass
+      && (p.classTraining[classSkill.id] || 0) > 0 ? id : undefined;
+    return id;
+  });
   p.upgrades = { ...(d.upgrades || {}) };
   p.torchFuelById = (d.torchFuel && typeof d.torchFuel === 'object') ? { ...d.torchFuel } : {};
   // MIGRATION: old saves stored supply gear as boolean upgrades — convert each
@@ -2389,6 +2413,8 @@ function applyLoadedState(d) {
     }
     applyCampPerks();
   }
+  p.clearClassCombatState();
+  p.enforceClassEquipment();
   p.recompute();
   p.hp = Math.min(p.maxHp, d.hp ?? p.maxHp);
   companions.sync(player);
@@ -2604,6 +2630,11 @@ function buyStat(id) {
   const track = STAT_TRACKS.find(t => t.id === id);
   const tier = player.stats[id];
   if (!track || tier >= track.max || player.level < trainingLevelFor(track, tier + 1)) return;
+  if (game.kind === 'survival' && id === 'pet' && player.selectedClass !== 'beastmaster') {
+    ui.toast('🔒 Pet Training requires the Beastmaster class.', 'error');
+    audio.sfx('error', 0.4);
+    return;
+  }
   const cost = costFor(track.cost(tier + 1), game.kind === 'moba');
   if (!Object.entries(cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
   for (const [k, v] of Object.entries(cost)) player[k] = roundResource(player[k] - v);
@@ -2614,35 +2645,62 @@ function buyStat(id) {
   panels.flashCard(track.name);
 }
 
-function buyTalent(id) {
-  const tree = TALENT_TREES.find(t => t.nodes.some(n => n.id === id));
-  const node = tree?.nodes.find(n => n.id === id);
-  if (!node || player.hasTalent(id) || player.availableTalentPoints() <= 0) return;
-  if (node.requires && !player.hasTalent(node.requires)) {
-    ui.toast('🔒 Learn the previous talent in this path first.', 'error');
+function trainClassSkill(id) {
+  const skill = classSkillById(id);
+  if (!skill) return;
+  if (player.selectedClass && player.selectedClass !== skill.classId) {
+    ui.toast(`🔒 You are already committed to ${classTreeById(player.selectedClass)?.name}.`, 'error');
     audio.sfx('error', 0.4);
     return;
   }
-  player.talents[id] = true;
+  const current = player.classRank(id);
+  const nextRank = current + 1;
+  if (nextRank > skill.maxRank) return;
+  const requiredLevel = classSkillRequiredLevel(skill, nextRank);
+  if (player.level < requiredLevel) {
+    ui.toast(`🔒 ${skill.name} rank ${nextRank} requires level ${requiredLevel}.`, 'error');
+    audio.sfx('error', 0.4);
+    return;
+  }
+  const meatCost = classSkillMeatCost(skill, nextRank);
+  if (player.meat < meatCost) {
+    ui.toast(`🍖 ${skill.name} rank ${nextRank} costs ${meatCost} meat.`, 'error');
+    audio.sfx('error', 0.4);
+    return;
+  }
+  player.meat = roundResource(player.meat - meatCost);
+  player.selectedClass = skill.classId;
+  player.classTraining[id] = nextRank;
+  if (skill.type === 'active') player.assignAbilitySlot(id);
+  player.enforceClassEquipment();
   player.recompute();
   companions.sync(player);
-  ui.toast(`${tree.icon} Learned: ${node.name}`, 'level');
+  const tree = classTreeById(skill.classId);
+  ui.toast(`${tree.icon} Trained: ${skill.name} — rank ${nextRank}/${skill.maxRank}`, 'level');
   audio.sfx('upgrade', 0.55);
   panels.refresh();
+  panels.flashCard(skill.name);
 }
 
-function respecTalents() {
-  if (!nearHome() || player.spentTalentPoints() <= 0) {
-    ui.toast('🏠 Talents can only be reset beside your home at camp.', 'error');
+function resetClassTree() {
+  if (!nearHome() || !player.selectedClass) {
+    ui.toast('🏠 Your class can only be reset beside your home at camp.', 'error');
     audio.sfx('error', 0.4);
     return;
   }
-  player.talents = {};
-  player.petCommandTargetId = null;
+  const name = classTreeById(player.selectedClass)?.name || 'class';
+  if (!window.confirm(`Reset ${name}? Every trained rank will be lost and spent meat will NOT be refunded.`)) return;
+  const oldActives = new Set(player.trainedClassActives().map(skill => skill.id));
+  player.clearClassCombatState();
+  player.selectedClass = null;
+  player.classTraining = {};
+  player.spellSlots = player.spellSlots.map(id => oldActives.has(id) ? undefined : id);
+  for (const id of oldActives) delete player.spellCds[id];
+  player.enforceClassEquipment();
   player.recompute();
   companions.sync(player);
   clearHunterTraps();
-  ui.toast('🔄 Talent points returned — choose a new path.', 'level');
+  ui.toast('🔄 Class reset. Trained ranks are gone; spent meat was not refunded.', 'level');
   audio.sfx('upgrade', 0.5);
   panels.refresh();
 }
@@ -2695,11 +2753,13 @@ function dropConsumable(id) {
   audio.sfx('click', 0.4);
 }
 
-// action bar 1–6: spells cast, items EQUIP
+// action bar 1–6: spells and trained class abilities cast, items equip
 function useBarSlot(i) {
   const id = player.spellSlots[i];
   if (!id) return;
-  if (spellById(id)) player.castSpell(i, { enemyMgr: combatMgr() });
+  if (spellById(id) || classSkillById(id)) player.castSpell(i, {
+    enemyMgr: combatMgr(), projectiles, aimPoint, world, rpgView: game.rpgView,
+  });
   else if (itemById(id)?.placeable) placeCampItem(id);
   else if (itemById(id)) player.equip(id);
   ui.flashSpell(i);
@@ -3218,8 +3278,7 @@ input.onKey('KeyG', () => {
   }
 });
 
-// ---- Hunter traps (T) and pet resurrection / commands (R, P, Y) ----
-let hunterTrapCd = 0;
+// ---- Beastmaster class traps and companion maintenance ----
 const hunterTraps = [];
 
 function removeHunterTrap(trap) {
@@ -3235,46 +3294,40 @@ function removeHunterTrap(trap) {
 
 function clearHunterTraps() {
   while (hunterTraps.length) removeHunterTrap(hunterTraps[0]);
-  hunterTrapCd = 0;
 }
 
-function placeHunterTrap() {
-  if (game.kind !== 'survival' || !player.hunterTraps || player.dead || player.mounted) return;
-  if (hunterTrapCd > 0) {
-    ui.toast(`🪤 Trap ready in ${Math.ceil(hunterTrapCd)} s.`, '');
-    return;
+function placeHunterTrap(count = 1, power = 1, field = false) {
+  if (game.kind !== 'survival' || player.selectedClass !== 'beastmaster' || player.dead || player.mounted) return false;
+  for (let n = 0; n < count; n++) {
+    const angle = count > 1 ? n / count * Math.PI * 2 : 0;
+    const spread = field ? 2.2 : 0;
+    const x = player.pos.x + Math.cos(angle) * spread;
+    const z = player.pos.z + Math.sin(angle) * spread;
+    const mesh = new THREE.Group();
+    const ringMat = new THREE.MeshLambertMaterial({ color: 0x6f5634 });
+    const metalMat = new THREE.MeshLambertMaterial({ color: 0xaeb7ad });
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.72, 0.07, 5, 18), ringMat);
+    ring.rotation.x = Math.PI / 2;
+    mesh.add(ring);
+    for (let i = 0; i < 8; i++) {
+      const a = i / 8 * Math.PI * 2;
+      const tooth = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.35, 4), metalMat);
+      tooth.position.set(Math.cos(a) * 0.52, 0.13, Math.sin(a) * 0.52);
+      tooth.rotation.z = Math.cos(a) * 0.65;
+      tooth.rotation.x = Math.sin(a) * -0.65;
+      mesh.add(tooth);
+    }
+    mesh.position.set(x, world.heightAt(x, z) + 0.07, z);
+    scene.add(mesh);
+    hunterTraps.push({ mesh, x, z, power, life: 90, armT: 0.4 });
   }
-  if (player.wood < 2) {
-    ui.toast('🪤 A snare needs 2 🪵.', 'error');
-    audio.sfx('error', 0.4);
-    return;
-  }
-  player.wood = roundResource(player.wood - 2);
-  hunterTrapCd = 7;
-  const mesh = new THREE.Group();
-  const ringMat = new THREE.MeshLambertMaterial({ color: 0x6f5634 });
-  const metalMat = new THREE.MeshLambertMaterial({ color: 0xaeb7ad });
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.72, 0.07, 5, 18), ringMat);
-  ring.rotation.x = Math.PI / 2;
-  mesh.add(ring);
-  for (let i = 0; i < 8; i++) {
-    const a = i / 8 * Math.PI * 2;
-    const tooth = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.35, 4), metalMat);
-    tooth.position.set(Math.cos(a) * 0.52, 0.13, Math.sin(a) * 0.52);
-    tooth.rotation.z = Math.cos(a) * 0.65;
-    tooth.rotation.x = Math.sin(a) * -0.65;
-    mesh.add(tooth);
-  }
-  mesh.position.set(player.pos.x, world.heightAt(player.pos.x, player.pos.z) + 0.07, player.pos.z);
-  scene.add(mesh);
-  hunterTraps.push({ mesh, x: player.pos.x, z: player.pos.z, life: 90, armT: 0.4 });
-  while (hunterTraps.length > 4) removeHunterTrap(hunterTraps[0]);
-  ui.toast('🪤 Snare placed — 2 🪵.', '');
+  while (hunterTraps.length > 8) removeHunterTrap(hunterTraps[0]);
+  ui.toast(count > 1 ? `🪤 Trap field placed (${count}).` : '🪤 Snare placed.', '');
   audio.sfx('click', 0.45);
+  return true;
 }
 
 function updateHunterTraps(dt, enemyManager) {
-  hunterTrapCd = Math.max(0, hunterTrapCd - dt);
   for (let i = hunterTraps.length - 1; i >= 0; i--) {
     const trap = hunterTraps[i];
     trap.life -= dt;
@@ -3285,7 +3338,8 @@ function updateHunterTraps(dt, enemyManager) {
     const target = enemyManager?.alive?.().find(e => !e.cfg?.passive
       && Math.hypot(e.pos.x - trap.x, e.pos.z - trap.z) < 1.15 + (e.hitR || 0));
     if (!target) continue;
-    enemyManager.damage(target, Math.max(20, player.weapon.dmg * 0.55), null, 'local',
+    const trapPower = (trap.power || 1) * (1 + (player.classEffects.trapPower || 0));
+    enemyManager.damage(target, Math.max(20, player.weapon.dmg * 0.55) * trapPower, null, 'local',
       { bleed: { dps: 4 + player.level * 0.4, dur: 4 } });
     enemyManager.stun?.(target, 3.5);
     ui.popup(target.mesh.position.clone().setY(target.mesh.position.y + 1.8), '🪤 SNARED', '#d9e88a', 'big');
@@ -3294,10 +3348,84 @@ function updateHunterTraps(dt, enemyManager) {
   }
 }
 
-input.onKey('KeyT', () => {
-  if (!inPlay() || game.paused) return;
-  placeHunterTrap();
-});
+const classRankValue = (skill, key, rank, fallback = 0) => {
+  const value = skill?.[key];
+  return Array.isArray(value) ? (value[Math.max(0, rank - 1)] ?? fallback) : (value ?? fallback);
+};
+
+function healLocalCompanion(amount) {
+  const wolf = companions.wolf;
+  if (!wolf || player.petDead) return false;
+  const gained = Math.max(0, Math.min(wolf.maxHp - wolf.hp, Math.round(amount)));
+  if (!gained) return false;
+  wolf.hp += gained;
+  ui.popup(wolf.mesh.position.clone().setY(wolf.mesh.position.y + 1.5), `+${gained} ❤️`, '#7fe07f');
+  return true;
+}
+
+function handleClassWorldAction(action, skill, rank, ctx = {}) {
+  const rv = (key, fallback = 0) => classRankValue(skill, key, rank, fallback);
+  if (action === 'trap') return placeHunterTrap(rv('count', 1), rv('power', 1), false);
+  if (action === 'trapField') return placeHunterTrap(rv('count', 3), rv('power', 1), true);
+  if (action === 'mendPet') {
+    const wolf = companions.wolf;
+    if (!wolf || player.petDead) {
+      ui.toast('🐾 You have no living companion to mend.', 'error');
+      return false;
+    }
+    healLocalCompanion(wolf.maxHp * rv('power', 0.35));
+    player.petCommandPower = Math.max(player.petCommandPower || 0, rv('power', 0.35) * 0.5);
+    player.petCommandT = Math.max(player.petCommandT || 0, 6);
+    return true;
+  }
+  if (action === 'petCommand') {
+    if (!companions.wolf || player.petDead) {
+      ui.toast('🐾 You need a living animal companion.', 'error');
+      return false;
+    }
+    const commandAim = ctx.rpgView
+      ? player.pos.clone().addScaledVector(player.facing, 32) : (ctx.aimPoint || aimPoint);
+    const target = combatMgr()?.alive?.()
+      .filter(e => !e.cfg?.passive && Math.hypot(e.pos.x - player.pos.x, e.pos.z - player.pos.z) < 32)
+      .map(e => ({ e, d: Math.hypot(e.pos.x - commandAim.x, e.pos.z - commandAim.z) }))
+      .sort((a, b) => a.d - b.d)[0]?.e;
+    if (!target) {
+      ui.toast('📣 Aim near an enemy to issue Hunt Command.', 'error');
+      return false;
+    }
+    player.petCommandTargetId = target.id;
+    player.petCommandT = 8;
+    player.petCommandPower = rv('power', 0);
+    ui.toast(`📣 Hunt Command: ${target.cfg?.name ?? target.type}`, 'level');
+    return true;
+  }
+  if (action === 'groupHeal') {
+    const base = rv('amount');
+    player._healSelf(player._classHeal(base, player));
+    if (companions.wolf) healLocalCompanion(player._classHeal(base, companions.wolf));
+    const radius = rv('radius', 10) * (1 + (player.classEffects.healRadius || 0));
+    mp?.sendClassHeal?.(player._classHeal(base, mp?.remote), radius);
+    return true;
+  }
+  if (action === 'healAlly') {
+    const amount = player._classHeal(rv('amount'), mp?.remote);
+    mp?.sendClassHeal?.(amount, 14);
+    return true;
+  }
+  if (action === 'zoneHeal') {
+    const amount = player._classHeal(rv('amount'), mp?.remote);
+    mp?.sendClassHeal?.(amount, ctx.zone?.radius || rv('radius', 8), ctx.zone?.pos);
+    return true;
+  }
+  if (action === 'resurrection') {
+    const restored = rv('amount', 0.45);
+    if (mp?.sendClassRevive?.(restored, 14)) return true;
+    player._healSelf(player.maxHp * restored);
+    ui.toast('✝️ No fallen ally nearby — the miracle restores your health.', 'level');
+    return true;
+  }
+  return false;
+}
 
 function nearGrave() {
   return camp?.gravePos
@@ -3329,13 +3457,6 @@ input.onKey('KeyX', () => {
   if (player.mounted) dismountHorse();
   else if (boatMounted) dismountBoat();
 });
-
-for (const code of ['Space', 'ShiftLeft', 'ShiftRight']) {
-  input.onKey(code, () => {
-    if (!inPlay() || game.paused || player.mounted || boatMounted) return;
-    if (player.startDodge()) ui.toast('💨 Dodge', '');
-  });
-}
 
 input.onKey('KeyZ', () => {
   if (!inPlay() || game.paused) return;
@@ -3376,21 +3497,6 @@ input.onKey('KeyP', () => {
   player.petMode = PET_MODES[(PET_MODES.indexOf(player.petMode) + 1) % PET_MODES.length];
   ui.toast(`🐺 Pet mode: ${PET_MODE_LABEL[player.petMode]}`, 'level');
   audio.sfx('click', 0.4);
-});
-input.onKey('KeyY', () => {
-  if (!inPlay() || game.paused || !player.beastCommand || !companions.wolf) return;
-  const target = combatMgr()?.alive?.()
-    .filter(e => !e.cfg?.passive && e.pos.distanceToSquared(player.pos) < 32 * 32)
-    .map(e => ({ e, d: Math.hypot(e.pos.x - aimPoint.x, e.pos.z - aimPoint.z) }))
-    .filter(o => o.d < 7)
-    .sort((a, b) => a.d - b.d)[0]?.e;
-  if (!target) {
-    ui.toast('📣 Aim closer to an enemy to issue a hunt command.', '');
-    return;
-  }
-  player.petCommandTargetId = target.id;
-  ui.toast(`📣 Hunt command: ${target.cfg?.name ?? target.type}`, 'level');
-  audio.sfx('aggro', 0.45);
 });
 $id('bigmap').querySelector('.panel-close').addEventListener('click', () => toggleBigMap(false));
 $id('flightmap-close').addEventListener('click', () => toggleFlightMap(false));
@@ -3896,9 +4002,6 @@ function updateAtmosphere(dt) {
   if (player.mudguard < 1) envSpeedMult = 1 - (1 - envSpeedMult) * player.mudguard;
   // Frozen Peak chill: stiff, frozen legs move up to 30% slower
   envSpeedMult *= 1 - 0.3 * coldK;
-  if (player.environmentResist > 0) {
-    envSpeedMult = 1 - (1 - envSpeedMult) * (1 - player.environmentResist);
-  }
   const biome = BIOMES[game.biomeIndex];
 
   // the cave is dark; light floods in as you walk toward the mouth
