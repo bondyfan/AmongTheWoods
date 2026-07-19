@@ -156,7 +156,7 @@
         <div class="help-row"><kbd>I</kbd><span>inventory (drag stacks to drop / hotkey)</span></div>
         <div class="help-row"><kbd>M</kbd><span>world map</span></div>
         <div class="help-row"><kbd>U</kbd><span>upgrades shop</span></div>
-        <div class="help-row"><kbd>U → Class</kbd><span>choose one class and train its passive and active skills with meat</span></div>
+        <div class="help-row"><kbd>C → Class</kbd><span>choose one class and train its skill path with meat</span></div>
         <div class="help-row"><kbd>C</kbd><span>character &amp; equipment</span></div>
         <div class="help-row"><kbd>N</kbd><span>bestiary</span></div>
         <div class="help-row"><kbd>P</kbd><span>pet mode: aggressive / defensive / passive</span></div>
@@ -182,6 +182,10 @@
   <div id="character" class="panel hidden">
     <div class="panel-head">
       <h2>Armory</h2>
+      <div id="char-tabs">
+        <button class="char-tab active" data-ctab="gear">🎒 Gear</button>
+        <button class="char-tab" data-ctab="class">🧬 Class</button>
+      </div>
       <button id="toggle-doll" class="section-toggle on" title="Show/hide character">🧍 Character</button>
       <button id="toggle-inv" class="section-toggle on" title="Show/hide inventory">🎒 Inventory</button>
       <button class="panel-close">✕</button>
@@ -209,6 +213,7 @@
         <p id="spellbook-note" class="empty-note"></p>
       </div>
     </div>
+    <div id="class-body" class="hidden"></div>
   </div>
 
   <!-- bestiary -->
@@ -424,7 +429,7 @@
       </div>
       <div class="controls">
         <div><kbd>WASD</kbd> move &nbsp;·&nbsp; <kbd>LMB</kbd> attack / hold to charge &nbsp;·&nbsp; <kbd>Ctrl</kbd> block</div>
-        <div><kbd>1</kbd>–<kbd>6</kbd> abilities &nbsp;·&nbsp; <kbd>U</kbd> shop / class &nbsp;·&nbsp; <kbd>C</kbd> character &nbsp;·&nbsp; <kbd>N</kbd> bestiary</div>
+        <div><kbd>1</kbd>–<kbd>6</kbd> abilities &nbsp;·&nbsp; <kbd>U</kbd> shop &nbsp;·&nbsp; <kbd>C</kbd> character / class &nbsp;·&nbsp; <kbd>N</kbd> bestiary</div>
         <div><kbd>Esc</kbd> pause &nbsp;·&nbsp; <kbd>M</kbd> world map</div>
       </div>
       <p class="hint">Hunt for meat &amp; XP · loot flies to you · chop trees with an axe · beware the pack mothers 💀</p>

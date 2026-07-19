@@ -386,3 +386,10 @@ export function itemIcon(entry) {
   const svg = ITEM_ICONS[entry?.id];
   return svg ? `<span class="item-icon">${svg}</span>` : (entry?.icon ?? '');
 }
+
+// Painted class-skill/ability art lives in assets/skills/<id>.webp. If the file
+// is missing the <img> errors out and we fall back to the skill's emoji glyph.
+export function skillArt(id, emoji = '') {
+  return `<span class="skill-art"><img src="assets/skills/${id}.webp" alt="" loading="lazy"
+    onerror="this.remove();this.parentNode.classList.add('noart')"><span class="art-glyph">${emoji}</span></span>`;
+}

@@ -53,26 +53,27 @@ no build step, no CDN dependency.
   floating loot that flies to you when you come close.
 - **Aiming**: a normal free mouse cursor — you face wherever it points. A short
   amber arc (blue for bows) shows a slice of your current weapon's reach in the
-  direction you're facing, so you can gauge range at a glance. Bows start very
-  short-ranged — train **Range / Power / Swift Hands** (shop → Training) to
-  extend reach, damage and attack speed. Range has 10 tiers; Power and Swift
-  Hands continue to tier 15, with advanced tiers unlocked at biome milestones.
+  direction you're facing, so you can gauge range at a glance. Reach, damage and
+  attack speed now come from your **class** path rather than a separate training
+  shop.
 - The world is carved into rooms by **rock ridges with gates** and **rivers
   with wooden bridges** — chokepoints where packs can corner you. Some
   creatures (storm serpents, ice golems) fire shots that **stun** you.
-- **Classes** are trained in the separate **Upgrades → Class** tab. The first
-  passive or active rank locks in exactly one class: **Warrior**,
-  **Beastmaster**, **Rogue**, **Mage**, or **Priest**. Every class has ten
-  upgradeable passives and ten upgradeable active abilities, with three ranks
-  each and player-level requirements. Training costs meat. A class tree can be
-  reset beside home, but spent meat is not refunded and every rank must be
-  trained again. Beastmaster alone can equip bows, crossbows, and companions.
+- **Classes** live in the **Character (C) → Class** tab. Every class starts
+  collapsed with a **Choose** button (10 🍖); picking one commits you to it —
+  **Warrior**, **Beastmaster**, **Rogue**, **Mage**, or **Priest** — and opens
+  its **skill path**. Each path interleaves ten passives and ten active
+  abilities (three ranks each) as painted icons, revealing only the skills up to
+  your current level; everything beyond stays a mystery **?** until you level up.
+  The first skill costs just 10 🍖 and each rank costs meat. A class can be
+  reset beside home, but spent meat is not refunded. Beastmaster alone can equip
+  bows, crossbows, and companions.
 - **Equipment slots** (WoW-style): weapon, off-hand, armour layers, boots,
   cloak, mount, charm and one companion.
-  Items are bought in the grouped shop (Weapons / Clothing / Companions /
-  Spells) or looted from bosses. Manage them in the Character sheet (C).
-- **Spells and trained class abilities** share max 6 action slots and are used
-  with 1–6. New late-game spells and class ranks unlock through level 24.
+  Weapons and companions are bought in the shop's **Arsenal** tab (or looted
+  from bosses). Manage them in the Character sheet (C).
+- **Trained active class abilities** fill up to 6 action slots, used with keys
+  1–6. New class ranks unlock through level 24.
 - Enemy level bands rise by three per biome: Verdant Forest **1–3**, Scorched
   Desert **4–6**, Dark Forest **7–9**, Murky Swamp **10–12**, Highlands
   **13–15**, Haunted Forest **16–18**, Jungle **19–21**, Frozen Peak **22–24**.

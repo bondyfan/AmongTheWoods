@@ -1615,24 +1615,14 @@ export class Player {
     // local +z toward the aim point, so arm swings (toward +z) punch forward
     this.mesh.rotation.y = Math.atan2(this.facing.x, this.facing.z);
 
-    // -- attack with the equipped weapon: tap LMB for a normal hit, hold and
-    // release for a charged strike. RMB remains quick-repeat in top-down view. --
+    // -- attack with the equipped weapon: hold the attack button (LMB, or RMB in
+    // top-down view) to auto-swing repeatedly at the weapon's normal cadence.
+    // There is no charge-up — every hit lands at full, immediate strength. --
     this.attackCd -= dt;
-    const pressed = input.takeLeftPressed();
-    const released = input.takeLeftReleased();
-    if (pressed && this.attackCd <= 0 && this.dashT <= 0 && !this.blocking) {
-      this.charging = true;
-      this.chargeT = 0;
-    }
-    if (this.charging) {
-      if (input.mouse.left) this.chargeT = Math.min(1.2, this.chargeT + dt);
-      if (released || !input.mouse.left) {
-        const charge = Math.min(1, this.chargeT / 1.05);
-        this.charging = false;
-        if (this.weapon.kind === 'bow') this._doShoot(projectiles, charge, ctx.mounted);
-        else this._doMelee(world, enemyMgr, ctx.pickups, charge, moving, ctx.mounted);
-      }
-    } else if (input.quickAttack && this.attackCd <= 0 && this.dashT <= 0 && !this.blocking) {
+    input.takeLeftPressed();          // consume edge state (charging removed)
+    input.takeLeftReleased();
+    const wantAttack = input.mouse.left || input.quickAttack;
+    if (wantAttack && this.attackCd <= 0 && this.dashT <= 0 && !this.blocking) {
       if (this.weapon.kind === 'bow') this._doShoot(projectiles, 0, ctx.mounted);
       else this._doMelee(world, enemyMgr, ctx.pickups, 0, moving, ctx.mounted);
     }

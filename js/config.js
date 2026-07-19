@@ -893,9 +893,24 @@ export const classSkillById = (id) => {
 };
 export const classSkillRequiredLevel = (skill, rank) =>
   Math.min(MAX_LEVEL, skill.level + Math.max(0, rank - 1) * 3);
-export const classSkillMeatCost = (skill, rank) => {
+// Committing to a class costs a token of meat; the first skill along the path
+// is just as cheap so a brand-new class can be started for 10 + 10 meat.
+export const CLASS_CHOOSE_COST = 10;
+export const CLASS_FIRST_SKILL_COST = 10;
+export const classSkillMeatCost = (skill, rank, firstOfClass = false) => {
+  if (firstOfClass && rank <= 1) return CLASS_FIRST_SKILL_COST;
   const base = (skill.type === 'active' ? 40 : 25) + skill.level * 4;
   return Math.ceil(base * rank * (1 + 0.3 * Math.max(0, rank - 1)) / 5) * 5;
+};
+// The skills of a class laid out as a single progression "path": passives and
+// active abilities interleaved by the level they unlock at (passive first on
+// ties). The very first node is the class's cheap starter skill.
+export const classPathSkills = (tree) =>
+  [...tree.passives, ...tree.actives].sort((a, b) =>
+    a.level - b.level || (a.type === 'active' ? 1 : 0) - (b.type === 'active' ? 1 : 0));
+export const firstClassSkillId = (classId) => {
+  const tree = classTreeById(classId);
+  return tree ? classPathSkills(tree)[0].id : null;
 };
 export function classEffectsFor(classId, training = {}) {
   const effects = {};
@@ -1075,11 +1090,13 @@ export const isForgeItem = (i) =>
 // entries in ITEMS: torch/torchoil → off-hand, socks → legs, lining →
 // underlayer, bedroll → back, saddle → mount)
 
+// Weapons + companions share one "Arsenal" tab. Spells and stat training are
+// gone — the exclusive class trees (Character → Class) now own every ability
+// and combat bonus, so there is no parallel progression to buy here.
 export const SHOP_GROUPS = [
-  { key: 'weapons',  label: '⚔️ Weapons',   items: () => ITEMS.filter(i => i.slot === 'weapon' && !i.free && !i.unique && !isForgeItem(i)) },
-  { key: 'friends',  label: '🐾 Companions', items: () => ITEMS.filter(i => i.slot === 'companion') },
-  { key: 'spells',   label: '📖 Spells',    items: () => SPELLS },
-  { key: 'training', label: '📈 Training',  items: () => STAT_TRACKS },
+  { key: 'weapons',  label: '⚔️ Arsenal', items: () => ITEMS.filter(i =>
+      (i.slot === 'companion' || (i.slot === 'weapon' && !isForgeItem(i)))
+      && !i.free && !i.unique) },
 ];
 
 export const SMITH_GROUPS = [

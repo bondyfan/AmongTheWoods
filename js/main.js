@@ -6,7 +6,8 @@ import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOB
          biomeIndexAt, progressAt, fmtResource, roundResource, itemById, spellById,
          consumableById, essenceDropFor, MAX_LEVEL, questFor, repeatableQuestFor,
          questXpFor, BIOME_LAIRS, CAMP_BUILDINGS, trainingLevelFor, CLASS_TREES,
-         classTreeById, classSkillById, classSkillRequiredLevel, classSkillMeatCost } from './config.js';
+         classTreeById, classSkillById, classSkillRequiredLevel, classSkillMeatCost,
+         CLASS_CHOOSE_COST, firstClassSkillId } from './config.js';
 import { makeAimArc, updateAimArc, makeRaft, makeBlacksmith, makeHorse, makeWisp, makeMan,
          makeGriffin, makeGriffinRoost, makeTumbleweed } from './models.js';
 import { PostFX } from './postfx.js';
@@ -150,6 +151,7 @@ const panels = new Panels({
   onBuyItem: buyItem,
   onBuySpell: buySpell,
   onBuyStat: buyStat,
+  onChooseClass: chooseClass,
   onTrainClassSkill: trainClassSkill,
   onResetClass: resetClassTree,
   canResetClass: () => nearHome(),
@@ -280,11 +282,6 @@ const player = new Player(scene, {
     ui.banner('⭐ LEVEL UP!');
     ui.goldFlash();
     const freshItems = ITEMS.filter(i => i.level === level).map(i => i.name);
-    const freshSpells = SPELLS.filter(s => s.level === level).map(s => s.name);
-    const freshTraining = STAT_TRACKS
-      .filter(t => t.max > player.stats[t.id]
-        && trainingLevelFor(t, player.stats[t.id] + 1) === level)
-      .map(t => t.name);
     const freshBuildings = CAMP_BUILDINGS.flatMap(b => b.levels
       .map((upgrade, i) => ({ upgrade, name: b.names[i] })))
       .filter(x => x.upgrade.level === level).map(x => x.name);
@@ -292,7 +289,7 @@ const player = new Player(scene, {
     const freshClass = trees.some(tree => [...tree.passives, ...tree.actives]
       .some(skill => [1, 2, 3].some(rank => classSkillRequiredLevel(skill, rank) === level)))
       ? ['new class training'] : [];
-    const fresh = [...freshItems, ...freshSpells, ...freshTraining, ...freshBuildings, ...freshClass];
+    const fresh = [...freshItems, ...freshBuildings, ...freshClass];
     ui.toast(`⭐ Level ${level}!` + (fresh.length ? ` New: ${fresh.join(', ')}` : ''), 'level');
     audio.sfx('evolve_ready', 0.4);
     ui.pulseShopButton(true);
@@ -2645,10 +2642,43 @@ function buyStat(id) {
   panels.flashCard(track.name);
 }
 
+// Committing to a class is now an explicit, cheap step: it just spends the
+// choose fee and locks the tree in. Skills are trained afterwards along the path.
+function chooseClass(classId) {
+  const tree = classTreeById(classId);
+  if (!tree) return;
+  if (player.selectedClass) {
+    if (player.selectedClass !== classId) {
+      ui.toast(`🔒 You are already committed to ${classTreeById(player.selectedClass)?.name}.`, 'error');
+      audio.sfx('error', 0.4);
+    }
+    return;
+  }
+  if (player.meat < CLASS_CHOOSE_COST) {
+    ui.toast(`🍖 Choosing ${tree.name} costs ${CLASS_CHOOSE_COST} meat.`, 'error');
+    audio.sfx('error', 0.4);
+    return;
+  }
+  player.meat = roundResource(player.meat - CLASS_CHOOSE_COST);
+  player.selectedClass = classId;
+  player.enforceClassEquipment();
+  player.recompute();
+  companions.sync(player);
+  ui.toast(`${tree.icon} You have chosen the ${tree.name} path!`, 'level');
+  audio.sfx('upgrade', 0.6);
+  panels.refresh();
+  panels.flashCard(tree.name);
+}
+
 function trainClassSkill(id) {
   const skill = classSkillById(id);
   if (!skill) return;
-  if (player.selectedClass && player.selectedClass !== skill.classId) {
+  if (!player.selectedClass) {
+    ui.toast('🧬 Choose a class first.', 'error');
+    audio.sfx('error', 0.4);
+    return;
+  }
+  if (player.selectedClass !== skill.classId) {
     ui.toast(`🔒 You are already committed to ${classTreeById(player.selectedClass)?.name}.`, 'error');
     audio.sfx('error', 0.4);
     return;
@@ -2662,7 +2692,8 @@ function trainClassSkill(id) {
     audio.sfx('error', 0.4);
     return;
   }
-  const meatCost = classSkillMeatCost(skill, nextRank);
+  const firstOfClass = id === firstClassSkillId(skill.classId);
+  const meatCost = classSkillMeatCost(skill, nextRank, firstOfClass);
   if (player.meat < meatCost) {
     ui.toast(`🍖 ${skill.name} rank ${nextRank} costs ${meatCost} meat.`, 'error');
     audio.sfx('error', 0.4);

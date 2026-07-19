@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { WORLD, XP_LEVELS, MAX_LEVEL, MAX_SPELL_SLOTS, ENEMY_TYPES, RES_ICONS,
          fmtResource, itemById, spellById, classSkillById } from './config.js';
-import { itemIcon } from './icons.js';
+import { itemIcon, skillArt } from './icons.js';
 import { audio } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
@@ -105,7 +105,6 @@ export class UI {
 
     const weapon = itemById(player.equipment.weapon);
     const combat = [];
-    if (player.charging) combat.push(`CHARGE ${Math.round(Math.min(1, player.chargeT / 1.05) * 100)}%`);
     if (player.blocking) combat.push(player.weapon.parry ? 'PARRY' : 'BLOCK');
     if (player.weapon.style === 'bow') combat.push(`${player.arrowMode.toUpperCase()} · Z`);
     $('weapon-display').innerHTML = `${itemIcon(weapon)} ${weapon.name}`
@@ -182,7 +181,9 @@ export class UI {
         continue;
       }
       el.classList.remove('empty');
-      iconEl.innerHTML = itemIcon(ability ?? item);
+      iconEl.innerHTML = activeClassAbility
+        ? skillArt(id, activeClassAbility.icon)
+        : itemIcon(ability ?? item);
       el.title = ability
         ? `${ability.name} — ${ability.desc}${activeClassAbility ? ` · Rank ${player.classRank?.(id) ?? player.classTraining?.[id] ?? 1}` : ''}`
         : `${item.name} — press ${i + 1} to equip`;

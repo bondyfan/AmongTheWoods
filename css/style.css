@@ -434,78 +434,133 @@ kbd {
 .buy-btn:disabled { cursor: default; filter: grayscale(1); opacity: 0.42; }
 .card.expensive .buy-btn { filter: grayscale(0.7); opacity: 0.7; }
 
-/* ---------- exclusive survival class trees ---------- */
-.class-board { grid-column: 1 / -1; min-width: 0; }
-.class-board-head {
-  display: flex; align-items: center; gap: 18px; padding: 13px 15px;
+/* ---------- exclusive class path (Character → Class tab) ---------- */
+#char-tabs { display: flex; gap: 6px; margin-left: 6px; }
+.char-tab {
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.22);
+  color: #9fb884; border-radius: 8px; padding: 5px 13px; font-size: 13px; cursor: pointer; font-weight: bold;
+}
+.char-tab:hover { border-color: #e8c96a; }
+.char-tab.active { color: #17130a; background: linear-gradient(#e8c96a, #c39b43); border-color: #e8c96a; }
+
+#class-body { padding: 16px 20px; overflow-y: auto; max-height: 76vh; }
+#character.class-mode { width: min(960px, 96vw); }
+
+.classp-head {
+  display: flex; align-items: center; gap: 18px; padding: 13px 16px; margin-bottom: 15px;
   border: 1px solid rgba(232,201,106,0.38); border-radius: 13px;
   background: linear-gradient(110deg, rgba(232,201,106,0.11), rgba(8,13,6,0.3));
 }
-.class-board-head > div { flex: 1; display: flex; flex-direction: column; gap: 4px; }
-.class-board-head b { color: #f2dfa4; font-size: 18px; }
-.class-board-head span, .class-intro { color: #b9c5ad; font-size: 12px; line-height: 1.45; }
-.class-board-head .class-currency { color: #ffe6a0; font-size: 15px; font-weight: bold; white-space: nowrap; }
-.class-intro { margin: 10px 5px 13px; }
-.class-trees { display: flex; flex-direction: column; gap: 10px; }
-.class-tree {
-  --class-color: #e8c96a; overflow: hidden; border: 1px solid color-mix(in srgb, var(--class-color) 65%, transparent);
-  border-radius: 13px; background: rgba(0,0,0,0.17);
+.classp-title { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.classp-title b { color: #f2dfa4; font-size: 18px; }
+.classp-title span { color: #b9c5ad; font-size: 12px; line-height: 1.45; }
+.classp-meat { color: #ffe6a0; font-size: 16px; font-weight: bold; white-space: nowrap; }
+
+/* --- pick screen: five collapsed, un-openable class cards --- */
+.class-pick-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 14px; }
+.class-pick {
+  --class-color: #e8c96a; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 9px;
+  padding: 20px 15px 16px; border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--class-color) 55%, transparent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--class-color) 15%, transparent), rgba(6,10,5,0.35));
 }
-.class-tree.selected { box-shadow: 0 0 18px color-mix(in srgb, var(--class-color) 18%, transparent); }
-.class-tree.locked:not([open]) { opacity: 0.58; }
-.class-tree > summary {
-  display: grid; grid-template-columns: 160px 1fr auto 20px; gap: 12px; align-items: center;
-  padding: 12px 14px; cursor: pointer; list-style: none; user-select: none;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--class-color) 13%, transparent), rgba(255,255,255,0.018));
+.pick-emblem {
+  width: 76px; height: 76px; border-radius: 50%; display: grid; place-items: center; font-size: 39px;
+  background: radial-gradient(circle, color-mix(in srgb, var(--class-color) 32%, transparent), rgba(0,0,0,0.4));
+  border: 2px solid color-mix(in srgb, var(--class-color) 70%, transparent);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--class-color) 25%, transparent);
 }
-.class-tree > summary::-webkit-details-marker { display: none; }
-.class-tree > summary::after { content: '▸'; color: var(--class-color); font-size: 18px; }
-.class-tree[open] > summary::after { content: '▾'; }
-.class-title { color: var(--class-color); font-size: 16px; }
-.class-summary { color: #b8c4ad; font-size: 11.5px; line-height: 1.35; }
-.class-ranks { color: #e7dab3; font-size: 11px; white-space: nowrap; }
-.class-skill-groups { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px; border-top: 1px solid rgba(255,255,255,0.08); }
-.class-skill-groups > section { min-width: 0; }
-.class-skill-groups h3 { margin: 0 0 8px; color: var(--class-color); font-size: 13px; letter-spacing: 0.5px; }
-.class-skill-groups h3 small { color: #aab49f; font-weight: normal; }
-.class-skills { display: grid; gap: 7px; }
-.class-skill {
-  min-height: 118px; display: flex; flex-direction: column; gap: 5px; padding: 9px;
-  border: 1px solid rgba(255,255,255,0.12); border-radius: 9px; background: rgba(6,9,5,0.28);
+.class-pick h3 { margin: 2px 0 0; color: var(--class-color); font-size: 17px; letter-spacing: 0.5px; }
+.class-pick p { margin: 0; flex: 1; color: #b8c4ad; font-size: 11.5px; line-height: 1.4; }
+.class-pick .choose { width: 100%; padding: 9px; font-weight: bold; }
+
+/* --- committed: the chosen class header + skill path --- */
+.classp-chosen {
+  --class-color: #e8c96a; display: flex; align-items: center; gap: 14px; margin-bottom: 16px;
+  padding: 12px 16px; border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--class-color) 60%, transparent);
+  background: linear-gradient(100deg, color-mix(in srgb, var(--class-color) 17%, transparent), rgba(6,10,5,0.3));
+  box-shadow: 0 0 20px color-mix(in srgb, var(--class-color) 14%, transparent);
 }
-.class-skill.trained { border-color: color-mix(in srgb, var(--class-color) 72%, transparent); }
-.class-skill.maxed { box-shadow: inset 0 0 16px color-mix(in srgb, var(--class-color) 10%, transparent); }
-.class-skill.locked { opacity: 0.52; }
-.class-skill.expensive:not(.locked) { border-color: rgba(214,139,94,0.45); }
-.class-skill-head { display: grid; grid-template-columns: 24px 1fr auto; gap: 5px; align-items: center; }
-.class-skill-icon { font-size: 18px; }
-.class-skill-head b { color: #eef2e8; font-size: 12px; }
-.class-skill-head > span:last-child { color: var(--class-color); font-size: 10px; }
-.class-skill p { flex: 1; margin: 0; color: #bac5ad; font-size: 10.5px; line-height: 1.35; }
-.class-skill-meta, .class-skill-action { display: flex; justify-content: space-between; gap: 8px; color: #9faa96; font-size: 9.5px; }
-.class-skill-action > span { color: var(--class-color); }
-.class-skill-action .ok { color: #9fe07f; }
-.class-skill .buy-btn { padding: 6px; font-size: 10px; }
-.class-reset {
-  margin-top: 13px; padding: 13px 15px; display: flex; align-items: center; gap: 18px;
-  border: 1px solid rgba(217,99,86,0.45); border-radius: 12px; background: rgba(92,25,18,0.13);
+.cc-emblem {
+  font-size: 32px; width: 58px; height: 58px; border-radius: 50%; display: grid; place-items: center; flex: 0 0 auto;
+  background: radial-gradient(circle, color-mix(in srgb, var(--class-color) 34%, transparent), rgba(0,0,0,0.45));
+  border: 2px solid color-mix(in srgb, var(--class-color) 72%, transparent);
 }
-.class-reset > div { flex: 1; display: flex; flex-direction: column; gap: 3px; }
-.class-reset b { color: #ffb4a7; }
-.class-reset span, .class-reset em { color: #c8b3a7; font-size: 11px; line-height: 1.4; }
-.class-reset em { color: #e6c276; }
-.class-reset .buy-btn { width: auto; min-width: 190px; }
+.cc-name { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.cc-name b { color: var(--class-color); font-size: 20px; }
+.cc-name span { color: #b8c4ad; font-size: 12px; line-height: 1.4; }
+.cc-progress { color: #e7dab3; font-size: 13px; font-weight: bold; white-space: nowrap; }
+
+.class-path { --class-color: #e8c96a; position: relative; display: flex; flex-direction: column; gap: 13px; }
+.class-path::before {
+  content: ''; position: absolute; left: 45px; top: 34px; bottom: 34px; width: 3px; border-radius: 2px;
+  background: linear-gradient(color-mix(in srgb, var(--class-color) 65%, transparent), color-mix(in srgb, var(--class-color) 8%, transparent));
+}
+.class-node {
+  position: relative; z-index: 1; display: grid; grid-template-columns: 76px 1fr; gap: 16px; align-items: center;
+  padding: 10px 15px 10px 8px; border-radius: 15px;
+  border: 1px solid rgba(255,255,255,0.1); background: rgba(6,10,5,0.5);
+}
+.class-node.trained { border-color: color-mix(in srgb, var(--class-color) 60%, transparent); }
+.class-node.maxed { border-color: color-mix(in srgb, var(--class-color) 85%, transparent);
+  box-shadow: 0 0 16px color-mix(in srgb, var(--class-color) 20%, transparent); }
+.class-node.lvl-locked { opacity: 0.6; }
+.class-node.mystery { opacity: 0.8; border-style: dashed; }
+
+.node-art {
+  --class-color: #e8c96a; position: relative; width: 76px; height: 76px; border-radius: 15px; overflow: hidden;
+  background: rgba(0,0,0,0.5); border: 2px solid color-mix(in srgb, var(--class-color) 55%, transparent);
+}
+.skill-art { position: absolute; inset: 0; display: grid; place-items: center; overflow: hidden; }
+.skill-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.skill-art .art-glyph { display: none; font-size: 34px; line-height: 1; }
+.skill-art.noart .art-glyph { display: grid; place-items: center; }
+.class-node.maxed .node-art { border-color: var(--class-color); box-shadow: 0 0 14px color-mix(in srgb, var(--class-color) 45%, transparent); }
+.class-node.lvl-locked .node-art img { filter: grayscale(0.85) brightness(0.68); }
+/* the same painted art on the 1–6 action bar */
+.spell-icon .skill-art { z-index: 1; }
+.spell-icon .skill-art .art-glyph { font-size: 24px; }
+
+.node-info { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.node-top { display: flex; align-items: baseline; gap: 10px; }
+.node-top b { color: #eef2e8; font-size: 15px; }
+.node-kind { color: var(--class-color); font-size: 11px; white-space: nowrap; margin-left: auto; }
+.node-pips { display: flex; align-items: center; gap: 5px; }
+.node-pips .pip { width: 9px; height: 9px; border-radius: 50%; background: transparent;
+  border: 1px solid color-mix(in srgb, var(--class-color) 60%, transparent); }
+.node-pips .pip.on { background: var(--class-color); box-shadow: 0 0 6px color-mix(in srgb, var(--class-color) 65%, transparent); }
+.node-rank { color: #9faa96; font-size: 10.5px; margin-left: 5px; }
+.node-desc { margin: 0; color: #b6c1aa; font-size: 11.5px; line-height: 1.4; }
+.node-action { margin-top: 2px; }
+.node-action .buy-btn { width: auto; min-width: 150px; padding: 7px 13px; font-size: 12px; }
+.node-done { color: #9fe07f; font-weight: bold; font-size: 12.5px; }
+.node-lock { color: #d0a15f; font-size: 12px; }
+.class-node.mystery .node-top b { color: #8a9484; letter-spacing: 5px; }
+
+.classp-reset {
+  margin-top: 18px; padding: 13px 16px; display: flex; align-items: center; gap: 18px;
+  border: 1px solid rgba(217,99,86,0.4); border-radius: 12px; background: rgba(92,25,18,0.12);
+}
+.classp-reset > div { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.classp-reset b { color: #ffb4a7; }
+.classp-reset span { color: #c8b3a7; font-size: 11.5px; line-height: 1.4; }
+.classp-reset .buy-btn { width: auto; min-width: 170px; }
+
 .buy-btn.danger { color: #fff0e8; background: linear-gradient(#9b473b, #6e2d25); }
 .class-requirement { display: block; margin-top: 6px; color: #e5c36c; font-size: 11px; font-weight: bold; }
 .inv-item.class-ability { border-color: rgba(156,156,255,0.55); }
+.inv-item .inv-art { position: relative; display: inline-block; width: 26px; height: 26px;
+  border-radius: 6px; overflow: hidden; vertical-align: middle; flex: 0 0 auto; }
+.inv-item .inv-art .skill-art .art-glyph { font-size: 17px; }
 .inv-item .ability-rank { color: #c9c4ff; font-size: 10px; }
 .spell-slot.class-ability-slot { box-shadow: inset 0 0 10px rgba(156,156,255,0.22); }
 @media (max-width: 760px) {
-  .class-board-head, .class-reset { align-items: stretch; flex-direction: column; }
-  .class-tree > summary { grid-template-columns: 1fr auto 20px; }
-  .class-summary { grid-column: 1 / -1; grid-row: 2; }
-  .class-skill-groups { grid-template-columns: 1fr; }
-  .class-reset .buy-btn { width: 100%; }
+  .classp-head, .classp-chosen, .classp-reset { flex-direction: column; align-items: stretch; text-align: left; }
+  .class-node { grid-template-columns: 58px 1fr; }
+  .skill-art { width: 58px; height: 58px; }
+  .class-path::before { left: 36px; }
+  .classp-reset .buy-btn, .node-action .buy-btn { width: 100%; }
 }
 
 /* ---------- menu & end screen ---------- */

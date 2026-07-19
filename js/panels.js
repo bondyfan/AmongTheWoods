@@ -2,16 +2,17 @@
 // equipment slots, bestiary of discovered creatures ----
 
 import { SHOP_GROUPS, SMITH_GROUPS, questFor, repeatableQuestFor, questXpFor,
-         QUEST_CATEGORY_LABELS, QUESTS_PER_BIOME, BIOMES, SLOTS, SLOT_LABELS, ENEMY_TYPES, ITEMS, SPELLS,
-         STAT_TRACKS, MOBA_BUILDINGS, CAMP_BUILDINGS, RES_ICONS, RESOURCES, CONSUMABLES,
-         MAX_SPELL_SLOTS, fmtResource, itemById, spellById, costFor, trainingLevelFor,
+         QUEST_CATEGORY_LABELS, QUESTS_PER_BIOME, BIOMES, SLOTS, SLOT_LABELS, ENEMY_TYPES, ITEMS,
+         MOBA_BUILDINGS, CAMP_BUILDINGS, RES_ICONS, RESOURCES, CONSUMABLES,
+         MAX_SPELL_SLOTS, fmtResource, itemById, spellById, costFor,
          CLASS_TREES, classTreeById, classSkillById, classSkillRequiredLevel,
-         classSkillMeatCost, requiredClassForItem } from './config.js';
+         classSkillMeatCost, classPathSkills, firstClassSkillId, CLASS_CHOOSE_COST,
+         requiredClassForItem } from './config.js';
 
 const NEED_NAMES = { tent: 'Hide Tent', cabin: 'Wooden Cabin', furnace: 'Stone Furnace',
   keep: 'Medieval Keep', runic: 'Runic Hall', mountain: 'Mountain Fortress',
   spirit: 'Spirit Bastion', primal: 'Primal Citadel', frosthold: 'Frosthold' };
-import { itemIcon, resIcon } from './icons.js';
+import { itemIcon, resIcon, skillArt } from './icons.js';
 import { audio } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
@@ -24,6 +25,7 @@ export class Panels {
     this.openSet = new Set();
     this.shopTab = SHOP_GROUPS[0].key;
     this.smithTab = 'quests';
+    this.charTab = 'gear';   // Character modal: 'gear' (doll+inventory) or 'class'
     this.player = null;
     this.moba = null; // set in MOBA mode → adds the Base tab
     this.camp = null; // set in survival → adds the Camp tab + era gating
@@ -53,6 +55,13 @@ export class Panels {
           !$('toggle-doll').classList.contains('on') || !$('toggle-inv').classList.contains('on'));
       });
     }
+    // Character modal Gear / Class tabs
+    document.querySelectorAll('#char-tabs .char-tab').forEach(btn =>
+      btn.addEventListener('click', () => {
+        this.charTab = btn.dataset.ctab;
+        audio.sfx('click', 0.4);
+        this.renderCharacter();
+      }));
   }
 
   // drag any panel by its header so several can sit side by side
@@ -150,11 +159,12 @@ export class Panels {
     const p = this.player;
     $('shop-res').innerHTML = this._resLine();
 
-    // tabs (+ Base tab in MOBA, + Camp and the exclusive Class tree in survival)
+    // tabs (+ Base tab in MOBA, + Camp/Supplies in survival). The exclusive
+    // class trees now live in the Character modal, not here.
     const groups = this.moba
       ? [...SHOP_GROUPS, { key: 'base', label: '🏰 Base' }]
       : this.camp
-        ? [{ key: 'camp', label: '🏕️ Camp' }, { key: 'class', label: '🧬 Class' },
+        ? [{ key: 'camp', label: '🏕️ Camp' },
            ...SHOP_GROUPS, { key: 'supplies', label: '🧪 Supplies' }]
         : SHOP_GROUPS;
     const tabs = $('shop-tabs');
@@ -172,14 +182,6 @@ export class Panels {
     const wrap = $('shop-items');
     wrap.innerHTML = '';
 
-    if (this.shopTab === 'training') {
-      this._renderTraining(wrap);
-      return;
-    }
-    if (this.shopTab === 'class') {
-      this._renderClass(wrap);
-      return;
-    }
     if (this.shopTab === 'base') {
       this._renderBase(wrap);
       return;
@@ -459,128 +461,129 @@ export class Panels {
     }
   }
 
-  // Training unlocks early tiers level-by-level, then advanced tiers at biome milestones.
-  _renderTraining(wrap) {
-    const p = this.player;
-    for (const track of STAT_TRACKS) {
-      const tier = p.stats[track.id];
-      const maxed = tier >= track.max;
-      const nextTier = tier + 1;
-      const cost = maxed ? null : costFor(track.cost(nextTier), !!this.moba);
-      const requiredLevel = maxed ? null : trainingLevelFor(track, nextTier);
-      const levelLocked = !maxed && p.level < requiredLevel;
-      const classLocked = !!this.camp && track.id === 'pet' && p.selectedClass !== 'beastmaster';
-      const affordable = cost && this._affordable(cost);
-
-      const card = document.createElement('div');
-      card.className = 'card' + (maxed ? ' owned' : (levelLocked || classLocked) ? ' locked' : affordable ? ' buyable' : ' expensive');
-
-      let status;
-      if (maxed) status = '<span class="tag ok">Fully trained</span>';
-      else if (classLocked) status = '<span class="tag">🔒 Requires Beastmaster class</span>';
-      else if (levelLocked) status = `<span class="tag">Tier ${nextTier} needs player Lv ${requiredLevel}</span>`;
-      else status = `<button class="buy-btn" data-id="${track.id}">Train to ${nextTier} — ${this._costStr(cost)}</button>`;
-
-      card.innerHTML = `
-        <div class="card-head"><span class="icon">${itemIcon(track)}</span>
-          <span class="name">${track.name}</span><span class="lv">${tier}/${track.max}</span></div>
-        <div class="desc">${track.desc}</div>
-        <div class="card-foot">${status}</div>`;
-      wrap.appendChild(card);
-    }
-    wrap.querySelectorAll('.buy-btn').forEach(btn => {
-      btn.addEventListener('click', () => this.hooks.onBuyStat(btn.dataset.id));
-    });
-  }
-
   _classRank(id) {
     return Math.max(0, Number(this.player.classRank?.(id) ?? this.player.classTraining?.[id] ?? 0) || 0);
   }
 
-  _renderClass(wrap) {
+  // The exclusive class tree, rendered as a single "path" inside the Character
+  // modal. Before a class is picked every class is a collapsed card with a
+  // Choose button; once committed, only the chosen class's path is shown and it
+  // reveals skills up to the player's current level (the rest hide behind a "?").
+  _renderClassPath(container) {
     const p = this.player;
     const selected = classTreeById(p.selectedClass);
-    const spentRanks = Object.values(p.classTraining || {}).reduce((sum, rank) => sum + (Number(rank) || 0), 0);
+    const meatIcon = resIcon('meat', RES_ICONS.meat ?? '🍖');
+    container.innerHTML = '';
 
-    const board = document.createElement('section');
-    board.className = 'class-board';
-    board.innerHTML = `<div class="class-board-head">
-      <div><b>🧬 Choose your class</b>
+    const head = document.createElement('div');
+    head.className = 'classp-head';
+    head.innerHTML = `<div class="classp-title"><b>🧬 Class path</b>
         <span>${selected
-          ? `${selected.icon} ${selected.name} is locked in · ${spentRanks} trained ranks`
-          : 'Your first trained rank permanently chooses one class until you reset at camp.'}</span></div>
-      <span class="class-currency">${fmtResource(p.meat)} ${resIcon('meat', RES_ICONS.meat ?? '🍖')}</span>
-    </div>
-    <p class="class-intro">Each class contains 10 passives and 10 active abilities. Every skill has three ranks; later ranks require a higher player level and cost more meat. Trained active abilities can be placed on keys 1–6 in the Armory.</p>
-    <div class="class-trees"></div>`;
-    const paths = board.querySelector('.class-trees');
+          ? `${selected.icon} ${selected.name} — follow the path, spend 🍖 to train each skill.`
+          : `Commit to ONE class. Choosing costs ${CLASS_CHOOSE_COST} 🍖 and is permanent until you reset at home.`}</span></div>
+      <span class="classp-meat">${fmtResource(p.meat)} ${meatIcon}</span>`;
+    container.appendChild(head);
 
-    for (const tree of CLASS_TREES) {
-      const classLocked = !!selected && selected.id !== tree.id;
-      const treeRanks = [...tree.passives, ...tree.actives]
-        .reduce((sum, skill) => sum + this._classRank(skill.id), 0);
-      const branch = document.createElement('details');
-      branch.className = `class-tree${classLocked ? ' locked' : ''}${selected?.id === tree.id ? ' selected' : ''}`;
-      branch.style.setProperty('--class-color', tree.color);
-      if (!selected || selected.id === tree.id) branch.open = true;
-      branch.innerHTML = `<summary>
-        <span class="class-title">${tree.icon} <b>${tree.name}</b></span>
-        <span class="class-summary">${tree.summary}</span>
-        <span class="class-ranks">${treeRanks}/60 ranks${classLocked ? ` · 🔒 ${selected.name} selected` : ''}</span>
-      </summary>
-      <div class="class-skill-groups">
-        <section><h3>🛡️ Passive skills <small>10 skills</small></h3><div class="class-skills passive"></div></section>
-        <section><h3>⚡ Active abilities <small>10 abilities</small></h3><div class="class-skills active"></div></section>
-      </div>`;
-
-      const renderSkills = (skills, container) => {
-        for (const skill of skills) {
-          const rank = this._classRank(skill.id);
-          const maxed = rank >= skill.maxRank;
-          const nextRank = Math.min(skill.maxRank, rank + 1);
-          const requiredLevel = classSkillRequiredLevel(skill, nextRank);
-          const meatCost = classSkillMeatCost(skill, nextRank);
-          const levelLocked = !maxed && p.level < requiredLevel;
-          const affordable = p.meat >= meatCost;
-          const canTrain = !classLocked && !maxed && !levelLocked && affordable;
-          let status;
-          if (classLocked) status = `<span>🔒 Locked by ${selected.name}</span>`;
-          else if (maxed) status = '<span class="ok">✓ Fully trained</span>';
-          else if (levelLocked) status = `<span>🔒 Rank ${nextRank} requires Lv ${requiredLevel}</span>`;
-          else status = `<button class="buy-btn" data-class-skill="${skill.id}" ${canTrain ? '' : 'disabled'}>
-            Train rank ${nextRank} · ${fmtResource(meatCost)} ${resIcon('meat', RES_ICONS.meat ?? '🍖')}
-          </button>`;
-
-          const card = document.createElement('article');
-          card.className = `class-skill${rank ? ' trained' : ''}${maxed ? ' maxed' : ''}${classLocked || levelLocked ? ' locked' : ''}${!affordable && !maxed ? ' expensive' : ''}`;
-          card.innerHTML = `<div class="class-skill-head">
-              <span class="class-skill-icon">${skill.icon}</span>
-              <b>${skill.name}</b>
-              <span>Rank ${rank}/${skill.maxRank}</span>
-            </div>
-            <p>${skill.desc}</p>
-            <div class="class-skill-meta"><span>${skill.type === 'active' ? `⚡ Active · ${skill.cd}s cooldown` : '🛡️ Passive'}</span><span>${maxed ? 'Max rank' : `Required Lv ${requiredLevel}`}</span></div>
-            <div class="class-skill-action">${status}</div>`;
-          container.appendChild(card);
-        }
-      };
-      renderSkills(tree.passives, branch.querySelector('.class-skills.passive'));
-      renderSkills(tree.actives, branch.querySelector('.class-skills.active'));
-      paths.appendChild(branch);
+    // ---------- no class yet: five collapsed pick cards ----------
+    if (!selected) {
+      const grid = document.createElement('div');
+      grid.className = 'class-pick-grid';
+      for (const tree of CLASS_TREES) {
+        const affordable = p.meat >= CLASS_CHOOSE_COST;
+        const card = document.createElement('article');
+        card.className = 'class-pick';
+        card.style.setProperty('--class-color', tree.color);
+        card.innerHTML = `<div class="pick-emblem">${tree.icon}</div>
+          <h3>${tree.name}</h3>
+          <p>${tree.summary}</p>
+          <button class="buy-btn choose" data-choose="${tree.id}" ${affordable ? '' : 'disabled'}>
+            Choose — ${CLASS_CHOOSE_COST} ${meatIcon}</button>`;
+        grid.appendChild(card);
+      }
+      container.appendChild(grid);
+      container.querySelectorAll('[data-choose]').forEach(btn =>
+        btn.addEventListener('click', () => this.hooks.onChooseClass?.(btn.dataset.choose)));
+      return;
     }
 
+    // ---------- committed: the class path ----------
+    const path = classPathSkills(selected);
+    const firstId = firstClassSkillId(selected.id);
+    const firstLevel = path[0]?.level ?? 1;
+    const revealMax = Math.max(p.level, firstLevel);
+    const trained = path.reduce((n, s) => n + this._classRank(s.id), 0);
+
+    const chosen = document.createElement('div');
+    chosen.className = 'classp-chosen';
+    chosen.style.setProperty('--class-color', selected.color);
+    chosen.innerHTML = `<span class="cc-emblem">${selected.icon}</span>
+      <div class="cc-name"><b>${selected.name}</b><span>${selected.summary}</span></div>
+      <span class="cc-progress">${trained}/60 ranks</span>`;
+    container.appendChild(chosen);
+
+    const pathEl = document.createElement('div');
+    pathEl.className = 'class-path';
+    pathEl.style.setProperty('--class-color', selected.color);
+
+    let hiddenAny = false;
+    path.forEach((skill, i) => {
+      if (skill.level > revealMax) { hiddenAny = true; return; }
+      const rank = this._classRank(skill.id);
+      const maxed = rank >= skill.maxRank;
+      const nextRank = Math.min(skill.maxRank, rank + 1);
+      const requiredLevel = classSkillRequiredLevel(skill, nextRank);
+      const isFirst = skill.id === firstId;
+      const meatCost = classSkillMeatCost(skill, nextRank, isFirst);
+      const levelLocked = !maxed && p.level < requiredLevel;
+      const affordable = p.meat >= meatCost;
+      const canTrain = !maxed && !levelLocked && affordable;
+
+      const pips = Array.from({ length: skill.maxRank }, (_, r) =>
+        `<i class="pip${r < rank ? ' on' : ''}"></i>`).join('');
+
+      let action;
+      if (maxed) action = '<span class="node-done">✓ Mastered</span>';
+      else if (levelLocked) action = `<span class="node-lock">🔒 Reach Lv ${requiredLevel}</span>`;
+      else action = `<button class="buy-btn node-train" data-class-skill="${skill.id}" ${canTrain ? '' : 'disabled'}>
+          ${rank ? `Upgrade → R${nextRank}` : 'Train'} · ${fmtResource(meatCost)} ${meatIcon}</button>`;
+
+      const node = document.createElement('div');
+      node.className = `class-node ${skill.type}${rank ? ' trained' : ''}${maxed ? ' maxed' : ''}${levelLocked ? ' lvl-locked' : ''}`;
+      node.style.setProperty('--i', i);
+      node.innerHTML = `<div class="node-art">${skillArt(skill.id, skill.icon)}</div>
+        <div class="node-info">
+          <div class="node-top"><b>${skill.name}</b>
+            <span class="node-kind">${skill.type === 'active' ? `⚡ ${skill.cd}s` : '🛡️ passive'}</span></div>
+          <div class="node-pips">${pips}<span class="node-rank">${rank}/${skill.maxRank}</span></div>
+          <p class="node-desc">${skill.desc}</p>
+          <div class="node-action">${action}</div>
+        </div>`;
+      pathEl.appendChild(node);
+    });
+
+    if (hiddenAny) {
+      const mystery = document.createElement('div');
+      mystery.className = 'class-node mystery';
+      mystery.innerHTML = `<div class="node-art"><span class="skill-art noart"><span class="art-glyph">❓</span></span></div>
+        <div class="node-info">
+          <div class="node-top"><b>? ? ?</b></div>
+          <p class="node-desc">Keep leveling up to reveal what lies further along your path.</p>
+        </div>`;
+      pathEl.appendChild(mystery);
+    }
+    container.appendChild(pathEl);
+
     const canReset = !!this.hooks.canResetClass?.();
-    const reset = document.createElement('section');
-    reset.className = 'class-reset';
-    reset.innerHTML = `<div><b>🔄 Reset class tree</b>
-        <span>This clears your selected class and every trained rank. Spent meat is not refunded, and every skill must be trained again.</span>
-        ${canReset ? '' : '<em>Stand beside your home at camp to reset.</em>'}</div>
-      <button class="buy-btn danger" data-class-reset="1" ${!spentRanks || !canReset ? 'disabled' : ''}>Reset class — no refund</button>`;
-    board.appendChild(reset);
-    wrap.appendChild(board);
-    board.querySelectorAll('[data-class-skill]').forEach(btn =>
+    const reset = document.createElement('div');
+    reset.className = 'classp-reset';
+    reset.innerHTML = `<div><b>🔄 Reset class</b>
+        <span>Clears your class and every trained rank — no meat refunded.${canReset ? '' : ' Stand beside your home at camp to reset.'}</span></div>
+      <button class="buy-btn danger" data-class-reset="1" ${(!p.selectedClass || !canReset) ? 'disabled' : ''}>Reset — no refund</button>`;
+    container.appendChild(reset);
+
+    container.querySelectorAll('[data-class-skill]').forEach(btn =>
       btn.addEventListener('click', () => this.hooks.onTrainClassSkill?.(btn.dataset.classSkill)));
-    board.querySelector('[data-class-reset]')?.addEventListener('click', () =>
+    container.querySelector('[data-class-reset]')?.addEventListener('click', () =>
       this.hooks.onResetClass?.());
   }
 
@@ -589,6 +592,18 @@ export class Panels {
   // flanking it, a stat breakdown below, and a stackable inventory grid.
   renderCharacter() {
     const p = this.player;
+
+    // Gear / Class tabs: switch the whole body between the paper-doll+inventory
+    // view and the exclusive class path.
+    const classMode = this.charTab === 'class';
+    document.querySelectorAll('#char-tabs .char-tab').forEach(b =>
+      b.classList.toggle('active', b.dataset.ctab === this.charTab));
+    $('character').classList.toggle('class-mode', classMode);
+    $('character-body').classList.toggle('hidden', classMode);
+    $('class-body').classList.toggle('hidden', !classMode);
+    $('toggle-doll').classList.toggle('hidden', classMode);
+    $('toggle-inv').classList.toggle('hidden', classMode);
+    if (classMode) { this._renderClassPath($('class-body')); return; }
 
     // armor hugs the doll on the sides; hands/mount/companion sit in a row below
     const DOLL = { left: ['head', 'chest', 'underlayer'],
@@ -623,8 +638,8 @@ export class Panels {
     const passiveRanks = classTree?.passives.reduce((sum, skill) => sum + this._classRank(skill.id), 0) ?? 0;
     const activeRanks = classTree?.actives.reduce((sum, skill) => sum + this._classRank(skill.id), 0) ?? 0;
     rows.push(['🧬 Class', classTree ? `${classTree.icon} ${classTree.name}` : 'Unchosen', classTree
-      ? `${passiveRanks}/30 passive ranks · ${activeRanks}/30 active ranks · Upgrades → Class`
-      : 'Train your first rank in Upgrades → Class to choose one class']);
+      ? `${passiveRanks}/30 passive ranks · ${activeRanks}/30 active ranks · see the Class tab`
+      : 'Open the Class tab to choose one class']);
     const base = itemById(p.equipment.weapon)?.weapon ?? itemById('fists').weapon;
     const charm = itemById(p.equipment.charm);
     const dmgParts = [`${Math.round(base.dmg)} ${itemById(p.equipment.weapon)?.name ?? 'fists'}`];
@@ -756,13 +771,14 @@ export class Panels {
       ...[...(p.spellsOwned || [])].map(id => spellById(id)).filter(Boolean),
       ...classActives,
     ];
-    if (!abilities.length) book.innerHTML = '<div class="empty-note">No spells or class abilities learned yet — see Upgrades → Spells or Class.</div>';
+    if (!abilities.length) book.innerHTML = '<div class="empty-note">No class abilities learned yet — train some in the Class tab.</div>';
     for (const spell of abilities) {
       const id = spell.id;
       const slotIdx = p.spellSlots.indexOf(id);
       const div = document.createElement('button');
       div.className = 'inv-item' + (slotIdx >= 0 ? ' slotted' : '') + (spell.type === 'active' ? ' class-ability' : '');
-      div.innerHTML = `${itemIcon(spell)} <b>${spell.name}</b> ${spell.type === 'active' ? `<span class="ability-rank">R${this._classRank(id)}</span>` : ''}<span class="lv">${slotIdx >= 0 ? `key ${slotIdx + 1}` : 'not slotted'}</span>`;
+      const icon = spell.type === 'active' ? `<span class="inv-art">${skillArt(id, spell.icon)}</span>` : itemIcon(spell);
+      div.innerHTML = `${icon} <b>${spell.name}</b> ${spell.type === 'active' ? `<span class="ability-rank">R${this._classRank(id)}</span>` : ''}<span class="lv">${slotIdx >= 0 ? `key ${slotIdx + 1}` : 'not slotted'}</span>`;
       div.title = `${spell.desc} (cooldown ${spell.cd}s)${spell.type === 'active' ? ` · ${classTree?.name} ability` : ''}`;
       div.addEventListener('click', () => this.hooks.onToggleSpell(id));
       book.appendChild(div);
@@ -1010,7 +1026,7 @@ export class Panels {
     classReset.innerHTML = `<div class="card-head"><span class="icon">🧬</span>
       <span class="name">Reset class tree</span><span class="lv">${selected ? `${selected.icon} ${selected.name} · ` : ''}${spent} ranks</span></div>
       <div class="desc">Clears the selected class and all trained skills. Spent meat is not refunded; every rank must be trained again.</div>
-      <div class="card-foot"><button class="buy-btn danger" data-home-class-reset="1" ${spent ? '' : 'disabled'}>
+      <div class="card-foot"><button class="buy-btn danger" data-home-class-reset="1" ${selected ? '' : 'disabled'}>
         🔄 Reset class — no refund
       </button></div>`;
     wrap.appendChild(classReset);
