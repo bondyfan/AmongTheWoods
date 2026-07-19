@@ -94,7 +94,11 @@ export class UI {
     window.addEventListener('pointerdown', tryMenuMusic);
   }
 
-  hideMenu() { $('menu').classList.add('hidden'); $('hud').classList.remove('hidden'); }
+  hideMenu() {
+    $('menu').classList.add('hidden');
+    $('hud').classList.remove('hidden');
+    $('actionbar').classList.remove('hidden');
+  }
 
   setTrackedResources(keys) {
     this.resourceKeys = Array.isArray(keys) ? [...keys] : [];
@@ -343,6 +347,7 @@ export class UI {
 
   showEnd(victory, stats) {
     $('hud').classList.add('hidden');
+    $('actionbar').classList.add('hidden');
     document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden'));
     const end = $('endscreen');
     end.classList.remove('hidden');

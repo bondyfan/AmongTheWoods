@@ -83,8 +83,6 @@
     <div id="weapon-display"></div>
     <div id="pet-display" class="hidden"></div>
     <div id="supply-display" class="hidden"></div>
-    <div id="slot-hint" class="hidden"><span>Drag your new ability onto a slot</span><i>👇</i></div>
-    <div id="spellbar"></div>
 
     <canvas id="minimap" width="120" height="230"></canvas>
     <div id="minimap-zoom" class="hidden">
@@ -100,6 +98,13 @@
       <button id="settings-btn">⚙️ Settings</button>
       <button id="help-btn">❓ Controls <kbd>H</kbd></button>
     </div>
+  </div>
+
+  <!-- Action bar lives OUTSIDE #hud so it (and the drag hint) can sit above the
+       open modals — otherwise #hud's own stacking context traps it underneath. -->
+  <div id="actionbar" class="hidden">
+    <div id="slot-hint" class="hidden"><span>Drag your new ability onto a slot</span><i>👇</i></div>
+    <div id="spellbar"></div>
   </div>
 
   <div id="banner" class="hidden"></div>
