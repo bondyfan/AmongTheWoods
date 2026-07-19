@@ -737,38 +737,38 @@ export const CLASS_TREES = [
   { id: 'beastmaster', icon: '🏹', name: 'Beastmaster', color: '#9bc56b',
     summary: 'The only class able to equip bows, crossbows and companions; controls traps and arrow storms.',
     passives: [
-      P('beast_ranged_license', '🏹', 'Ranged Discipline', 2, 'Beastmaster training permits ranged weapons; +2% ranged damage per rank.', { rangedDmg: 0.02 }),
-      P('beast_marksman', '🎯', 'Marksman', 3, '+5% ranged damage per rank.', { rangedDmg: 0.05 }),
-      P('beast_quickdraw', '⚡', 'Quick Draw', 5, '+5% ranged attack speed per rank.', { rangedSpeed: 0.05 }),
-      P('beast_trapper', '🪤', 'Trapper', 7, 'Traps gain +20% damage per rank.', { trapPower: 0.2 }),
-      P('beast_bond', '🐾', 'Wild Bond', 9, 'Companion health and damage +10% per rank.', { petPower: 0.1 }),
-      P('beast_pack_tactics', '🐺', 'Pack Tactics', 11, 'Companions move and attack 8% faster per rank.', { petSpeed: 0.08 }),
-      P('beast_keen_eye', '👁️', 'Keen Eye', 13, '+3.5% ranged critical chance per rank.', { rangedCrit: 0.035 }),
-      P('beast_broadheads', '🩸', 'Broadheads', 15, 'Ranged hits cause stronger bleeding per rank.', { arrowBleed: 0.03 }),
-      P('beast_scavenger', '🍖', 'Scavenger', 18, '+8% meat collected per rank.', { meatMult: 0.08 }),
-      P('beast_handler', '🫶', 'Animal Handler', 21, 'Companion regeneration +25% per rank.', { petRegen: 0.25 }),
+      P('beast_ranged_license', '🏹', 'Ranged Discipline', 2, 'Beastmaster training permits ranged weapons and sharpens them.', { rangedDmg: [0.03, 0.06, 0.10] }),
+      P('beast_marksman', '🎯', 'Marksman', 3, 'A big boost to all of your ranged damage.', { rangedDmg: [0.08, 0.16, 0.26] }),
+      P('beast_quickdraw', '⚡', 'Quick Draw', 5, 'Loose arrows far faster.', { rangedSpeed: [0.08, 0.16, 0.26] }),
+      P('beast_trapper', '🪤', 'Trapper', 7, 'Your traps hit much harder.', { trapPower: [0.30, 0.60, 1.00] }),
+      P('beast_bond', '🐾', 'Wild Bond', 9, 'Greatly toughens and empowers your companion.', { petPower: [0.15, 0.32, 0.52] }),
+      P('beast_pack_tactics', '🐺', 'Pack Tactics', 11, 'Companions move and strike faster.', { petSpeed: [0.10, 0.20, 0.32] }),
+      P('beast_keen_eye', '👁️', 'Keen Eye', 13, 'A strong boost to ranged critical chance.', { rangedCrit: [0.05, 0.11, 0.18] }),
+      P('beast_broadheads', '🩸', 'Broadheads', 15, 'Every arrow leaves a vicious bleeding wound.', { arrowBleed: [0.04, 0.08, 0.14] }),
+      P('beast_scavenger', '🍖', 'Scavenger', 18, 'Collect far more meat from every kill.', { meatMult: [0.10, 0.22, 0.36] }),
+      P('beast_handler', '🫶', 'Animal Handler', 21, 'Your companion regenerates rapidly.', { petRegen: [0.30, 0.65, 1.10] }),
     ],
     actives: [
-      A('beast_snare', '🪤', 'Snare Trap', 2, 'Place a damaging trap that stuns its first victim.', 'world',
-        { cd: 12, worldAction: 'trap', count: [1, 1, 2], power: [1, 1.35, 1.7] }),
+      A('beast_snare', '🪤', 'Snare Trap', 2, 'Place a trap that damages, bleeds and stuns its first victim.', 'world',
+        { cd: 60, worldAction: 'trap', count: [1, 1, 2], power: [1.5, 2.2, 3.0], trapDmgPct: 0.55, trapStun: 3.5 }),
       A('beast_arrow_haste', '⚡', 'Arrow Haste', 4, 'Greatly increases ranged attack speed.', 'buff',
-        { cd: 38, buff: 'arrowHaste', duration: [8, 11, 14], power: [0.35, 0.48, 0.6] }),
+        { cd: 36, buff: 'arrowHaste', duration: [8, 11, 14], power: [0.40, 0.55, 0.70] }),
       A('beast_ten_arrows', '🏹', 'Ten-Arrow Volley', 6, 'Fire ten arrows in a wide fan.', 'multishot',
-        { cd: 16, count: 10, spread: 1.05, weaponMult: [0.3, 0.42, 0.55] }),
+        { cd: 15, count: 10, spread: 1.05, weaponMult: [0.40, 0.55, 0.72] }),
       A('beast_arrow_rain', '🌧️', 'Rain of Arrows', 8, 'Mark the ground; arrows rain over the area for 10 s.', 'zone',
-        { cd: 34, zone: 'arrows', castRange: 18, radius: [5, 6, 7], duration: 10, weaponMult: [0.22, 0.31, 0.4], interval: 1 }),
+        { cd: 32, zone: 'arrows', castRange: 18, radius: [5, 6, 7], duration: 10, weaponMult: [0.30, 0.42, 0.55], interval: 1 }),
       A('beast_piercing_shot', '➶', 'Piercing Shot', 10, 'A high-damage arrow that pierces every enemy in line.', 'multishot',
-        { cd: 14, count: 1, pierce: true, spread: 0, weaponMult: [1.5, 2, 2.6] }),
+        { cd: 13, count: 1, pierce: true, spread: 0, weaponMult: [1.8, 2.4, 3.2] }),
       A('beast_explosive_arrow', '💣', 'Explosive Arrow', 12, 'Detonate a burning blast at the aimed location.', 'zoneBurst',
-        { cd: 22, castRange: 18, radius: [3.5, 4.2, 5], weaponMult: [1, 1.35, 1.7], burn: [6, 10, 14] }),
+        { cd: 20, castRange: 18, radius: [3.5, 4.2, 5], weaponMult: [1.3, 1.8, 2.3], burn: [8, 13, 18] }),
       A('beast_mend_pet', '🫶', 'Mend Companion', 14, 'Restore companion health and empower its next attacks.', 'world',
-        { cd: 28, worldAction: 'mendPet', power: [0.35, 0.55, 0.8] }),
-      A('beast_hunt_command', '📣', 'Hunt Command', 16, 'Order your companion to focus the aimed enemy.', 'world',
-        { cd: 8, worldAction: 'petCommand', power: [0.15, 0.3, 0.5] }),
+        { cd: 26, worldAction: 'mendPet', power: [0.40, 0.65, 0.95] }),
+      A('beast_hunt_command', '📣', 'Hunt Command', 16, 'Order your companion to savage the aimed enemy.', 'world',
+        { cd: 8, worldAction: 'petCommand', power: [0.20, 0.40, 0.65] }),
       A('beast_trap_field', '⛓️', 'Trap Field', 20, 'Place several powerful snares around you.', 'world',
-        { cd: 42, worldAction: 'trapField', count: [3, 4, 5], power: [1.2, 1.55, 1.9] }),
+        { cd: 40, worldAction: 'trapField', count: [3, 4, 5], power: [1.6, 2.2, 2.8], trapDmgPct: 0.55, trapStun: 3.5 }),
       A('beast_stampede', '🐗', 'Stampede', 24, 'Your living companion calls a stampede through every nearby enemy.', 'petAoe',
-        { cd: 75, radius: [7, 8.5, 10], petMult: [3, 5, 7], stun: [1, 1.5, 2] }),
+        { cd: 70, radius: [7, 8.5, 10], petMult: [4, 6, 9], stun: [1.2, 1.8, 2.5] }),
     ] },
 
   { id: 'rogue', icon: '🗡️', name: 'Rogue', color: '#8ec6c9',
@@ -1007,6 +1007,12 @@ export function classActiveInfo(skill, rank) {
     return Array.isArray(v) ? v[Math.max(0, Math.min(v.length - 1, rank - 1))] : (v ?? fallback);
   };
   const out = [];
+  // traps: damage scales off weapon damage × the trap's power, plus a stun
+  if (skill.trapDmgPct) {
+    out.push(`${Math.round(skill.trapDmgPct * rv('power', 1) * 100)}% weapon damage per trap`);
+    if (skill.trapStun) out.push(`stuns ${num1(skill.trapStun)} s`);
+    out.push('bleeds the victim');
+  }
   if (skill.weaponMult) out.push(`${Math.round(rv('weaponMult') * 100)}% weapon damage`);
   if (skill.damage) out.push(`${Math.round(rv('damage'))} damage`);
   if (skill.bleedPct) out.push(`bleeds ${pctStr(rv('bleedPct'))} of max HP over ${skill.bleedDur} s`);

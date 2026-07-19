@@ -3384,7 +3384,10 @@ function updateHunterTraps(dt, enemyManager) {
       { bleed: { dps: 4 + player.level * 0.4, dur: 4 } });
     enemyManager.stun?.(target, 3.5);
     ui.popup(target.mesh.position.clone().setY(target.mesh.position.y + 1.8), '🪤 SNARED', '#d9e88a', 'big');
-    audio.sfx('base_hit', 0.55, 90);
+    player._fxBurst?.(target.pos, 0xaeb7ad, 12, 5, 0.45); // steel jaws snap shut
+    player._spawnClassRing?.(target.pos, 1.3, 0xd9e88a, 0.4);
+    audio.sfx('base_hit', 0.7, 0);
+    audio.sfx('hit', 0.5, 0);
     removeHunterTrap(trap);
   }
 }

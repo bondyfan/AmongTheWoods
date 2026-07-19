@@ -545,26 +545,31 @@ export class Player {
 
     if (skill.action === 'target' || skill.action === 'execute') {
       const enemy = target();
-      if (!enemy) return false;
-      if (skill.action === 'execute' && enemy.hp / Math.max(1, enemy.maxHp) > skill.threshold) {
-        this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
-          `Target must be below ${Math.round(skill.threshold * 100)}% health`, '#ffcc66');
-        return false;
+      // Execute only lands on a wounded target, but the swing itself always
+      // fires — even into empty air when nothing is in front of you.
+      const validHit = enemy && !(skill.action === 'execute'
+        && enemy.hp / Math.max(1, enemy.maxHp) > skill.threshold);
+      if (validHit) {
+        const opts = {};
+        if (skill.bleedPct) opts.rend = {
+          dps: enemy.maxHp * rv('bleedPct') / Math.max(1, skill.bleedDur), dur: skill.bleedDur,
+        };
+        if (skill.poison) opts.poison = { dps: rv('poison') * (1 + (this.classEffects.poisonPower || 0)), dur: 6 };
+        let amount = this._classWeaponDamage(enemy, rv('weaponMult', 1));
+        if (skill.backstab && this._isBehind(enemy)) amount *= 1.35 + rank * 0.15;
+        damageTarget(enemy, amount, opts);
+        if (skill.stun) enemyMgr.stun?.(enemy, rv('stun'));
+        if (skill.bleedPct) this.hooks.popup(enemy.mesh.position.clone().setY(enemy.mesh.position.y + 2),
+          `🩸 ${Math.round(rv('bleedPct') * 100)}% bleed / 30s`, '#ff6b68', 'big');
       }
-      const opts = {};
-      if (skill.bleedPct) opts.rend = {
-        dps: enemy.maxHp * rv('bleedPct') / Math.max(1, skill.bleedDur), dur: skill.bleedDur,
-      };
-      if (skill.poison) opts.poison = { dps: rv('poison') * (1 + (this.classEffects.poisonPower || 0)), dur: 6 };
-      let amount = this._classWeaponDamage(enemy, rv('weaponMult', 1));
-      if (skill.backstab && this._isBehind(enemy)) amount *= 1.35 + rank * 0.15;
-      const ok = damageTarget(enemy, amount, opts);
-      if (skill.stun) enemyMgr.stun?.(enemy, rv('stun'));
-      if (skill.bleedPct) this.hooks.popup(enemy.mesh.position.clone().setY(enemy.mesh.position.y + 2),
-        `🩸 ${Math.round(rv('bleedPct') * 100)}% bleed / 30s`, '#ff6b68', 'big');
-      this._meleeAbilityFx(skill, enemy);
+      // swing the weapon arm + slash arc, and land the impact FX on the target
+      // (or on a point in the air ahead if there was nothing to hit)
+      this.attackDur = 0.3; this.attackT = 0.3; this._spawnSlash();
+      const at = validHit ? enemy.pos
+        : this.pos.clone().addScaledVector(this.facing, Math.min(3.2, rv('range', 3) * 0.7));
+      this._meleeAbilityFx(skill, at);
       if (hostile) this.breakStealth();
-      return ok;
+      return true;
     }
 
     if (skill.action === 'buff') {
@@ -618,6 +623,12 @@ export class Player {
         this._fxBurst(this.pos, 0xffd27f, 12, 6, 0.45);
         audio.sfx('attack_melee', 0.6, 0);
         audio.sfx('special', 0.5, 0);
+      } else if (skill.id === 'rogue_fan_knives') {
+        this.spinT = this.spinDur * 0.7; // quick spin as knives fly out
+        this._spawnClassRing(this.pos, radius, 0x8ec6c9, 0.4);
+        this._fxBurst(this.pos, 0xbfe9b0, 16, 7, 0.5); // poisoned knives
+        audio.sfx('attack_ranged', 0.6, 0);
+        audio.sfx('special', 0.45, 0);
       }
       if (hostile) this.breakStealth();
       return true;
@@ -686,6 +697,11 @@ export class Player {
             ? { bleed: { dps: this.weapon.dmg * this.classEffects.arrowBleed, dur: 5 } } : null,
         });
       }
+      // draw-and-loose flourish: a burst of fletching dust and a bowstring twang
+      this.attackDur = 0.28; this.attackT = 0.28;
+      this._fxBurst(origin, skill.pierce ? 0xffe08a : 0xe7d16f, count > 3 ? 10 : 5, 5, 0.35, 0.12);
+      audio.sfx('attack_ranged', 0.7, 0);
+      if (count > 3) audio.sfx('special', 0.4, 0);
       this.breakStealth();
       return true;
     }
@@ -725,6 +741,12 @@ export class Player {
         hits++;
       }
       this._spawnClassRing(at, radius, skill.element === 'fire' || skill.burn ? 0xff6b2f : 0xd9e88a);
+      // detonation: a fireball-style burst + cracks (Explosive Arrow / Meteor)
+      const burst = skill.element === 'fire' || skill.burn ? 0xff6b2f : 0xd9e88a;
+      this._fxBurst(at, burst, 16, 6, 0.55);
+      this._fxGroundCracks(at, radius * 0.8, burst, 5);
+      audio.sfx('rock_crack', 0.7, 0);
+      audio.sfx('special', 0.55, 0);
       this.breakStealth();
       return true;
     }
@@ -744,6 +766,10 @@ export class Player {
         if (skill.stun) enemyMgr.stun?.(enemy, rv('stun'));
       }
       this._spawnClassRing(this.pos, radius, 0xd6a94f, 0.9);
+      this._fxGroundCracks(this.pos, radius * 0.85, 0xcbb08a, 7); // hoofprints/dust
+      this._fxBurst(this.pos, 0xcbb08a, 18, 7, 0.6);
+      audio.sfx('boar_attack', 0.8, 0);
+      audio.sfx('special', 0.5, 0);
       this.breakStealth();
       return true;
     }
@@ -762,25 +788,48 @@ export class Player {
 
     if (skill.action === 'shadowstep') {
       const enemy = target();
-      if (!enemy) return false;
-      const ry = enemy.mesh?.rotation?.y ?? 0;
-      const enemyForward = new THREE.Vector3(-Math.sin(ry), 0, -Math.cos(ry));
-      this.pos.copy(enemy.pos).addScaledVector(enemyForward, -1.4);
-      this.facing.copy(enemyForward);
-      damageTarget(enemy, this._classWeaponDamage(enemy, rv('weaponMult', 1), true));
+      const from = this.pos.clone();
+      if (enemy) {
+        const ry = enemy.mesh?.rotation?.y ?? 0;
+        const enemyForward = new THREE.Vector3(-Math.sin(ry), 0, -Math.cos(ry));
+        this.pos.copy(enemy.pos).addScaledVector(enemyForward, -1.4);
+        this.facing.copy(enemyForward);
+        damageTarget(enemy, this._classWeaponDamage(enemy, rv('weaponMult', 1), true));
+        this.attackDur = 0.3; this.attackT = 0.3; this._spawnSlash();
+        this._meleeAbilityFx(skill, enemy.pos);
+      } else {
+        // no target — blink forward through the shadows and strike the air
+        this.pos.addScaledVector(this.facing, Math.min(6, rv('range', 10) * 0.5));
+        ctx.world?.collide?.(this.pos, 0.45); this._applyBounds(ctx);
+        this.attackDur = 0.3; this.attackT = 0.3; this._spawnSlash();
+        this._meleeAbilityFx(skill, this.pos.clone().addScaledVector(this.facing, 1.4));
+      }
+      this._fxBurst(from, 0x7a5cff, 10, 4, 0.42);          // vanish puff
+      this._fxBurst(this.pos, 0x9c8cff, 10, 4, 0.42);        // reappear puff
+      audio.sfx('special', 0.5, 0);
       this.breakStealth();
       return true;
     }
 
     if (skill.action === 'magicTarget') {
       const enemy = target();
-      if (!enemy) return false;
-      const result = this._classMagicDamage(rv('damage'), skill.element);
-      const opts = skill.burn
-        ? { burn: { dps: skill.element === 'fire' ? this._classBurnDamage(rv('burn')) : rv('burn'), dur: 6 } }
-        : null;
-      damageTarget(enemy, result.amount, opts);
-      if (skill.stun) enemyMgr.stun?.(enemy, rv('stun'));
+      const color = skill.element === 'frost' ? 0x75cfff : 0xff6b2f;
+      if (enemy) {
+        const result = this._classMagicDamage(rv('damage'), skill.element);
+        const opts = skill.burn
+          ? { burn: { dps: skill.element === 'fire' ? this._classBurnDamage(rv('burn')) : rv('burn'), dur: 6 } }
+          : null;
+        damageTarget(enemy, result.amount, opts);
+        if (skill.stun) enemyMgr.stun?.(enemy, rv('stun'));
+        this._fxBurst(enemy.pos, color, 12, 5, 0.5);
+        this._spawnClassRing(enemy.pos, 1.8, color, 0.4);
+      } else {
+        // no target — hurl the bolt forward and burst it in the air
+        const at = this.pos.clone().addScaledVector(this.facing, Math.min(10, rv('range', 12) * 0.6));
+        this._spawnClassRing(at, 2, color, 0.45);
+        this._fxBurst(at, color, 12, 5, 0.5);
+      }
+      audio.sfx('special', 0.5, 0);
       this.breakStealth();
       return true;
     }
@@ -830,26 +879,42 @@ export class Player {
   }
 
   // per-ability impact effects for single-target melee strikes
-  _meleeAbilityFx(skill, enemy) {
-    const at = enemy.pos;
-    if (skill.id === 'war_rend') {
-      const side = new THREE.Vector3(-this.facing.z, 0, this.facing.x).multiplyScalar(0.9);
-      this._fxGroundSlash({ x: at.x - side.x, z: at.z - side.z },
-        { x: at.x + side.x, z: at.z + side.z }, 0xd23b2f, 0.35, 0.5);
-      this._fxBurst(at, 0xd23b2f, 8, 3, 0.5);
-      audio.sfx('hit', 0.6, 0);
-    } else if (skill.id === 'war_heroic_strike') {
-      this._fxGroundSlash(this.pos, at, 0xffc257, 0.6);
-      this._fxBurst(at, 0xffd27f, 10, 4.5, 0.45);
-      audio.sfx('attack_melee', 0.75, 0);
-      audio.sfx('rock_crack', 0.45, 0);
-    } else if (skill.id === 'war_execute') {
-      this._fxGroundSlash(this.pos, at, 0xff5a3c, 0.85, 0.6);
-      this._fxBurst(at, 0xff5a3c, 14, 5, 0.55);
-      audio.sfx('rock_crack', 0.7, 0);
-      audio.sfx('attack_melee', 0.85, 0);
-    } else {
-      this._fxBurst(at, 0xffd27f, 6, 3, 0.4);
+  // impact effects for single-target melee abilities. `at` is a world position
+  // (the enemy, or a point in the air ahead when swung into empty space). A
+  // quick arm swing + slash arc is triggered by the caller.
+  _meleeAbilityFx(skill, at) {
+    const sideVec = (len) => new THREE.Vector3(-this.facing.z, 0, this.facing.x).multiplyScalar(len);
+    switch (skill.id) {
+      case 'war_rend': {
+        const s = sideVec(0.9);
+        this._fxGroundSlash({ x: at.x - s.x, z: at.z - s.z }, { x: at.x + s.x, z: at.z + s.z }, 0xd23b2f, 0.35, 0.5);
+        this._fxBurst(at, 0xd23b2f, 8, 3, 0.5); audio.sfx('hit', 0.6, 0); break;
+      }
+      case 'war_heroic_strike':
+        this._fxGroundSlash(this.pos, at, 0xffc257, 0.6);
+        this._fxBurst(at, 0xffd27f, 10, 4.5, 0.45);
+        audio.sfx('attack_melee', 0.75, 0); audio.sfx('rock_crack', 0.45, 0); break;
+      case 'war_execute':
+        this._fxGroundSlash(this.pos, at, 0xff5a3c, 0.85, 0.6);
+        this._fxBurst(at, 0xff5a3c, 14, 5, 0.55);
+        audio.sfx('rock_crack', 0.7, 0); audio.sfx('attack_melee', 0.85, 0); break;
+      // ---- Rogue: fast, shadowy, poison-tinged strikes ----
+      case 'rogue_backstab_active': {
+        const s = sideVec(0.7);
+        this._fxGroundSlash({ x: at.x - s.x, z: at.z - s.z }, { x: at.x + s.x, z: at.z + s.z }, 0x8ec6c9, 0.3, 0.4);
+        this._fxBurst(at, 0x9c8cff, 10, 4.5, 0.4);
+        audio.sfx('attack_melee', 0.7, 0); audio.sfx('hit', 0.5, 0); break;
+      }
+      case 'rogue_kidney_shot':
+        this._fxBurst(at, 0xbfe9b0, 9, 4, 0.45);
+        this._spawnClassRing(at, 1.4, 0x8ec6c9, 0.4);
+        audio.sfx('hit', 0.65, 0); audio.sfx('special', 0.4, 0); break;
+      case 'rogue_assassinate':
+        this._fxGroundSlash(this.pos, at, 0x6f5cff, 0.8, 0.55);
+        this._fxBurst(at, 0x9c8cff, 16, 5.5, 0.55);
+        audio.sfx('attack_melee', 0.85, 0); audio.sfx('special', 0.55, 0); break;
+      default:
+        this._fxBurst(at, 0xffd27f, 6, 3, 0.4); audio.sfx('attack_melee', 0.5, 0);
     }
   }
 

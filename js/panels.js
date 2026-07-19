@@ -571,6 +571,8 @@ export class Panels {
     pathEl.style.setProperty('--class-color', selected.color);
 
     let hiddenAny = false;
+    // skills sharing a level share a row (two half-width nodes side by side)
+    let curRow = null, curLevel = null;
     path.forEach((skill, i) => {
       if (skill.level > revealMax) { hiddenAny = true; return; }
       const rank = this._classRank(skill.id);
@@ -622,10 +624,19 @@ export class Panels {
           <div class="node-action">${action}</div>
         </div>`;
       if (draggable) this._wireSpellDrag(node.querySelector('.node-art'), skill.id);
-      pathEl.appendChild(node);
+      // open a fresh row whenever the unlock level changes
+      if (skill.level !== curLevel) {
+        curLevel = skill.level;
+        curRow = document.createElement('div');
+        curRow.className = 'path-row';
+        pathEl.appendChild(curRow);
+      }
+      curRow.appendChild(node);
     });
 
     if (hiddenAny) {
+      const row = document.createElement('div');
+      row.className = 'path-row';
       const mystery = document.createElement('div');
       mystery.className = 'class-node mystery';
       mystery.innerHTML = `<div class="node-art"><span class="skill-art noart"><span class="art-glyph">❓</span></span></div>
@@ -633,7 +644,8 @@ export class Panels {
           <div class="node-top"><b>? ? ?</b></div>
           <p class="node-desc">Keep leveling up to reveal what lies further along your path.</p>
         </div>`;
-      pathEl.appendChild(mystery);
+      row.appendChild(mystery);
+      pathEl.appendChild(row);
     }
     container.appendChild(pathEl);
 

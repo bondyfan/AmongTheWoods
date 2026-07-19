@@ -559,14 +559,19 @@ body.slotting .spell-slot.empty {
 .cc-progress { color: #e7dab3; font-size: 13px; font-weight: bold; white-space: nowrap; }
 
 .class-path { --class-color: #e8c96a; position: relative; display: flex; flex-direction: column; gap: 13px; }
+/* the path's spine now runs straight down the MIDDLE, like a skill-tree trunk */
 .class-path::before {
-  content: ''; position: absolute; left: 45px; top: 34px; bottom: 34px; width: 3px; border-radius: 2px;
+  content: ''; position: absolute; left: 50%; top: 34px; bottom: 34px; width: 3px; border-radius: 2px;
+  transform: translateX(-50%);
   background: linear-gradient(color-mix(in srgb, var(--class-color) 65%, transparent), color-mix(in srgb, var(--class-color) 8%, transparent));
 }
+/* each unlock level is a row; up to two skills sit side by side at half width */
+.path-row { display: flex; gap: 14px; justify-content: center; align-items: stretch; }
 .class-node {
-  position: relative; z-index: 1; display: grid; grid-template-columns: 76px 1fr; gap: 16px; align-items: center;
-  padding: 10px 15px 10px 8px; border-radius: 15px;
-  border: 1px solid rgba(255,255,255,0.1); background: rgba(6,10,5,0.5);
+  position: relative; z-index: 1; flex: 0 1 calc(50% - 7px); box-sizing: border-box;
+  display: grid; grid-template-columns: 66px 1fr; gap: 12px; align-items: center;
+  padding: 10px 13px 10px 8px; border-radius: 15px;
+  border: 1px solid rgba(255,255,255,0.1); background: rgba(6,10,5,0.72);
 }
 .class-node.trained { border-color: color-mix(in srgb, var(--class-color) 60%, transparent); }
 .class-node.maxed { border-color: color-mix(in srgb, var(--class-color) 85%, transparent);
@@ -575,7 +580,7 @@ body.slotting .spell-slot.empty {
 .class-node.mystery { opacity: 0.8; border-style: dashed; }
 
 .node-art {
-  --class-color: #e8c96a; position: relative; width: 76px; height: 76px; border-radius: 15px; overflow: hidden;
+  --class-color: #e8c96a; position: relative; width: 66px; height: 66px; border-radius: 14px; overflow: hidden;
   background: rgba(0,0,0,0.5); border: 2px solid color-mix(in srgb, var(--class-color) 55%, transparent);
 }
 .skill-art { position: absolute; inset: 0; display: grid; place-items: center; overflow: hidden; }
