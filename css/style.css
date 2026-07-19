@@ -584,6 +584,20 @@ body.slotting .spell-slot.empty {
 .skill-art.noart .art-glyph { display: grid; place-items: center; }
 .class-node.maxed .node-art { border-color: var(--class-color); box-shadow: 0 0 14px color-mix(in srgb, var(--class-color) 45%, transparent); }
 .class-node.lvl-locked .node-art img { filter: grayscale(0.85) brightness(0.68); }
+/* a trained active ability can be grabbed and dropped onto the 1–6 bar */
+.class-node.draggable .node-art { cursor: grab; }
+.class-node.draggable .node-art:hover { border-color: #ffe28a; box-shadow: 0 0 16px rgba(255, 226, 138, 0.55); }
+.class-node.draggable .node-art:active { cursor: grabbing; }
+.node-art .drag-grip {
+  position: absolute; right: 3px; bottom: 2px; font-size: 13px; color: #ffe6a0;
+  text-shadow: 0 1px 3px #000; opacity: 0.85; pointer-events: none; letter-spacing: -2px;
+}
+.node-slot {
+  margin-left: auto; font-size: 10px; font-weight: bold; color: #cbb26a;
+  border: 1px solid rgba(232, 201, 106, 0.5); border-radius: 6px; padding: 1px 6px;
+}
+.node-slot.on { color: #bfe9b0; border-color: rgba(150, 220, 150, 0.6); }
+.node-pips { flex-wrap: wrap; }
 /* the same painted art on the 1–6 action bar */
 .spell-icon .skill-art { z-index: 1; }
 .spell-icon .skill-art .art-glyph { font-size: 24px; }

@@ -601,18 +601,27 @@ export class Panels {
           <span class="rr-info">${info.join(' · ')}</span></div>`;
       }).join('');
 
+      // trained active abilities can be dragged straight from the path onto the
+      // 1–6 bar (or clicked to auto-slot) — no need to switch to the Gear tab
+      const slotIdx = p.spellSlots.indexOf(skill.id);
+      const draggable = skill.type === 'active' && rank > 0;
+      const slotTag = draggable
+        ? `<span class="node-slot${slotIdx >= 0 ? ' on' : ''}">${slotIdx >= 0 ? `⌨ key ${slotIdx + 1}` : '✋ drag to 1–6 bar'}</span>`
+        : '';
+
       const node = document.createElement('div');
-      node.className = `class-node ${skill.type}${rank ? ' trained' : ''}${maxed ? ' maxed' : ''}${levelLocked ? ' lvl-locked' : ''}`;
+      node.className = `class-node ${skill.type}${rank ? ' trained' : ''}${maxed ? ' maxed' : ''}${levelLocked ? ' lvl-locked' : ''}${draggable ? ' draggable' : ''}`;
       node.style.setProperty('--i', i);
-      node.innerHTML = `<div class="node-art">${skillArt(skill.id, skill.icon)}</div>
+      node.innerHTML = `<div class="node-art">${skillArt(skill.id, skill.icon)}${draggable ? '<span class="drag-grip">⠿</span>' : ''}</div>
         <div class="node-info">
           <div class="node-top"><b>${skill.name}</b>
             <span class="node-kind">${skill.type === 'active' ? `⚡ ${skill.cd}s cooldown` : '🛡️ passive'} · Lv ${skill.level}</span></div>
-          <div class="node-pips">${pips}<span class="node-rank">${rank}/${skill.maxRank}</span></div>
+          <div class="node-pips">${pips}<span class="node-rank">${rank}/${skill.maxRank}</span>${slotTag}</div>
           <p class="node-desc">${skill.desc}</p>
           <div class="node-ranks">${rankRows}</div>
           <div class="node-action">${action}</div>
         </div>`;
+      if (draggable) this._wireSpellDrag(node.querySelector('.node-art'), skill.id);
       pathEl.appendChild(node);
     });
 
