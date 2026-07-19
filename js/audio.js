@@ -89,7 +89,7 @@ class AudioManager {
   // front). Track switches crossfade, and every track remembers its playback
   // position so re-entering a biome resumes where its music left off.
   playMusic(name) {
-    if (this.musicName === name) return;
+    if (this.musicName === name && this.music) return;
     this._musicPos ??= new Map();
     // fade the old track out, then release it
     if (this.music) {
@@ -98,6 +98,13 @@ class AudioManager {
       this._fade(old, 0, 1.2, () => old.pause());
     }
     this.musicName = name;
+    this._startMusic(name);
+  }
+
+  // Create the streaming <audio> for a track and wire up the self-healing
+  // handlers. The tracks are baked as seamless crossfade loops, so a plain
+  // loop=true wraps cleanly — no click at the 15-minute seam.
+  _startMusic(name) {
     const a = new Audio(MUSIC_PATH + name + '.mp3');
     a.loop = true;
     a.preload = 'auto';        // the browser streams progressively — no full download
@@ -106,9 +113,31 @@ class AudioManager {
       a.addEventListener('loadedmetadata', () => { try { a.currentTime = resume; } catch {} }, { once: true });
     }
     a.volume = 0;
-    a.play().catch(() => {});
+    // --- robust download+play: a biome track must NEVER end up silent. If the
+    // stream stalls or errors, force a reload and keep trying until it plays. ---
+    const kick = () => { if (this.music === a) a.play().catch(() => {}); };
+    const reload = () => { if (this.music === a) { try { a.load(); } catch {} kick(); } };
+    a.addEventListener('canplay', kick);
+    a.addEventListener('stalled', () => setTimeout(kick, 1000));
+    a.addEventListener('error',   () => setTimeout(reload, 1500));
     this.music = a;
+    kick();
     this._fade(a, this.muted ? 0 : this.musicVolume, 1.2);
+    this._ensureMusicWatchdog();
+  }
+
+  // Watchdog: every few seconds, make sure the current track is actually
+  // rolling. Covers the case where the very first play() was blocked (autoplay
+  // policy) or the browser quietly paused a stalled stream — once the page has
+  // any user gesture, this resumes it. Redownloads a track that errored out.
+  _ensureMusicWatchdog() {
+    if (this._musicWatch) return;
+    this._musicWatch = setInterval(() => {
+      const a = this.music;
+      if (!a) return;
+      if (a.error) { try { a.load(); } catch {} }
+      if (a.paused || a.ended || a.error) a.play().catch(() => {});
+    }, 4000);
   }
 
   // linear volume fade using a small interval; onDone fires at the end
