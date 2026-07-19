@@ -700,38 +700,38 @@ export const CLASS_TREES = [
   { id: 'warrior', icon: '🛡️', name: 'Warrior', color: '#d99b62',
     summary: 'Heavy melee fighter with health, brutal weapon skills and lasting bleeds.',
     passives: [
-      P('war_vitality', '❤️', 'Vitality', 2, '+5% maximum health per rank.', { hpPct: 0.05 }),
-      P('war_arms', '⚔️', 'Arms Mastery', 3, '+5% melee damage per rank.', { meleeDmg: 0.05 }),
-      P('war_thick_skin', '🪨', 'Thick Skin', 4, '-2% incoming damage per rank.', { damageCut: 0.02 }),
-      P('war_cleave', '🪓', 'Cleave Training', 7, 'Melee swing arcs widen per rank.', { arcBonus: 0.08 }),
-      P('war_executioner', '☠️', 'Executioner', 9, '+8% damage to wounded enemies (below 50% health) per rank.', { executeDmg: 0.08 }),
-      P('war_blood_drinker', '🩸', 'Blood Drinker', 11, 'Kills restore 1.5% max health per rank.', { lifeOnKillPct: 0.015 }),
-      P('war_heavy_hands', '🔨', 'Heavy Hands', 13, '+4% chance to stagger per rank.', { staggerChance: 0.04 }),
-      P('war_unshaken', '⛰️', 'Unshaken', 15, 'Enemy stuns are 12% shorter per rank.', { stunResist: 0.12 }),
-      P('war_iron_guard', '🛡️', 'Iron Guard', 18, '+4% blocked damage per rank.', { blockBonus: 0.04 }),
-      P('war_tactician', '📯', 'Battle Tactician', 21, 'Warrior ability cooldowns -4% per rank.', { classCdReduction: 0.04 }),
+      P('war_vitality', '❤️', 'Vitality', 2, 'Greatly boosts your maximum health (gear & camp included).', { hpPct: [0.15, 0.30, 0.50] }),
+      P('war_arms', '⚔️', 'Arms Mastery', 3, 'Sharpens every melee blow.', { meleeDmg: [0.10, 0.22, 0.35] }),
+      P('war_thick_skin', '🪨', 'Thick Skin', 4, 'Toughens your hide against all damage.', { damageCut: [0.04, 0.09, 0.15] }),
+      P('war_cleave', '🪓', 'Cleave Training', 7, 'Widens your melee swing arc so you hit more foes at once.', { arcBonus: [0.12, 0.24, 0.38] }),
+      P('war_executioner', '☠️', 'Executioner', 9, 'Deals extra damage to wounded enemies (below 50% health).', { executeDmg: [0.15, 0.30, 0.50] }),
+      P('war_blood_drinker', '🩸', 'Blood Drinker', 11, 'Every kill restores a chunk of your health.', { lifeOnKillPct: [0.02, 0.045, 0.08] }),
+      P('war_heavy_hands', '🔨', 'Heavy Hands', 13, 'Your hits can stagger enemies mid-attack.', { staggerChance: [0.08, 0.16, 0.26] }),
+      P('war_unshaken', '⛰️', 'Unshaken', 15, 'Shortens every stun and disable used against you.', { stunResist: [0.18, 0.34, 0.55] }),
+      P('war_iron_guard', '🛡️', 'Iron Guard', 18, 'Blocks far more damage when guarding.', { blockBonus: [0.08, 0.16, 0.26] }),
+      P('war_tactician', '📯', 'Battle Tactician', 21, 'Cuts the cooldown of every Warrior ability.', { classCdReduction: [0.08, 0.15, 0.24] }),
     ],
     actives: [
       A('war_heroic_strike', '⚔️', 'Heroic Strike', 2, 'Wind up, then land a crushing single-target strike.', 'target',
-        { cd: 10, range: 3.2, weaponMult: [1.5, 1.9, 2.3], windup: 0.55 }),
+        { cd: 10, range: 3.2, weaponMult: [2.0, 2.5, 3.0], windup: 0.55 }),
       A('war_rend', '🩸', 'Rend', 4, 'Stab one target; it loses a percentage of max HP over 30 s.', 'target',
-        { cd: 24, range: 3.2, weaponMult: [0.7, 0.9, 1.1], bleedPct: [0.12, 0.18, 0.24], bleedDur: 30 }),
+        { cd: 22, range: 3.2, weaponMult: [1.0, 1.4, 1.8], bleedPct: [0.18, 0.30, 0.45], bleedDur: 30 }),
       A('war_cry', '📯', 'War Cry', 6, 'Temporarily increases damage and damage reduction.', 'buff',
-        { cd: 40, buff: 'warCry', duration: [8, 10, 12], power: [0.15, 0.25, 0.35] }),
+        { cd: 40, buff: 'warCry', duration: [8, 10, 12], power: [0.20, 0.32, 0.45] }),
       A('war_ground_slam', '💥', 'Ground Slam', 8, 'Slam the earth: damage and stun all nearby enemies.', 'aoe',
-        { cd: 24, radius: [4.5, 5.2, 6], weaponMult: [0.8, 1.05, 1.3], stun: [1.2, 1.8, 2.4], windup: 0.45 }),
+        { cd: 22, radius: [4.5, 5.2, 6], weaponMult: [1.2, 1.6, 2.1], stun: [1.5, 2.2, 3.0], windup: 0.45 }),
       A('war_charge', '🐂', 'Bull Charge', 10, 'Rush forward, striking and stunning enemies in your path.', 'dash',
-        { cd: 22, weaponMult: [1, 1.3, 1.6], stun: [1, 1.5, 2], distance: [7, 9, 11] }),
-      A('war_whirlwind', '🌪️', 'Whirlwind', 12, 'A powerful circular melee attack.', 'aoe',
-        { cd: 18, radius: [5, 5.5, 6], weaponMult: [1.1, 1.4, 1.8] }),
+        { cd: 20, weaponMult: [1.4, 1.9, 2.5], stun: [1.2, 1.8, 2.5], distance: [7, 9, 11] }),
+      A('war_whirlwind', '🌪️', 'Whirlwind', 12, 'A powerful spinning melee attack that hits everything around you.', 'aoe',
+        { cd: 16, radius: [5, 5.5, 6.5], weaponMult: [1.5, 2.0, 2.6] }),
       A('war_cleaving_wave', '🌊', 'Cleaving Wave', 14, 'Send a broad damaging wave in front of you.', 'cone',
-        { cd: 16, range: [7, 8.5, 10], weaponMult: [1, 1.3, 1.6] }),
+        { cd: 15, range: [7, 8.5, 10], weaponMult: [1.4, 1.9, 2.4] }),
       A('war_blood_fury', '🔥', 'Blood Fury', 16, 'Gain attack speed and life steal for a short time.', 'buff',
-        { cd: 48, buff: 'bloodFury', duration: [8, 10, 12], power: [0.12, 0.18, 0.25] }),
+        { cd: 46, buff: 'bloodFury', duration: [8, 10, 12], power: [0.18, 0.26, 0.35] }),
       A('war_execute', '🪓', 'Execute', 20, 'Wind up a massive killing blow on a target below 35% health.', 'execute',
-        { cd: 20, range: 3.2, weaponMult: [2.5, 3.3, 4.2], threshold: 0.35, windup: 0.6 }),
+        { cd: 18, range: 3.2, weaponMult: [3.2, 4.4, 5.8], threshold: 0.35, windup: 0.6 }),
       A('war_avatar', '🗿', 'Avatar', 24, 'Become a juggernaut with damage, protection and a health shield.', 'buff',
-        { cd: 90, buff: 'avatar', duration: [10, 13, 16], power: [0.25, 0.35, 0.45] }),
+        { cd: 85, buff: 'avatar', duration: [10, 13, 16], power: [0.30, 0.42, 0.55] }),
     ] },
 
   { id: 'beastmaster', icon: '🏹', name: 'Beastmaster', color: '#9bc56b',
@@ -774,38 +774,39 @@ export const CLASS_TREES = [
   { id: 'rogue', icon: '🗡️', name: 'Rogue', color: '#8ec6c9',
     summary: 'Fast assassin using stealth, poison, evasion and devastating attacks from behind.',
     passives: [
-      P('rogue_fleet', '🥾', 'Fleet Foot', 2, '+0.3 movement speed per rank.', { speed: 0.3 }),
-      P('rogue_precision', '🎯', 'Precision', 3, '+4% melee critical chance per rank.', { meleeCrit: 0.04 }),
-      P('rogue_light_foot', '🪶', 'Light Foot', 5, '-1.5% incoming damage per rank.', { damageCut: 0.015 }),
-      P('rogue_shadow_training', '🌑', 'Shadow Training', 7, 'Stealth lasts 0.75 s longer per rank.', { stealthDuration: 0.75 }),
-      P('rogue_evasion', '💨', 'Evasion Mastery', 9, 'Evade windows last 0.15 s longer per rank.', { evadeDuration: 0.15 }),
-      P('rogue_backstab', '🔪', 'Backstabber', 11, '+15% damage from behind per rank.', { backstab: 0.15 }),
-      P('rogue_poisoner', '☠️', 'Poisoner', 13, 'Weapon poison damage +20% per rank.', { poisonPower: 0.2 }),
-      P('rogue_combo', '⚔️', 'Combo Mastery', 15, '+5% melee attack speed per rank.', { meleeSpeed: 0.05 }),
-      P('rogue_escape', '🌫️', 'Escape Artist', 18, 'Gain a speed burst after taking damage.', { hurtSpeed: 0.2 }),
-      P('rogue_assassin', '💀', 'Assassin', 21, '+10% damage to wounded targets per rank.', { executeDmg: 0.1 }),
+      P('rogue_precision', '🎯', 'Precision', 3, 'Big boost to your melee critical-hit chance.', { meleeCrit: [0.06, 0.12, 0.20] }),
+      P('rogue_light_foot', '🪶', 'Light Foot', 5, 'Nimble footwork softens the blows that land.', { damageCut: [0.03, 0.06, 0.10] }),
+      P('rogue_shadow_training', '🌑', 'Shadow Training', 7, 'Your stealth lasts considerably longer.', { stealthDuration: [1.5, 3, 5] }),
+      P('rogue_evasion', '💨', 'Evasion Mastery', 9, 'Widens the window of your evade.', { evadeDuration: [0.2, 0.45, 0.75] }),
+      P('rogue_backstab', '🔪', 'Backstabber', 11, 'Devastating extra damage when you strike from behind.', { backstab: [0.20, 0.42, 0.70] }),
+      P('rogue_poisoner', '☠️', 'Poisoner', 13, 'Empowers all of your weapon poisons.', { poisonPower: [0.25, 0.55, 0.90] }),
+      P('rogue_combo', '⚔️', 'Combo Mastery', 15, 'Your blades fly faster.', { meleeSpeed: [0.08, 0.16, 0.26] }),
+      P('rogue_escape', '🌫️', 'Escape Artist', 18, 'Taking damage grants a burst of speed to escape.', { hurtSpeed: [0.25, 0.5, 0.85] }),
+      P('rogue_assassin', '💀', 'Assassin', 21, 'Extra damage to wounded targets (below 50% health).', { executeDmg: [0.15, 0.30, 0.50] }),
     ],
     actives: [
+      A('rogue_fleet', '🥾', 'Fleet Foot', 2, 'Dash off with a surge of movement speed for a short time.', 'buff',
+        { cd: 60, buff: 'sprint', duration: [5, 8, 15], power: [4, 6, 8] }),
       A('rogue_stealth', '🌑', 'Stealth', 2, 'Become nearly invisible; attacking breaks stealth.', 'stealth',
-        { cd: 28, duration: [8, 11, 14] }),
+        { cd: 26, duration: [8, 11, 15] }),
       A('rogue_evade', '💨', 'Evade', 4, 'Avoid every incoming attack during a short glowing window.', 'evade',
-        { cd: 24, duration: [1, 1.3, 1.6] }),
-      A('rogue_backstab_active', '🔪', 'Backstab', 6, 'A brutal strike that is stronger from behind.', 'target',
-        { cd: 11, range: 3.2, weaponMult: [1.7, 2.2, 2.8], backstab: true }),
+        { cd: 22, duration: [1, 1.4, 2] }),
+      A('rogue_backstab_active', '🔪', 'Backstab', 6, 'A brutal strike that is far stronger from behind.', 'target',
+        { cd: 10, range: 3.2, weaponMult: [2.0, 2.7, 3.5], backstab: true }),
       A('rogue_shadowstep', '🌘', 'Shadowstep', 8, 'Teleport behind the aimed enemy and strike.', 'shadowstep',
-        { cd: 20, range: [10, 13, 16], weaponMult: [1.2, 1.6, 2] }),
+        { cd: 18, range: [10, 13, 16], weaponMult: [1.5, 2.1, 2.8] }),
       A('rogue_poison_blades', '☠️', 'Poison Blades', 10, 'Coat weapons with powerful poison.', 'buff',
-        { cd: 36, buff: 'poisonBlades', duration: [10, 14, 18], power: [1, 1.5, 2] }),
+        { cd: 34, buff: 'poisonBlades', duration: [10, 14, 18], power: [1.2, 1.8, 2.6] }),
       A('rogue_fan_knives', '🗡️', 'Fan of Knives', 12, 'Hit every nearby enemy with poisoned knives.', 'aoe',
-        { cd: 18, radius: [5, 6, 7], weaponMult: [0.8, 1.1, 1.45], poison: [4, 7, 10] }),
+        { cd: 16, radius: [5, 6, 7], weaponMult: [1.0, 1.4, 1.9], poison: [6, 11, 16] }),
       A('rogue_smoke_bomb', '🌫️', 'Smoke Bomb', 14, 'Create a smoke zone that hides you from enemies.', 'zone',
-        { cd: 42, zone: 'smoke', castRange: 12, radius: [4.5, 5.5, 6.5], duration: [7, 9, 11], interval: 0.5 }),
+        { cd: 40, zone: 'smoke', castRange: 12, radius: [4.5, 5.5, 6.5], duration: [7, 9, 11], interval: 0.5 }),
       A('rogue_sprint', '🏃', 'Sprint', 16, 'Gain a tremendous burst of movement speed.', 'buff',
-        { cd: 35, buff: 'sprint', duration: [6, 8, 10], power: [2, 3, 4] }),
+        { cd: 35, buff: 'sprint', duration: [6, 8, 10], power: [5, 8, 11] }),
       A('rogue_kidney_shot', '⚡', 'Kidney Shot', 20, 'Stun one target and deal weapon damage.', 'target',
-        { cd: 25, range: 3.2, weaponMult: [0.8, 1.1, 1.4], stun: [3, 4, 5] }),
+        { cd: 24, range: 3.2, weaponMult: [1.0, 1.4, 1.9], stun: [3, 4, 5] }),
       A('rogue_assassinate', '💀', 'Assassinate', 24, 'Execute a wounded target with immense damage.', 'execute',
-        { cd: 45, range: 3.2, weaponMult: [3.2, 4.3, 5.5], threshold: 0.4 }),
+        { cd: 42, range: 3.2, weaponMult: [3.5, 4.8, 6.2], threshold: 0.4 }),
     ] },
 
   { id: 'mage', icon: '🧙', name: 'Mage', color: '#9c9cff',
@@ -912,6 +913,11 @@ export const firstClassSkillId = (classId) => {
   const tree = classTreeById(classId);
   return tree ? classPathSkills(tree)[0].id : null;
 };
+// A passive effect value can be a flat per-rank number (value × rank) OR an
+// explicit [R1, R2, R3] array of cumulative totals for finer, non-linear tuning.
+export const passiveEffectValue = (value, rank) => Array.isArray(value)
+  ? (value[Math.max(0, Math.min(value.length - 1, rank - 1))] ?? 0)
+  : value * rank;
 export function classEffectsFor(classId, training = {}) {
   const effects = {};
   const tree = classTreeById(classId);
@@ -920,7 +926,7 @@ export function classEffectsFor(classId, training = {}) {
     const rank = Math.max(0, Math.min(skill.maxRank, training[skill.id] || 0));
     if (!rank) continue;
     for (const [key, value] of Object.entries(skill.effects || {})) {
-      effects[key] = (effects[key] || 0) + value * rank;
+      effects[key] = (effects[key] || 0) + passiveEffectValue(value, rank);
     }
   }
   return effects;
@@ -993,7 +999,7 @@ const CLASS_BUFF_INFO = {
 };
 export function classPassiveInfo(skill, rank) {
   return Object.entries(skill.effects || {}).map(([key, v]) =>
-    (CLASS_EFFECT_INFO[key] || ((x) => `${key} ${x}`))(v * rank));
+    (CLASS_EFFECT_INFO[key] || ((x) => `${key} ${x}`))(passiveEffectValue(v, rank)));
 }
 export function classActiveInfo(skill, rank) {
   const rv = (key, fallback = 0) => {

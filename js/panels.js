@@ -563,7 +563,7 @@ export class Panels {
     chosen.style.setProperty('--class-color', selected.color);
     chosen.innerHTML = `<span class="cc-emblem">${selected.icon}</span>
       <div class="cc-name"><b>${selected.name}</b><span>${selected.summary}</span></div>
-      <span class="cc-progress">${trained}/60 ranks</span>`;
+      <span class="cc-progress">${trained}/${path.length * 3} ranks</span>`;
     container.appendChild(chosen);
 
     const pathEl = document.createElement('div');
@@ -714,7 +714,7 @@ export class Panels {
     const passiveRanks = classTree?.passives.reduce((sum, skill) => sum + this._classRank(skill.id), 0) ?? 0;
     const activeRanks = classTree?.actives.reduce((sum, skill) => sum + this._classRank(skill.id), 0) ?? 0;
     rows.push(['🧬 Class', classTree ? `${classTree.icon} ${classTree.name}` : 'Unchosen', classTree
-      ? `${passiveRanks}/30 passive ranks · ${activeRanks}/30 active ranks · see the Class tab`
+      ? `${passiveRanks}/${classTree.passives.length * 3} passive ranks · ${activeRanks}/${classTree.actives.length * 3} active ranks · see the Class tab`
       : 'Open the Class tab to choose one class']);
     const base = itemById(p.equipment.weapon)?.weapon ?? itemById('fists').weapon;
     const charm = itemById(p.equipment.charm);
