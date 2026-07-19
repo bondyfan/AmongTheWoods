@@ -68,7 +68,9 @@ export class Projectiles {
   }
 
   // playerTargets: who enemy shots can hit (solo: [player]; co-op host: both).
-  update(dt, enemyMgr, playerTargets) {
+  // onArrowFly(projectile) → truthy if the arrow struck a world object (hive)
+  // and should be consumed.
+  update(dt, enemyMgr, playerTargets, onArrowFly = null) {
     for (let i = this.list.length - 1; i >= 0; i--) {
       const p = this.list[i];
       p.life -= dt;
@@ -118,6 +120,8 @@ export class Projectiles {
             if (!(p.kind === 'arrow' && p.pierce)) { consumed = true; break; }
           }
         }
+        // arrows can also smash a wild beehive open
+        if (!consumed && p.kind === 'arrow' && onArrowFly && onArrowFly(p)) consumed = true;
       }
 
       if (consumed || p.life <= 0) {

@@ -738,10 +738,9 @@ export const CLASS_TREES = [
     summary: 'The only class able to equip bows, crossbows and companions; controls traps and arrow storms.',
     passives: [
       P('beast_ranged_license', '🏹', 'Ranged Discipline', 2, 'Beastmaster training permits ranged weapons and sharpens them.', { rangedDmg: [0.03, 0.06, 0.10] }),
-      P('beast_marksman', '🎯', 'Marksman', 3, 'A big boost to all of your ranged damage.', { rangedDmg: [0.08, 0.16, 0.26] }),
+      P('beast_marksman', '🎯', 'Marksman', 3, 'Extends the reach of your bows and crossbows.', { rangedRange: [3, 7, 15] }),
       P('beast_quickdraw', '⚡', 'Quick Draw', 5, 'Loose arrows far faster.', { rangedSpeed: [0.08, 0.16, 0.26] }),
       P('beast_trapper', '🪤', 'Trapper', 7, 'Your traps hit much harder.', { trapPower: [0.30, 0.60, 1.00] }),
-      P('beast_bond', '🐾', 'Wild Bond', 9, 'Greatly toughens and empowers your companion.', { petPower: [0.15, 0.32, 0.52] }),
       P('beast_pack_tactics', '🐺', 'Pack Tactics', 11, 'Companions move and strike faster.', { petSpeed: [0.10, 0.20, 0.32] }),
       P('beast_keen_eye', '👁️', 'Keen Eye', 13, 'A strong boost to ranged critical chance.', { rangedCrit: [0.05, 0.11, 0.18] }),
       P('beast_broadheads', '🩸', 'Broadheads', 15, 'Every arrow leaves a vicious bleeding wound.', { arrowBleed: [0.04, 0.08, 0.14] }),
@@ -749,6 +748,8 @@ export const CLASS_TREES = [
       P('beast_handler', '🫶', 'Animal Handler', 21, 'Your companion regenerates rapidly.', { petRegen: [0.30, 0.65, 1.10] }),
     ],
     actives: [
+      A('beast_bond', '🐾', 'Tame Beast', 9, 'Channel for 20 s on a wild beast ahead of you — one with four or more legs, or with wings. It is charmed to fight at your side for 20 s. The channel will not start with no beast in front of you.', 'tame',
+        { cd: 60, channel: 20, tameDur: 20, range: 7 }),
       A('beast_snare', '🪤', 'Snare Trap', 2, 'Place a trap that damages, bleeds and stuns its first victim.', 'world',
         { cd: 60, worldAction: 'trap', count: [1, 1, 2], power: [1.5, 2.2, 3.0], trapDmgPct: 0.55, trapStun: 3.5 }),
       A('beast_arrow_haste', '⚡', 'Arrow Haste', 4, 'Greatly increases ranged attack speed.', 'buff',
@@ -756,11 +757,11 @@ export const CLASS_TREES = [
       A('beast_ten_arrows', '🏹', 'Ten-Arrow Volley', 6, 'Fire ten arrows in a wide fan.', 'multishot',
         { cd: 15, count: 10, spread: 1.05, weaponMult: [0.40, 0.55, 0.72] }),
       A('beast_arrow_rain', '🌧️', 'Rain of Arrows', 8, 'Mark the ground; arrows rain over the area for 10 s.', 'zone',
-        { cd: 32, zone: 'arrows', castRange: 18, radius: [5, 6, 7], duration: 10, weaponMult: [0.30, 0.42, 0.55], interval: 1 }),
+        { cd: 32, zone: 'arrows', castRange: 20, radius: [5, 6, 7], duration: 10, weaponMult: [0.30, 0.42, 0.55], interval: 1 }),
       A('beast_piercing_shot', '➶', 'Piercing Shot', 10, 'A high-damage arrow that pierces every enemy in line.', 'multishot',
         { cd: 13, count: 1, pierce: true, spread: 0, weaponMult: [1.8, 2.4, 3.2] }),
       A('beast_explosive_arrow', '💣', 'Explosive Arrow', 12, 'Detonate a burning blast at the aimed location.', 'zoneBurst',
-        { cd: 20, castRange: 18, radius: [3.5, 4.2, 5], weaponMult: [1.3, 1.8, 2.3], burn: [8, 13, 18] }),
+        { cd: 20, castRange: 20, radius: [3.5, 4.2, 5], weaponMult: [1.3, 1.8, 2.3], burn: [8, 13, 18] }),
       A('beast_mend_pet', '🫶', 'Mend Companion', 14, 'Restore companion health and empower its next attacks.', 'world',
         { cd: 26, worldAction: 'mendPet', power: [0.40, 0.65, 0.95] }),
       A('beast_hunt_command', '📣', 'Hunt Command', 16, 'Order your companion to savage the aimed enemy.', 'world',
@@ -800,7 +801,7 @@ export const CLASS_TREES = [
       A('rogue_fan_knives', '🗡️', 'Fan of Knives', 12, 'Hit every nearby enemy with poisoned knives.', 'aoe',
         { cd: 16, radius: [5, 6, 7], weaponMult: [1.0, 1.4, 1.9], poison: [6, 11, 16] }),
       A('rogue_smoke_bomb', '🌫️', 'Smoke Bomb', 14, 'Create a smoke zone that hides you from enemies.', 'zone',
-        { cd: 40, zone: 'smoke', castRange: 12, radius: [4.5, 5.5, 6.5], duration: [7, 9, 11], interval: 0.5 }),
+        { cd: 40, zone: 'smoke', castRange: 20, radius: [4.5, 5.5, 6.5], duration: [7, 9, 11], interval: 0.5 }),
       A('rogue_sprint', '🏃', 'Sprint', 16, 'Gain a tremendous burst of movement speed.', 'buff',
         { cd: 35, buff: 'sprint', duration: [6, 8, 10], power: [5, 8, 11] }),
       A('rogue_kidney_shot', '⚡', 'Kidney Shot', 20, 'Stun one target and deal weapon damage.', 'target',
@@ -829,9 +830,9 @@ export const CLASS_TREES = [
       A('mage_frostbolt', '❄️', 'Frostbolt', 4, 'Damage and briefly freeze one target.', 'magicTarget',
         { cd: 8, element: 'frost', range: 15, damage: [38, 65, 95], stun: [1.2, 1.8, 2.5] }),
       A('mage_flamestrike', '🌋', 'Flamestrike', 6, 'Burn the aimed ground for several seconds.', 'zone',
-        { cd: 22, zone: 'fire', castRange: 18, radius: [4, 5, 6], duration: [6, 8, 10], damage: [20, 32, 46], interval: 1 }),
+        { cd: 22, zone: 'fire', castRange: 20, radius: [4, 5, 6], duration: [6, 8, 10], damage: [20, 32, 46], interval: 1 }),
       A('mage_blizzard', '🌨️', 'Blizzard', 8, 'A frost storm damages and slows an aimed area.', 'zone',
-        { cd: 28, zone: 'frost', castRange: 18, radius: [5, 6, 7], duration: [7, 9, 11], damage: [16, 26, 38], interval: 1, stun: 0.35 }),
+        { cd: 28, zone: 'frost', castRange: 20, radius: [5, 6, 7], duration: [7, 9, 11], damage: [16, 26, 38], interval: 1, stun: 0.35 }),
       A('mage_frost_nova', '🧊', 'Frost Nova', 10, 'Freeze all enemies around you.', 'magicAoe',
         { cd: 24, element: 'frost', radius: [5, 6, 7], damage: [25, 42, 62], stun: [2.5, 3.5, 4.5] }),
       A('mage_meteor', '☄️', 'Meteor', 12, 'Call a devastating burning impact at the aimed point.', 'zoneBurst',
@@ -878,7 +879,7 @@ export const CLASS_TREES = [
       A('priest_guardian_spirit', '👼', 'Guardian Spirit', 16, 'Prevent one lethal hit and restore health.', 'guardian',
         { cd: 75, duration: [10, 14, 18], amount: [0.25, 0.4, 0.55] }),
       A('priest_sanctuary', '⛪', 'Sanctuary', 20, 'Consecrate the aimed ground with sustained healing.', 'zone',
-        { cd: 42, zone: 'healing', castRange: 16, radius: [5, 6.5, 8], duration: [8, 11, 14], amount: [8, 13, 19], interval: 1 }),
+        { cd: 42, zone: 'healing', castRange: 20, radius: [5, 6.5, 8], duration: [8, 11, 14], amount: [8, 13, 19], interval: 1 }),
       A('priest_resurrection', '✝️', 'Resurrection', 24, 'Revive a fallen ally or grant yourself a massive heal.', 'world',
         { cd: 100, worldAction: 'resurrection', amount: [0.45, 0.7, 1] }),
     ] },
@@ -937,6 +938,13 @@ export function requiredClassForItem(item) {
   return null;
 }
 
+// A "beast" the Beastmaster can tame: it walks on four or more legs, or it has
+// wings. Two-legged humanoids, legless snakes, and constructs/undead are not
+// beasts. (Bosses are excluded separately, at the tame site.)
+const TAMEABLE_BEASTS = new Set(['rabbit', 'sheep', 'horse', 'rat', 'spider', 'scorpion',
+  'wolf', 'venomspider', 'boar', 'elk', 'icewolf', 'icespider', 'bear', 'vulture', 'bee', 'bat']);
+export const isTameableBeast = (type) => TAMEABLE_BEASTS.has(type);
+
 // ---- Concrete per-rank numbers for the class UI. Every skill can spell out
 // exactly what a given rank does, so nothing stays a vague "increases X". ----
 const pctStr = (v) => `${Math.round(v * 1000) / 10}%`;
@@ -957,6 +965,7 @@ const CLASS_EFFECT_INFO = {
   classCdReduction: v => `-${pctStr(v)} class ability cooldowns`,
   speed: v => `+${num1(v)} move speed`,
   rangedDmg: v => `+${pctStr(v)} ranged damage`,
+  rangedRange: v => `+${num1(v)} m bow/crossbow range`,
   rangedSpeed: v => `+${pctStr(v)} ranged attack speed`,
   rangedCrit: v => `+${pctStr(v)} ranged crit chance`,
   arrowBleed: v => `arrows bleed ${pctStr(v)} weapon damage/s for 5 s`,
@@ -1023,8 +1032,9 @@ export function classActiveInfo(skill, rank) {
   if (skill.action === 'cone' || skill.action === 'magicCone') out.push(`${num1(rv('range'))} m cone`);
   else if (skill.range && ['target', 'execute', 'magicTarget', 'shadowstep'].includes(skill.action))
     out.push(`${num1(rv('range'))} m range`);
+  if (skill.action === 'tame') out.push(`channel ${skill.channel} s`, `tamed for ${skill.tameDur} s`, `${skill.range} m reach`);
   if (skill.distance) out.push(`charges ${num1(rv('distance'))} m`);
-  if (skill.castRange) out.push(`cast up to ${rv('castRange')} m away`);
+  if (skill.castRange) out.push(`cast up to ${Math.min(20, rv('castRange'))} m away`);
   if (skill.count && (Array.isArray(skill.count) || skill.count > 1)) out.push(`×${rv('count')}`);
   if (skill.petMult) out.push(`${rv('petMult')}× companion damage`);
   if (skill.duration) out.push(`lasts ${num1(rv('duration'))} s`);

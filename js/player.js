@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { WORLD, XP_LEVELS, MAX_LEVEL, itemById, spellById, consumableById,
          biomeIndexAt, RESOURCES, MAX_SPELL_SLOTS, classSkillById,
-         classEffectsFor, requiredClassForItem } from './config.js';
+         classEffectsFor, requiredClassForItem, isTameableBeast } from './config.js';
 import { makeMan, makeAxe, makeBow, makePickaxe, makeTorchMesh, makeClub,
          makeSword, makeHandSpear, makeCrossbow, makeShield } from './models.js';
 import { audio } from './audio.js';
@@ -132,6 +132,7 @@ export class Player {
     this.charging = false;
     this.chargeT = 0;
     this.castWindup = null;   // { skill, rank, id, t, dur } — ability charging up
+    this.tameChannel = null;  // { beast, skill, rank, t, dur, heartT } — Tame Beast
     this.spinT = 0;           // Whirlwind body-spin animation timer
     this.spinDur = 0.55;
     this.classAuraT = 0;      // particle-aura emit accumulator (Blood Fury etc.)
@@ -302,6 +303,7 @@ export class Player {
     for (const zone of this.classZones) this._removeClassZone(zone);
     this.classZones.length = 0;
     this.castWindup = null;
+    this.tameChannel = null;
     this.spinT = 0;
     this.mesh?.scale?.setScalar(1); // Avatar growth ends with the buff
     this.breakStealth();
@@ -341,7 +343,7 @@ export class Player {
     if ((this.spellCds[id] || 0) > 0) { audio.sfx('error', 0.35, 300); return false; }
     if (classSkill) {
       if (classSkill.type !== 'active' || !this.hasClassSkill(id)) return false;
-      if (this.castWindup) return false; // already committed to a wind-up
+      if (this.castWindup || this.tameChannel) return false; // already committed
       const werr = this._abilityWeaponError(classSkill);
       if (werr) {
         this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2), werr, '#ffcc66');
@@ -452,7 +454,84 @@ export class Player {
       .sort((a, b) => a.score - b.score)[0]?.e || null;
   }
 
-  _classAimPoint(aimPoint, maxRange = 18, useFacing = false) {
+  // the tameable beast most directly in front of the player, within range
+  _findTameTarget(enemyMgr, range = 7) {
+    let best = null, bestDot = 0.15; // must be roughly ahead of you
+    for (const e of enemyMgr?.alive?.() || []) {
+      if (e.dying || e.dead || e.bossRank > 0 || e.tamedT > 0 || !e.pos) continue;
+      if (!isTameableBeast(e.type)) continue;
+      const dx = e.pos.x - this.pos.x, dz = e.pos.z - this.pos.z;
+      const d = Math.hypot(dx, dz);
+      if (d > range + (e.hitR || 0)) continue;
+      const dot = (this.facing.x * dx + this.facing.z * dz) / (d || 1);
+      if (dot > bestDot) { bestDot = dot; best = e; }
+    }
+    return best;
+  }
+
+  // stop channelling; refund the cooldown unless the tame actually completed
+  cancelTame(completed = false) {
+    const tc = this.tameChannel;
+    if (!tc) return;
+    if (!completed) this.spellCds[tc.skill.id] = 0;
+    this.tameChannel = null;
+  }
+
+  _updateTameChannel(dt, enemyMgr) {
+    const tc = this.tameChannel;
+    const beast = tc.beast;
+    const alive = enemyMgr?.alive?.() || [];
+    const lost = !beast || beast.dead || beast.dying || beast.tamedT > 0
+      || !alive.includes(beast)
+      || Math.hypot(beast.pos.x - this.pos.x, beast.pos.z - this.pos.z) > (tc.skill.range || 7) + 2.5;
+    if (this.dead || this.stunT > 0 || lost) {
+      this.cancelTame(false);
+      if (!this.dead) this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
+        '🐾 Taming interrupted', '#ffcc66');
+      audio.sfx('error', 0.3, 300);
+      return;
+    }
+    // face the beast and shower it with hearts
+    this.facing.set(beast.pos.x - this.pos.x, 0, beast.pos.z - this.pos.z).normalize();
+    tc.t -= dt;
+    tc.heartT -= dt;
+    if (tc.heartT <= 0) {
+      tc.heartT = 0.3;
+      const from = this.mesh.position.clone().setY(this.mesh.position.y + 1.4);
+      const mid = from.clone().lerp(beast.mesh.position, 0.35 + Math.random() * 0.4)
+        .setY(this.mesh.position.y + 1 + Math.random() * 1.2);
+      this._fxHeart(mid);
+    }
+    if (tc.t <= 0) {
+      enemyMgr.tameBeast?.(beast, tc.skill.tameDur || 20);
+      this.cancelTame(true);
+      this.spellCds[tc.skill.id] = this.classAbilityCooldown(tc.skill.id);
+      audio.sfx('special', 0.7, 0);
+    }
+  }
+
+  // a small green heart that floats up (Tame Beast affection)
+  _fxHeart(pos) {
+    const shape = new THREE.Shape();
+    shape.moveTo(0, 0.12);
+    shape.bezierCurveTo(0.14, 0.28, 0.3, 0.08, 0, -0.16);
+    shape.bezierCurveTo(-0.3, 0.08, -0.14, 0.28, 0, 0.12);
+    const geo = new THREE.ShapeGeometry(shape);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0x8ee87f, transparent: true, opacity: 0.95, side: THREE.DoubleSide,
+      depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(pos);
+    mesh.rotation.x = -Math.PI / 2; // lie flat, face the top-down camera
+    mesh.scale.setScalar(0.7 + Math.random() * 0.5);
+    this.scene.add(mesh);
+    this.classFx.push({ mesh, t: 0.9, life: 0.9, kind: 'riser', op0: 0.95,
+      vel: new THREE.Vector3((Math.random() - 0.5) * 0.6, 1.6 + Math.random(), (Math.random() - 0.5) * 0.6) });
+  }
+
+  _classAimPoint(aimPoint, maxRange = 20, useFacing = false) {
+    maxRange = Math.min(20, maxRange); // ground-targeted casts reach at most 20 m
     const out = useFacing
       ? this.pos.clone().addScaledVector(this.facing, maxRange)
       : aimPoint?.clone?.() || this.pos.clone().addScaledVector(this.facing, maxRange);
@@ -839,6 +918,19 @@ export class Player {
         rv('amount') * (1 + (this.classEffects.shieldPower || 0)));
       this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
         `🛡️ ${Math.round(this.classShield)} shield`, '#8ed8ff');
+      return true;
+    }
+
+    if (skill.action === 'tame') {
+      const beast = this._findTameTarget(enemyMgr, skill.range || 7);
+      if (!beast) {
+        this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
+          'No beast to tame ahead of you', '#ffcc66');
+        return false;
+      }
+      this.tameChannel = { beast, skill, rank, t: skill.channel || 20, dur: skill.channel || 20, heartT: 0 };
+      this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.4),
+        `🐾 Taming ${beast.cfg?.name || 'the beast'}…`, '#8ee87f');
       return true;
     }
 
@@ -1276,17 +1368,18 @@ export class Player {
     // Keep the established attack-speed curve through Lv14, then slow it so
     // late levels do not erase the identity of slow and fast weapons.
     this.levelAttackSpeedBonus = 0.1 * Math.min(lvl, 13) + 0.025 * Math.max(0, lvl - 13);
-    this.levelDamagePct = 0.01 * lvl; // small +1% weapon power per level
+    this.levelDamage = lvl; // flat +1 weapon damage per level (lvl = this.level - 1)
     const lvlCd = (cd) => 1 / (1 / cd + this.levelAttackSpeedBonus);
     this.weapon = {
       ...base,
-      dmg: base.dmg * (1 + 0.05 * s.power) * (1 + this.levelDamagePct) * this.gearMult,
+      dmg: base.dmg * (1 + 0.05 * s.power) * this.gearMult,
       cd: lvlCd(base.cd * (1 - 0.04 * s.swift)),
       range: base.range + (base.kind === 'bow' ? 2.0 : 0.1) * s.range,
     };
     if (base.kind === 'bow') {
       this.weapon.dmg *= 1 + (this.classEffects.rangedDmg || 0);
       this.weapon.cd *= Math.max(0.35, 1 - (this.classEffects.rangedSpeed || 0));
+      this.weapon.range += this.classEffects.rangedRange || 0; // Marksman reach
     } else {
       this.weapon.dmg *= 1 + (this.classEffects.meleeDmg || 0);
       this.weapon.cd *= Math.max(0.35, 1 - (this.classEffects.meleeSpeed || 0));
@@ -1322,6 +1415,7 @@ export class Player {
     const charm = equipped('charm');
     if (charm?.stats?.dmgPct) this.weapon.dmg *= 1 + charm.stats.dmgPct;
     if (charm?.stats?.aspd) this.weapon.cd *= 1 - charm.stats.aspd;
+    this.weapon.dmg += this.levelDamage; // flat +1/level, added after every multiplier
     this.attackRange = this.weapon.range; // aim marker clamps to this
     // ONE companion slot: a wolf (pet) or a sphere (orb), never both.
     // Pets scale with training AND the owner's level; orbs with Power.
@@ -1771,6 +1865,8 @@ export class Player {
         }
       }
     }
+    // ---- Tame Beast channel: root in place, rain hearts, charm on finish ----
+    if (this.tameChannel) this._updateTameChannel(dt, enemyMgr);
     // ---- visible auras for timed class buffs ----
     if (this.bloodFuryT > 0) {
       this.classAuraT -= dt;
@@ -1833,7 +1929,7 @@ export class Player {
 
     // A sword can parry during the first instant of its guard; shields sustain
     // a stronger block. Guarding slows movement and prevents attacking.
-    const wantsBlock = input.block && this.canBlock && !this.castWindup && this.dashT <= 0;
+    const wantsBlock = input.block && this.canBlock && !this.castWindup && !this.tameChannel && this.dashT <= 0;
     if (wantsBlock && !this.blocking) this.parryT = 0.22;
     this.blocking = wantsBlock;
 
@@ -1913,7 +2009,7 @@ export class Player {
         const mountBonus = ctx.mounted ? 9 : ctx.boatMount ? 6 : 0;
         const terrainMult = onWater ? (ctx.boatMount ? 0.65 : 0.4) : (ctx.boatMount ? 0.45 : 1);
         const speed = (this.speed + this.moveSpeedBonus + mountBonus) * terrainMult
-          * guardSlow * (this.castWindup ? 0.5 : 1)
+          * guardSlow * (this.tameChannel ? 0 : this.castWindup ? 0.5 : 1)
           * (this.roastT > 0 ? 1.1 : 1) * (ctx.devFly ? 1 : (ctx.envSpeedMult ?? 1));
         // cliffs are walls: block any step that climbs too steeply (walking
         // DOWN or falling off is always allowed); sliding along one is fine.
@@ -1972,7 +2068,7 @@ export class Player {
     input.takeLeftPressed();          // consume edge state (charging removed)
     input.takeLeftReleased();
     const wantAttack = input.attackHeld || input.quickAttack;
-    if (wantAttack && this.attackCd <= 0 && this.dashT <= 0 && !this.blocking && !this.castWindup) {
+    if (wantAttack && this.attackCd <= 0 && this.dashT <= 0 && !this.blocking && !this.castWindup && !this.tameChannel) {
       if (this.weapon.kind === 'bow') this._doShoot(projectiles, 0, ctx.mounted);
       else this._doMelee(world, enemyMgr, ctx.pickups, 0, moving, ctx.mounted);
     }

@@ -487,6 +487,19 @@ export class EnemyManager {
     if (!enemy.dying) enemy.stunT = Math.max(enemy.stunT, sec);
   }
 
+  // Beastmaster charm: the beast fights at your side for a while, then reverts.
+  tameBeast(enemy, dur = 20) {
+    if (!enemy || enemy.dying || enemy.dead) return false;
+    enemy.tamedT = dur;
+    enemy.aggroed = false;
+    enemy.returning = false;
+    enemy.threatLog = [];
+    enemy.attackCd = 0;
+    this.hooks.popup(enemy.mesh.position.clone().setY(enemy.mesh.position.y + 2.2),
+      '💚 TAMED', '#8ee87f', 'big');
+    return true;
+  }
+
   damage(enemy, dmg, knockDir, srcId = 'local', opts = null) {
     if (enemy.dying || enemy.escaping) return; // a beaten griffin is beyond reach
     if (opts?.armorBreak) {
@@ -884,6 +897,67 @@ export class EnemyManager {
         e.stunT -= dt;
         e.mesh.position.set(e.pos.x, this.world.heightAt(e.pos.x, e.pos.z) + e.flyY, e.pos.z);
         continue;
+      }
+
+      // ---- CHARMED (Tame Beast): a friendly buddy that hunts other enemies ----
+      if (e.tamedT > 0) {
+        e.tamedT -= dt;
+        if (e.tamedT <= 0) { // the charm fades — back to the wild
+          this.hooks.popup(e.mesh.position.clone().setY(e.mesh.position.y + 2), '💔', '#c9c0b4');
+          e.wanderT = 0;
+        } else {
+          const owner = targets[0];
+          // nearest OTHER hostile creature to savage
+          let foe = null, fd = Infinity;
+          for (const o of this.list) {
+            if (o === e || o.dying || o.tamedT > 0 || o.cfg.passive) continue;
+            const d = Math.hypot(o.pos.x - e.pos.x, o.pos.z - e.pos.z);
+            if (d < fd) { fd = d; foe = o; }
+          }
+          const goal = (foe && fd < 16) ? foe.pos : owner?.pos;
+          let vx = 0, vz = 0, gd = 0;
+          if (goal) {
+            const dx = goal.x - e.pos.x, dz = goal.z - e.pos.z;
+            gd = Math.hypot(dx, dz) || 1;
+            const keep = (goal === owner?.pos) ? 2.4 : e.range * 0.7;
+            if (gd > keep) { vx = (dx / gd) * e.speed; vz = (dz / gd) * e.speed; }
+            e.mesh.rotation.y = Math.atan2(dx, dz) + Math.PI;
+          }
+          // separation from allies/others
+          for (const o of this.list) {
+            if (o === e || o.dying) continue;
+            const sx = e.pos.x - o.pos.x, sz = e.pos.z - o.pos.z;
+            const d2 = sx * sx + sz * sz;
+            if (d2 < 1.44 && d2 > 1e-6) { const d = Math.sqrt(d2); vx += (sx / d) * 3; vz += (sz / d) * 3; }
+          }
+          e.pos.x += vx * dt; e.pos.z += vz * dt;
+          if (!e.cfg.flying) this.world.collide(e.pos, 0.4 * e.sizeMult);
+          // bite the foe
+          e.attackCd -= dt;
+          if (foe && fd < e.range + (foe.hitR || 0) && e.attackCd <= 0) {
+            e.attackCd = e.cfg.attackCd;
+            e.lungeT = 0.25;
+            this.damage(foe, e.meleeDmg, new THREE.Vector3(foe.pos.x - e.pos.x, 0, foe.pos.z - e.pos.z), 'local');
+            audio.creature(e.type, 'attack', 0.3, 110);
+          }
+          // affection hearts
+          e.tameHeartT = (e.tameHeartT ?? 0) - dt;
+          if (e.tameHeartT <= 0) {
+            e.tameHeartT = 1.4;
+            this.hooks.popup(e.mesh.position.clone().setY(e.mesh.position.y + 1.9 * e.sizeMult), '💚', '#8ee87f');
+          }
+          // walk/idle animation + ground snap
+          const spd = Math.hypot(vx, vz);
+          e.walkT += dt * Math.max(2, spd);
+          const ud = e.mesh.userData;
+          (ud.legs || []).forEach((leg, li) => { leg.rotation.x = Math.sin(e.walkT * 2.2 + (li % 2) * Math.PI) * 0.6; });
+          (ud.wings || []).forEach((wing, wi) => { wing.rotation.z = Math.sin(e.walkT * 6 + wi * Math.PI) * 0.55; });
+          const gy = this.world.heightAt(e.pos.x, e.pos.z) + e.flyY + (e.cfg.flying ? Math.sin(e.walkT * 1.5) * 0.25 : 0);
+          if (e.lungeT > 0) { e.lungeT -= dt; }
+          e.mesh.position.set(e.pos.x, gy, e.pos.z);
+          e.mesh.scale.setScalar(e.sizeMult);
+          continue;
+        }
       }
 
       // ---- boss abilities ----

@@ -145,6 +145,7 @@ const panels = new Panels({
       input.cancelCombat();
       player.charging = false;
       player.castWindup = null;
+      player.cancelTame?.(false);
       player.blocking = false;
       document.exitPointerLock?.(); // panels need the cursor back
     }
@@ -2798,6 +2799,12 @@ function dropConsumable(id) {
 function useBarSlot(i) {
   const id = player.spellSlots[i];
   if (!id) return;
+  // ground-targeted abilities enter aim-and-click placement instead of firing
+  const skill = classSkillById(id);
+  if (skill && GROUND_TARGETED.has(skill.action) && player.hasClassSkill(id)) {
+    beginAbilityPlacement(i, id, skill);
+    return;
+  }
   if (spellById(id) || classSkillById(id)) player.castSpell(i, {
     enemyMgr: combatMgr(), projectiles, aimPoint, world, rpgView: game.rpgView,
   });
@@ -3337,6 +3344,83 @@ function clearHunterTraps() {
   while (hunterTraps.length) removeHunterTrap(hunterTraps[0]);
 }
 
+// arrows (and companion/orb shots) can crack a wild beehive open in flight
+function arrowHitsHive(p) {
+  if (game.kind !== 'survival') return false;
+  const pos = p.mesh.position;
+  for (const hive of (world.hivesNear?.(pos, 1.4) ?? [])) {
+    if (hive.dead) continue;
+    if (Math.hypot(hive.x - pos.x, hive.z - pos.z) < (hive.radius || 1) + 0.4) {
+      const res = world.hitHive(hive, p.dmg);
+      player.hooks.onHiveHit?.(hive, res);
+      return true;
+    }
+  }
+  return false;
+}
+
+// ---- ground-targeted class abilities: press the key, aim with the free
+// cursor, click the ground to cast (capped at 20 m). Esc cancels. ----
+let pendingAbility = null; // { slot, id, skill, ghost }
+const GROUND_TARGETED = new Set(['zone', 'zoneBurst']);
+
+function makeAbilityReticle(radius) {
+  const g = new THREE.Group();
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(Math.max(0.2, radius - 0.25), radius, 40),
+    new THREE.MeshBasicMaterial({ color: 0x8fd6ff, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false }));
+  ring.rotation.x = -Math.PI / 2;
+  const dot = new THREE.Mesh(
+    new THREE.CircleGeometry(0.28, 16),
+    new THREE.MeshBasicMaterial({ color: 0xbfeaff, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false }));
+  dot.rotation.x = -Math.PI / 2;
+  g.add(ring, dot);
+  return g;
+}
+
+function beginAbilityPlacement(slot, id, skill) {
+  if (!inPlay() || player.dead) return;
+  if ((player.spellCds[id] || 0) > 0) { audio.sfx('error', 0.35, 300); return; }
+  if (player.castWindup || player.tameChannel) return;
+  if (pendingCampItem) cancelCampItemPlacement();
+  if (pendingNest) cancelNestPlacement();
+  if (pendingAbility) cancelAbilityPlacement();
+  if (panels.open) panels.toggle(null);
+  const radius = classRankValue(skill, 'radius', player.classRank(id), 3);
+  const ghost = makeAbilityReticle(radius);
+  scene.add(ghost);
+  pendingAbility = { slot, id, skill, ghost };
+  document.exitPointerLock?.(); // free the cursor so you can aim on the ground
+  ui.toast('🎯 Aim with the cursor and click the ground to cast. (Esc cancels)', 'level');
+}
+
+function cancelAbilityPlacement() {
+  if (!pendingAbility) return;
+  scene.remove(pendingAbility.ghost);
+  pendingAbility = null;
+}
+
+function updateAbilityGhost() {
+  if (!pendingAbility) return;
+  // clamp the reticle to the 20 m cast range
+  let dx = aimPoint.x - player.pos.x, dz = aimPoint.z - player.pos.z;
+  const d = Math.hypot(dx, dz);
+  const max = 20;
+  const x = d > max ? player.pos.x + dx / d * max : aimPoint.x;
+  const z = d > max ? player.pos.z + dz / d * max : aimPoint.z;
+  pendingAbility.ghost.position.set(x, world.heightAt(x, z) + 0.08, z);
+}
+
+function confirmAbilityPlacement() {
+  if (!pendingAbility) return true;
+  const { slot } = pendingAbility;
+  cancelAbilityPlacement();
+  // cast at the aimed ground point (rpgView:false → castSpell uses aimPoint)
+  player.castSpell(slot, { enemyMgr: combatMgr(), projectiles, aimPoint, world, rpgView: false });
+  ui.flashSpell(slot);
+  return true;
+}
+
 function placeHunterTrap(count = 1, power = 1, field = false) {
   if (game.kind !== 'survival' || player.selectedClass !== 'beastmaster' || player.dead || player.mounted) return false;
   for (let n = 0; n < count; n++) {
@@ -3577,6 +3661,7 @@ for (let i = 0; i < 6; i++) {
 }
 input.onKey('Escape', () => {
   if (!inPlay()) return;
+  if (pendingAbility) { cancelAbilityPlacement(); ui.toast('Cast cancelled.', ''); return; }
   if (pendingCampItem) { cancelCampItemPlacement(); ui.toast('Placement cancelled.', ''); return; }
   if (pendingNest) { cancelNestPlacement(); ui.toast('🪺 Placement cancelled.', ''); return; }
   if (flightmapOpen) { toggleFlightMap(false); return; }
@@ -3763,7 +3848,9 @@ function updateWaves(dt) {
 }
 
 function updateAim() {
-  if (game.rpgView) {
+  // during any ground placement the free cursor drives the aim, even in RPG view
+  const placing = pendingAbility || pendingCampItem || pendingNest;
+  if (game.rpgView && !placing) {
     // third person: you strike what's in FRONT of you — aim rides the facing
     aimPoint.set(player.pos.x + player.facing.x * player.attackRange,
       0, player.pos.z + player.facing.z * player.attackRange);
@@ -4090,6 +4177,7 @@ let shakeT = 0; // brief tremble on boss entrances
 // fov + fog wall keep the draw load in check
 // free mouse-look: clicking the world (with no panel open) locks the pointer
 renderer.domElement.addEventListener('click', () => {
+  if (pendingAbility) { confirmAbilityPlacement(); return; }
   if (pendingCampItem) { confirmCampItemPlacement(); return; }
   if (pendingNest) { confirmNestPlacement(); return; }
   if (game.rpgView && settings.mouseLook && game.mode === 'play'
@@ -4250,6 +4338,7 @@ function step() {
     updateAim(dt);
     updateNestGhost();
     updateCampItemGhost();
+    updateAbilityGhost();
     const em = combatMgr(); // real mgr / co-op shadow / pvp arena / moba units
     // while a griffin carries you the flight drives your position — the
     // normal walk/attack simulation pauses until touchdown
@@ -4294,7 +4383,7 @@ function step() {
       } else {
         const targets = combatTargets();
         enemyMgr.update(dt, targets, projectiles);
-        projectiles.update(dt, enemyMgr, targets);
+        projectiles.update(dt, enemyMgr, targets, arrowHitsHive);
         pickups.update(dt, [player]);
       }
       companions.update(dt, player, em, projectiles, world);

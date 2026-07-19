@@ -731,7 +731,7 @@ export class Panels {
     const base = itemById(p.equipment.weapon)?.weapon ?? itemById('fists').weapon;
     const charm = itemById(p.equipment.charm);
     const dmgParts = [`${Math.round(base.dmg)} ${itemById(p.equipment.weapon)?.name ?? 'fists'}`];
-    if (p.levelDamagePct) dmgParts.push(`+${Math.round(p.levelDamagePct * 100)}% level`);
+    if (p.levelDamage) dmgParts.push(`+${p.levelDamage} level`);
     if (s.power) dmgParts.push(`+${s.power * 5}% training`);
     const classEffects = p.classEffects || {};
     const classDamage = base.kind === 'bow' ? classEffects.rangedDmg : classEffects.meleeDmg;
