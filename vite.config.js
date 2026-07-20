@@ -49,6 +49,11 @@ function copyStaticAssets() {
 
 export default defineConfig({
   plugins: [copyStaticAssets(), worldPatchEndpoint()],
+  // main.js boots with a top-level `await loadWorldPatch()`; the default
+  // esbuild target ('modules' → es2020/safari14) rejects top-level await,
+  // so target the first level that allows it. Every browser that can run
+  // WebGL2 for this game supports es2022.
+  build: { target: 'es2022' },
   resolve: {
     alias: {
       three: resolve(__dirname, 'libs/three.module.js'),
