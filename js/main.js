@@ -4194,11 +4194,11 @@ let biomeLightK = 1; // smoothed per-biome light dimming factor
 const BIOME_MUSIC = [
   'level1',            // 0 Verdant Forest
   'biome_desert',      // 1 Scorched Desert
-  'biome_darkforest',  // 2 Dark Forest
+  'biome_jungle',      // 2 Jungle
   'biome_swamp',       // 3 Murky Swamp
-  'biome_highlands',   // 4 Highlands
+  'biome_darkforest',  // 4 Dark Forest
   'biome_darkforest',  // 5 Haunted Forest
-  'biome_jungle',      // 6 Jungle
+  'biome_highlands',   // 6 Highlands
   'level3',            // 7 Frozen Peak
 ];
 
@@ -4207,11 +4207,11 @@ const BIOME_MUSIC = [
 const BIOME_AMBIENCE = [
   'verdant_birds',   // 0 Verdant — rich daytime birdsong & nature
   'wind_ambience',   // 1 Scorched Desert — hot whistling wind
-  null,              // 2 Dark Forest — eerie hush (the gloom sells it)
+  'forest_ambience', // 2 Jungle — dense birds & insects
   'swamp_ambience',  // 3 Murky Swamp — frogs & bubbling
-  'wind_ambience',   // 4 Highlands — open windswept moor
+  null,              // 4 Dark Forest — eerie hush (the gloom sells it)
   null,              // 5 Haunted Forest — dead silence
-  'forest_ambience', // 6 Jungle — dense birds & insects
+  'wind_ambience',   // 6 Highlands — open windswept moor
   'wind_ambience',   // 7 Frozen Peak — howling gale
 ];
 let ambienceName = null;
