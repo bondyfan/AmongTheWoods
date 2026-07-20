@@ -38,7 +38,7 @@ class AudioManager {
       'torch_equip', 'aggro', 'equip_gear', 'buy'];
     // nature ambience loops — warmed via HTTP cache, played through loopStart
     const AMB = ['forest_ambience', 'wind_ambience', 'swamp_ambience', 'cave_ambience', 'water_lapping',
-      'torch_loop', 'night_crickets', 'verdant_birds'];
+      'torch_loop', 'night_crickets', 'verdant_birds', 'jungle_rain'];
     const MUSIC = ['level1', 'level3', 'mainmenu'];
     const urls = [...SFX.map(n => SFX_PATH + n + '.mp3'), ...AMB.map(n => SFX_PATH + n + '.mp3'),
       ...MUSIC.map(n => MUSIC_PATH + n + '.mp3')];

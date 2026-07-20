@@ -9,7 +9,7 @@ import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOB
          classTreeById, classSkillById, classSkillRequiredLevel, classSkillMeatCost,
          CLASS_CHOOSE_COST, firstClassSkillId } from './config.js';
 import { makeAimArc, updateAimArc, makeRaft, makeBlacksmith, makeHorse, makeWisp, makeMan,
-         makeGriffin, makeGriffinRoost, makeTumbleweed } from './models.js';
+         makeGriffin, makeGriffinRoost, makeTumbleweed, BAKED_MAT } from './models.js';
 import { PostFX } from './postfx.js';
 import { Camp } from './camp.js';
 import { audio } from './audio.js';
@@ -63,6 +63,15 @@ scene.add(sun, sun.target);
 // user FPS cap (0 = unlimited) + a smoothed FPS readout for the on-screen meter
 let fpsFrameCap = 0;
 let _fpsSmooth = 60, _fpsMeterT = 0;
+
+// foliage-density graphics setting → scatter-count multiplier in _genChunk
+const FOLIAGE_MULT = { low: 0.35, normal: 1, high: 1.7, ultra: 2.8 };
+let _windT = 0; // wind-shader clock (keeps blowing across pauses/menus)
+// disturbance trail: the player's recent path, fed to the foliage shader so
+// brushed vegetation keeps ringing (damped spring) after you pass through
+const _folTrail = []; // ring buffer of {x, z, t, s}
+let _folTrailIdx = 0;
+const _folLastPos = { x: 0, z: 0 };
 
 const autoQuality = {
   stage: 0, t: 0, frames: 0, low: 0,
@@ -489,6 +498,8 @@ function setRain(on, dt) {
     rainMesh.frustumCulled = false;
     scene.add(rainMesh);
   }
+  // layer the rain hiss under the biome music while it pours (seamless loop)
+  if (on !== rainOn) { if (on) audio.loopStart('jungle_rain', 0.5); else audio.loopStop('jungle_rain'); }
   rainOn = on;
   if (rainMesh) {
     rainMesh.visible = on;
@@ -526,6 +537,7 @@ function tickBlizzard(dt) {
   const el = $id('blizzard');
   if (!spec) {
     if (blizzard.on) { blizzard.on = false; applyViewMode(); }
+    setRain(false, dt); // leaving a weather biome kills the downpour + its rain loop
     el.style.opacity = 0;
     return;
   }
@@ -2008,7 +2020,7 @@ function endMoba(iWon) {
   if (game.mode !== 'play') return;
   game.mode = iWon ? 'won' : 'dead';
   aimArc.visible = false;
-  audio.stopMusic(); setAmbience(null);
+  audio.stopMusic(); setAmbience(null); audio.loopStop('jungle_rain');
   audio.sfx(iWon ? 'victory' : 'defeat', 0.6);
   const end = document.getElementById('end-title');
   ui.showEnd(iWon, endStats());
@@ -2277,7 +2289,7 @@ const settings = Object.assign(
   settings.bloom = false;
   settings.hiShadows = false;
   settings.filmic = false;
-  settings.texDetail ??= 0;
+  settings.texDetail ??= 1; // Medium ground detail by default — richer terrain
   settings.shadows ??= true;
   settings.resScale ??= 'auto';
   settings.drawDist ??= 'far'; // default to a generous view distance
@@ -2336,6 +2348,25 @@ const settings = Object.assign(
     settings.drawDist = $id('set-drawdist').value;
     saveGfx();
     applyViewMode(); // fog baseline shifts with the new distance
+  });
+
+  // foliage: density regenerates the world's decoration meshes; motion just
+  // flips the wind/trample shader uniforms (free, no rebuild)
+  settings.foliage ??= 'high';
+  settings.foliageMove ??= true;
+  $id('set-foliage').value = String(settings.foliage);
+  $id('set-foliagemove').checked = settings.foliageMove !== false;
+  world.foliageMult = FOLIAGE_MULT[settings.foliage] ?? 1;
+  $id('set-foliage').addEventListener('change', () => {
+    settings.foliage = $id('set-foliage').value;
+    world.foliageMult = FOLIAGE_MULT[settings.foliage] ?? 1;
+    saveGfx();
+    world.regenChunks(); // scatter counts changed — rebuild decoration meshes
+    world.update(0, player.pos);
+  });
+  $id('set-foliagemove').addEventListener('change', () => {
+    settings.foliageMove = $id('set-foliagemove').checked;
+    saveGfx();
   });
 
   // volume sliders (persisted); music slider maps 100% → volume 0.7
@@ -2654,7 +2685,7 @@ async function ensureMp() {
       onCoopWin: () => {
         if (game.mode !== 'play') return;
         game.mode = 'won';
-        audio.stopMusic(); setAmbience(null);
+        audio.stopMusic(); setAmbience(null); audio.loopStop('jungle_rain');
         hideJoinCodeHud();
         audio.sfx('victory', 0.6);
         ui.showEnd(true, endStats());
@@ -4640,6 +4671,41 @@ function tick(nowMs) {
 function step() {
   const dt = Math.min(clock.getDelta(), 0.05);
   if (!document.hidden) autoQuality.tick(dt);
+
+  // foliage wind + player-trample shader uniforms (shared by every baked
+  // mesh; wrapping the clock keeps sin() precise on mobile GPUs — the
+  // once-per-15-min phase jump is invisible)
+  _windT = (_windT + dt) % 900;
+  // lay a trail disturbance every ~0.35 m of movement — brushed foliage
+  // rings down (damped spring) behind the runner instead of snapping back
+  if (game.mode === 'play' && !game.paused) {
+    const mvx = player.pos.x - _folLastPos.x, mvz = player.pos.z - _folLastPos.z;
+    const moved = Math.hypot(mvx, mvz);
+    if (moved > 0.35) {
+      const speed = Math.min(moved / Math.max(dt, 0.001), 14);
+      _folTrail[_folTrailIdx % 8] = {
+        x: player.pos.x, z: player.pos.z, t: _windT,
+        s: Math.min(1.2, 0.55 + speed * 0.06),
+      };
+      _folTrailIdx++;
+      _folLastPos.x = player.pos.x; _folLastPos.z = player.pos.z;
+    }
+  }
+  const folShaders = BAKED_MAT.userData.shaders;
+  if (folShaders.length) {
+    const folOn = settings.foliageMove !== false ? 1 : 0;
+    for (const sh of folShaders) {
+      sh.uniforms.uTime.value = _windT;
+      sh.uniforms.uWind.value = folOn;
+      sh.uniforms.uPush.value = folOn;
+      sh.uniforms.uPlayer.value.set(player.pos.x, player.mesh.position.y, player.pos.z);
+      const dst = sh.uniforms.uDist.value;
+      for (let i = 0; i < 8; i++) {
+        const p = _folTrail[i];
+        if (p) dst[i].set(p.x, p.z, p.t, p.s);
+      }
+    }
+  }
 
   // on-screen FPS meter (smoothed; refreshes the label ~5×/s)
   if (settings.showFps && dt > 0) {
