@@ -9,7 +9,8 @@ import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOB
          classTreeById, classSkillById, classSkillRequiredLevel, classSkillMeatCost,
          CLASS_CHOOSE_COST, firstClassSkillId } from './config.js';
 import { makeAimArc, updateAimArc, makeRaft, makeBlacksmith, makeHorse, makeWisp, makeMan,
-         makeGriffin, makeGriffinRoost, makeTumbleweed, BAKED_MAT } from './models.js';
+         makeGriffin, makeGriffinRoost, makeTumbleweed, BAKED_MAT, WATER_SHADERS,
+         makeSkyDome } from './models.js';
 import { PostFX } from './postfx.js';
 import { Camp } from './camp.js';
 import { audio } from './audio.js';
@@ -47,6 +48,15 @@ scene.background = new THREE.Color(BIOMES[0].sky);
 
 const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 300);
 
+// gradient sky dome: replaces the old flat scene.background color with a
+// horizon→zenith gradient + a glowing sun disc. The horizon band is kept
+// equal to the current fog color every frame (see updateAtmosphere), so
+// terrain fades into the sky with zero seam. Re-centered on the camera each
+// frame — at 45 m radius (well inside the smallest camera.far the game ever
+// uses) it shows no parallax at any zoom or view mode.
+const skyDome = makeSkyDome(45);
+scene.add(skyDome);
+
 const hemi = new THREE.HemisphereLight(0xdfeadf, 0x3a4a35, 0.9);
 scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xfff2dd, 1.4);
@@ -72,6 +82,7 @@ let _windT = 0; // wind-shader clock (keeps blowing across pauses/menus)
 const _folTrail = []; // ring buffer of {x, z, t, s}
 let _folTrailIdx = 0;
 const _folLastPos = { x: 0, z: 0 };
+const _waterSunDir = new THREE.Vector3();
 
 const autoQuality = {
   stage: 0, t: 0, frames: 0, low: 0,
@@ -4715,6 +4726,26 @@ function step() {
       }
     }
   }
+  // water surfaces (ocean/lakes/rivers) share the same clock + sun direction
+  _waterSunDir.set(18, 35, 12).normalize(); // matches the fixed sun offset in updateCamera
+  if (WATER_SHADERS.length) {
+    for (const sh of WATER_SHADERS) {
+      sh.uniforms.uTime.value = _windT;
+      sh.uniforms.uSunDir.value.copy(_waterSunDir);
+    }
+  }
+  // sky dome: re-center on the camera (no parallax at any radius/zoom).
+  // Horizon = scene.fog.color, zenith = scene.background — both are kept
+  // current by updateAtmosphere in EVERY branch (overworld/dungeon/bigmap),
+  // so the dome tracks biome/night/cave darkening for free and collapses to
+  // a flat tint (no fake sky) wherever those two are already set equal.
+  skyDome.position.copy(camera.position);
+  skyDome.updateMatrix();
+  const skyU = skyDome.material.uniforms;
+  skyU.uHorizon.value.copy(scene.fog.color);
+  skyU.uZenith.value.copy(scene.background);
+  skyU.uSunDir.value.copy(_waterSunDir);
+  skyU.uSunColor.value.copy(sun.color);
 
   // on-screen FPS meter (smoothed; refreshes the label ~5×/s)
   if (settings.showFps && dt > 0) {

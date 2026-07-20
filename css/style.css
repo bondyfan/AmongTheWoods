@@ -1125,3 +1125,15 @@ body.slotting .spell-slot.empty {
 #gate-signin:hover { transform: translateY(-2px); box-shadow: 0 12px 32px rgba(0,0,0,0.55); }
 #gate-signin:active { transform: translateY(0); }
 #gate-msg { margin-top: 18px; color: #ffb3a0; font-size: 14px; min-height: 18px; }
+
+/* ---- melee/bow windup bar: minimalist sliver centered above the action bar ---- */
+#swing-bar-wrap {
+  position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%);
+  width: 110px; height: 5px; border-radius: 3px;
+  background: rgba(10, 12, 10, 0.55); border: 1px solid rgba(255, 255, 255, 0.18);
+  overflow: hidden; pointer-events: none; z-index: 12;
+}
+#swing-bar {
+  height: 100%; width: 0%; border-radius: 2px;
+  background: linear-gradient(90deg, #d8c27a, #ffe9a8);
+}

@@ -87,6 +87,10 @@ const SOUNDS = [
   ['buy', 'A purchase confirmation: a pleasant bright coin-jingle and a soft wooden thunk as goods change hands, satisfying and short, no music, no voice', 0.8],
   ['night_crickets', 'Peaceful nighttime outdoor ambience: a chorus of chirping crickets and distant hooting owl, soft night breeze through grass, calm and nocturnal. Seamless loop with no start or end, no music, no human voice', 16.0],
   ['verdant_birds', 'Bright sunny forest daytime ambience: rich layered birdsong, chirping and warbling songbirds near and far, gentle rustling leaves and a warm breeze, lively and cheerful. Seamless loop with no start or end, no music, no human voice', 16.0],
+  // ---- harvesting (axe/pick/tree-fall) ----
+  ['wood_chop', 'A sharp axe blade biting deep into a living tree trunk: one clean heavy chop with a crisp woody thock, a slight resonant ring of the axehead and a few bark chips scattering, outdoor forest acoustics. Single dry hit, very short, no music, no human voice', 0.7],
+  ['stone_mine', 'A heavy iron pickaxe striking solid rock face: one sharp metallic clang with a gritty stone crunch and small rubble skittering, slightly resonant quarry acoustics. Single dry hit, very short, no music, no human voice', 0.7],
+  ['tree_fall', 'A large felled tree keeling over and crashing down: a loud fibrous trunk crack and tearing splinter, a slow groaning tip-over with whooshing branches, then a heavy ground-shaking thud with leaves rustling and settling. Single dry event, no music, no human voice', 2.2],
 ];
 
 const exists = async (p) => { try { await access(p); return true; } catch { return false; } };

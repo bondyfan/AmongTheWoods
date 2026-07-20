@@ -144,14 +144,14 @@ export class MobaWorld extends World {
     for (let i = 0; i < 16; i++) {
       const x = cxw + rng() * CHUNK, z = czw + rng() * CHUNK;
       if (!ok(x, z, 5)) continue;
-      const size = rng() < 0.4 ? 0 : rng() < 0.75 ? 1 : 2;
+      const size = rng() < 0.35 ? 0 : rng() < 0.65 ? 1 : rng() < 0.85 ? 2 : rng() < 0.96 ? 3 : 4;
       const { mesh, radius } = makeTree(size, JUNGLE, rng);
       mesh.position.set(x, this.heightAt(x, z), z);
       mesh.rotation.y = rng() * Math.PI * 2;
       group.add(mesh);
       trees.push({
         id: this.nextTreeId++, mesh, x, z, radius, size,
-        hp: [2, 4, 6][size], wood: [2, 4, 7][size], alive: true,
+        hp: [3, 6, 10, 16, 24][size], wood: [1, 2, 3, 4, 5][size], alive: true,
       });
     }
     // decorations (sparser near lanes so paths read clean)

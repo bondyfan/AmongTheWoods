@@ -131,6 +131,7 @@ export class Player {
     this.attackCd = 0;
     this.attackT = 0;
     this.attackDur = 0.3;
+    this.swingWindup = null; // { t, dur } — the raise-before-the-strike phase
     this.charging = false;
     this.chargeT = 0;
     this.castWindup = null;   // { skill, rank, id, t, dur } — ability charging up
@@ -343,6 +344,7 @@ export class Player {
     const canCleanseStun = classSkill?.action === 'cleanse';
     if (!id || this.dead || (this.stunT > 0 && !canCleanseStun)) return false;
     if ((this.spellCds[id] || 0) > 0) { audio.sfx('error', 0.35, 300); return false; }
+    this.swingWindup = null; // casting overrides a pending basic swing
     if (classSkill) {
       if (classSkill.type !== 'active' || !this.hasClassSkill(id)) return false;
       if (this.castWindup || this.tameChannel) return false; // already committed
@@ -2107,16 +2109,33 @@ export class Player {
     this.mesh.rotation.y = Math.atan2(this.facing.x, this.facing.z)
       + (this.spinT > 0 ? (1 - this.spinT / this.spinDur) * Math.PI * 4 : 0);
 
-    // -- attack with the equipped weapon: hold the attack button (LMB, or RMB in
-    // top-down view) to auto-swing repeatedly at the weapon's normal cadence.
-    // There is no charge-up — every hit lands at full, immediate strength. --
+    // -- attack with the equipped weapon: hold the attack button (LMB, or RMB
+    // in top-down view) to auto-swing repeatedly at the weapon's cadence.
+    // Every strike WINDS UP first — the weapon rises (bow draws), a small bar
+    // fills, then the hit lands. The windup is a slice of the weapon's
+    // cooldown, so faster attack speed shortens it too; it costs no extra
+    // time (it is credited against the cooldown). Stun/dash/block interrupt.
     this.attackCd -= dt;
     input.takeLeftPressed();          // consume edge state (charging removed)
     input.takeLeftReleased();
     const wantAttack = input.attackHeld || input.quickAttack;
-    if (wantAttack && this.attackCd <= 0 && this.dashT <= 0 && !this.blocking && !this.castWindup && !this.tameChannel) {
-      if (this.weapon.kind === 'bow') this._doShoot(projectiles, 0, ctx.mounted);
-      else this._doMelee(world, enemyMgr, ctx.pickups, 0, moving, ctx.mounted);
+    if (this.swingWindup) {
+      if (this.stunT > 0 || this.dashT > 0 || this.blocking) {
+        this.swingWindup = null;      // interrupted — no cooldown burned
+      } else {
+        this.swingWindup.t -= dt;
+        if (this.swingWindup.t <= 0) {
+          const wu = this.swingWindup;
+          this.swingWindup = null;
+          if (this.weapon.kind === 'bow') this._doShoot(projectiles, 0, ctx.mounted);
+          else this._doMelee(world, enemyMgr, ctx.pickups, 0, moving, ctx.mounted);
+          this.attackCd -= wu.dur;    // windup time counts into the swing cycle
+        }
+      }
+    } else if (wantAttack && this.attackCd <= 0 && this.dashT <= 0 && !this.blocking && !this.castWindup && !this.tameChannel) {
+      const dur = Math.max(0.1, Math.min(0.5, this.weapon.cd * 0.25));
+      this.swingWindup = { t: dur, dur };
+      audio.sfx('attack_melee', 0.18, 320); // a light "raise" whoosh
     }
 
     this._animate(dt, moving);
@@ -2164,6 +2183,7 @@ export class Player {
     this.dashT = 0;
     this.blocking = false;
     this.charging = false;
+    this.swingWindup = null;
     this.mesh.rotation.z = 0;
   }
 
@@ -2183,23 +2203,39 @@ export class Player {
     return dot > minDot;
   }
 
-  // Visible swing arc — a crescent that sweeps and fades with the strike.
-  // Its outer radius matches the weapon's melee reach so the effect never
-  // looks bigger than the actual hit range.
-  _spawnSlash() {
+  // Visible swing arc. Basic strikes draw a VERTICAL crescent chopping down
+  // in front of the player (attacks hit forward only now); AoE abilities
+  // (Whirlwind, Ground Slam…) pass wide=true for the old flat sweeping ring.
+  // Outer radius matches the weapon's reach so it never oversells the hit.
+  _spawnSlash(wide = false) {
     const r = this.weapon.range;
-    const geo = new THREE.RingGeometry(r * 0.4, r, 14, 1, Math.PI / 2 - 1.1, 2.2);
-    geo.rotateX(Math.PI / 2); // arc lies flat, centered on local +z
+    const baseRy = Math.atan2(this.facing.x, this.facing.z);
     const mat = new THREE.MeshBasicMaterial({
       color: this.weapon.tier > 0 ? 0xffd98a : 0xffffff,
       transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false,
     });
-    const mesh = new THREE.Mesh(geo, mat);
-    const baseRy = Math.atan2(this.facing.x, this.facing.z);
-    mesh.position.set(this.pos.x, this.mesh.position.y + 0.85, this.pos.z);
-    mesh.rotation.y = baseRy - 0.5;
+    if (wide) {
+      const geo = new THREE.RingGeometry(r * 0.4, r, 14, 1, Math.PI / 2 - 1.1, 2.2);
+      geo.rotateX(Math.PI / 2); // arc lies flat, centered on local +z
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(this.pos.x, this.mesh.position.y + 0.85, this.pos.z);
+      mesh.rotation.y = baseRy - 0.5;
+      this.scene.add(mesh);
+      this.slashes.push({ mesh, baseRy, t: 0, life: 0.2 });
+      return;
+    }
+    // vertical chop: an upright crescent standing in the facing plane,
+    // sweeping top-to-bottom with the strike
+    const geo = new THREE.RingGeometry(r * 0.35, r * 0.95, 12, 1, Math.PI / 2 - 0.75, 1.5);
+    const mesh = new THREE.Mesh(geo, mat); // ring lives in the XY plane — already upright
+    mesh.position.set(
+      this.pos.x + this.facing.x * r * 0.25,
+      this.mesh.position.y + 1.0,
+      this.pos.z + this.facing.z * r * 0.25);
+    mesh.rotation.y = baseRy;
+    mesh.rotation.z = 0.55; // start high, _updateSlashes chops it downward
     this.scene.add(mesh);
-    this.slashes.push({ mesh, baseRy, t: 0, life: 0.2 });
+    this.slashes.push({ mesh, baseRy, t: 0, life: 0.18, vertical: true });
   }
 
   // ---------- level-up burst ----------
@@ -2287,7 +2323,11 @@ export class Player {
       const s = this.slashes[i];
       s.t += dt;
       const k = Math.min(1, s.t / s.life);
-      s.mesh.rotation.y = s.baseRy - 0.5 + k * 1.1;         // sweep across the arc
+      if (s.vertical) {
+        s.mesh.rotation.z = 0.55 - k * 1.35;                // chop top → bottom
+      } else {
+        s.mesh.rotation.y = s.baseRy - 0.5 + k * 1.1;       // sweep across the arc
+      }
       s.mesh.material.opacity = 0.7 * (1 - k);
       s.mesh.scale.setScalar(0.92 + k * 0.08);              // settles at 1.0 = full reach
       if (s.t >= s.life) {
@@ -2330,7 +2370,10 @@ export class Player {
     // (No attack lunge — a forward hop on every moving swing read as a jerky
     // stutter. Attacks now land in place while you keep moving smoothly.)
 
-    const baseArcDot = w.style === 'axe' ? 0.22 : w.style === 'spear' || w.style === 'pick' ? 0.76 : 0.5;
+    // Basic attacks strike FORWARD only — a narrow vertical slash in front of
+    // you (dot 0.6 ≈ ±53°). Wide sweeps are ability territory now: Warrior's
+    // Cleave Training (arcBonus) widens this, Whirlwind/Ground Slam hit rings.
+    const baseArcDot = w.style === 'spear' || w.style === 'pick' ? 0.76 : 0.6;
     const arcDot = Math.max(-0.1, baseArcDot - (this.meleeArcBonus || 0));
     const baseCrit = Math.random() < this.critChance;
     for (const e of enemyMgr.alive()) {
@@ -2428,7 +2471,7 @@ export class Player {
     } else if (trees.length && w.chop <= 0 && !this.hintedAxe) {
       this.hintedAxe = true;
       this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
-        'You can\'t fell trees with that — craft a club or an axe!', '#ffcc66');
+        'Only an AXE fells trees — craft a Bone Axe!', '#ffcc66');
     } else if (rocks.length && !(w.mine > 0) && !this.hintedRock) {
       this.hintedRock = true;
       this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
@@ -2495,6 +2538,17 @@ export class Player {
         rightArm.rotation.x = 0.5 + k * 1.15;
         rightArm.rotation.z = -0.2 - k * 0.3;
       }
+    } else if (this.swingWindup) {
+      // the raise: weapon climbs behind the shoulder (bow draws) while the
+      // little windup bar fills — the strike below then just whips through
+      const k = 1 - Math.max(0, this.swingWindup.t) / this.swingWindup.dur;
+      if (bowEquipped) {
+        leftArm.rotation.x = -1.5;
+        rightArm.rotation.x = -0.4 - k * 0.85; // drawing the string back
+      } else {
+        rightArm.rotation.x = 0.9 * k;         // rising behind the shoulder
+        rightArm.rotation.z = -0.22 * k;
+      }
     } else if (this.attackT > 0) {
       this.attackT -= dt;
       const k = 1 - Math.max(0, this.attackT) / this.attackDur; // 0 → 1 over the swing
@@ -2502,12 +2556,13 @@ export class Player {
         leftArm.rotation.x = -1.5;
         rightArm.rotation.x = -1.2 * Math.sin(k * Math.PI);
       } else {
-        // real chop: wind up behind the shoulder, then whip down through the arc
-        const windup = 0.85 * Math.min(1, k / 0.3);
-        const strike = k <= 0.3 ? 0 : (k - 0.3) / 0.7;
+        // the windup already happened (swingWindup) — snap from the raised
+        // pose straight into the downward whip: a vertical forward chop
+        const windup = 0.9 * Math.min(1, k / 0.12);
+        const strike = k <= 0.12 ? 0 : (k - 0.12) / 0.88;
         const whip = strike * strike * (3 - 2 * strike); // smoothstep
         rightArm.rotation.x = windup * (1 - whip) - 2.6 * whip;
-        rightArm.rotation.z = -0.35 * Math.sin(k * Math.PI); // slight diagonal sweep
+        rightArm.rotation.z = -0.22 * (1 - whip);        // straight down, no side sweep
         rightSocket.rotation.x = -1.1 * whip * (1 - strike * 0.4); // wrist flick
       }
     } else {

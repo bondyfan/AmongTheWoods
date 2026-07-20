@@ -120,6 +120,13 @@ export class UI {
     }
     $('hp-bar').style.width = (player.hp / player.maxHp * 100) + '%';
     $('hp-text').textContent = `${Math.ceil(player.hp)} / ${player.maxHp}`;
+    // minimalist windup bar: fills while the weapon rises, gone on impact
+    const sw = $('swing-bar-wrap');
+    if (sw) {
+      const wu = player.swingWindup;
+      sw.classList.toggle('hidden', !wu);
+      if (wu) $('swing-bar').style.width = ((1 - Math.max(0, wu.t) / wu.dur) * 100) + '%';
+    }
     $('xp-bar').style.width = (player.xpProgress() * 100) + '%';
     $('level-text').textContent = player.level >= MAX_LEVEL
       ? `Lv ${player.level} (MAX)`

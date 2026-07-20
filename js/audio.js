@@ -35,7 +35,9 @@ class AudioManager {
       'elk_attack', 'elk_death', 'bear_attack', 'bear_death',
       'bee_attack', 'bee_death', 'cactus_attack', 'cactus_death',
       'spear_throw', 'map_reveal',
-      'torch_equip', 'aggro', 'equip_gear', 'buy'];
+      'torch_equip', 'aggro', 'equip_gear', 'buy',
+      // harvesting: axe biting wood, pick striking stone, a tree keeling over
+      'wood_chop', 'stone_mine', 'tree_fall'];
     // nature ambience loops — warmed via HTTP cache, played through loopStart
     const AMB = ['forest_ambience', 'wind_ambience', 'swamp_ambience', 'cave_ambience', 'water_lapping',
       'torch_loop', 'night_crickets', 'verdant_birds', 'jungle_rain'];

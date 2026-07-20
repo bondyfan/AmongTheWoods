@@ -184,10 +184,109 @@ export function bakeAt(out, root, x, y, z, rotY = 0, scale = 1, sway = null) {
 // identity check for the shared color-keyed materials — anything else
 // (clones, sprites, custom mats) is safe to dispose
 export const isSharedMaterial = (mat) =>
-  !!mat?.color && matCache.get(mat.color.getHex()) === mat;
+  !!mat?.userData?.shared || (!!mat?.color && matCache.get(mat.color.getHex()) === mat);
 export function mat(color) {
   if (!matCache.has(color)) matCache.set(color, new THREE.MeshLambertMaterial({ color }));
   return matCache.get(color);
+}
+
+// ---- water shader ----
+// Shared by every water mesh (ocean ring, lakes, rivers, treasure pools): a
+// gentle whole-body swell (vertex bob, cheap enough to work even on the
+// low-poly lake fans) plus a fresnel-brightened rim and a scrolling
+// procedural sun-glint sparkle — fragment-only, so no normal map or extra
+// geometry is needed. Uniforms are updated once per frame from main.js via
+// WATER_SHADERS (the same pattern as BAKED_MAT.userData.shaders).
+// ---- sky dome ----
+// A gradient replaces the old flat scene.background color: a horizon band
+// (kept equal to the CURRENT fog color every frame, so terrain fades into
+// the sky with zero seam) rising to a deeper zenith tint, plus a soft glowing
+// sun disc. The dome is small (well inside camera.far) and re-centered on
+// the camera every frame, so at any radius it shows no parallax at all.
+const SKY_VERT = /* glsl */`
+  varying vec3 vSkyDir;
+  void main() {
+    vSkyDir = normalize(position);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }`;
+const SKY_FRAG = /* glsl */`
+  uniform vec3 uHorizon;
+  uniform vec3 uZenith;
+  uniform vec3 uSunDir;
+  uniform vec3 uSunColor;
+  varying vec3 vSkyDir;
+  void main() {
+    float h = clamp(vSkyDir.y, -1.0, 1.0);
+    float t = pow(1.0 - max(h, 0.0), 1.8);
+    vec3 col = mix(uZenith, uHorizon, t);
+    if (h < 0.0) col = mix(col, uHorizon * 0.55, smoothstep(0.0, -0.35, h));
+    float sunDot = max(dot(vSkyDir, normalize(uSunDir)), 0.0);
+    float sunDisc = smoothstep(0.9985, 0.9997, sunDot);
+    float sunGlow = pow(sunDot, 12.0) * 0.5;
+    col += uSunColor * (sunDisc * 1.4 + sunGlow);
+    gl_FragColor = vec4(col, 1.0);
+  }`;
+export function makeSkyDome(radius = 45) {
+  const geo = new THREE.SphereGeometry(radius, 24, 16);
+  const m = new THREE.ShaderMaterial({
+    vertexShader: SKY_VERT, fragmentShader: SKY_FRAG, side: THREE.BackSide,
+    depthWrite: false, depthTest: false, fog: false,
+    uniforms: {
+      uHorizon: { value: new THREE.Color(0xaecfe8) },
+      uZenith: { value: new THREE.Color(0x5a8fc0) },
+      uSunDir: { value: new THREE.Vector3(0.35, 0.85, 0.25) },
+      uSunColor: { value: new THREE.Color(0xfff2dd) },
+    },
+  });
+  const mesh = new THREE.Mesh(geo, m);
+  mesh.renderOrder = -1000; // always draws first — depth-less, so nothing else needs to know
+  mesh.frustumCulled = false;
+  mesh.matrixAutoUpdate = false;
+  return mesh;
+}
+
+export const WATER_SHADERS = [];
+const waterMatCache = new Map();
+export function waterMaterial(color, opacity = 0.9) {
+  const key = color + '|' + opacity;
+  if (waterMatCache.has(key)) return waterMatCache.get(key);
+  const m = new THREE.MeshLambertMaterial({
+    color, transparent: true, opacity, side: THREE.DoubleSide, depthWrite: false });
+  m.userData.shared = true;
+  m.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = { value: 0 };
+    shader.uniforms.uSunDir = { value: new THREE.Vector3(0.35, 0.85, 0.25) };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
+varying vec3 vWaterWP;
+varying vec3 vSunDirView;
+uniform float uTime;
+uniform vec3 uSunDir;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+vec3 wpWater = (modelMatrix * vec4(transformed, 1.0)).xyz;
+transformed.y += sin(uTime * 0.55 + wpWater.x * 0.05 + wpWater.z * 0.04) * 0.06
+  + sin(uTime * 0.9 - wpWater.x * 0.11 + wpWater.z * 0.07) * 0.03;
+vWaterWP = wpWater;
+vSunDirView = normalize(mat3(viewMatrix) * uSunDir);`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+varying vec3 vWaterWP;
+varying vec3 vSunDirView;
+uniform float uTime;`)
+      .replace('#include <opaque_fragment>', `
+vec3 vDirWater = normalize(vViewPosition);
+float fresWater = pow(1.0 - max(dot(vDirWater, normal), 0.0), 2.5);
+outgoingLight += diffuse * fresWater * 0.35;
+vec3 halfWater = normalize(vDirWater + vSunDirView);
+float glintWater = pow(max(dot(normal, halfWater), 0.0), 60.0);
+float rippleWater = sin(vWaterWP.x * 2.6 + uTime * 1.4) * sin(vWaterWP.z * 2.2 - uTime * 1.1);
+glintWater *= smoothstep(0.3, 1.0, rippleWater * 0.5 + 0.5);
+outgoingLight += vec3(1.0, 0.98, 0.9) * glintWater * 1.6;
+#include <opaque_fragment>`);
+    WATER_SHADERS.push(shader);
+  };
+  waterMatCache.set(key, m);
+  return m;
 }
 
 function box(w, h, d, color) {
@@ -2732,11 +2831,12 @@ function pickTreeType(weights, rng) {
   return 'pine';
 }
 
-// size: 0 small, 1 medium, 2 big. Returns { mesh, radius } — radius for collision.
+// size: 0 sapling … 4 forest giant (five tiers — bigger tree, more wood and
+// far more hidden trunk health). Returns { mesh, radius } — radius = collision.
 export function makeTree(size, biome, rng) {
   const g = new THREE.Group();
   g.scale.y = 2; // trees tower — double height, same footprint
-  const scale = [0.65, 1.0, 1.5][size] * (0.8 + rng() * 0.45);
+  const scale = [0.9, 1.3, 1.8, 2.4, 3.1][Math.min(4, size)] * (0.8 + rng() * 0.45);
   const foliageColor = biome.foliage[Math.floor(rng() * biome.foliage.length)];
   const type = pickTreeType(biome.trees, rng);
 

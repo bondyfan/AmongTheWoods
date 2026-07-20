@@ -22,7 +22,7 @@ import { makeTree, makeRock, makeGrassTuft, makeFlower, makeMushroom, makeBush,
          makePalm, makeGroundLeaves } from './models.js';
 import { makePier } from './ship.js';
 import { bakeGroup, bakeAccumulator, buildBakedMesh, bakeAt, BAKED_MAT,
-         isSharedMaterial } from './models.js';
+         isSharedMaterial, waterMaterial } from './models.js';
 import { worldPatch } from './worldpatch.js';
 import { audio } from './audio.js';
 
@@ -79,6 +79,10 @@ function valueNoise(x, z, scale, seed) {
 
 const LAKE_REGION = 220; // deterministic lakes are generated per region cell
 const BERRY_REGROW = 600; // seconds until a harvested bush bears fruit again
+// five tree sizes (sapling → forest giant): hidden trunk health an axe must
+// chew through, and the wood paid out on the fall. Only axes chop (weapon.chop).
+const TREE_HP = [3, 6, 10, 16, 24];
+const TREE_WOOD = [1, 2, 3, 4, 5];
 const TERRACE_STEP = 5;   // mountain plateau height — cliffs between them
 
 // ---- procedural ground detail textures (medium/high graphics) ----
@@ -1037,9 +1041,7 @@ export class World {
       geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
       geo.setIndex(idx);
       geo.computeVertexNormals();
-      const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
-        color: 0x3f6f9e, transparent: true, opacity: 0.88, side: THREE.DoubleSide,
-      }));
+      const mesh = new THREE.Mesh(geo, waterMaterial(0x3f6f9e, 0.87));
       this._addStatic(mesh);
     }
     for (const gate of this.gates) {
@@ -1336,8 +1338,7 @@ export class World {
     seaGeo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
     seaGeo.setIndex(sidx);
     seaGeo.computeVertexNormals();
-    const sea = new THREE.Mesh(seaGeo, new THREE.MeshLambertMaterial({
-      color: 0x2e5f8e, transparent: true, opacity: 0.92, side: THREE.DoubleSide }));
+    const sea = new THREE.Mesh(seaGeo, waterMaterial(0x2e5f8e, 0.92));
     sea.position.y = -0.85;
     this._addStatic(sea);
   }
@@ -1629,8 +1630,7 @@ export class World {
     const chunkLakes = this.lakesNear(cxw + CHUNK / 2, czw + CHUNK / 2);
     for (const lake of chunkLakes) {
       if (lake.x < cxw || lake.x >= cxw + CHUNK || lake.z < czw || lake.z >= czw + CHUNK) continue;
-      const mesh = new THREE.Mesh(new THREE.CircleGeometry(lake.r, 20),
-        new THREE.MeshLambertMaterial({ color: 0x3f6f9e, transparent: true, opacity: 0.85 }));
+      const mesh = new THREE.Mesh(new THREE.CircleGeometry(lake.r, 20), waterMaterial(0x3f6f9e, 0.87));
       mesh.rotation.x = -Math.PI / 2;
       mesh.position.set(lake.x, this.heightAt(lake.x, lake.z) + 0.22, lake.z);
       group.add(mesh);
@@ -1680,9 +1680,11 @@ export class World {
       const z = czw + rng() * CHUNK;
       if (!inBounds(x, z)) continue;
       if (radiusOf(x, z) < 100) continue; // open meadow around the base
+      // five tree sizes: sapling → forest giant. Deep woods grow the big ones.
+      const roll = rng();
       const size = denseWood
-        ? (rng() < 0.12 ? 0 : rng() < 0.5 ? 1 : 2)
-        : (rng() < 0.45 ? 0 : rng() < 0.75 ? 1 : 2);
+        ? (roll < 0.08 ? 0 : roll < 0.30 ? 1 : roll < 0.60 ? 2 : roll < 0.85 ? 3 : 4)
+        : (roll < 0.30 ? 0 : roll < 0.60 ? 1 : roll < 0.82 ? 2 : roll < 0.95 ? 3 : 4);
       const made = makeTree(size, biome, rng);
       // one draw call per tree; the canopy gets a subtle wind ripple
       // (trunk anchored below y0, leaves at full amplitude by y1)
@@ -1692,7 +1694,7 @@ export class World {
       group.add(mesh);
       trees.push({
         id: this.nextTreeId++, mesh, x, z, radius: made.radius, size,
-        hp: [2, 4, 6][size], wood: [2, 4, 7][size], alive: true, kind: 'tree',
+        hp: TREE_HP[size], wood: TREE_WOOD[size], alive: true, kind: 'tree',
       });
     }
 
@@ -1917,7 +1919,7 @@ export class World {
     for (const e of worldPatch.doodadsIn(cxw, czw, CHUNK)) {
       const drng = mulberry32((this.seed ^ 0xd00d) + (parseInt(e.id.slice(1), 10) || 0) * 7919);
       if (e.kind === 'tree') {
-        const size = Math.min(2, Math.max(0, e.size ?? 1));
+        const size = Math.min(4, Math.max(0, e.size ?? 1));
         // style variants: default = the local biome's tree, or a forced look
         const tb = e.variant === 'jungle' ? BIOMES[2]
           : e.variant === 'winter' ? BIOMES[7]
@@ -1930,7 +1932,8 @@ export class World {
         mesh.rotation.y = drng() * Math.PI * 2;
         group.add(mesh);
         trees.push({ id: this.nextTreeId++, mesh, x: e.x, z: e.z, radius, size,
-          hp: [2, 4, 6][size], wood: [2, 4, 7][size], alive: true, kind: 'tree', patchId: e.id });
+          hp: TREE_HP[Math.min(4, size)], wood: TREE_WOOD[Math.min(4, size)],
+          alive: true, kind: 'tree', patchId: e.id });
       } else if (e.kind === 'rock') {
         const sc = e.size ? 1.4 + drng() * 0.3 : 0.9 + drng() * 0.3;
         const mesh = makeBoulder(sc, 0x8a8a84, drng);
@@ -2344,20 +2347,20 @@ export class World {
   chop(tree, power, fromPos) {
     tree.hp -= power;
     tree.shake = 0.35;
-    audio.sfx('base_hit', 0.4);
+    audio.sfx('wood_chop', 0.55);
     if (tree.hp > 0) return 0;
     tree.alive = false;
     const dx = tree.x - fromPos.x, dz = tree.z - fromPos.z;
     const len = Math.hypot(dx, dz) || 1;
     this.fallingTrees.push({ mesh: tree.mesh, t: 0, dirX: (dz / len), dirZ: (dx / len), kind: 'tree' });
-    audio.sfx('tower_build', 0.55);
+    audio.sfx('tree_fall', 0.7);
     return tree.wood;
   }
 
   mineRock(rock, power, fromPos) {
     rock.hp -= power;
     rock.shake = 0.3;
-    audio.sfx('mine_hit', 0.55);
+    audio.sfx('stone_mine', 0.55);
     if (rock.hp > 0) return 0;
     rock.alive = false;
     this.fallingTrees.push({ mesh: rock.mesh, t: 0, dirX: 0, dirZ: 0, kind: 'rock' });
