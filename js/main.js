@@ -60,6 +60,10 @@ scene.add(sun, sun.target);
 // ---------- adaptive quality: weak laptops get smoother frames ----------
 // Watches the real frame rate and steps quality DOWN (never up mid-session):
 // 1) render at 1.25x pixel ratio  2) 1x + soft shadows off  3) shorter view
+// user FPS cap (0 = unlimited) + a smoothed FPS readout for the on-screen meter
+let fpsFrameCap = 0;
+let _fpsSmooth = 60, _fpsMeterT = 0;
+
 const autoQuality = {
   stage: 0, t: 0, frames: 0, low: 0,
   tick(dt) {
@@ -2190,7 +2194,7 @@ const settings = Object.assign(
 
   // RPG third-person view: camera, fog and view distance all switch together
   const rpgBox = $id('set-rpgview');
-  settings.rpgView ??= false;
+  settings.rpgView ??= true; // RPG behind-the-shoulder is the default first impression
   rpgBox.checked = settings.rpgView;
   applyViewMode();
   rpgBox.addEventListener('change', () => {
@@ -2206,7 +2210,7 @@ const settings = Object.assign(
   // free mouse-look (RPG only): pointer locks into the game and every mouse
   // move steers; A/D strafe. Esc (or opening any panel) frees the cursor.
   const lookBox = $id('set-mouselook');
-  settings.mouseLook ??= false;
+  settings.mouseLook ??= true; // free mouse-look on by default (pairs with RPG view)
   lookBox.checked = settings.mouseLook;
   input.mouseLook = settings.mouseLook;
   lookBox.addEventListener('change', () => {
@@ -2255,6 +2259,19 @@ const settings = Object.assign(
     audio.sfx('click', 0.35);
   });
 
+  // hide any tracked resource whose total is 0 (on by default — a cleaner HUD)
+  settings.hideZeroRes ??= true;
+  const ownedBox = $id('set-ownedres');
+  ownedBox.checked = settings.hideZeroRes !== false;
+  ui.setHideZeroResources(settings.hideZeroRes !== false);
+  ownedBox.addEventListener('change', () => {
+    settings.hideZeroRes = ownedBox.checked;
+    ui.setHideZeroResources(ownedBox.checked);
+    localStorage.setItem('atw-settings', JSON.stringify(settings));
+    refreshHud();
+    audio.sfx('click', 0.35);
+  });
+
   // graphics: only ground texture detail is user-facing now. Bloom is OFF by
   // default (it dulled the image), and the shadow/filmic toggles are gone.
   settings.bloom = false;
@@ -2263,12 +2280,39 @@ const settings = Object.assign(
   settings.texDetail ??= 0;
   settings.shadows ??= true;
   settings.resScale ??= 'auto';
-  settings.drawDist ??= 'normal';
+  settings.drawDist ??= 'far'; // default to a generous view distance
+  settings.showFps ??= false;
+  settings.fpsCap ??= 0; // 0 = unlimited
   $id('set-texdetail').value = String(settings.texDetail);
   $id('set-shadows').checked = settings.shadows !== false;
   $id('set-resscale').value = String(settings.resScale);
   $id('set-drawdist').value = String(settings.drawDist);
   applyGraphics();
+
+  // FPS meter toggle
+  const fpsBox = $id('set-showfps');
+  fpsBox.checked = !!settings.showFps;
+  $id('fps-meter').classList.toggle('hidden', !settings.showFps);
+  fpsBox.addEventListener('change', () => {
+    settings.showFps = fpsBox.checked;
+    $id('fps-meter').classList.toggle('hidden', !settings.showFps);
+    localStorage.setItem('atw-settings', JSON.stringify(settings));
+    audio.sfx('click', 0.4);
+  });
+
+  // FPS cap slider (150 on the track = unlimited → stored as 0)
+  const fpsCapSlider = $id('set-fpscap'), fpsCapOut = $id('set-fpscap-out');
+  const fpsCapLabel = () => { fpsCapOut.textContent = fpsFrameCap > 0 ? `${fpsFrameCap}` : '∞'; };
+  fpsCapSlider.value = String(settings.fpsCap && settings.fpsCap <= 144 ? settings.fpsCap : 150);
+  fpsFrameCap = settings.fpsCap || 0;
+  fpsCapLabel();
+  fpsCapSlider.addEventListener('input', () => {
+    const v = +fpsCapSlider.value;
+    fpsFrameCap = v >= 150 ? 0 : v; // top of the track = unlimited
+    settings.fpsCap = fpsFrameCap;
+    fpsCapLabel();
+    localStorage.setItem('atw-settings', JSON.stringify(settings));
+  });
   const saveGfx = () => {
     localStorage.setItem('atw-settings', JSON.stringify(settings));
     applyGraphics();
@@ -3799,6 +3843,12 @@ function canResurrectPetHere() {
 
 input.onKey('KeyX', () => {
   if (game.mode !== 'play') return;
+  // dead → respawn at base immediately instead of waiting out the pause /
+  // partner rescue. Co-op downed goes through the MP path (drops loot, etc.).
+  if (player.dead) {
+    if (mp?.respawnNow?.()) return;
+    if (game.kind === 'survival') { reviveAt('cave'); return; }
+  }
   if (player.mounted) dismountHorse();
   else if (boatMounted) dismountBoat();
 });
@@ -4392,7 +4442,7 @@ function updateAtmosphere(dt) {
 // draw-distance option scales the fog wall; the camera far plane then hugs
 // the fog (plus a small margin) so nothing invisible is ever drawn or
 // shadow-cast — in RPG view this culls ~2/3 of the old frustum
-const FOG_SCALE = { short: 0.72, normal: 1, far: 1.5 };
+const FOG_SCALE = { short: 0.72, normal: 1, far: 1.5, furthest: 2.1 };
 const NIGHT_SKY = new THREE.Color(0x0a1230), NIGHT_FOG = new THREE.Color(0x141a34);
 const _atmoA = new THREE.Color(), _atmoB = new THREE.Color();
 function syncFarToFog() {
@@ -4571,8 +4621,16 @@ function refreshHud() {
 // ---------- main loop ----------
 const clock = new THREE.Clock();
 
-function tick() {
+let _lastFrameMs = 0;
+function tick(nowMs) {
   requestAnimationFrame(tick);
+  // optional FPS cap: skip this rAF frame if it arrived too soon. The 1 ms
+  // slack keeps us from perpetually landing just under the interval on
+  // displays whose refresh doesn't divide the target evenly.
+  if (fpsFrameCap > 0 && nowMs) {
+    if (nowMs - _lastFrameMs < 1000 / fpsFrameCap - 1) return;
+    _lastFrameMs = nowMs;
+  }
   step();
 }
 
@@ -4582,6 +4640,17 @@ function tick() {
 function step() {
   const dt = Math.min(clock.getDelta(), 0.05);
   if (!document.hidden) autoQuality.tick(dt);
+
+  // on-screen FPS meter (smoothed; refreshes the label ~5×/s)
+  if (settings.showFps && dt > 0) {
+    _fpsSmooth += (1 / dt - _fpsSmooth) * 0.1;
+    _fpsMeterT += dt;
+    if (_fpsMeterT >= 0.2) {
+      _fpsMeterT = 0;
+      const el = $id('fps-meter');
+      if (el) el.textContent = `${Math.round(_fpsSmooth)} FPS`;
+    }
+  }
 
   if (game.mode === 'play' && !game.paused && !game.editorView) {
     game.time += dt;

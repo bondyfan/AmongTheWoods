@@ -49,11 +49,11 @@
       <div id="active-quest" class="hidden"></div>
     </div>
     <div id="top-center">
-      <div class="bar-wrap journey"><div id="progress-bar" class="bar"></div><span id="progress-text" class="bar-label"></span></div>
       <div id="biome-name"></div>
       <div id="mp-status" class="hidden"></div>
       <div id="resource-hud" class="hidden"></div>
     </div>
+    <div id="fps-meter" class="hidden">-- FPS</div>
     <div id="dev-distance-tool" class="hidden">
       <button id="dev-distance-toggle" type="button" aria-expanded="false" aria-controls="dev-distance-panel">
         ◎ See distance radius
@@ -268,17 +268,26 @@
             <span class="opt-label">Draw distance</span>
             <select id="set-drawdist">
               <option value="short">Short (fastest)</option>
-              <option value="normal" selected>Normal</option>
-              <option value="far">Far (heavier)</option>
+              <option value="normal">Normal</option>
+              <option value="far" selected>Far (heavier)</option>
+              <option value="furthest">Furthest (heaviest)</option>
             </select>
           </label>
           <label class="opt-field opt-toggle">
             <span class="opt-label">Shadows</span>
             <input type="checkbox" id="set-shadows" checked>
           </label>
+          <label class="opt-field opt-toggle">
+            <span class="opt-label">Show FPS</span>
+            <input type="checkbox" id="set-showfps">
+          </label>
+          <label class="opt-field">
+            <span class="opt-label">Limit FPS <output id="set-fpscap-out" style="opacity:.7;font-weight:normal">∞</output></span>
+            <input type="range" id="set-fpscap" min="30" max="150" step="10" value="150" style="width:130px">
+          </label>
         </div>
         <p class="settings-note">Lower these if the 3D view stutters — resolution and shadows
-          have the biggest impact on framerate.</p>
+          have the biggest impact on framerate. Limit FPS caps the framerate (∞ = unlimited).</p>
       </div>
 
       <!-- ========== CONTROLS ========== -->
@@ -331,6 +340,10 @@
         <div class="setting-row resource-setting">
           <span><b>🎒 Resources shown in the HUD</b><br>
             <small>Choose which resource totals stay visible at the top of the gameplay screen.</small></span>
+          <label style="display:flex;align-items:center;gap:8px;margin-top:9px;cursor:pointer;font-size:13px">
+            <input type="checkbox" id="set-ownedres" checked style="width:18px;height:18px;accent-color:#86b45e">
+            <span>Show only owned resources <small style="opacity:.65">(hide any total at 0)</small></span>
+          </label>
           <div id="set-hud-resources" class="resource-setting-grid"></div>
         </div>
         <div class="setting-row" id="mpcode-row">

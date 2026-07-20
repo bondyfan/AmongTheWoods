@@ -105,6 +105,12 @@ export class UI {
     this._resourceMarkup = '';
   }
 
+  // when true, a tracked resource sitting at 0 is hidden from the HUD
+  setHideZeroResources(v) {
+    this.hideZeroRes = !!v;
+    this._resourceMarkup = '';
+  }
+
   // ---------- HUD ----------
   updateHUD(player, progressPct, biomeName, survival = true) {
     if (this.playerLevel !== player.level) {
@@ -117,9 +123,6 @@ export class UI {
     $('level-text').textContent = player.level >= MAX_LEVEL
       ? `Lv ${player.level} (MAX)`
       : `Lv ${player.level} — ${player.xp}/${XP_LEVELS[player.level + 1]} XP`;
-    $('progress-bar').style.width = (progressPct * 100) + '%';
-    // progress is zone tier + depth now, not raw meters — show the journey %
-    $('progress-text').textContent = `Journey ${Math.round(progressPct * 100)}% — the summit awaits`;
     $('biome-name').textContent = biomeName;
 
     const questEl = $('active-quest');
@@ -138,8 +141,11 @@ export class UI {
     } else questEl.classList.add('hidden');
 
     const resourceEl = $('resource-hud');
-    if (survival && this.resourceKeys.length) {
-      const markup = this.resourceKeys.map(key =>
+    const shownKeys = this.hideZeroRes
+      ? this.resourceKeys.filter(key => (player[key] || 0) > 0)
+      : this.resourceKeys;
+    if (survival && shownKeys.length) {
+      const markup = shownKeys.map(key =>
         `<span class="hud-resource" title="${key}">${RES_ICONS[key] ?? ''} ${fmtResource(player[key])}</span>`).join('');
       if (markup !== this._resourceMarkup) {
         resourceEl.innerHTML = markup;

@@ -920,7 +920,7 @@ export class Multiplayer {
     if (this.downedUntil && p.dead) {
       const left = Math.max(0, this.downedUntil - performance.now());
       if (downedEl) {
-        downedEl.textContent = `☠️ DOWNED — your partner can revive you… ${Math.ceil(left / 1000)} s`;
+        downedEl.textContent = `☠️ DOWNED — partner can revive you (${Math.ceil(left / 1000)} s) · press X to respawn at base now`;
         downedEl.classList.remove('hidden');
       }
       if (left <= 0) this._bleedOut();
@@ -1135,8 +1135,10 @@ export class Multiplayer {
     return true;
   }
 
-  // the un-rescued death: level lost, half of everything spilled, wake at camp
-  _bleedOut() {
+  // the un-rescued death: level lost, half of everything spilled, wake at camp.
+  // `immediate` (player chose to respawn now, pressing X) skips the dramatic
+  // pause and stands them up at the cabin right away.
+  _bleedOut(immediate = false) {
     const { ctx } = this;
     const p = ctx.player;
     this.downedUntil = null;
@@ -1144,13 +1146,24 @@ export class Multiplayer {
     const dropped = ctx.dropHalfMeat(p.pos.clone());
     p.loseLevel();
     p.mesh.rotation.z = Math.PI / 2; // lie down while "out"
-    ctx.ui.toast(`☠️ You fell… you wake at the cabin. This level's XP progress is gone; ${dropped} 🍖 spilled where you died.`, 'boss');
-    setTimeout(() => {
+    ctx.ui.toast(immediate
+      ? `☠️ You wake at the cabin. This level's XP progress is gone; ${dropped} 🍖 spilled where you died.`
+      : `☠️ You fell… you wake at the cabin. This level's XP progress is gone; ${dropped} 🍖 spilled where you died.`, 'boss');
+    const stand = () => {
       if (!this.active) return;
       p.revive(1);
       p.pos.set(0, 0, 3);
       p.mesh.rotation.z = 0;
-    }, 3000);
+    };
+    if (immediate) stand(); else setTimeout(stand, 3000);
+  }
+
+  // X while downed: give up waiting for a partner rescue and respawn at base now
+  respawnNow() {
+    if (!this.active || !this.downedUntil || !this.ctx.player.dead) return false;
+    document.getElementById('downed-hint')?.classList.add('hidden');
+    this._bleedOut(true);
+    return true;
   }
 
   // E near a downed partner revives them (they get half health, no penalty)
