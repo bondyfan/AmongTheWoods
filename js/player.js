@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { WORLD, XP_LEVELS, MAX_LEVEL, itemById, spellById, consumableById,
          biomeIndexAt, RESOURCES, MAX_SPELL_SLOTS, classSkillById,
          classEffectsFor, requiredClassForItem, isTameableBeast,
-         PLAYER_HP, OOC_DELAY, OOC_REGEN_PCT } from './config.js';
+         PLAYER_HP, OOC_DELAY, oocRegenFor } from './config.js';
 import { makeMan, makeAxe, makeBow, makePickaxe, makeTorchMesh, makeClub,
          makeSword, makeHandSpear, makeCrossbow, makeShield } from './models.js';
 import { audio } from './audio.js';
@@ -1365,14 +1365,17 @@ export class Player {
     this.speed = 5.5 + 0.04 * lvl + speedAdd + (this.upgrades.trailblazer || 0) * 0.2
       + (this.classEffects.speed || 0);
     // hpRegen is the IN-COMBAT trickle (small; gear can stack it up). The real
-    // WoW-style recovery happens out of combat: OOC_REGEN_PCT of max health
-    // per second once nothing has hurt you (or been hit by you) for OOC_DELAY.
+    // WoW-style recovery happens out of combat: a FLAT oocRegen hp/s (below)
+    // once nothing has hurt you (or been hit by you) for OOC_DELAY seconds.
     let regen = 0.3 + 0.06 * lvl;
     for (const slot of ['head', 'chest', 'boots', 'charm', 'offhand', 'underlayer', 'legs', 'back', 'mount']) {
       const it = equipped(slot);
       if (it?.stats?.regen) regen += it.stats.regen * this.gearMult;
     }
     this.hpRegen = regen;
+    // flat out-of-combat recovery: grows LINEARLY with level, so the bigger
+    // your (quadratic) pool gets the longer a full breather takes — WoW style
+    this.oocRegen = oocRegenFor(this.level);
 
     // effective weapon = base weapon + training (range/power/swift tracks)
     const base = equipped('weapon')?.weapon || itemById('fists').weapon;
@@ -1861,17 +1864,19 @@ export class Player {
     } else this._torchWarned = false;
 
     // WoW-style recovery: after OOC_DELAY seconds without taking damage or
-    // swinging at anything, health surges back at OOC_REGEN_PCT of the pool
-    // per second (a full heal in ~12 s at ANY level). While fighting, only
-    // the small hpRegen trickle (base + gear) applies. Rest gear (bedroll,
-    // stormcloak…) speeds the out-of-combat surge further.
+    // swinging at anything, health knits back at a FLAT oocRegen hp/s (plus
+    // any gear regen). oocRegen grows only linearly with level while the pool
+    // grows quadratically, so a level-1 heals to full in ~12 s and a level-50
+    // takes ~40 s — the more max HP you have, the slower the flat regen fills
+    // it. While fighting, only the small hpRegen trickle applies. Rest gear
+    // (bedroll, stormcloak…) multiplies the out-of-combat rate.
     this.combatNoiseT += dt;
     if (this.hp < this.maxHp) {
       const outOfCombat = this.hurtT > OOC_DELAY && this.combatNoiseT > OOC_DELAY;
       let rate = this.hpRegen;
       if (outOfCombat) {
         const restBonus = this.restMult > 1 && this.idleT > 1 ? 1 + this.restMult / 10 : 1;
-        rate = Math.max(rate, this.maxHp * OOC_REGEN_PCT * restBonus);
+        rate = (this.oocRegen + this.hpRegen) * restBonus;
       }
       this.hp = Math.min(this.maxHp, this.hp + rate * dt);
     }

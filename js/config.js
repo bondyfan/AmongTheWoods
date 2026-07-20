@@ -375,11 +375,14 @@ export const ENEMY_HP = (level) => Math.round(120 + 60 * level + 5.2 * level * l
 export const ENEMY_DMG = (level) => Math.round((5 + 2.6 * level + 0.06 * level * level) * 10) / 10;
 // XP paid by a standard mob of a level (elites ×2, bosses × their rank mult)
 export const xpKillFor = (level) => Math.round(14 + 5.2 * level);
-// Out-of-combat recovery, WoW style: no damage dealt or taken for OOC_DELAY
-// seconds and you knit back OOC_REGEN_PCT of max health every second (a full
-// heal in ~12 s at any level). Rest gear (bedroll etc.) speeds even that up.
+// Out-of-combat recovery, WoW style: after OOC_DELAY seconds with no damage
+// dealt or taken, you knit back a FLAT amount of health per second. It grows
+// with level, but LINEARLY — far slower than the quadratic health pool — so a
+// fresh level-1 (small pool) heals to full in ~12 s while a level-50 with a
+// huge pool needs ~40 s. The bigger you get, the longer a breather takes.
+// Gear regen adds on top and rest gear (bedroll etc.) multiplies it.
 export const OOC_DELAY = 5;
-export const OOC_REGEN_PCT = 0.08;
+export const oocRegenFor = (level) => 7 + 1.5 * level; // flat hp/s, not a %
 
 // Each zone covers a WoW-style level band (index = difficulty tier). The gap
 // between Verdant and the Desert is intentional — the first border bites.

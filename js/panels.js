@@ -788,7 +788,7 @@ export class Panels {
       const it = itemById(p.equipment[slot]);
       if (it?.stats?.regen) regenParts.push(`+${(it.stats.regen * p.gearMult).toFixed(1)} ${it.name}`);
     }
-    regenParts.push(`out of combat: ${Math.round(p.maxHp * 0.08)}/s`);
+    regenParts.push(`out of combat: ${Math.round(p.oocRegen + p.hpRegen)}/s (~${Math.round(p.maxHp / (p.oocRegen + p.hpRegen))}s to full)`);
     rows.push(['💚 Regen', `${(Math.round(p.hpRegen * 10) / 10)}/s`, regenParts.join(' · ')]);
 
     $('char-stats').innerHTML = rows.map(([label, val, parts]) =>
