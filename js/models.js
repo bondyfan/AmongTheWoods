@@ -3,6 +3,104 @@
 import * as THREE from 'three';
 
 const matCache = new Map();
+
+// ---- geometry baking ----
+// Merges a whole model group (dozens of tiny box/cyl/sphere meshes) into ONE
+// vertex-colored mesh — a single draw call instead of 8-15. Special children
+// (transparent / emissive / basic / lines / sprites) survive as real children
+// of the baked mesh. This is the backbone of the render performance: a dense
+// forest chunk drops from ~600 draw calls to ~75.
+export const BAKED_MAT = new THREE.MeshLambertMaterial({ vertexColors: true });
+
+const _bakeMat4 = new THREE.Matrix4();
+const _bakeNrm = new THREE.Matrix3();
+const _bakeV = new THREE.Vector3();
+
+function _bakeInto(node, parentMatrix, out) {
+  _bakeMat4.compose(node.position, node.quaternion, node.scale);
+  const m = new THREE.Matrix4().multiplyMatrices(parentMatrix, _bakeMat4);
+  if (node.isMesh && node.geometry?.attributes?.position) {
+    const mat = node.material;
+    const simple = mat && mat.isMeshLambertMaterial && !mat.transparent
+      && !mat.map && (!mat.emissive || mat.emissive.getHex() === 0);
+    if (simple) {
+      const geo = node.geometry;
+      const pos = geo.attributes.position;
+      const nrm = geo.attributes.normal;
+      const base = out.pos.length / 3;
+      _bakeNrm.getNormalMatrix(m);
+      const c = mat.color;
+      for (let i = 0; i < pos.count; i++) {
+        _bakeV.fromBufferAttribute(pos, i).applyMatrix4(m);
+        out.pos.push(_bakeV.x, _bakeV.y, _bakeV.z);
+        if (nrm) {
+          _bakeV.fromBufferAttribute(nrm, i).applyMatrix3(_bakeNrm).normalize();
+          out.nrm.push(_bakeV.x, _bakeV.y, _bakeV.z);
+        } else out.nrm.push(0, 1, 0);
+        out.col.push(c.r, c.g, c.b);
+      }
+      const idx = geo.index;
+      if (idx) for (let i = 0; i < idx.count; i++) out.idx.push(base + idx.getX(i));
+      else for (let i = 0; i < pos.count; i++) out.idx.push(base + i);
+    } else {
+      out.extras.push({ node, matrix: m.clone() });
+    }
+  } else if (!node.isMesh && node !== undefined) {
+    if (node.isLine || node.isPoints || node.isSprite) {
+      out.extras.push({ node, matrix: m.clone() });
+      return; // keep whole
+    }
+  }
+  if (node.children) for (const ch of [...node.children]) _bakeInto(ch, m, out);
+}
+
+export function buildBakedMesh(out, castShadow = true) {
+  if (!out.pos.length) return null;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(out.pos), 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(out.nrm), 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(out.col), 3));
+  geo.setIndex(out.idx);
+  const mesh = new THREE.Mesh(geo, BAKED_MAT);
+  mesh.castShadow = castShadow;
+  mesh.matrixAutoUpdate = true;
+  return mesh;
+}
+
+export const bakeAccumulator = () => ({ pos: [], nrm: [], col: [], idx: [], extras: [] });
+const _identity = new THREE.Matrix4();
+
+// bake ONE model (tree, hive, building, landmark…) → a single mesh that
+// keeps the original's outer transform semantics (rotate/scale/position it
+// exactly like the old group). Un-bakeable parts ride along as children.
+export function bakeGroup(root, castShadow = true) {
+  const out = bakeAccumulator();
+  _bakeInto(root, _identity, out);
+  const mesh = buildBakedMesh(out, castShadow);
+  if (!mesh) return root; // nothing bakeable — return the original
+  for (const ex of out.extras) {
+    ex.node.parent?.remove(ex.node);
+    ex.matrix.decompose(ex.node.position, ex.node.quaternion, ex.node.scale);
+    mesh.add(ex.node);
+  }
+  mesh.userData = root.userData;
+  return mesh;
+}
+
+// bake a model INTO a shared per-chunk accumulator at a world offset —
+// whole-chunk decoration ends up as one mesh total
+const _bakeRootM = new THREE.Matrix4(); // MUST be distinct from _bakeMat4 —
+// _bakeInto composes node transforms into _bakeMat4 and would clobber it
+export function bakeAt(out, root, x, y, z, rotY = 0, scale = 1) {
+  _bakeRootM.makeRotationY(rotY);
+  _bakeRootM.setPosition(x, y, z);
+  if (scale !== 1) _bakeRootM.scale(new THREE.Vector3(scale, scale, scale));
+  _bakeInto(root, _bakeRootM, out);
+}
+// identity check for the shared color-keyed materials — anything else
+// (clones, sprites, custom mats) is safe to dispose
+export const isSharedMaterial = (mat) =>
+  !!mat?.color && matCache.get(mat.color.getHex()) === mat;
 export function mat(color) {
   if (!matCache.has(color)) matCache.set(color, new THREE.MeshLambertMaterial({ color }));
   return matCache.get(color);
@@ -515,7 +613,7 @@ export function makeCobweb(rng = Math.random) {
 }
 
 // berry bush: leafy mound with BLUEBERRIES that hide while regrowing
-export function makeBerryBush(rng = Math.random) {
+export function makeBerryBush(rng = Math.random, berryColor = 0x4a6de0) {
   const g = new THREE.Group();
   for (const [x, y, z, s] of [[0, 0.35, 0, 0.55], [-0.4, 0.28, 0.15, 0.4], [0.38, 0.3, -0.1, 0.42], [0.05, 0.3, 0.4, 0.38]]) {
     const puff = sphere(s, 0x3d6b2e, 6);
@@ -525,12 +623,34 @@ export function makeBerryBush(rng = Math.random) {
   const berries = [];
   for (let i = 0; i < 7; i++) {
     const a = rng() * Math.PI * 2, r = 0.25 + rng() * 0.45;
-    const b = sphere(0.09, 0x4a6de0, 5);
+    const b = sphere(0.09, berryColor, 5);
     b.position.set(Math.cos(a) * r, 0.45 + rng() * 0.35, Math.sin(a) * r);
     g.add(b);
     berries.push(b);
   }
   g.userData.berries = berries;
+  return g;
+}
+
+// a broad-leafed jungle plant (banana-like): drooping paddles + a bloom
+export function makeJunglePlant(rng = Math.random) {
+  const g = new THREE.Group();
+  const leaves = 4 + Math.floor(rng() * 3);
+  const c = [0x2d8a34, 0x1f6b2a, 0x39a03e][Math.floor(rng() * 3)];
+  for (let i = 0; i < leaves; i++) {
+    const len = 1.0 + rng() * 0.7;
+    const leaf = box(0.34, len, 0.03, c);
+    const a = (i / leaves) * Math.PI * 2 + rng() * 0.5;
+    leaf.position.set(Math.cos(a) * 0.28, len * 0.42, Math.sin(a) * 0.28);
+    leaf.rotation.y = -a + Math.PI / 2;
+    leaf.rotation.x = 0.7 + rng() * 0.5; // droop outward
+    g.add(leaf);
+  }
+  if (rng() < 0.35) { // an occasional jungle bloom
+    const bloom = sphere(0.14, 0xd95f8a, 6);
+    bloom.position.y = 0.75;
+    g.add(bloom);
+  }
   return g;
 }
 
@@ -1678,6 +1798,98 @@ export function makeGriffinRoost(rng = Math.random) {
   return g;
 }
 
+// ---- town buildings (World-Editor placeables) ----
+export function makeTownHouse(rng = Math.random) {
+  const g = new THREE.Group();
+  const w = 3.2 + rng() * 1.2, d = 2.7 + rng() * 0.9, h = 2.0 + rng() * 0.5;
+  const wallC = [0xcbb391, 0xbfa87f, 0xd6c39b, 0xb9a184][Math.floor(rng() * 4)];
+  const walls = box(w, h, d, wallC);
+  walls.position.y = h / 2;
+  g.add(walls);
+  for (const sideZ of [-1, 1]) { // gable roof from two leaning slabs
+    const slab = box(w + 0.5, 0.14, d * 0.62, 0x8a4f3a);
+    slab.position.set(0, h + d * 0.19, sideZ * d * 0.24);
+    slab.rotation.x = -sideZ * 0.62;
+    g.add(slab);
+  }
+  const ridge = box(w + 0.55, 0.14, 0.18, 0x6e3d2c);
+  ridge.position.y = h + d * 0.35;
+  g.add(ridge);
+  const door = box(0.7, 1.3, 0.1, 0x5c4326);
+  door.position.set((rng() - 0.5) * w * 0.4, 0.65, d / 2 + 0.03);
+  g.add(door);
+  for (const wx of [-w * 0.28, w * 0.28]) {
+    const win = box(0.5, 0.5, 0.08, 0x9db4c4);
+    win.position.set(wx, h * 0.6, d / 2 + 0.03);
+    g.add(win);
+  }
+  const chimney = box(0.4, 1.1, 0.4, 0x8f8a7c);
+  chimney.position.set(w * 0.3, h + 0.8, -d * 0.15);
+  g.add(chimney);
+  return g;
+}
+
+export function makeChurch(rng = Math.random) {
+  const g = new THREE.Group();
+  const nave = box(3.6, 3.0, 6.5, 0xd6cfc0);
+  nave.position.y = 1.5;
+  g.add(nave);
+  for (const sideZ of [-1, 1]) {
+    const slab = box(4.2, 0.16, 4.0, 0x6e5a48);
+    slab.position.set(0, 3.7, sideZ * 1.35);
+    slab.rotation.x = -sideZ * 0.7;
+    g.add(slab);
+  }
+  const tower = box(2.0, 5.6, 2.0, 0xcfc8b8);
+  tower.position.set(0, 2.8, 3.6);
+  g.add(tower);
+  const spire = new THREE.Mesh(new THREE.ConeGeometry(1.6, 2.2, 4),
+    new THREE.MeshLambertMaterial({ color: 0x6e5a48 }));
+  spire.castShadow = true;
+  spire.position.set(0, 6.7, 3.6);
+  spire.rotation.y = Math.PI / 4;
+  g.add(spire);
+  const crossV = box(0.12, 0.9, 0.12, 0xe8d9a0);
+  crossV.position.set(0, 8.2, 3.6);
+  const crossH = box(0.5, 0.12, 0.12, 0xe8d9a0);
+  crossH.position.set(0, 8.35, 3.6);
+  g.add(crossV, crossH);
+  const door = box(1.0, 1.7, 0.1, 0x5c4326);
+  door.position.set(0, 0.85, 4.63);
+  g.add(door);
+  for (const zz of [-1.6, 0, 1.6]) {
+    const win = box(0.08, 1.1, 0.5, 0x89b7d8);
+    win.position.set(1.83, 1.9, zz);
+    g.add(win);
+    const win2 = win.clone();
+    win2.position.x = -1.83;
+    g.add(win2);
+  }
+  return g;
+}
+
+export function makeFountain(rng = Math.random) {
+  const g = new THREE.Group();
+  const rim = cyl(1.7, 1.8, 0.55, 0x8f8a7c, 10);
+  rim.position.y = 0.27;
+  g.add(rim);
+  const water = new THREE.Mesh(new THREE.CylinderGeometry(1.45, 1.45, 0.1, 10),
+    new THREE.MeshLambertMaterial({ color: 0x3f6f9e, transparent: true, opacity: 0.9 }));
+  water.position.y = 0.5;
+  g.add(water);
+  const column = cyl(0.22, 0.3, 1.5, 0x9a958a, 7);
+  column.position.y = 1.0;
+  g.add(column);
+  const bowl = cyl(0.62, 0.35, 0.25, 0x8f8a7c, 8);
+  bowl.position.y = 1.8;
+  g.add(bowl);
+  const jet = new THREE.Mesh(new THREE.SphereGeometry(0.16, 6, 5),
+    new THREE.MeshLambertMaterial({ color: 0x9fd8f0, transparent: true, opacity: 0.85 }));
+  jet.position.y = 2.05;
+  g.add(jet);
+  return g;
+}
+
 export function makeEnemyMesh(type) {
   switch (type) {
     case 'rabbit': return makeRabbit();
@@ -1703,6 +1915,7 @@ export function makeEnemyMesh(type) {
     case 'tribesman': return makeTribesman();
     case 'shaman': return makeShaman();
     case 'poacher': return makePoacher();
+    case 'villager': return makeMan();
     case 'thornling': return makeThornling();
     case 'treant': return makeTreant();
     case 'bogCrawler': return makeBogCrawler();
@@ -2350,6 +2563,47 @@ export function makeTree(size, biome, rng) {
   const foliageColor = biome.foliage[Math.floor(rng() * biome.foliage.length)];
   const type = pickTreeType(biome.trees, rng);
 
+  // Jungle canopy giants: tall smooth trunk with buttress roots, a wide
+  // umbrella crown, and lianas hanging off the canopy edge. Most jungle
+  // trees grow this way; the rest fall through to the normal variants.
+  if (biome.jungleFlora && type !== 'dead' && rng() < 0.85) {
+    const trunkH = (2.4 + rng() * 1.0) * scale;
+    const trunk = cyl(0.1 * scale, 0.2 * scale, trunkH, 0x6a5638, 6);
+    trunk.position.y = trunkH / 2;
+    trunk.rotation.z = (rng() - 0.5) * 0.08;
+    g.add(trunk);
+    for (let i = 0; i < 3; i++) { // buttress roots
+      const b = box(0.08 * scale, 0.5 * scale, 0.22 * scale, 0x5c4a30);
+      const a = (i / 3) * Math.PI * 2 + rng();
+      b.position.set(Math.cos(a) * 0.2 * scale, 0.22 * scale, Math.sin(a) * 0.2 * scale);
+      b.rotation.y = -a;
+      b.rotation.x = 0.35;
+      g.add(b);
+    }
+    const crownR = (1.1 + rng() * 0.5) * scale;
+    for (let i = 0; i < 2 + size; i++) { // flat umbrella crown pads
+      const c = sphere(crownR * (1 - i * 0.22), foliageColor, 7);
+      c.scale.y = 0.32;
+      c.position.set((rng() - 0.5) * 0.7 * scale, trunkH + i * 0.3 * scale, (rng() - 0.5) * 0.7 * scale);
+      g.add(c);
+    }
+    const lianas = 4 + Math.floor(rng() * 4);
+    for (let i = 0; i < lianas; i++) { // hanging lianas off the crown rim
+      const len = (1.0 + rng() * 1.5) * scale;
+      const l = cyl(0.02, 0.03, len, 0x3f7a2c, 4);
+      const a = rng() * Math.PI * 2;
+      l.position.set(Math.cos(a) * crownR * 0.8, trunkH - len / 2 + 0.1, Math.sin(a) * crownR * 0.8);
+      l.rotation.z = (rng() - 0.5) * 0.15;
+      g.add(l);
+      if (rng() < 0.5) { // a leaf tuft at the liana's tip
+        const t = sphere(0.09 * scale + 0.05, 0x4c9a34, 5);
+        t.position.set(l.position.x, trunkH - len + 0.05, l.position.z);
+        g.add(t);
+      }
+    }
+    return { mesh: g, radius: 0.3 * scale + 0.14 };
+  }
+
   if (type === 'dead') {
     const trunkH = 2.1 * scale;
     const trunk = cyl(0.09 * scale, 0.17 * scale, trunkH, 0x3f3226, 5);
@@ -2421,6 +2675,46 @@ export function makeTree(size, biome, rng) {
 }
 
 // ---------- small ground decorations (no collision) ----------
+// a wheat tuft: tall golden stalks with seed heads (editor-sown fields)
+export function makeWheatTuft(rng) {
+  const g = new THREE.Group();
+  const stalks = 5 + Math.floor(rng() * 4);
+  for (let i = 0; i < stalks; i++) {
+    const h = 0.9 + rng() * 0.4;
+    const stalk = box(0.025, h, 0.025, 0xc9a84e);
+    stalk.castShadow = false;
+    const a = rng() * Math.PI * 2, r = rng() * 0.16;
+    stalk.position.set(Math.cos(a) * r, h / 2, Math.sin(a) * r);
+    stalk.rotation.z = (rng() - 0.5) * 0.22;
+    g.add(stalk);
+    const head = box(0.055, 0.2, 0.055, 0xe6c964);
+    head.castShadow = false;
+    head.position.set(stalk.position.x + stalk.rotation.z * -h * 0.5, h + 0.08, stalk.position.z);
+    head.rotation.z = stalk.rotation.z;
+    g.add(head);
+  }
+  return g;
+}
+
+// a fern: a rosette of arched flat blades (jungle undergrowth)
+export function makeFern(rng) {
+  const g = new THREE.Group();
+  const blades = 6 + Math.floor(rng() * 4);
+  const color = [0x2f7a2e, 0x3a8a34, 0x27682a][Math.floor(rng() * 3)];
+  for (let i = 0; i < blades; i++) {
+    const len = 0.5 + rng() * 0.45;
+    const b = box(0.09, len, 0.015, color);
+    const a = (i / blades) * Math.PI * 2 + rng() * 0.4;
+    b.position.set(Math.cos(a) * 0.12, len * 0.42, Math.sin(a) * 0.12);
+    b.rotation.y = -a + Math.PI / 2;
+    b.rotation.x = 0.85 + rng() * 0.35; // arch outward
+    b.rotation.z = (rng() - 0.5) * 0.2;
+    b.castShadow = false;
+    g.add(b);
+  }
+  return g;
+}
+
 export function makeGrassTuft(color, rng) {
   const g = new THREE.Group();
   const blades = 3 + Math.floor(rng() * 3);

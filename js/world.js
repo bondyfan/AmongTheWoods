@@ -1,24 +1,34 @@
-// ---- Radial survival world ----
-// You start in a dark cave at the center; biome rings expand outward in every
-// direction. Ring barriers (boulder ridges / ring rivers with bridges) carve
-// the circle into bands with gate chokepoints. Lakes dot the wilds — the big
-// ones hide treasure islands you can only reach by boat. Trees give wood,
-// scattered rocks give stone.
+// ---- Continent survival world ----
+// You start in a dark cave inside the walled Verdant valley; seven wild
+// zones are stacked around it like the Eastern Kingdoms, and only
+// consecutive tiers share a gated border (boulder ridge or border river
+// with a bridge) — every other border is an impassable mountain wall, so
+// the journey runs the whole chain zone by zone. Lakes dot the wilds — the
+// big ones hide treasure islands you can only reach by boat. Trees give
+// wood, scattered rocks give stone.
 
 import * as THREE from 'three';
-import { WORLD, BIOMES, biomeAt, radiusOf } from './config.js';
+import { WORLD, BIOMES, biomeAt, biomeIndexAt, radiusOf, zoneInfoAt,
+         ZONE_LINES, wobX, wobZ, hubEdgeR, coastRAt, coastDistAt,
+         HARBOR_SPECS } from './config.js';
 import { makeTree, makeRock, makeGrassTuft, makeFlower, makeMushroom, makeBush,
          makeLog, makeBoulder, makeBridge, makeCampfire, makeStalagmite,
          makeBerryBush, makeShrine, makeMonolith, makeCrypt, makeBlacksmith, makeCobweb,
          makeFarm, makeTrader, makeBeehive, makeBeehiveBig, makeCocoon, makeGlade, makeGraveyardRuin,
          makeCursedStatue, makeVillage, makeRaceFlag, makeNest, makeLilypad,
          makeTemple, makeLianaPole, makeBonfire, makeSummitCairn, makeCactus,
-         makeLairEntrance, makeCage } from './models.js';
+         makeLairEntrance, makeCage, makeFern, makeTownHouse, makeChurch,
+         makeFountain, makeWheatTuft, makeJunglePlant } from './models.js';
+import { makePier } from './ship.js';
+import { bakeGroup, bakeAccumulator, buildBakedMesh, bakeAt, BAKED_MAT,
+         isSharedMaterial } from './models.js';
+import { worldPatch } from './worldpatch.js';
 import { audio } from './audio.js';
 
 const CHUNK = 40;
 const VIEW_RADIUS = 3;   // chunks around the player kept alive
-const RING_HALF = { ridge: 2.2, river: 2.7 };
+// half-width of the border barrier bands (the Frostwall is a fat ridge)
+const BORDER_HALF = { ridge: 2.2, river: 2.7, wall: 2.8 };
 
 // Deterministic per-chunk RNG so the forest is identical for every client —
 // a multiplayer guest can rebuild the exact same world from the seed alone.
@@ -38,6 +48,24 @@ export function latticeHash(ix, iz, seed) {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 const smooth = (t) => t * t * (3 - 2 * t);
+const _gcTmp = new THREE.Color(); // scratches for the hot per-vertex color path
+const _gcTmp2 = new THREE.Color();
+
+// hypsometric tint for the editor's elevation view: deep blue → green →
+// yellow → orange → white with altitude
+const ELEV_STOPS = [[-6, 0x1d3a5f], [-0.8, 0x3f6f9e], [0.2, 0x3f7a4a], [5, 0x9ac25a],
+  [11, 0xe0c95e], [18, 0xd08a4a], [26, 0xb0524a], [36, 0xffffff]];
+const _elevA = new THREE.Color(), _elevB = new THREE.Color();
+function elevationColor(h) {
+  for (let i = 1; i < ELEV_STOPS.length; i++) {
+    if (h <= ELEV_STOPS[i][0] || i === ELEV_STOPS.length - 1) {
+      const [h0, c0] = ELEV_STOPS[i - 1], [h1, c1] = ELEV_STOPS[i];
+      const t = Math.max(0, Math.min(1, (h - h0) / (h1 - h0)));
+      return _elevA.set(c0).lerp(_elevB.set(c1), t);
+    }
+  }
+  return _elevA.set(0xffffff);
+}
 
 function valueNoise(x, z, scale, seed) {
   const fx = x / scale, fz = z / scale;
@@ -47,14 +75,6 @@ function valueNoise(x, z, scale, seed) {
   const c = latticeHash(ix, iz + 1, seed), d = latticeHash(ix + 1, iz + 1, seed);
   return (a + (b - a) * tx) + ((c + (d - c) * tx) - (a + (b - a) * tx)) * tz;
 }
-
-// smallest absolute angle difference
-const angDiff = (a, b) => {
-  let d = (a - b) % (Math.PI * 2);
-  if (d > Math.PI) d -= Math.PI * 2;
-  if (d < -Math.PI) d += Math.PI * 2;
-  return Math.abs(d);
-};
 
 const LAKE_REGION = 220; // deterministic lakes are generated per region cell
 const BERRY_REGROW = 600; // seconds until a harvested bush bears fruit again
@@ -149,6 +169,7 @@ export class World {
     this.pois = [];              // landmarks: shrines / monoliths / crypts
     this.onPoiSpawned = null;    // main hooks this to post crypt guards
     this.smiths = [];            // wandering blacksmiths — forge gear at them
+    this._patchObstacles = new Set(); // building obstacles already pushed
     this._genRings();
     this._genLakes();
     this._genPois();
@@ -157,6 +178,7 @@ export class World {
     this._buildGround();
     this._buildRingRivers();
     this._buildCave();
+    this._buildHarbors();
   }
 
   _addStatic(mesh) {
@@ -167,9 +189,12 @@ export class World {
 
   // Remove everything this world put into the scene (mode/world swap).
   dispose() {
-    for (const m of this._statics) this.scene.remove(m);
+    for (const m of this._statics) { this.scene.remove(m); this._disposeGroup(m); }
     this._statics = [];
-    for (const chunk of this.chunks.values()) this.scene.remove(chunk.group);
+    for (const chunk of this.chunks.values()) {
+      this.scene.remove(chunk.group);
+      this._disposeGroup(chunk.group);
+    }
     this.chunks.clear();
     for (const f of this.fallingTrees) f.mesh.parent?.remove(f.mesh);
     this.fallingTrees = [];
@@ -196,6 +221,7 @@ export class World {
     this._buildGround();
     this._buildRingRivers();
     this._buildCave();
+    this._buildHarbors();
   }
 
   // ---- PvP arena (unchanged: a sand circle ringed by boulders, off-world) ----
@@ -229,34 +255,31 @@ export class World {
     if (this._arena) { this.scene.remove(this._arena); this._arena = null; }
   }
 
-  // 0..1: how deep inside the (flat) Murky Swamp ring this radius is —
-  // blends over 40 m so the swamp floor meets its neighbours smoothly
-  _swampFlatK(r) {
-    const d = Math.min(r - BIOMES[2].rMax, BIOMES[3].rMax - r);
-    return Math.max(0, Math.min(1, d / 40));
+  // 0..1: how deep inside the (flat) Murky Swamp this point is — blends
+  // over 40 m so the bog floor meets its neighbour zones smoothly
+  _swampFlatK(zi) {
+    return zi.idx === 3 ? Math.min(1, zi.borderDist / 40) : 0;
   }
 
-  // 0..1: how deep inside the Highlands ring — its massifs grow EXTREME
-  _highlandsK(r) {
-    const d = Math.min(r - BIOMES[3].rMax, BIOMES[4].rMax - r);
-    return Math.max(0, Math.min(1, d / 50));
+  // 0..1: how deep inside the Highlands — its massifs grow EXTREME
+  _highlandsK(zi) {
+    return zi.idx === 6 ? Math.min(1, zi.borderDist / 50) : 0;
   }
 
   // How strongly (0..1) a mountain massif rises here — masked low-frequency
-  // noise, kept away from ring barriers so gates and bridges stay usable.
+  // noise, kept away from zone borders so gates and bridges stay usable.
   // In the Highlands the mask opens wide (mountains everywhere); in the
   // swamp it closes completely (dead flat bog).
-  _mountainK(x, z, r = radiusOf(x, z)) {
-    if (this._swampFlatK(r) > 0) return 0; // the swamp has NO hills or mountains
-    const thr = 0.62 - 0.17 * this._highlandsK(r);
+  _mountainK(x, z, zi = zoneInfoAt(x, z)) {
+    if (zi.idx === 3) return 0; // the swamp has NO hills or mountains
+    const thr = 0.62 - 0.17 * this._highlandsK(zi);
     const m = valueNoise(x, z, 420, this.seed + 57);
     if (m <= thr) return 0;
-    // fade massifs out SMOOTHLY near ring barriers (a hard cutoff would
-    // leave impassable vertical walls circling every ring)
+    // fade massifs out SMOOTHLY near zone borders (a hard cutoff would
+    // leave impassable vertical walls along every seam)
     let fade = 1;
-    for (const w of this.rings || []) {
-      const d = Math.abs(r - w.r);
-      if (d < 55) fade = Math.min(fade, Math.max(0, (d - 25) / 30));
+    if (this._hasBorders && zi.borderDist < 55) {
+      fade = Math.max(0, (zi.borderDist - 25) / 30);
     }
     if (fade <= 0) return 0;
     const k = (m - thr) / (1 - thr);
@@ -274,18 +297,18 @@ export class World {
   // Terrain height — detail bumps + long rolling hills + occasional mountain
   // massifs with rugged tops; flattened around the cave & camp.
   // raw terrain height, before lake basins are carved out
-  _terrainH(x, z) {
+  _terrainH(x, z, zi = zoneInfoAt(x, z)) {
     let h = valueNoise(x, z, 30, this.seed) * 1.9
           + valueNoise(x, z, 10, this.seed + 7) * 0.55
           - 1.2;
     const r = radiusOf(x, z);
     h += (valueNoise(x, z, 160, this.seed + 31) - 0.5) * 5;
     // the Murky Swamp is dead flat — only faint ripples in the peat
-    const flat = this._swampFlatK(r);
+    const flat = this._swampFlatK(zi);
     if (flat > 0) h *= 1 - 0.88 * flat;
-    const mk = this._mountainK(x, z, r);
+    const mk = this._mountainK(x, z, zi);
     if (mk > 0) {
-      const highK = this._highlandsK(r); // Highlands: EXTREMELY tall massifs
+      const highK = this._highlandsK(zi); // Highlands: EXTREMELY tall massifs
       const detail = valueNoise(x, z, 55, this.seed + 91);
       const amp = (20 + detail * 12) * (1 + 2.0 * highK);
       let m = mk * amp;
@@ -311,9 +334,10 @@ export class World {
   // ---- Murky Swamp zoning: ~80% open black water (BOAT country), the rest
   // mud banks and rare dry hummocks. Paths, POIs and smiths sit on carved
   // dry ground so the world stays traversable on foot — barely. ----
-  swampZone(x, z) {
-    const r = radiusOf(x, z);
-    if (r <= BIOMES[2].rMax || r > BIOMES[3].rMax) return null; // not in the swamp ring
+  swampZone(x, z, zi = null) {
+    zi ??= zoneInfoAt(x, z);
+    if (zi.idx !== 3) return null;                               // not in the swamp
+    if (zi.borderDist < 14) return 'mud';                        // passable border band
     if (this.pathDistance(x, z) < 4) return 'dry';               // a NARROW causeway
     if (this._dryIslands?.some(d => Math.hypot(d.x - x, d.z - z) < d.r)) return 'dry';
     // measured on the real noise field: <0.70 ≈ 82% water, mud ≈ 10%, dry ≈ 8%
@@ -341,8 +365,9 @@ export class World {
   // lakes carve a flat basin: without this a hill next to (or under) a lake
   // buries the water plane under the terrain
   heightAt(x, z) {
-    let h = this._terrainH(x, z);
-    const sz = this.swampZone(x, z);
+    const zi = zoneInfoAt(x, z);
+    let h = this._terrainH(x, z, zi);
+    const sz = this.swampZone(x, z, zi);
     if (sz === 'water') h -= 0.9;      // open water sits in a shallow basin
     else if (sz === 'mud') h -= 0.35;  // mud squelches a little lower
     for (const lake of this.lakesNear(x, z)) {
@@ -357,106 +382,362 @@ export class World {
         h = lake.bed * (1 - k) + h * k;
       }
     }
+    // the island falls into the sea past the coastline: a short beach, then
+    // a seabed shelf (the ocean plane floats at y = -0.85)
+    const cd = coastDistAt(x, z);
+    if (cd < 20) {
+      // beach → wadeable shallows shelf…
+      const k = Math.max(0, Math.min(1, (20 - cd) / 50));
+      h = h * (1 - k) - 1.6 * k;
+    }
+    if (cd < -30) {
+      // …then the bottom drops to the deep (the ocean is ~6 m deep)
+      const k2 = Math.max(0, Math.min(1, (-30 - cd) / 60));
+      h = h * (1 - k2) - 7 * k2;
+    }
+    // harbors rest on a gentle flattened apron — the pier connects to the
+    // shore without a step or a cliff
+    for (const hb of this.harbors ?? []) {
+      const hd = Math.hypot(x - hb.x, z - hb.z);
+      if (hd < 24) {
+        const k = smooth(1 - hd / 24);
+        h = h * (1 - k) + 0.5 * k;
+      }
+    }
+    // World-Editor overrides: sculpted height deltas; painted shallow water
+    // sits in a hand-dug basin, painted DEEP water in a 6 m pit
+    h += worldPatch.heightAt(x, z);
+    const pw = worldPatch.waterAt(x, z);
+    if (pw === 1) h -= 1.1;
+    else if (pw === 3) h -= 6;
     return h;
   }
 
-  // ---- ring barriers at the biome edges: ridge (boulders + gates) or river
-  // (water ring + bridges). Bigger rings get more gates. ----
+  // ---- zone borders: every border line is walked into a dense list of
+  // SAMPLES (~3 m apart), each typed by probing what actually lies on its
+  // two sides — a consecutive-tier pair gets its ridge/river type, anything
+  // else becomes an impassable wall, and stretches where both sides match
+  // (the Desert west wrap, the inside of the valley) get no barrier at all.
+  // Collision, water, boulders and the minimap all read these same samples,
+  // so they always agree with biomeIndexAt. Gates are the only crossings,
+  // and only consecutive tiers get one. ----
   _genRings() {
+    this.rings = [];        // legacy: nothing is radial anymore
+    this.edges = [];        // legacy (MOBA override compat)
+    this._hasBorders = true;
     const rng = mulberry32(this.seed ^ 0x5eed);
-    const radii = BIOMES.slice(0, -1).map(b => b.rMax);
-    const MIN_SEP = Math.PI * 2 * 0.1; // gates at least 10% of the circle apart
-    this.rings = radii.map((r, i) => {
-      const type = i % 2 === 0 ? 'ridge' : 'river';
-      const gaps = [];
-      // 2–5 randomly placed exits per ring (huge outer rings get a few more
-      // so the trek along the wall never becomes a chore)
-      const count = Math.max(2 + Math.floor(rng() * 4), Math.round(r / 900));
-      for (let g = 0; g < count; g++) {
-        let a = rng() * Math.PI * 2;
-        // keep exits spread out: re-roll while too close to an earlier gate
-        for (let tries = 0; tries < 20
-             && gaps.some(gap => angDiff(a, gap.a) < MIN_SEP); tries++) {
-          a = rng() * Math.PI * 2;
-        }
-        if (gaps.some(gap => angDiff(a, gap.a) < MIN_SEP)) continue;
-        const width = (type === 'river' ? 9 : 15) + rng() * 8; // meters of opening
-        gaps.push({ a, w: width / r });                         // width in radians
+
+    // bisection solvers against the wobble fields (both are monotone)
+    const solveZ = (x, c) => {
+      let lo = c - 170, hi = c + 170;
+      for (let i = 0; i < 20; i++) {
+        const m = (lo + hi) / 2;
+        if (m + wobZ(x, m) < c) lo = m; else hi = m;
       }
-      return { r, type, gaps };
+      return (lo + hi) / 2;
+    };
+    const solveX = (z, c) => {
+      let lo = c - 170, hi = c + 170;
+      for (let i = 0; i < 20; i++) {
+        const m = (lo + hi) / 2;
+        if (m + wobX(m, z) < c) lo = m; else hi = m;
+      }
+      return (lo + hi) / 2;
+    };
+    const solveBlob = (a) => {
+      const sa = Math.sin(a), ca = Math.cos(a);
+      let lo = WORLD.hubR - 140, hi = WORLD.hubR + 140;
+      for (let i = 0; i < 18; i++) {
+        const m = (lo + hi) / 2;
+        if (m - hubEdgeR(sa * m, ca * m) < 0) lo = m; else hi = m;
+      }
+      const r0 = (lo + hi) / 2;
+      return { x: sa * r0, z: ca * r0 };
+    };
+
+    const PAIR_TYPE = { '0,1': 'ridge', '1,2': 'river', '2,3': 'ridge',
+      '3,4': 'river', '4,5': 'ridge', '5,6': 'river', '6,7': 'ridge' };
+    const R2 = WORLD.radius - 6;
+    this.borderSamples = [];
+    const addSample = (x, z, nx, nz) => {
+      if (Math.hypot(x, z) > R2) return;
+      if (coastDistAt(x, z) < -85) return; // barriers reach past the swimmable band (hard swim limit is −80)
+      const a = zoneInfoAt(x - nx * 7, z - nz * 7, true).idx;
+      const b = zoneInfoAt(x + nx * 7, z + nz * 7, true).idx;
+      if (a === b) return; // not a real border here
+      const pair = Math.min(a, b) + ',' + Math.max(a, b);
+      const type = Math.abs(a - b) === 1 && PAIR_TYPE[pair] ? PAIR_TYPE[pair] : 'wall';
+      // biomes flow into each other freely now — only the border RIVERS
+      // stay, as natural geography (bridges at the crossings, swimmable)
+      if (type !== 'river') return;
+      this.borderSamples.push({ x, z, nx, nz, type, pair });
+    };
+    for (const L of ZONE_LINES) {
+      if (L.axis === 'z') {
+        for (let x = -R2; x <= R2; x += 3) addSample(x, solveZ(x, L.c), 0, 1);
+      } else {
+        for (let z = L.lo - 150; z <= L.hi + 150; z += 3) addSample(solveX(z, L.c), z, 1, 0);
+      }
+    }
+    // the valley rim
+    for (let a = 0; a < Math.PI * 2; a += 2.2 / WORLD.hubR) {
+      const p = solveBlob(a);
+      const rr = Math.hypot(p.x, p.z) || 1;
+      addSample(p.x, p.z, p.x / rr, p.z / rr);
+    }
+
+    // bucket the samples for cheap runtime lookups (collision & water)
+    this._borderCell = 60;
+    this._borderBuckets = new Map();
+    this.borderSamples.forEach((s, i) => {
+      const k = Math.floor(s.x / this._borderCell) + ',' + Math.floor(s.z / this._borderCell);
+      if (!this._borderBuckets.has(k)) this._borderBuckets.set(k, []);
+      this._borderBuckets.get(k).push(i);
     });
+
+    // ---- gates: the ONLY crossings, one consecutive-tier pair each ----
+    this.gates = [];
+    const addGate = (x, z, pair, across) => this.gates.push({
+      x, z, w: PAIR_TYPE[pair] === 'river' ? 6 : 8.5, pair, across });
+    // valley gate: on the south-west arc, opening into the Desert
+    for (let t = 0; t < 14; t++) {
+      const a = -(0.35 + rng() * 0.85);
+      const p = solveBlob(a);
+      const rr = Math.hypot(p.x, p.z) || 1;
+      if (zoneInfoAt(p.x * (1 + 12 / rr), p.z * (1 + 12 / rr), true).idx !== 1) continue;
+      addGate(p.x, p.z, '0,1', { x: p.x / rr, z: p.z / rr });
+      break;
+    }
+    // border-line gates; dir points from zone i INTO zone i+1
+    const GATE_SPECS = [
+      { pair: '1,2', axis: 'z', c: 1480, lo: -1500, hi: -280, dir: { x: 0, z: 1 } },
+      { pair: '2,3', axis: 'z', c: 1480, lo: 280, hi: 1500, dir: { x: 0, z: -1 } },
+      { pair: '3,4', axis: 'z', c: 630, lo: 720, hi: 1700, dir: { x: 0, z: -1 } },
+      { pair: '4,5', axis: 'z', c: -520, lo: 720, hi: 1700, dir: { x: 0, z: -1 } },
+      { pair: '5,6', axis: 'x', c: -160, lo: -1350, hi: -660, dir: { x: -1, z: 0 } },
+      { pair: '6,7', axis: 'z', c: -1480, lo: -1750, hi: -380, dir: { x: 0, z: -1 } },
+    ];
+    for (const spec of GATE_SPECS) {
+      const placed = [];
+      for (let g = 0; g < 2; g++) {
+        for (let t = 0; t < 12; t++) {
+          const p = spec.lo + rng() * (spec.hi - spec.lo);
+          if (placed.some(q => Math.abs(q - p) < 330)) continue;
+          const gx = spec.axis === 'z' ? p : solveX(p, spec.c);
+          const gz = spec.axis === 'z' ? solveZ(p, spec.c) : p;
+          const a = zoneInfoAt(gx - spec.dir.x * 12, gz - spec.dir.z * 12, true).idx;
+          const b = zoneInfoAt(gx + spec.dir.x * 12, gz + spec.dir.z * 12, true).idx;
+          if (Math.min(a, b) + ',' + Math.max(a, b) !== spec.pair) continue;
+          if (coastDistAt(gx, gz) < 60) continue; // keep crossings off the beach
+          placed.push(p);
+          addGate(gx, gz, spec.pair, spec.dir);
+          break;
+        }
+      }
+    }
+    this.hubGates = this.gates.filter(g => g.pair === '0,1'); // compat
+    // only river crossings matter on the map now (walls are gone)
+    this.gateList = this.gates
+      .filter(g => PAIR_TYPE[g.pair] === 'river')
+      .map(g => ({ x: g.x, z: g.z }));
+
+    // ---- harbors: the ship line's two piers, resolved against the real
+    // coastline (nudged along the shore until they sit in the right zone) ----
+    this.harbors = [];
+    for (const spec of HARBOR_SPECS) {
+      for (let t = 0; t < 30; t++) {
+        const a = spec.a + (t % 2 ? -1 : 1) * 0.05 * Math.ceil(t / 2);
+        const sa = Math.sin(a), ca = Math.cos(a);
+        const cr = coastRAt(sa * 2000, ca * 2000);
+        const hx = sa * (cr - 8), hz = ca * (cr - 8);
+        if (zoneInfoAt(hx, hz, true).idx !== spec.zone) continue;
+        this.harbors.push({ id: spec.id, name: spec.name, x: hx, z: hz, outX: sa, outZ: ca });
+        break;
+      }
+    }
+
+    // minimap polylines: contiguous same-type runs of decimated samples
+    this.borderLines = [];
+    let run = null, lastS = null, lastPt = null;
+    for (const s of this.borderSamples) {
+      if (!run || !lastS || s.type !== run.type
+          || Math.hypot(s.x - lastS.x, s.z - lastS.z) > 30) {
+        run = { type: s.type, pts: [{ x: s.x, z: s.z }] };
+        this.borderLines.push(run);
+        lastPt = s;
+      } else if (Math.hypot(s.x - lastPt.x, s.z - lastPt.z) > 55) {
+        run.pts.push({ x: s.x, z: s.z });
+        lastPt = s;
+      }
+      lastS = s;
+    }
+    this.borderLines = this.borderLines.filter(bl => bl.pts.length >= 2);
   }
 
-  // ---- winding field paths: from the base out through a gate of every
-  // ring, gate to gate, so following the trail always leads you deeper ----
+  // Nearest blocked border sample at pos (null when clear): gates punch an
+  // open hole, boats cross border rivers anywhere, and boulder walls open
+  // where a road runs (rivers never do — trails only cross at bridges).
+  // Returns the pushed-out position.
+  _borderHit(pos, pr, opts = {}) {
+    if (!this._hasBorders) return null;
+    const C = this._borderCell;
+    const cx = Math.floor(pos.x / C), cz = Math.floor(pos.z / C);
+    let best = null, bestD = BORDER_HALF.wall + pr;
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+      const list = this._borderBuckets.get((cx + dx) + ',' + (cz + dz));
+      if (!list) continue;
+      for (const i of list) {
+        const s = this.borderSamples[i];
+        if ((opts.boat || opts.swimmer) && s.type === 'river') continue;
+        const d = Math.hypot(pos.x - s.x, pos.z - s.z);
+        if (d >= BORDER_HALF[s.type] + pr || d >= bestD) continue;
+        bestD = d; best = s;
+      }
+    }
+    if (!best) return null;
+    if (this.gates.some(g => Math.hypot(pos.x - g.x, pos.z - g.z) < g.w + pr)) return null;
+    if (best.type !== 'river' && this.pathDistance(pos.x, pos.z) < 4) return null;
+    const side = (pos.x - best.x) * best.nx + (pos.z - best.z) * best.nz >= 0 ? 1 : -1;
+    const push = BORDER_HALF[best.type] + pr;
+    return { x: best.x + best.nx * side * push, z: best.z + best.nz * side * push };
+  }
+
+  // ---- winding field paths: the main road leaves camp through the
+  // homeland gate of the Desert, crosses every wedge seam at its low gate
+  // in tier order, and ends at the Frozen summit. Side trails run from camp
+  // to the other homeland gates, and every zone forks toward its boss lair
+  // plus one red-herring dead end. ----
   _genPaths() {
     this.pathPts = [];
     this.branches = [];       // fork spurs: { kind:'lair'|'deadend', pts:[...] }
     this._pathBuckets = new Map();
     this._pathSegs = [];      // every walkable segment (main road + branches)
-    if (!this.rings?.length) return;
+    if (!this.gates?.length) return;
     const rng = mulberry32(this.seed ^ 0xf1e1d);
 
-    // A gently-meandering trail between two (angle, radius) endpoints, built in
-    // POLAR space so it always sweeps AROUND the map rather than cutting a
-    // straight chord back through the center. Returns points i=1..n (the far
-    // endpoint is hit dead-on because the meander fades to 0 at both ends).
-    const trail = (sA, sR, eA, eR, meanderAmp) => {
-      let dA = eA - sA;
-      while (dA > Math.PI) dA -= Math.PI * 2;
-      while (dA < -Math.PI) dA += Math.PI * 2;
-      const arcLen = Math.abs(dA) * (sR + eR) * 0.5;
-      const dist = Math.hypot(arcLen, eR - sR);
+    // A gently-meandering trail between two points: straight line plus a
+    // perpendicular sine sway that fades to 0 at both ends, so every leg
+    // hits its endpoint dead-on.
+    const trail = (sx, sz, ex, ez, meanderAmp) => {
+      const dx = ex - sx, dz = ez - sz;
+      const dist = Math.hypot(dx, dz) || 1;
       const n = Math.max(4, Math.ceil(dist / 22));
       const waves = 2 + Math.floor(rng() * 3), phase = rng() * Math.PI * 2;
       const amp = Math.min(meanderAmp, dist * 0.06);
+      const px = -dz / dist, pz = dx / dist;
       const out = [];
       for (let i = 1; i <= n; i++) {
         const t = i / n, fade = Math.sin(t * Math.PI);
         const off = Math.sin(t * Math.PI * waves + phase) * amp * fade;
-        const a = sA + dA * t, r = sR + (eR - sR) * t + off;
-        out.push({ x: Math.sin(a) * r, z: Math.cos(a) * r });
+        out.push({ x: sx + dx * t + px * off, z: sz + dz * t + pz * off });
       }
       return out;
     };
 
-    // gates store a as atan2(x, z) → world pos is (r sin a, r cos a)
     let cur = { x: 0, z: 26 };
-    let curA = Math.atan2(cur.x, cur.z);
-    const pts = [{ x: cur.x, z: cur.z }];
-    for (let i = 0; i < this.rings.length; i++) {
-      const ring = this.rings[i];
-      if (!ring.gaps.length) break;
-      let gate = ring.gaps[0];
-      for (const g of ring.gaps) if (angDiff(g.a, curA) < angDiff(gate.a, curA)) gate = g;
-      const startR = Math.hypot(cur.x, cur.z) || 1;
+    const pts = [{ ...cur }];
+    const pushLeg = (to, amp = 45) => {
+      pts.push(...trail(cur.x, cur.z, to.x, to.z, amp));
+      cur = { x: to.x, z: to.z };
+    };
+    const gateOf = (pair) => this.gates.find(g => g.pair === pair);
 
-      // From the 2nd biome onward (i >= 1), the entrance opens onto a 3-WAY
-      // FORK: the main road pushes on to the next gate, a spur runs to this
-      // biome's boss lair, and a dead-end trail wanders off to the far side.
-      if (i >= 1) {
-        const lair = this.pois.find(p => p.type === 'lair' && p.ring === i);
-        if (lair) {
-          const lA = Math.atan2(lair.x, lair.z), lR = Math.hypot(lair.x, lair.z) || 1;
-          this.branches.push({ kind: 'lair',
-            pts: [{ x: cur.x, z: cur.z }, ...trail(curA, startR, lA, lR, 40)] });
-        }
-        // a red-herring spur: opposite side from the NEXT gate, ending partway
-        // into the biome at nothing in particular
-        const deadA = gate.a + Math.PI + (rng() - 0.5) * 0.7;
-        const deadR = startR + (ring.r - startR) * (0.4 + rng() * 0.25);
-        this.branches.push({ kind: 'deadend',
-          pts: [{ x: cur.x, z: cur.z }, ...trail(curA, startR, deadA, deadR, 60)] });
+    // zone hearts: where the road pauses inside each country before pushing
+    // on toward the next crossing (nominal spots, jittered per seed)
+    const HEARTS = [null, [-1150, 990], [-280, 1870], [1100, 1050],
+      [1370, 60], [720, -990], [-1050, -990]];
+    const hearts = [null];
+    for (let i = 1; i <= 6; i++) {
+      let h = { x: HEARTS[i][0], z: HEARTS[i][1] };
+      for (let t = 0; t < 6; t++) {
+        const c = { x: HEARTS[i][0] + (rng() - 0.5) * 280,
+                    z: HEARTS[i][1] + (rng() - 0.5) * 280 };
+        if (zoneInfoAt(c.x, c.z, true).idx === i) { h = c; break; }
       }
+      hearts.push(h);
+    }
 
-      // main road: sweep on to this ring's gate, then step just past it
-      pts.push(...trail(curA, startR, gate.a, ring.r, 50));
-      curA = gate.a;
-      const outR = ring.r + 30;
-      cur = { x: Math.sin(gate.a) * outR, z: Math.cos(gate.a) * outR };
-      pts.push({ x: cur.x, z: cur.z });
+    // main road: camp → valley gate → Desert heart → 1|2 gate → Dark heart
+    // → … → Jungle heart → 6|7 gate → bonfires → the summit cairn. After
+    // every crossing the road steps FIRMLY into the next zone before
+    // turning: the borders sway ±110 m, and without the step the road could
+    // dip back into a border river just past its bridge. Branch forks start
+    // at these step points (they lie on the main road).
+    const entered = [null];
+    // approach every gate head-on: a waypoint 140 m before and after the
+    // crossing keeps the road perpendicular to the border, so it only
+    // touches the barrier band at the gate (bridge) itself
+    const step = (g, s) => ({ x: g.x + g.across.x * 110 * s, z: g.z + g.across.z * 110 * s });
+    const crossGate = (g, amp) => {
+      pushLeg(step(g, -1), amp);
+      pushLeg(g, 5);
+      pushLeg(step(g, 1), 5);
+    };
+    const g01 = gateOf('0,1');
+    if (g01) crossGate(g01, 15);
+    entered[1] = { ...cur };
+    for (let i = 1; i <= 6; i++) {
+      pushLeg(hearts[i], 60);
+      const gate = gateOf(i + ',' + (i + 1));
+      if (!gate) break;
+      crossGate(gate, 45);
+      entered[i + 1] = { ...cur };
+    }
+    // …then up the Frozen Peak: bonfire, bonfire, summit cairn
+    for (const p of this.pois.filter(p => p.ring === 7
+        && (p.type === 'bonfire' || p.type === 'summit'))) {
+      pushLeg(p, 30);
     }
     this.pathPts = pts;
+
+    // a trail that never breaches a border: re-roll the meander if a bend
+    // dips into a river or wanders across a wobbled zone line (a trail
+    // through a wall would OPEN it — roads part boulder barriers)
+    const safeTrail = (sx, sz, ex, ez, amp, zone = null) => {
+      let best = null;
+      for (let t = 0; t < 5; t++) {
+        const cand = trail(sx, sz, ex, ez, amp);
+        const wet = cand.some(p => this._borderRiverAt(p.x, p.z));
+        const strays = zone != null
+          && cand.some(p => zoneInfoAt(p.x, p.z, true).idx !== zone);
+        if (!wet && !strays) return cand;
+        best = cand;
+        amp *= 0.5;
+      }
+      return best;
+    };
+    // per zone: the entrance opens onto a 3-WAY FORK — the main road pushes
+    // on, a spur runs to the boss lair, and a dead end wanders off nowhere
+    for (let i = 1; i <= 7; i++) {
+      const from = entered[i];
+      if (!from) break;
+      const lair = this.pois.find(p => p.type === 'lair' && p.ring === i);
+      if (lair) {
+        this.branches.push({ kind: 'lair',
+          pts: [{ ...from }, ...safeTrail(from.x, from.z, lair.x, lair.z, 40, i)] });
+      }
+      const dead = this._randPointInZone(rng, i, 80);
+      if (dead) {
+        this.branches.push({ kind: 'deadend',
+          pts: [{ ...from }, ...safeTrail(from.x, from.z, dead.x, dead.z, 60, i)] });
+      }
+    }
+    // a couple of valley strolls — short trails to nowhere around home
+    for (let i = 0; i < 2; i++) {
+      const dead = this._randPointInZone(rng, 0, 40);
+      if (dead) {
+        this.branches.push({ kind: 'deadend',
+          pts: [{ x: 0, z: 26 }, ...trail(0, 26, dead.x, dead.z, 30)] });
+      }
+    }
+    // harbor spurs: a trail from each harbor's country down to its pier
+    for (const h of this.harbors ?? []) {
+      const from = h.id === 'jungle' ? hearts[2] : entered[7];
+      if (!from) continue;
+      const base = { x: h.x - h.outX * 10, z: h.z - h.outZ * 10 };
+      this.branches.push({ kind: 'deadend',
+        pts: [{ ...from }, ...safeTrail(from.x, from.z, base.x, base.z, 40, h.id === 'jungle' ? 2 : 7)] });
+    }
 
     // every trail (main road + all fork branches) is walkable dry ground, so
     // bucket ALL their segments on an 80 m grid for a cheap pathDistance()
@@ -482,6 +763,8 @@ export class World {
   }
 
   pathDistance(x, z) {
+    if (worldPatch.pathAt(x, z)) return 0;      // World-Editor painted road
+    if (worldPatch.townRoadAt?.(x, z)) return 0; // auto lanes between buildings
     if (!this._pathBuckets?.size) return Infinity;
     const segs = this._pathBuckets.get(
       Math.floor(x / this._pathCellB) + ',' + Math.floor(z / this._pathCellB));
@@ -501,86 +784,108 @@ export class World {
   // ---- lakes are generated lazily per region cell (the world is huge) ----
   _genLakes() {} // kept for subclass overrides (MOBA disables lakes)
 
-  // ---- landmarks: a handful of seeded POIs per biome ring. Shrines bless,
-  // monoliths hoard resources, crypts hide treasure behind a guard pack. ----
+  // Rough sampling box per zone (rejection-checked against zoneInfoAt, so
+  // the wobbled reality always wins). Zone 0 samples radially in the valley.
+  static ZONE_BOX = {
+    1: [-1980, -140, -440, 1400],   // Desert (wraps up the west flank)
+    2: [-1540, 1540, 1570, 2500],   // Jungle — the southern lobe
+    3: [140, 1980, 720, 1400],      // Murky Swamp
+    4: [850, 2200, -440, 550],      // Dark Forest
+    5: [-80, 1870, -1400, -600],    // Haunted Forest
+    6: [-1980, -250, -1400, -600],  // Highlands
+    7: [-1540, 1540, -2500, -1570], // Frozen Peak
+  };
+
+  // random point well inside a zone (away from its borders); null if unlucky
+  _randPointInZone(rng, zone, margin = 60, tries = 16) {
+    const box = World.ZONE_BOX[zone];
+    for (let t = 0; t < tries; t++) {
+      let x, z;
+      if (zone === 0) {
+        const a = rng() * Math.PI * 2, r = 120 + rng() * (WORLD.hubR - 280);
+        x = Math.sin(a) * r; z = Math.cos(a) * r;
+      } else {
+        x = box[0] + rng() * (box[1] - box[0]);
+        z = box[2] + rng() * (box[3] - box[2]);
+      }
+      if (coastDistAt(x, z) < margin + 25) continue; // never in the surf
+      const zi = zoneInfoAt(x, z, true);
+      if (zi.idx !== zone || zi.borderDist < margin) continue;
+      return { x, z };
+    }
+    return null;
+  }
+
+  // ---- landmarks: a handful of seeded POIs per zone. Shrines bless,
+  // monoliths hoard resources, crypts hide treasure behind a guard pack.
+  // (poi.ring is the ZONE index — the name survives from the ring era.) ----
   _genPois() {
     const rng = mulberry32(this.seed ^ 0x9013);
     this.pois = [];
-    this._dryIslands = []; // carved dry pads in the swamp ring (POIs, smiths)
-    const types = ['shrine', 'monolith', 'crypt'];
+    this._dryIslands = []; // carved dry pads in the swamp (POIs, smiths)
     let id = 1;
-    for (let ring = 0; ring < BIOMES.length; ring++) {
-      const rMin = ring === 0 ? 130 : BIOMES[ring - 1].rMax + 70;
-      const rMax = Math.min(BIOMES[ring].rMax - 70, WORLD.radius - 120);
-      if (rMax <= rMin) continue;
-      const count = ring === 0 ? 2 : 3;
+
+    // random point well inside a zone, away from borders / lakes / others
+    const sample = (zone, { margin = 60, minPoi = 0 } = {}) => {
+      for (let tries = 0; tries < 20; tries++) {
+        const p = this._randPointInZone(rng, zone, zone === 0 ? Math.min(margin, 40) : margin);
+        if (!p) continue;
+        if (this.lakesNear(p.x, p.z).some(l => Math.hypot(p.x - l.x, p.z - l.z) < l.r + 10)) continue;
+        if (minPoi && this.pois.some(pp => Math.hypot(pp.x - p.x, pp.z - p.z) < minPoi)) continue;
+        return p;
+      }
+      return null;
+    };
+    const add = (type, zone, p) => {
+      this.pois.push({ id: id++, type, x: p.x, z: p.z, ring: zone,
+        claimed: false, guarded: false, mesh: null });
+      if (zone === 3) this._dryIslands.push({ x: p.x, z: p.z, r: 24 });
+    };
+
+    const types = ['shrine', 'monolith', 'crypt'];
+    for (let zone = 0; zone < BIOMES.length; zone++) {
+      const count = zone === 0 ? 2 : 3;
       for (let i = 0; i < count; i++) {
-        let placed = null;
-        for (let tries = 0; tries < 10 && !placed; tries++) {
-          const a = rng() * Math.PI * 2;
-          const r = rMin + rng() * (rMax - rMin);
-          const x = Math.sin(a) * r, z = Math.cos(a) * r;
-          if (this.rings.some(w => Math.abs(r - w.r) < 25)) continue;
-          if (this.lakesNear(x, z).some(l => Math.hypot(x - l.x, z - l.z) < l.r + 8)) continue;
-          placed = { x, z };
-        }
-        if (!placed) continue;
-        this.pois.push({
-          id: id++, type: types[Math.floor(rng() * types.length)],
-          x: placed.x, z: placed.z, ring, claimed: false, guarded: false, mesh: null,
-        });
-        if (ring === 3) (this._dryIslands ??= []).push({ x: placed.x, z: placed.z, r: 24 });
+        const p = sample(zone);
+        if (p) add(types[Math.floor(rng() * types.length)], zone, p);
       }
     }
 
-    // ring-SPECIFIC landmarks: each biome gets its own signature encounters
-    const place = (type, ring, count) => {
-      const rMin = ring === 0 ? 150 : BIOMES[ring - 1].rMax + 80;
-      const rMax = Math.min(BIOMES[ring].rMax - 80, WORLD.radius - 130);
-      if (rMax <= rMin) return;
+    // zone-SPECIFIC landmarks: each biome gets its own signature encounters
+    const place = (type, zone, count) => {
       for (let i = 0; i < count; i++) {
-        for (let tries = 0; tries < 12; tries++) {
-          const a = rng() * Math.PI * 2;
-          const r = rMin + rng() * (rMax - rMin);
-          const x = Math.sin(a) * r, z = Math.cos(a) * r;
-          if (this.rings.some(w => Math.abs(r - w.r) < 25)) continue;
-          if (this.lakesNear(x, z).some(l => Math.hypot(x - l.x, z - l.z) < l.r + 10)) continue;
-          if (this.pois.some(pp => Math.hypot(pp.x - x, pp.z - z) < 90)) continue;
-          this.pois.push({ id: id++, type, x, z, ring, claimed: false, guarded: false, mesh: null });
-          if (ring === 3) this._dryIslands.push({ x, z, r: 24 });
-          break;
-        }
+        const p = sample(zone, { margin: 70, minPoi: 90 });
+        if (p) add(type, zone, p);
       }
     };
-    for (let ring = 0; ring < 8; ring++) place('lair', ring, 1); // one named boss lair per biome (incl. Frozen Peak)
+    for (let zone = 0; zone < 8; zone++) place('lair', zone, 1); // one named boss lair per zone (incl. Frozen Peak)
     // Quest-critical encounters are deterministic and guaranteed. Random
     // crypt/camp generation must never be able to block an eight-part line.
     place('crypt', 1, 1);
     place('crypt', 2, 1);
-    for (let ring = 0; ring < 7; ring++) place('captive', ring, 1);
+    for (let zone = 0; zone < 7; zone++) place('captive', zone, 1);
     place('village', 3, 2);    // Swamp: tribute buys you peace with the tribes
     place('temple', 6, 2);     // Jungle: trapped step pyramids with a treasury
 
     // Jungle liana ziplines come in PAIRS — E at one end glides you across
     for (let i = 0; i < 3; i++) {
-      const rMin = BIOMES[5].rMax + 80, rMax = BIOMES[6].rMax - 80;
-      const a = rng() * Math.PI * 2;
-      const r = rMin + rng() * (rMax - rMin);
-      const x = Math.sin(a) * r, z = Math.cos(a) * r;
+      const p = sample(6, { margin: 70, minPoi: 50 });
+      if (!p) continue;
       const b = rng() * Math.PI * 2;
-      const tx = x + Math.cos(b) * 38, tz = z + Math.sin(b) * 38;
-      if (this.rings.some(w => Math.abs(r - w.r) < 25)) continue;
-      const p1 = { id: id++, type: 'liana', x, z, tx, tz, ring: 6, claimed: false, guarded: false, mesh: null };
-      const p2 = { id: id++, type: 'liana', x: tx, z: tz, tx: x, tz: z, ring: 6, claimed: false, guarded: false, mesh: null };
-      this.pois.push(p1, p2);
+      const tx = p.x + Math.cos(b) * 38, tz = p.z + Math.sin(b) * 38;
+      if (zoneInfoAt(tx, tz).idx !== 6) continue;
+      this.pois.push(
+        { id: id++, type: 'liana', x: p.x, z: p.z, tx, tz, ring: 6, claimed: false, guarded: false, mesh: null },
+        { id: id++, type: 'liana', x: tx, z: tz, tx: p.x, tz: p.z, ring: 6, claimed: false, guarded: false, mesh: null });
     }
 
     // Frozen Peak: the summit pilgrimage — two bonfire checkpoints leading
-    // to the cairn where the Father of the Mountain waits
+    // due north to the cairn where the Father of the Mountain waits
     {
-      const a = rng() * Math.PI * 2;
-      for (const [type, rr] of [['bonfire', WORLD.radius - 560], ['bonfire', WORLD.radius - 380], ['summit', WORLD.radius - 210]]) {
-        this.pois.push({ id: id++, type, x: Math.sin(a) * rr, z: Math.cos(a) * rr,
+      const x0 = (rng() - 0.5) * 400;
+      for (const [type, xx, zz] of [['bonfire', x0 * 0.9, -1800],
+          ['bonfire', x0 * 0.95, -2100], ['summit', x0 * 0.4, -2440]]) {
+        this.pois.push({ id: id++, type, x: xx, z: zz,
           ring: 7, claimed: false, guarded: false, mesh: null });
       }
     }
@@ -588,8 +893,25 @@ export class World {
     place('nest', 4, 3);       // Highlands: eagle nests on rock pillars
     place('farm', 0, 1);       // Verdant: an abandoned farmstead to restore
     place('trader', 0, 2);     // Verdant: wandering merchants buying surplus
-    place('graveyard', 5, 2);  // Haunted (now ring 5): undead-wave defense events
+    place('graveyard', 5, 2);  // Haunted: undead-wave defense events
     place('statue', 5, 3);     // Haunted: cursed statues (boon + bane)
+
+    // ---- World-Editor overrides: deleted / moved / added landmarks ----
+    // Generated ids are deterministic (fixed seed), so the patch can key
+    // them; added entities get ids far above the generated range.
+    this.pois = this.pois.filter(p => !worldPatch.removed.has('poi:' + p.id));
+    for (const p of this.pois) {
+      const mv = worldPatch.moved.get('poi:' + p.id);
+      if (mv) { p.x = mv.x; p.z = mv.z; }
+    }
+    let extraId = 100000;
+    for (const e of worldPatch.entities) {
+      if (e.kind !== 'poi') continue;
+      const ring = biomeIndexAt(e.x, e.z);
+      this.pois.push({ id: extraId++, patchId: e.id, type: e.type, x: e.x, z: e.z,
+        ring, claimed: false, guarded: false, mesh: null });
+      if (ring === 3) this._dryIslands.push({ x: e.x, z: e.z, r: 24 });
+    }
   }
 
   poisNear(x, z, radius) {
@@ -610,16 +932,28 @@ export class World {
         const x = gx * CELL + 40 + rng() * (CELL - 80);
         const z = gz * CELL + 40 + rng() * (CELL - 80);
         const r = radiusOf(x, z);
-        if (r < 70 || r > WORLD.radius - 60) continue;
-        if (this.rings.some(w => Math.abs(r - w.r) < 18)) continue;
+        if (r < 70 || coastDistAt(x, z) < 45) continue;
+        const zi = zoneInfoAt(x, z);
+        if (zi.borderDist < 18) continue;
         if (this.lakesNear(x, z).some(l => Math.hypot(x - l.x, z - l.z) < l.r + 6)) continue;
         this.smiths.push({ id: id++, x, z, obstacleAdded: false });
         // swamp smiths get a dry island too (list may not exist yet — genPois
         // runs before genSmiths and creates it; be safe either way)
-        if (r > BIOMES[2].rMax && r <= BIOMES[3].rMax) {
-          (this._dryIslands ??= []).push({ x, z, r: 22 });
-        }
+        if (zi.idx === 3) (this._dryIslands ??= []).push({ x, z, r: 22 });
       }
+    }
+
+    // World-Editor overrides (delete / move / add blacksmith camps)
+    this.smiths = this.smiths.filter(sm => !worldPatch.removed.has('smith:' + sm.id));
+    for (const sm of this.smiths) {
+      const mv = worldPatch.moved.get('smith:' + sm.id);
+      if (mv) { sm.x = mv.x; sm.z = mv.z; }
+    }
+    let extraSmith = 100000;
+    for (const e of worldPatch.entities) {
+      if (e.kind !== 'smith') continue;
+      this.smiths.push({ id: extraSmith++, patchId: e.id, x: e.x, z: e.z, obstacleAdded: false });
+      if (zoneInfoAt(e.x, e.z, true).idx === 3) (this._dryIslands ??= []).push({ x: e.x, z: e.z, r: 22 });
     }
   }
 
@@ -639,9 +973,11 @@ export class World {
       const z = rz * LAKE_REGION + 20 + rng() * (LAKE_REGION - 40);
       const lr = 6 + rng() * 12;
       const r = radiusOf(x, z);
-      if (r < 70 || r > WORLD.radius - 30) continue;
-      if (this.rings.some(w => Math.abs(r - w.r) < lr + 12)) continue;
-      if (this._mountainK(x, z, r) > 0.02) continue; // no lakes up a mountainside
+      if (r < 70 || coastDistAt(x, z) < lr + 20) continue;
+      if (zoneInfoAt(x, z, true).idx === 1) continue; // no lakes in the Desert
+      const zi = zoneInfoAt(x, z);
+      if (zi.borderDist < lr + 12) continue;
+      if (this._mountainK(x, z, zi) > 0.02) continue; // no lakes up a mountainside
       const island = lr >= 14 ? { r: 4.5 } : null;
       list.push({ x, z, r: lr, island, id: key + ':' + i });
     }
@@ -658,30 +994,61 @@ export class World {
     return out;
   }
 
-  // river rings hug the terrain; every gate gets a bridge
+  // Border rivers hug the terrain: ribbons of water built from the SAME
+  // border samples isWater blocks on, so the visual always matches the
+  // physics. Every river gate gets a bridge.
   _buildRingRivers() {
-    for (const ring of this.rings) {
-      if (ring.type !== 'river') continue;
-      const half = RING_HALF.river;
-      const segs = Math.max(64, Math.min(4096, Math.round(ring.r)));
-      const geo = new THREE.RingGeometry(ring.r - half, ring.r + half, segs, 1);
-      geo.rotateX(-Math.PI / 2);
-      const pos = geo.attributes.position;
-      for (let i = 0; i < pos.count; i++) {
-        pos.setY(i, this.heightAt(pos.getX(i), pos.getZ(i)) + 0.18);
+    if (!this._hasBorders) return;
+    // contiguous runs of river-typed samples → one ribbon each
+    const runs = [];
+    let run = null, last = null;
+    for (const s of this.borderSamples) {
+      if (s.type !== 'river'
+          || (last && Math.hypot(s.x - last.x, s.z - last.z) > 8)) run = null;
+      if (s.type === 'river') {
+        if (!run) { run = []; runs.push(run); }
+        run.push(s);
       }
+      last = s;
+    }
+    const half = BORDER_HALF.river;
+    for (const r0 of runs) {
+      const pts = r0.filter((s, i) => i % 3 === 0);
+      if (pts.length < 2) continue;
+      const verts = new Float32Array(pts.length * 2 * 3);
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i], q = pts[Math.min(i + 1, pts.length - 1)];
+        const o = pts[Math.max(i - 1, 0)];
+        const dx = q.x - o.x, dz = q.z - o.z;
+        const dl = Math.hypot(dx, dz) || 1;
+        const px = -dz / dl, pz = dx / dl; // perpendicular to the border
+        const y = this.heightAt(p.x, p.z) + 0.18;
+        verts.set([p.x + px * half, y, p.z + pz * half,
+                   p.x - px * half, y, p.z - pz * half], i * 6);
+      }
+      const idx = [];
+      for (let i = 0; i < pts.length - 1; i++) {
+        const a = i * 2;
+        idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+      geo.setIndex(idx);
+      geo.computeVertexNormals();
       const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
         color: 0x3f6f9e, transparent: true, opacity: 0.88, side: THREE.DoubleSide,
       }));
       this._addStatic(mesh);
-
-      for (const gap of ring.gaps) {
-        const gx = Math.sin(gap.a) * ring.r, gz = Math.cos(gap.a) * ring.r;
-        const bridge = makeBridge(Math.min(gap.w * ring.r - 2, 5), 8.5);
-        bridge.position.set(gx, this.heightAt(gx, gz), gz);
-        bridge.rotation.y = Math.atan2(gx, gz); // deck runs across the river
-        this._addStatic(bridge);
-      }
+    }
+    for (const gate of this.gates) {
+      const river = this.borderSamples.some(s => s.type === 'river'
+        && Math.hypot(s.x - gate.x, s.z - gate.z) < 12);
+      if (!river) continue;
+      const bridge = makeBridge(5, 8.5);
+      bridge.position.set(gate.x, this.heightAt(gate.x, gate.z), gate.z);
+      // the deck runs along the crossing direction
+      bridge.rotation.y = Math.atan2(gate.across.x, gate.across.z);
+      this._addStatic(bridge);
     }
   }
 
@@ -714,6 +1081,17 @@ export class World {
     const fire = makeCampfire();
     fire.position.set(2, this.heightAt(2, 14), 14);
     this._addStatic(fire);
+  }
+
+  // wooden piers reaching from each harbor's beach out over the sea
+  _buildHarbors() {
+    for (const h of this.harbors ?? []) {
+      const pier = makePier();
+      pier.position.set(h.x, 0, h.z);
+      pier.rotation.y = Math.atan2(h.outX, h.outZ);
+      this._addStatic(pier);
+      this.obstacles.push({ x: h.x - h.outX * 4, z: h.z - h.outZ * 4, r: 0.001 });
+    }
   }
 
   // The CENTER structure is your home. Level 0 is the starting cave; every
@@ -832,59 +1210,83 @@ export class World {
     return g;
   }
 
-  // Ground tone at a world position: biome rings blended at the edges, dirt
-  // patches, dark cave rock at the center, sandy island shores.
+  // Ground tone at a world position: neighbouring zones blended along the
+  // borders, dirt patches, dark cave rock at the center, sandy island shores.
   _groundColor(x, z, out) {
     const r = radiusOf(x, z);
-    const biome = biomeAt(x, z);
-    const cA = new THREE.Color(biome.ground);
-    const cB = new THREE.Color(biome.ground2);
-    const cDirt = new THREE.Color(biome.dirt);
+    const zi = zoneInfoAt(x, z);
+    const biome = BIOMES[zi.idx];
+    // (scratch colors — this runs for every terrain vertex)
 
     const grassMix = valueNoise(x, z, 5, this.seed + 21);
-    out.copy(cA).lerp(cB, grassMix);
+    out.set(biome.ground).lerp(_gcTmp.set(biome.ground2), grassMix);
 
     const patch = valueNoise(x, z, 15, this.seed + 13);
-    if (patch > 0.55) out.lerp(cDirt, Math.min(1, (patch - 0.55) / 0.2));
+    if (patch > 0.55) out.lerp(_gcTmp.set(biome.dirt), Math.min(1, (patch - 0.55) / 0.2));
 
-    // cross-fade into the next ring near its edge
-    const idx = BIOMES.indexOf(biome);
-    if (idx < BIOMES.length - 1) {
-      const distToEdge = biome.rMax - r;
-      if (distToEdge < 24) {
-        const next = BIOMES[idx + 1];
-        const nextCol = new THREE.Color(next.ground).lerp(new THREE.Color(next.ground2), grassMix);
-        out.lerp(nextCol, 0.5 - (distToEdge / 24) * 0.5);
-      }
+    // World-Editor terrain paint replaces the biome base tone
+    const tp = worldPatch.terrainAt(x, z);
+    if (tp) out.set(tp.ground).lerp(_gcTmp.set(tp.ground2), grassMix);
+
+    // cross-fade into the neighbouring zone near its border
+    if (this._hasBorders && zi.borderDist < 24) {
+      const next = BIOMES[zi.nearIdx];
+      const nextCol = _gcTmp2.set(next.ground).lerp(_gcTmp.set(next.ground2), grassMix);
+      out.lerp(nextCol, 0.5 - (zi.borderDist / 24) * 0.5);
     }
 
     // the swamp reads at a glance: deep black-teal water, black mud, moss.
     // A faint blue-green shimmer patches make the water look enchanted.
-    const sz = this.swampZone(x, z);
+    const sz = this.swampZone(x, z, zi);
     if (sz === 'water') {
-      out.copy(new THREE.Color(0x16262c)).lerp(new THREE.Color(0x101c22), grassMix);
+      out.set(0x16262c).lerp(_gcTmp.set(0x101c22), grassMix);
       const glow = valueNoise(x, z, 12, this.seed + 909);
-      if (glow > 0.72) out.lerp(new THREE.Color(0x1e4a5a), (glow - 0.72) / 0.28 * 0.8);
-    } else if (sz === 'mud') out.lerp(new THREE.Color(0x1c1810), 0.7);
+      if (glow > 0.72) out.lerp(_gcTmp.set(0x1e4a5a), (glow - 0.72) / 0.28 * 0.8);
+    } else if (sz === 'mud') out.lerp(_gcTmp.set(0x1c1810), 0.7);
 
     // Highlands mountain trails read as pale packed gravel on the rock
-    if (this._highlandsK(r) > 0) {
-      const mk = this._mountainK(x, z, r);
+    if (zi.idx === 6) {
+      const mk = this._mountainK(x, z, zi);
       if (mk > 0.02) {
         const pk = this._mountainPathK(x, z);
-        if (pk > 0.3) out.lerp(new THREE.Color(0xb7a97e), (pk - 0.3) / 0.7 * 0.75);
+        if (pk > 0.3) out.lerp(_gcTmp.set(0xb7a97e), (pk - 0.3) / 0.7 * 0.75);
       }
     }
 
     // trodden field path: packed pale sand, wide and unmistakable
     const pd = this.pathDistance(x, z);
     if (pd < 5.2) {
-      const trail = new THREE.Color(0xd8b878);
+      const trail = _gcTmp.set(0xd8b878);
       out.lerp(trail, pd < 3.6 ? 0.95 : 0.95 * (1 - (pd - 3.6) / 1.6));
     }
 
+    // towns: packed pads around placed buildings; ten-plus buildings make
+    // a real town — cobblestone squares with knitted lanes
+    const tg = worldPatch.buildingGroundAt?.(x, z) ?? 0;
+    if (tg === 2) {
+      out.set(0x8f8c86).lerp(_gcTmp.set(0x7a776f), grassMix);
+      const cobble = latticeHash(Math.round(x * 1.3), Math.round(z * 1.3), 77);
+      if (cobble > 0.8) out.offsetHSL(0, 0, -0.055);      // dark set stones
+      else if (cobble < 0.14) out.offsetHSL(0, 0, 0.05);  // pale worn stones
+    } else if (tg === 1) {
+      out.set(0xcfba86).lerp(_gcTmp.set(0xbfa878), grassMix);
+    }
+
+    // World-Editor painted water reads like still water — deep is DARK
+    const pw = worldPatch.waterAt(x, z);
+    if (pw === 1) out.set(0x274a5e).lerp(_gcTmp.set(0x1b3644), grassMix);
+    else if (pw === 3) out.set(0x142c3c).lerp(_gcTmp.set(0x0d2030), grassMix);
+
+    // beaches: a pale sand ribbon along the waterline, wet sand seabed below
+    const cd = coastDistAt(x, z);
+    if (cd < 14) {
+      const sand = _gcTmp2.set(0xd6c188);
+      if (cd > 0) out.lerp(sand, 1 - cd / 14);
+      else out.copy(sand).lerp(_gcTmp.set(0x5e6e66), Math.min(1, -cd / 40));
+    }
+
     // the cave floor is dark rock
-    if (r < WORLD.caveR + 2.5) out.lerp(new THREE.Color(0x2a2a26), Math.min(1, (WORLD.caveR + 2.5 - r) / 3));
+    if (r < WORLD.caveR + 2.5) out.lerp(_gcTmp.set(0x2a2a26), Math.min(1, (WORLD.caveR + 2.5 - r) / 3));
 
     // subtle per-vertex jitter so large flats never look uniform
     const j = (latticeHash(Math.round(x * 3), Math.round(z * 3), this.seed + 99) - 0.5) * 0.05;
@@ -909,23 +1311,45 @@ export class World {
     const size = WORLD.radius * 2 + 400;
     const geo = new THREE.PlaneGeometry(size, size, 1, 1);
     geo.rotateX(-Math.PI / 2);
-    const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: 0x2c3a24 }));
-    mesh.position.y = -2.6;
+    const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: 0x14232c }));
+    mesh.position.y = -4.2;
     this._addStatic(mesh);
+    // the OCEAN — a ring hugging the coastline (a full-map sheet would leak
+    // through every inland dip and flood the deserts with phantom water)
+    const SEG = 240;
+    const verts = new Float32Array((SEG + 1) * 2 * 3);
+    for (let i = 0; i <= SEG; i++) {
+      const a = (i / SEG) * Math.PI * 2;
+      const sa = Math.sin(a), ca = Math.cos(a);
+      const inner = coastRAt(sa * 2000, ca * 2000) - 8;
+      const outer = WORLD.radius + 300;
+      verts.set([sa * inner, 0, ca * inner, sa * outer, 0, ca * outer], i * 6);
+    }
+    const sidx = [];
+    for (let i = 0; i < SEG; i++) {
+      const b = i * 2;
+      sidx.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
+    }
+    const seaGeo = new THREE.BufferGeometry();
+    seaGeo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+    seaGeo.setIndex(sidx);
+    seaGeo.computeVertexNormals();
+    const sea = new THREE.Mesh(seaGeo, new THREE.MeshLambertMaterial({
+      color: 0x2e5f8e, transparent: true, opacity: 0.92, side: THREE.DoubleSide }));
+    sea.position.y = -0.85;
+    this._addStatic(sea);
   }
 
   // vertex-colored terrain tile for one chunk (finer mesh where cliffs are)
-  _groundTile(cxw, czw) {
-    // ONE grid density for every tile of a detail level. Mixing densities
-    // (finer near cliffs/paths) left T-junctions on shared edges — vertices
-    // of the coarse tile interpolated across gaps the fine tile shaded
-    // per-vertex, and every border showed as a seam line.
-    const segs = [14, 20, 28][this.groundDetail ?? 0];
-    const geo = new THREE.PlaneGeometry(CHUNK, CHUNK, segs, segs);
-    geo.rotateX(-Math.PI / 2);
-    geo.translate(cxw + CHUNK / 2, 0, czw + CHUNK / 2);
+  // (re)compute a tile's heights, colors and analytic normals in place
+  _fillGroundGeo(geo) {
     const pos = geo.attributes.position;
-    const colors = new Float32Array(pos.count * 3);
+    let colAttr = geo.attributes.color;
+    if (!colAttr) {
+      geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3));
+      colAttr = geo.attributes.color;
+    }
+    const colors = colAttr.array;
     const col = new THREE.Color();
     const void_ = new THREE.Color(0x11170e);
     const rock = new THREE.Color(0x7a766b);
@@ -936,6 +1360,7 @@ export class World {
       if (radiusOf(x, z) > WORLD.radius + 6) col.copy(void_);
       else {
         this._groundColor(x, z, col);
+        if (this.debugElevation) col.lerp(elevationColor(h), 0.68);
         // steep ground reads as bare rock, so cliff faces stand out
         const slope = Math.max(
           Math.abs(this.heightAt(x + 1.4, z) - h),
@@ -944,13 +1369,9 @@ export class World {
       }
       colors[i * 3] = col.r; colors[i * 3 + 1] = col.g; colors[i * 3 + 2] = col.b;
     }
-    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    // ANALYTIC normals from heightAt (central differences): per-tile
-    // computeVertexNormals only sees its own triangles, so every chunk edge
-    // shaded differently — visible seams across the whole world. The same
-    // height function on both sides of a border gives continuous lighting.
-    // (x/z squashed 0.4 toward 'up' so shaded valleys stay readable.)
-    geo.computeVertexNormals(); // allocates the attribute
+    // ANALYTIC normals from heightAt (central differences): the same height
+    // function on both sides of a chunk border gives continuous lighting.
+    if (!geo.attributes.normal) geo.computeVertexNormals();
     const nrm = geo.attributes.normal;
     const E = 1.2;
     for (let i = 0; i < pos.count; i++) {
@@ -960,6 +1381,22 @@ export class World {
       const l = Math.hypot(nx, 1, nz);
       nrm.setXYZ(i, nx / l, 1 / l, nz / l);
     }
+    pos.needsUpdate = true;
+    colAttr.needsUpdate = true;
+    nrm.needsUpdate = true;
+    geo.computeBoundingSphere(); // sculpted peaks must not get frustum-culled
+  }
+
+  _groundTile(cxw, czw) {
+    // ONE grid density for every tile of a detail level. Mixing densities
+    // (finer near cliffs/paths) left T-junctions on shared edges — vertices
+    // of the coarse tile interpolated across gaps the fine tile shaded
+    // per-vertex, and every border showed as a seam line.
+    const segs = [14, 20, 28][this.groundDetail ?? 0];
+    const geo = new THREE.PlaneGeometry(CHUNK, CHUNK, segs, segs);
+    geo.rotateX(-Math.PI / 2);
+    geo.translate(cxw + CHUNK / 2, 0, czw + CHUNK / 2);
+    this._fillGroundGeo(geo);
     const mat = { vertexColors: true };
     if ((this.groundDetail ?? 0) > 0) {
       // medium/high: a real tiling detail texture over the vertex colors
@@ -973,11 +1410,113 @@ export class World {
 
   // graphics setting changed → rebuild loaded ground tiles at the new detail
   regenChunks() {
-    for (const chunk of this.chunks.values()) this.scene.remove(chunk.group);
+    for (const chunk of this.chunks.values()) {
+      this.scene.remove(chunk.group);
+      this._disposeGroup(chunk.group);
+    }
     this.chunks.clear();
   }
 
+  // rebuild ONLY the chunks touching a circle — editor strokes repaint the
+  // spot they touched instead of flashing the whole island away
+  regenChunksNear(x, z, r = 60) {
+    const redo = [];
+    for (const [key, chunk] of [...this.chunks]) {
+      const [cx, cz] = key.split(',').map(Number);
+      const nx = Math.max(cx * 40, Math.min(x, cx * 40 + 40));
+      const nz = Math.max(cz * 40, Math.min(z, cz * 40 + 40));
+      if (Math.hypot(nx - x, nz - z) > r) continue;
+      this.scene.remove(chunk.group);
+      this._disposeGroup(chunk.group);
+      this.chunks.delete(key);
+      redo.push([cx, cz]);
+    }
+    // rebuild in the SAME frame — a removed-then-queued chunk would flash
+    // the sea ring / underlay through the hole. Huge strokes rebuild the
+    // nearest 24 now and let world.update amortize the rest.
+    redo.sort((a, b) =>
+      Math.hypot(a[0] * 40 + 20 - x, a[1] * 40 + 20 - z)
+      - Math.hypot(b[0] * 40 + 20 - x, b[1] * 40 + 20 - z));
+    for (const [cx, cz] of redo.slice(0, 24)) this._genChunk(cx, cz);
+  }
+
+  // repaint EVERY loaded tile in place, a few per frame (biome recolors,
+  // elevation toggle) — nothing is removed, so nothing ever flashes
+  refreshGroundAll() {
+    this._retileQueue = [...this.chunks.keys()];
+  }
+
+  // repaint ground tiles in place (heights + colors only, nothing removed) —
+  // this is what live terrain brushing uses: zero flicker, no model rebuilds
+  refreshGroundNear(x, z, r = 60) {
+    for (const [key, chunk] of this.chunks) {
+      if (!chunk.tile) continue;
+      const [cx, cz] = key.split(',').map(Number);
+      const nx = Math.max(cx * 40, Math.min(x, cx * 40 + 40));
+      const nz = Math.max(cz * 40, Math.min(z, cz * 40 + 40));
+      if (Math.hypot(nx - x, nz - z) > r) continue;
+      this._fillGroundGeo(chunk.tile.geometry);
+    }
+  }
+
+  // World-Editor entity edits changed → regenerate landmarks, smiths and
+  // trails (all deterministic, so this just re-applies the patch) and let
+  // the chunks rebuild around the player. Landmark obstacles are tagged and
+  // dropped here; chunk regen pushes them back at their current spots.
+  applyPatchEntities(skipRegen = false) {
+    worldPatch.rebuildTowns?.();
+    // landmark state must SURVIVE the deterministic re-roll — otherwise
+    // every editor tweak re-armed looted POIs and re-posted crypt guards
+    const prevState = new Map(this.pois.map(p =>
+      [p.patchId ?? ('g' + p.id), { claimed: p.claimed, guarded: p.guarded }]));
+    this._patchObstacles.clear();
+    this.obstacles = this.obstacles.filter(o => !o.tag);
+    for (const sm of this.smiths) sm.obstacleAdded = false;
+    this._genPois();
+    this._genSmiths();
+    this._genPaths();
+    for (const p of this.pois) {
+      const old = prevState.get(p.patchId ?? ('g' + p.id));
+      if (old) { p.claimed = old.claimed; p.guarded = old.guarded; }
+    }
+    // collision comes back island-wide RIGHT NOW — chunk regen (which only
+    // covers the edited area) merely re-renders the meshes
+    for (const poi of this.pois) {
+      poi.obstacleAdded = true;
+      this.obstacles.push({ x: poi.x, z: poi.z,
+        r: poi.type === 'crypt' ? 2.2 : 1.6, tag: 'poi:' + poi.id });
+    }
+    for (const sm of this.smiths) {
+      sm.obstacleAdded = true;
+      this.obstacles.push({ x: sm.x, z: sm.z, r: 1.4, tag: 'smith:' + sm.id });
+    }
+    for (const e of worldPatch.entities) {
+      if (e.kind === 'building') {
+        this._patchObstacles.add(e.id);
+        this.obstacles.push({ x: e.x, z: e.z, tag: 'b:' + e.id,
+          r: e.type === 'church' ? 3.4 : e.type === 'fountain' ? 1.9 : 2.3 });
+      } else if (e.kind === 'hive') {
+        this._patchObstacles.add(e.id);
+        this.obstacles.push({ x: e.x, z: e.z, r: 0.9, tag: 'b:' + e.id });
+      }
+    }
+    if (!skipRegen) this.regenChunks();
+  }
+
   _chunkKey(cx, cz) { return cx + ',' + cz; }
+
+  // free the GPU buffers of an evicted chunk (shared cache materials and the
+  // shared ground-detail texture are left alone; geometries are per-chunk)
+  _disposeGroup(root) {
+    root.traverse((o) => {
+      o.geometry?.dispose?.();
+      const mats = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
+      for (const m of mats) {
+        if (m === BAKED_MAT || isSharedMaterial(m)) continue;
+        m.dispose?.(); // never m.map — the ground texture is module-shared
+      }
+    });
+  }
 
   _place(obj, x, z) {
     obj.position.set(x, this.heightAt(x, z), z);
@@ -997,21 +1536,62 @@ export class World {
     return 1;
   }
 
-  isWater(x, z) {
-    if (this.swampZone(x, z) === 'water' && !this._lilypadAt(x, z)) return true;
+  // standing room on a harbor pier (a dry capsule along its deck)
+  _harborDry(x, z) {
+    for (const h of this.harbors ?? []) {
+      const ex = h.outX * 26, ez = h.outZ * 26;
+      const len2 = ex * ex + ez * ez;
+      let t = ((x - h.x) * ex + (z - h.z) * ez) / len2;
+      t = Math.max(0, Math.min(1, t));
+      if (Math.hypot(x - (h.x + ex * t), z - (h.z + ez * t)) < 3.4) return true;
+    }
+    return false;
+  }
+
+  isWater(x, z) { return this.waterKindAt(x, z) > 0; }
+
+  // 0 = dry land · 1 = SHALLOW water (wadeable by anyone, slow) ·
+  // 2 = DEEP water (6 m — drowns non-swimmers; learn Swimming, or boat it).
+  // Deep: the open ocean past the beach shallows, the black bog, border
+  // rapids, island lakes and editor-painted deep water.
+  waterKindAt(x, z) {
+    const pw = worldPatch.waterAt(x, z);          // World-Editor paint wins
+    if (pw) return pw === 2 ? 0 : pw === 3 ? 2 : 1;
+    if (this._harborDry(x, z)) return 0;          // piers stand over the sea
+    const cd = coastDistAt(x, z);
+    if (cd < 0) return cd < -25 ? 2 : 1;          // beach shallows, then the deep
+    if (this.swampZone(x, z) === 'water' && !this._lilypadAt(x, z)) return 2;
     for (const lake of this.lakesNear(x, z)) {
       const d = Math.hypot(x - lake.x, z - lake.z);
       if (d < lake.r) {
-        if (lake.island && d < lake.island.r) return false; // the island is land
-        return true;
+        if (lake.island && d < lake.island.r) return 0; // the island is land
+        return lake.island ? 2 : 1;  // treasure lakes are deep, ponds wadeable
       }
     }
-    for (const ring of this.rings) {
-      if (ring.type !== 'river') continue;
-      const r = radiusOf(x, z);
-      if (Math.abs(r - ring.r) < RING_HALF.river) {
-        const a = Math.atan2(x, z);
-        if (!ring.gaps.some(g => angDiff(a, g.a) < g.w / 2)) return true;
+    if (this._borderRiverAt(x, z)) return 2;
+    return 0;
+  }
+
+  // the y of the water surface over deep water (for the swimming float)
+  waterYAt(x, z) {
+    if (worldPatch.waterAt(x, z) === 3) return this.heightAt(x, z) + 6 - 0.35;
+    if (coastDistAt(x, z) < 0) return -0.9;
+    return this.heightAt(x, z) + 0.2; // bog / lakes / rapids sit on their bed
+  }
+
+  // inside a border-river band (and not on a bridge)?
+  _borderRiverAt(x, z) {
+    if (!this._hasBorders) return false;
+    const C = this._borderCell;
+    const cx = Math.floor(x / C), cz = Math.floor(z / C);
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+      const list = this._borderBuckets.get((cx + dx) + ',' + (cz + dz));
+      if (!list) continue;
+      for (const i of list) {
+        const s = this.borderSamples[i];
+        if (s.type !== 'river') continue;
+        if (Math.hypot(x - s.x, z - s.z) < BORDER_HALF.river
+            && !this.gates.some(g => Math.hypot(x - g.x, z - g.z) < g.w)) return true;
       }
     }
     return false;
@@ -1030,7 +1610,18 @@ export class World {
     const biome = biomeAt(cxw + CHUNK / 2, czw + CHUNK / 2);
 
     // detailed vertex-colored terrain for this chunk
-    group.add(this._groundTile(cxw, czw));
+    const tile = this._groundTile(cxw, czw);
+    tile.updateMatrix();
+    tile.matrixAutoUpdate = false;
+    group.add(tile);
+
+    // far god-view LOD: terrain only — the map stays readable and FAST when
+    // the editor camera looks at a whole biome at once
+    if (this.groundOnly) {
+      this.scene.add(group);
+      this.chunks.set(key, { group, tile, trees: [], rocks: [], webs: [], bushes: [], props: [], hives: [] });
+      return;
+    }
 
     // lakes whose center falls in this chunk get their water mesh here
     const chunkLakes = this.lakesNear(cxw + CHUNK / 2, czw + CHUNK / 2);
@@ -1056,9 +1647,11 @@ export class World {
 
     const inBounds = (x, z) => {
       const r = radiusOf(x, z);
-      if (r > WORLD.radius - 3 || r < 14) return false;               // world edge + cave
+      if (r < 14 || coastDistAt(x, z) < 8) return false;              // cave + beach/sea
+      if (this.isWater(x, z)) return false;                           // nothing grows in water
+      if (worldPatch.buildingGroundAt?.(x, z)) return false;          // town squares stay clear
       if (x > -13 && x < 16 && z > 8 && z < 24) return false;         // camp building spots
-      if (this.rings.some(w => Math.abs(r - w.r) < 5)) return false;  // ring bands
+      if (this._hasBorders && zoneInfoAt(x, z).borderDist < 6) return false; // border bands
       if (this.pathDistance(x, z) < 4.5) return false;                // keep trails clear
       if (chunkLakes.some(l => {
         const d = Math.hypot(x - l.x, z - l.z);
@@ -1076,7 +1669,7 @@ export class World {
       const f = valueNoise(cxw + CHUNK / 2, czw + CHUNK / 2, 240, this.seed + 133);
       if (f > 0.68) {
         const k = Math.min(1, (f - 0.68) / 0.1);
-        count = Math.min(110, Math.round(count * (3.5 + k * k * 6)));
+        count = Math.min(70, Math.round(count * (3 + k * k * 4)));
         denseWood = true; // thick woods grow TALL trees, not saplings
       }
     }
@@ -1088,12 +1681,13 @@ export class World {
       const size = denseWood
         ? (rng() < 0.12 ? 0 : rng() < 0.5 ? 1 : 2)
         : (rng() < 0.45 ? 0 : rng() < 0.75 ? 1 : 2);
-      const { mesh, radius } = makeTree(size, biome, rng);
+      const made = makeTree(size, biome, rng);
+      const mesh = bakeGroup(made.mesh); // one draw call per tree
       this._place(mesh, x, z);
       mesh.rotation.y = rng() * Math.PI * 2;
       group.add(mesh);
       trees.push({
-        id: this.nextTreeId++, mesh, x, z, radius, size,
+        id: this.nextTreeId++, mesh, x, z, radius: made.radius, size,
         hp: [2, 4, 6][size], wood: [2, 4, 7][size], alive: true, kind: 'tree',
       });
     }
@@ -1114,15 +1708,14 @@ export class World {
       });
     }
 
-    // -- decorations (visual only) --
+    // -- decorations (visual only): ALL of them bake into a single
+    // per-chunk mesh — grass, ferns, flowers, cacti, pads… one draw call --
+    const deco = bakeAccumulator();
     const scatter = (n, maker) => {
       for (let i = 0; i < n; i++) {
         const x = cxw + rng() * CHUNK, z = czw + rng() * CHUNK;
         if (!inBounds(x, z)) continue;
-        const obj = maker();
-        this._place(obj, x, z);
-        obj.rotation.y = rng() * Math.PI * 2;
-        group.add(obj);
+        bakeAt(deco, maker(), x, this.heightAt(x, z), z, rng() * Math.PI * 2);
       }
     };
     // biome-signature chunk props: silk cocoons & firefly glades (Dark Forest)
@@ -1134,12 +1727,16 @@ export class World {
     if (HONEY_BIOMES.includes(biome.name) && rng() < 0.16) {
       const x = cxw + 6 + rng() * (CHUNK - 12), z = czw + 6 + rng() * (CHUNK - 12);
       if (inBounds(x, z) && radiusOf(x, z) > 110) {
-        const hive = makeBeehiveBig(rng);
+        const hive = bakeGroup(makeBeehiveBig(rng));
         hive.position.set(x, this.heightAt(x, z), z);
         group.add(hive);
         hives.push({ id: this.nextTreeId++, x, z, mesh: hive, hp: 40, maxHp: 40,
                      disturbed: false, dead: false, regrowAt: 0, radius: 1.0, alive: true });
-        this.obstacles.push({ x, z, r: 0.9 });
+        const hobKey = 'genhive:' + key;
+        if (!this._patchObstacles.has(hobKey)) {
+          this._patchObstacles.add(hobKey);
+          this.obstacles.push({ x, z, r: 0.9, tag: hobKey });
+        }
       }
     }
     if (biome.name === 'Highlands' || biome.name === 'Scorched Desert') {
@@ -1149,10 +1746,7 @@ export class World {
         if (rng() > 0.5) continue;
         const x = cxw + 4 + rng() * (CHUNK - 8), z = czw + 4 + rng() * (CHUNK - 8);
         if (!inBounds(x, z)) continue;
-        const c = makeCactus(rng);
-        this._place(c, x, z);
-        c.rotation.y = rng() * Math.PI * 2;
-        group.add(c);
+        bakeAt(deco, makeCactus(rng), x, this.heightAt(x, z), z, rng() * Math.PI * 2);
       }
     }
     if (biome.name === 'Dark Forest') {
@@ -1187,10 +1781,7 @@ export class World {
           const pz = (gz + 0.2 + (h * 13 % 0.6)) * CELLP;
           if (px < cxw || px >= cxw + CHUNK || pz < czw || pz >= czw + CHUNK) continue;
           if (this.swampZone(px, pz) !== 'water') continue;
-          const pad = makeLilypad(rng);
-          pad.scale.setScalar(1.5);
-          pad.position.set(px, this.heightAt(px, pz) + 0.9 + 0.06, pz); // rides at water level
-          group.add(pad);
+          bakeAt(deco, makeLilypad(rng), px, this.heightAt(px, pz) + 0.96, pz, 0, 1.5);
         }
       }
     }
@@ -1214,6 +1805,11 @@ export class World {
     }
 
     scatter(22 + Math.floor(rng() * 12), () => makeGrassTuft(biome.grass, rng));
+    if (biome.jungleFlora) {
+      scatter(10 + Math.floor(rng() * 6), () => makeFern(rng));
+      scatter(3 + Math.floor(rng() * 4), () => makeJunglePlant(rng));
+      scatter(8 + Math.floor(rng() * 6), () => makeGrassTuft(0x3f8a30, rng));
+    }
     scatter(2 + Math.floor(rng() * 3), () => makeBush(biome.foliage[0], rng));
     scatter(1 + Math.floor(rng() * 2), () => makeRock(rng));
     if (biome.flowers) scatter(2 + Math.floor(rng() * 5), () => makeFlower(rng));
@@ -1234,35 +1830,26 @@ export class World {
       }
     }
 
-    // -- ridge-ring boulders crossing this chunk (rivers are built globally) --
+    // -- border barriers crossing this chunk (rivers are built globally):
+    // one boulder per precomputed ridge/wall sample (~3 m apart — a solid
+    // wall) that falls inside this chunk --
     const rockColor = biome.snowy ? 0xc8d4dc : 0x82817a;
-    for (const ring of this.rings) {
-      if (ring.type !== 'ridge') continue;
-      if (Math.abs(midR - ring.r) > CHUNK) continue;
-      // only walk the angle range this chunk subtends (rings are HUGE)
-      const aMid = Math.atan2(cxw + CHUNK / 2, czw + CHUNK / 2);
-      const aSpan = (CHUNK * 1.5) / ring.r;
-      for (let a = aMid - aSpan; a < aMid + aSpan; a += 2.3 / ring.r) {
-        const bx = Math.sin(a) * ring.r, bz = Math.cos(a) * ring.r;
-        if (bx < cxw - 2 || bx > cxw + CHUNK + 2 || bz < czw - 2 || bz > czw + CHUNK + 2) continue;
-        if (ring.gaps.some(g => angDiff(a, g.a) < g.w / 2 + 0.6 / ring.r)) continue;
-        const jx = bx + (rng() - 0.5) * 1.2, jz = bz + (rng() - 0.5) * 1.8;
-        const b = makeBoulder(1.5 + rng() * 1.1, rockColor, rng);
-        b.position.set(jx, this.heightAt(jx, jz) + 0.35, jz);
-        group.add(b);
-      }
-    }
-
-    // -- world-edge boulders --
-    if (Math.abs(midR - WORLD.radius) < CHUNK * 1.5) {
-      const aMid = Math.atan2(cxw + CHUNK / 2, czw + CHUNK / 2);
-      const aSpan = (CHUNK * 1.5) / WORLD.radius;
-      for (let a = aMid - aSpan; a < aMid + aSpan; a += 2.6 / WORLD.radius) {
-        const bx = Math.sin(a) * WORLD.radius, bz = Math.cos(a) * WORLD.radius;
-        if (bx < cxw - 4 || bx > cxw + CHUNK + 4 || bz < czw - 4 || bz > czw + CHUNK + 4) continue;
-        const b = makeBoulder(1.9 + rng() * 1.2, 0x7c786c, rng);
-        b.position.set(bx, this.heightAt(bx, bz) + 0.3, bz);
-        group.add(b);
+    if (this._hasBorders) {
+      const c0x = Math.floor((cxw - 4) / this._borderCell), c1x = Math.floor((cxw + CHUNK + 4) / this._borderCell);
+      const c0z = Math.floor((czw - 4) / this._borderCell), c1z = Math.floor((czw + CHUNK + 4) / this._borderCell);
+      for (let bx = c0x; bx <= c1x; bx++) for (let bz = c0z; bz <= c1z; bz++) {
+        for (const i of this._borderBuckets.get(bx + ',' + bz) ?? []) {
+          const s = this.borderSamples[i];
+          if (s.type === 'river') continue;
+          if (s.x < cxw - 2 || s.x > cxw + CHUNK + 2 || s.z < czw - 2 || s.z > czw + CHUNK + 2) continue;
+          if (this.gates.some(g => Math.hypot(s.x - g.x, s.z - g.z) < g.w + 1.6)) continue;
+          if (this.pathDistance(s.x, s.z) < 4) continue; // never wall off a road
+          const jx = s.x + (rng() - 0.5) * 1.4, jz = s.z + (rng() - 0.5) * 1.8;
+          const scale = s.type === 'wall' ? 2.0 + rng() * 1.3 : 1.5 + rng() * 1.1;
+          const b = makeBoulder(scale, rockColor, rng);
+          b.position.set(jx, this.heightAt(jx, jz) + 0.35, jz);
+          group.add(b);
+        }
       }
     }
 
@@ -1283,24 +1870,128 @@ export class World {
       }
     }
 
+    // -- World-Editor doodads pinned in this chunk (deterministic per id) --
+    for (const e of worldPatch.doodadsIn(cxw, czw, CHUNK)) {
+      const drng = mulberry32((this.seed ^ 0xd00d) + (parseInt(e.id.slice(1), 10) || 0) * 7919);
+      if (e.kind === 'tree') {
+        const size = Math.min(2, Math.max(0, e.size ?? 1));
+        // style variants: default = the local biome's tree, or a forced look
+        const tb = e.variant === 'jungle' ? BIOMES[2]
+          : e.variant === 'winter' ? BIOMES[7]
+          : e.variant === 'dead' ? { ...BIOMES[5], trees: { pine: 0, leafy: 0, birch: 0, dead: 1 } }
+          : biomeAt(e.x, e.z);
+        const made2 = makeTree(size, tb, drng);
+        const mesh = bakeGroup(made2.mesh);
+        const radius = made2.radius;
+        this._place(mesh, e.x, e.z);
+        mesh.rotation.y = drng() * Math.PI * 2;
+        group.add(mesh);
+        trees.push({ id: this.nextTreeId++, mesh, x: e.x, z: e.z, radius, size,
+          hp: [2, 4, 6][size], wood: [2, 4, 7][size], alive: true, kind: 'tree', patchId: e.id });
+      } else if (e.kind === 'rock') {
+        const sc = e.size ? 1.4 + drng() * 0.3 : 0.9 + drng() * 0.3;
+        const mesh = makeBoulder(sc, 0x8a8a84, drng);
+        mesh.position.set(e.x, this.heightAt(e.x, e.z) + sc * 0.25, e.z);
+        group.add(mesh);
+        rocks.push({ id: this.nextTreeId++, mesh, x: e.x, z: e.z, radius: sc * 0.9,
+          hp: e.size ? 5 : 3, stone: e.size ? 6 : 3, alive: true, kind: 'rock', patchId: e.id });
+      } else if (e.kind === 'building') {
+        const mesh = bakeGroup(e.type === 'church' ? makeChurch(drng)
+          : e.type === 'fountain' ? makeFountain(drng) : makeTownHouse(drng));
+        this._place(mesh, e.x, e.z);
+        mesh.rotation.y = e.rot ?? 0;
+        group.add(mesh);
+        if (!this._patchObstacles.has(e.id)) {
+          this._patchObstacles.add(e.id);
+          this.obstacles.push({ x: e.x, z: e.z, tag: 'b:' + e.id,
+            r: e.type === 'church' ? 3.4 : e.type === 'fountain' ? 1.9 : 2.3 });
+        }
+      } else if (e.kind === 'deco') {
+        // single decorations (visual only): cactus, fern, bush, mushroom…
+        const obj = e.type === 'cactus' ? makeCactus(drng)
+          : e.type === 'fern' ? makeFern(drng)
+          : e.type === 'bush' ? makeBush(biomeAt(e.x, e.z).foliage[0], drng)
+          : e.type === 'mushroom' ? makeMushroom(drng)
+          : e.type === 'flower' ? makeFlower(drng)
+          : e.type === 'log' ? makeLog(biomeAt(e.x, e.z).trunk, drng)
+          : makeGrassTuft(biomeAt(e.x, e.z).grass, drng);
+        this._place(obj, e.x, e.z);
+        obj.rotation.y = drng() * Math.PI * 2;
+        obj.traverse((o) => { o.updateMatrix(); o.matrixAutoUpdate = false; });
+        group.add(obj);
+      } else if (e.kind === 'berry') {
+        // a harvestable berry bush; raspberries pay out DOUBLE
+        const rasp = e.type === 'rasp';
+        const mesh = makeBerryBush(drng, rasp ? 0xd8486a : undefined);
+        this._place(mesh, e.x, e.z);
+        group.add(mesh);
+        const bkey = 'patchberry:' + e.id;
+        const eatenAt = this._berryEaten.get(bkey);
+        const ripe = eatenAt === undefined || this.time >= eatenAt + BERRY_REGROW;
+        if (!ripe) mesh.userData.berries.forEach(m => m.visible = false);
+        bushes.push({ id: this.nextTreeId++, key: bkey, mesh, x: e.x, z: e.z,
+                      radius: 0.75, alive: true, berries: ripe, kind: 'bush',
+                      mult: rasp ? 2 : 1, patchId: e.id });
+      } else if (e.kind === 'hive') {
+        // a destructible beehive — wired into the same hive systems the
+        // generated ones use (bees, honey, regrow)
+        const mesh = bakeGroup(makeBeehiveBig(drng));
+        mesh.position.set(e.x, this.heightAt(e.x, e.z), e.z);
+        group.add(mesh);
+        hives.push({ id: this.nextTreeId++, x: e.x, z: e.z, mesh, hp: 40, maxHp: 40,
+                     disturbed: false, dead: false, regrowAt: 0, radius: 1.0, alive: true, patchId: e.id });
+        if (!this._patchObstacles.has(e.id)) {
+          this._patchObstacles.add(e.id);
+          this.obstacles.push({ x: e.x, z: e.z, r: 0.9, tag: 'b:' + e.id });
+        }
+      } else if (e.kind === 'field') {
+        // wheat field / tall-grass meadow: an area sown with stalks
+        const n = Math.min(160, e.count ?? 40);
+        const fr = e.r ?? 10;
+        for (let i = 0; i < n; i++) {
+          const a = drng() * Math.PI * 2, rr = Math.sqrt(drng()) * fr;
+          const fx = e.x + Math.cos(a) * rr, fz = e.z + Math.sin(a) * rr;
+          if (fx < cxw || fx >= cxw + CHUNK || fz < czw || fz >= czw + CHUNK) continue;
+          if (this.isWater(fx, fz)) continue;
+          let obj;
+          if (e.type === 'wheat') obj = makeWheatTuft(drng);
+          else { obj = makeGrassTuft(0x7fa04e, drng); obj.scale.y = 1.9 + drng() * 0.5; }
+          bakeAt(deco, obj, fx, this.heightAt(fx, fz), fz, drng() * Math.PI * 2);
+        }
+      } else if (e.kind === 'meadow') {
+        // a flower meadow: the same flowers every visit, only the ones
+        // whose spot falls inside THIS chunk are added here
+        const n = Math.min(120, e.count ?? 24);
+        const mr = e.r ?? 10;
+        for (let i = 0; i < n; i++) {
+          const a = drng() * Math.PI * 2, rr = Math.sqrt(drng()) * mr;
+          const fx = e.x + Math.cos(a) * rr, fz = e.z + Math.sin(a) * rr;
+          if (fx < cxw || fx >= cxw + CHUNK || fz < czw || fz >= czw + CHUNK) continue;
+          if (this.isWater(fx, fz)) continue;
+          const f = drng() < 0.8 ? makeFlower(drng) : makeGrassTuft(0x6fa04c, drng);
+          bakeAt(deco, f, fx, this.heightAt(fx, fz), fz, drng() * Math.PI * 2);
+        }
+      }
+    }
+
     // -- blacksmith camps in this chunk --
     for (const sm of this.smiths) {
       if (sm.x < cxw || sm.x >= cxw + CHUNK || sm.z < czw || sm.z >= czw + CHUNK) continue;
-      const mesh = makeBlacksmith();
+      const mesh = bakeGroup(makeBlacksmith());
       mesh.position.set(sm.x, this.heightAt(sm.x, sm.z), sm.z);
       mesh.rotation.y = (sm.id * 1.7) % (Math.PI * 2);
       group.add(mesh);
       sm.mesh = mesh;
       if (!sm.obstacleAdded) {
         sm.obstacleAdded = true;
-        this.obstacles.push({ x: sm.x, z: sm.z, r: 1.4 });
+        this.obstacles.push({ x: sm.x, z: sm.z, r: 1.4, tag: 'smith:' + sm.id });
       }
     }
 
     // -- landmarks whose spot falls inside this chunk --
     for (const poi of this.pois) {
       if (poi.x < cxw || poi.x >= cxw + CHUNK || poi.z < czw || poi.z >= czw + CHUNK) continue;
-      const mesh = poi.type === 'lair' ? makeLairEntrance(poi.ring)
+      const raw = poi.type === 'lair' ? makeLairEntrance(poi.ring)
         : poi.type === 'captive' ? makeCage()
         : poi.type === 'temple' ? makeTemple()
         : poi.type === 'liana' ? makeLianaPole()
@@ -1315,18 +2006,28 @@ export class World {
         : poi.type === 'statue' ? makeCursedStatue()
         : poi.type === 'shrine' ? makeShrine()
         : poi.type === 'monolith' ? makeMonolith() : makeCrypt();
+      // one draw call per landmark (the captive cage keeps its live prisoner)
+      const mesh = poi.type === 'captive' ? raw : bakeGroup(raw);
       mesh.position.set(poi.x, this.heightAt(poi.x, poi.z), poi.z);
       group.add(mesh);
       poi.mesh = mesh;
       if (!poi.obstacleAdded) {
         poi.obstacleAdded = true;
-        this.obstacles.push({ x: poi.x, z: poi.z, r: poi.type === 'crypt' ? 2.2 : 1.6 });
+        this.obstacles.push({ x: poi.x, z: poi.z, r: poi.type === 'crypt' ? 2.2 : 1.6, tag: 'poi:' + poi.id });
       }
       this.onPoiSpawned?.(poi); // main posts crypt guards (once per session)
     }
 
+    const decoMesh = buildBakedMesh(deco, false); // decorations never cast shadows
+    if (decoMesh) {
+      decoMesh.receiveShadow = false;
+      decoMesh.updateMatrix();
+      decoMesh.matrixAutoUpdate = false;
+      group.add(decoMesh);
+    }
+
     this.scene.add(group);
-    this.chunks.set(key, { group, trees, rocks, webs: chunkWebs, bushes, props, hives });
+    this.chunks.set(key, { group, tile, trees, rocks, webs: chunkWebs, bushes, props, hives });
   }
 
   update(dt, playerPos) {
@@ -1349,16 +2050,35 @@ export class World {
         }
       }
     }
+    // pending in-place repaints (biome recolor / elevation tint)
+    if (this._retileQueue?.length) {
+      for (let i = 0; i < 6 && this._retileQueue.length; i++) {
+        const chunk = this.chunks.get(this._retileQueue.pop());
+        if (chunk?.tile) this._fillGroundGeo(chunk.tile.geometry);
+      }
+    }
+
     const pcx = Math.floor(playerPos.x / CHUNK), pcz = Math.floor(playerPos.z / CHUNK);
     const vr = this.viewRadius ?? VIEW_RADIUS; // adaptive quality can shrink it
-    for (let dx = -vr; dx <= vr; dx++)
-      for (let dz = -vr; dz <= vr; dz++)
-        this._genChunk(pcx + dx, pcz + dz);
+    // nearest-first, a handful per frame — no hitches when crossing into
+    // fresh country (or flying the editor camera)
+    let budget = this.groundOnly ? 26 : 6;
+    for (let ring = 0; ring <= vr && budget > 0; ring++) {
+      for (let dx = -ring; dx <= ring && budget > 0; dx++) {
+        for (let dz = -ring; dz <= ring && budget > 0; dz++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== ring) continue;
+          if (this.chunks.has(this._chunkKey(pcx + dx, pcz + dz))) continue;
+          this._genChunk(pcx + dx, pcz + dz);
+          budget--;
+        }
+      }
+    }
 
     for (const [key, chunk] of this.chunks) {
       const [cx, cz] = key.split(',').map(Number);
       if (Math.abs(cx - pcx) > (this.viewRadius ?? VIEW_RADIUS) + 1 || Math.abs(cz - pcz) > (this.viewRadius ?? VIEW_RADIUS) + 1) {
         this.scene.remove(chunk.group);
+        this._disposeGroup(chunk.group);
         this.chunks.delete(key);
       }
     }
@@ -1376,6 +2096,7 @@ export class World {
       }
       if (f.t > 1.6) {
         f.mesh.parent?.remove(f.mesh);
+        this._disposeGroup(f.mesh);
         this.fallingTrees.splice(i, 1);
       }
     }
@@ -1491,21 +2212,30 @@ export class World {
     for (const rock of this.rocksNear(pos, r + 0.5)) pushOut(rock.x, rock.z, r + rock.radius);
     for (const o of this.obstacles) pushOut(o.x, o.z, r + o.r);
 
-    // ring barriers (pass through the gates; boats cross river rings anywhere)
-    const pr = radiusOf(pos.x, pos.z);
-    for (const ring of this.rings) {
-      if (opts.boat && ring.type === 'river') continue;
-      const half = RING_HALF[ring.type];
-      if (Math.abs(pr - ring.r) > half + r) continue;
-      const a = Math.atan2(pos.x, pos.z);
-      if (ring.gaps.some(g => angDiff(a, g.a) < g.w / 2)) continue;
-      const target = ring.r + (pr >= ring.r ? 1 : -1) * (half + r);
-      const k = target / (pr || 1);
-      pos.x *= k; pos.z *= k;
+    // the coastline: creatures are pushed back onto the island; players
+    // (opts.wade) and boats may enter the sea, but a hard limit ~80 m out
+    // keeps everyone from paddling off the map
+    if (!this._harborDry(pos.x, pos.z)) {
+      const lim = (opts.wade || opts.boat) ? -80 : 0;
+      const cd = coastDistAt(pos.x, pos.z);
+      if (cd < lim + r + 0.4) {
+        const rr = radiusOf(pos.x, pos.z) || 1;
+        const k = Math.max(0.01, (rr - (lim + r + 0.4 - cd)) / rr);
+        pos.x *= k; pos.z *= k;
+      }
     }
 
-    // lakes (boats float over them; islands are solid ground)
-    if (!opts.boat) {
+    // zone borders (pass through the gates; boats cross border rivers
+    // anywhere). Two passes: a push off one border can land in another
+    // barrier band at a corner.
+    for (let pass = 0; pass < 2; pass++) {
+      const hit = this._borderHit(pos, r, opts);
+      if (!hit) break;
+      pos.x = hit.x; pos.z = hit.z;
+    }
+
+    // lakes (boats float over them, waders walk in; islands are solid)
+    if (!opts.boat && !opts.wade) {
       for (const lake of this.lakesNear(pos.x, pos.z)) {
         const d = Math.hypot(pos.x - lake.x, pos.z - lake.z);
         if (lake.island && d < lake.island.r + r * 0.5) continue; // on the island
@@ -1537,18 +2267,25 @@ export class World {
     return pos;
   }
 
-  // Clamp a point into the same ring band as the anchor (spawns stay in the
-  // player's "room" between two ring barriers).
+  // Clamp a point into the same ZONE as the anchor (spawns stay in the
+  // player's country instead of materializing across a border).
   clampToBand(x, z, ax, az, margin = 5) {
-    const ar = radiusOf(ax, az);
-    let lo = 20, hi = WORLD.radius - 5;
-    for (const ring of this.rings) {
-      if (ring.r < ar && ring.r + margin > lo) lo = ring.r + margin;
-      if (ring.r >= ar && ring.r - margin < hi) hi = ring.r - margin;
+    const cd = coastDistAt(x, z);
+    if (cd < margin + 3) {
+      const rr = radiusOf(x, z) || 1;
+      const k = Math.max(0.01, (rr - (margin + 3 - cd)) / rr);
+      x *= k; z *= k;
     }
-    const r = radiusOf(x, z) || 1;
-    const cl = Math.max(lo, Math.min(hi, r));
-    return { x: x * (cl / r), z: z * (cl / r) };
+    const target = biomeIndexAt(ax, az);
+    if (biomeIndexAt(x, z) === target) return { x, z };
+    // bisect along the anchor→point segment for the last in-zone spot
+    let lo = 0, hi = 1;
+    for (let it = 0; it < 10; it++) {
+      const m = (lo + hi) / 2;
+      if (biomeIndexAt(ax + (x - ax) * m, az + (z - az) * m) === target) lo = m;
+      else hi = m;
+    }
+    return { x: ax + (x - ax) * lo, z: az + (z - az) * lo };
   }
 
   // ---- harvesting ----

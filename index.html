@@ -254,6 +254,25 @@
             <option value="2">High</option>
           </select>
         </label>
+        <label style="display:inline-flex;align-items:center;gap:6px;margin:6px 12px 0 0">
+          Resolution
+          <select id="set-resscale">
+            <option value="1">Fast (1×)</option>
+            <option value="1.5">Balanced (1.5×)</option>
+            <option value="auto" selected>Sharp (native)</option>
+          </select>
+        </label>
+        <label style="display:inline-flex;align-items:center;gap:6px;margin:6px 12px 0 0">
+          Draw distance
+          <select id="set-drawdist">
+            <option value="short">Short (fastest)</option>
+            <option value="normal" selected>Normal</option>
+            <option value="far">Far (heavier)</option>
+          </select>
+        </label>
+        <label style="display:inline-flex;align-items:center;gap:6px;margin:6px 12px 0 0">
+          <input type="checkbox" id="set-shadows" checked> Shadows
+        </label>
       </div>
       <label class="setting-row">
         <input type="checkbox" id="set-rpgview">

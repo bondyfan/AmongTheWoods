@@ -1,71 +1,196 @@
 // ---- World & progression configuration ----
 
-// The survival world is RADIAL: you start in a cave at the center and the
-// biomes are concentric rings expanding outward in every direction. It is
-// HUGE — what fits on the minimap is barely the first ring.
+// The survival world is a round CONTINENT of WoW-style zones stacked like
+// the Eastern Kingdoms. The Verdant valley (cave + camp) sits walled-in at
+// the center; the seven wild zones are stacked bands and lobes around it,
+// and ONLY consecutive tiers share a gated border — every other border is
+// an impassable wall, so the journey is forced along the whole chain
+// Desert → Dark Forest → Swamp → Highlands → Haunted → Jungle → Frozen Peak.
 export const WORLD = {
-  radius: 5500,     // playable circle — 10× the old world
-  goalR: 5400,      // reach this distance from home to win
-  caveR: 9,         // the starting cave at the center
+  radius: 3000,     // hard world bound — the island plus a ring of open ocean
+  goalR: 2400,      // "crossed the wilds" — this deep into the Frozen Peak
+  caveR: 9,         // the starting cave at the center of the valley
+  hubR: 800,        // Verdant valley radius (its mountain rim wobbles ±60)
 };
 
 export const radiusOf = (x, z) => Math.hypot(x, z);
 
-// Biome rings from the center outward. rMax = outer edge of the ring.
+// ---- zone geometry: an ISLAND continent (Eastern-Kingdoms style) ----
+// Ocean all around; the coastline is irregular, with a pointy southern tip
+// (the Jungle cape and its harbor) and a pointy northern spire (the Frozen
+// Peak summit). Bands from south (+z) to north (-z), split by column lines:
+//   wz > 1480              Jungle (2) — the southern lobe with the cape
+//   1480 ≥ wz > 630        Desert (1) west | Murky Swamp (3) east
+//   630 ≥ wz > -520        Desert wraps the west flank | Dark Forest (4) east
+//                          (the Verdant valley blob sits in the middle and
+//                           seals the band, so Desert and Dark never touch)
+//   -520 ≥ wz > -1480      Highlands (6) west | Haunted Forest (5) east
+//   wz ≤ -1480             Frozen Peak (7) — the northern cap
+export const ZONE_COUNT = 7;
+const LZ = { s2: 1480, s1: 630, n1: -520, n2: -1480 };
+const LX = { ds: 0, jx: -160 };
+// border lines the world builder walks to raise barriers along them
+export const ZONE_LINES = [
+  { axis: 'z', c: LZ.s2 },
+  { axis: 'z', c: LZ.s1 },
+  { axis: 'z', c: LZ.n1 },
+  { axis: 'z', c: LZ.n2 },
+  { axis: 'x', c: LX.ds, lo: LZ.s1, hi: LZ.s2 },
+  { axis: 'x', c: LX.jx, lo: LZ.n2, hi: LZ.n1 },
+];
+
+// Deterministic value noise on a FIXED seed: the zone map is identical for
+// every world seed (like the old rings were), so any client can classify any
+// point without a world instance.
+function zHash(ix, iz, s) {
+  let h = ix * 374761393 + iz * 668265263 + s * 1442695;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+function zNoise(x, z, scale, s) {
+  const fx = x / scale, fz = z / scale;
+  const ix = Math.floor(fx), iz = Math.floor(fz);
+  const ux = fx - ix, uz = fz - iz;
+  const tx = ux * ux * (3 - 2 * ux), tz = uz * uz * (3 - 2 * uz);
+  const a = zHash(ix, iz, s), b = zHash(ix + 1, iz, s);
+  const c = zHash(ix, iz + 1, s), d = zHash(ix + 1, iz + 1, s);
+  return (a + (b - a) * tx) + ((c + (d - c) * tx) - (a + (b - a) * tx)) * tz;
+}
+// Border wobble fields — the classifier, barriers, water and collision all
+// read these SAME fields, so they always agree on where a border runs.
+// Amplitudes stay below the noise slope limit so every border is a single
+// smooth curve (no folded phantom strips).
+export const wobX = (x, z) => (zNoise(x, z, 300, 11) - 0.5) * 140;
+export const wobZ = (x, z) => (zNoise(x, z, 300, 37) - 0.5) * 140;
+export const hubEdgeR = (x, z) => WORLD.hubR + (zNoise(x, z, 260, 23) - 0.5) * 120;
+
+// ---- the coastline ----
+// Distance from the island center to the waterline in the direction of
+// (x,z): a slightly waisted oval with a pointy southern cape (Jungle) and a
+// pointy northern spire (Frozen Peak), roughened by fixed-seed noise so the
+// coast is ragged like a real continent. >0 from coastDistAt = on land.
+const angDiffAbs = (a, b) => {
+  let d = (a - b) % (Math.PI * 2);
+  if (d > Math.PI) d -= Math.PI * 2;
+  if (d < -Math.PI) d += Math.PI * 2;
+  return Math.abs(d);
+};
+export function coastRAt(x, z) {
+  const a = Math.atan2(x, z); // 0 = due south (+z), ±π = due north
+  let r = 2180 + 140 * Math.cos(2 * a);            // waisted east-west
+  const dS = angDiffAbs(a, 0), dN = angDiffAbs(a, Math.PI);
+  r += 420 * Math.exp(-((dS / 0.30) ** 2));        // the Jungle cape
+  r += 470 * Math.exp(-((dN / 0.26) ** 2));        // the Frozen spire
+  r += (zNoise(Math.sin(a) * 1600 + 4000, Math.cos(a) * 1600 + 4000, 420, 51) - 0.5) * 260;
+  return r;
+}
+export const coastDistAt = (x, z) => coastRAt(x, z) - radiusOf(x, z);
+
+// ---- harbors + the pirate ship line ----
+// A big ship calls at the Jungle cape and at the western landing of the
+// Frozen Peak: docked DOCK_T seconds (time to board), then sails out for
+// SAIL_T, teleports across the ocean, and sails the last SAIL_T into the
+// other harbor. Positions are resolved against the real coast in world.js.
+export const HARBOR_SPECS = [
+  { id: 'jungle', name: 'Cape Harbor',    a: 0.10, zone: 2 },
+  { id: 'frozen', name: 'Frost Landing',  a: -2.52, zone: 7 },
+];
+export const SHIP = { DOCK_T: 120, SAIL_T: 60, SPEED: 9 };
+
+// Everything about the zone under (x,z): its index, how far the nearest
+// zone border is, and (near borders) which zone lies across it.
+export function zoneInfoAt(x, z, shallow = false) {
+  const r = radiusOf(x, z);
+  const blobR = hubEdgeR(x, z);
+  const wx = x + wobX(x, z), wz = z + wobZ(x, z);
+  let idx;
+  if (r <= blobR) idx = 0;
+  else if (wz > LZ.s2) idx = 2;
+  else if (wz > LZ.s1) idx = wx < LX.ds ? 1 : 3;
+  else if (wz > LZ.n1) idx = wx < 0 ? 1 : 4;
+  else if (wz > LZ.n2) idx = wx < LX.jx ? 6 : 5;
+  else idx = 7;
+
+  // nearest border: the valley rim plus the real border lines. The z=630
+  // line west of the valley separates Desert from Desert (the wrap), so it
+  // doesn't count as a border there.
+  let d = Math.abs(r - blobR), wAxis = 'r', wC = 0;
+  const consider = (dist, axis, c) => { if (dist < d) { d = dist; wAxis = axis; wC = c; } };
+  consider(Math.abs(wz - LZ.s2), 'z', LZ.s2);
+  consider(Math.abs(wz - LZ.n1), 'z', LZ.n1);
+  consider(Math.abs(wz - LZ.n2), 'z', LZ.n2);
+  if (wx > -50) consider(Math.abs(wz - LZ.s1), 'z', LZ.s1);
+  if (wz > LZ.s1 - 120 && wz < LZ.s2 + 120) consider(Math.abs(wx - LX.ds), 'x', LX.ds);
+  if (wz > LZ.n2 - 120 && wz < LZ.n1 + 120) consider(Math.abs(wx - LX.jx), 'x', LX.jx);
+
+  let nearIdx = idx;
+  if (!shallow && d < 30) {
+    // probe just across the winning border for the neighbour's index
+    const step = d * 1.6 + 18;
+    let px = x, pz = z;
+    if (wAxis === 'r') { const k = (r + (r < blobR ? step : -step)) / (r || 1); px = x * k; pz = z * k; }
+    else if (wAxis === 'z') pz = z + (wz < wC ? step : -step);
+    else px = x + (wx < wC ? step : -step);
+    nearIdx = zoneInfoAt(px, pz, true).idx;
+  }
+  return { idx, borderDist: d, nearIdx };
+}
+
+// Zone palettes & rosters, index = difficulty tier (0 = homeland).
 // ground/ground2 = two grass tones blended by noise, dirt = patch color.
 // trees = weights for tree variants, snowy adds snow caps to pines.
-// packs: null = no packs in this ring, otherwise spawn config.
+// packs: null = no packs in this zone, otherwise spawn config.
 export const BIOMES = [
-  { name: 'Verdant Forest', rMax: 550,  ground: 0x55803c, ground2: 0x669147, dirt: 0x8a6b42,
+  { name: 'Verdant Forest', ground: 0x55803c, ground2: 0x669147, dirt: 0x8a6b42,
     fog: 0xc8dcae, sky: 0xaecfe8,
     foliage: [0x2d6a2d, 0x3c7f37, 0x4c8f3f], trunk: 0x6b4a2d,
     trees: { pine: 0.4, leafy: 0.4, birch: 0.2, dead: 0 }, snowy: false,
     grass: 0x6fa04c, flowers: true, mushrooms: false,
     enemies: ['rat', 'spider', 'snake'], humanoids: ['bandit'], packs: null, treeDensity: 1.0, denseForests: true,
     critters: ['rabbit', 'rabbit', 'rabbit', 'sheep'], night: { remove: ['rabbit', 'sheep'], add: 'spider' } },
-  { name: 'Scorched Desert', rMax: 1200, ground: 0xd8b878, ground2: 0xc9a860, dirt: 0xb89050,
+  { name: 'Scorched Desert', ground: 0xd8b878, ground2: 0xc9a860, dirt: 0xb89050,
     fog: 0xe8d8b0, sky: 0xbcd8e8, desert: true,
     foliage: [0x8a9a5a, 0x7a8a4a, 0x9aaa6a], trunk: 0x8a6b42,
     trees: { pine: 0, leafy: 0.1, birch: 0, dead: 0.9 }, snowy: false,
     grass: 0xc9b878, flowers: false, mushrooms: false,
     enemies: ['scorpion', 'cobra', 'vulture', 'snake'], humanoids: ['bandit', 'banditBrute'], packs: { skulls: [0.85, 0.15, 0] }, treeDensity: 0.3,
     critters: ['rabbit', 'rabbit'], night: { remove: ['rabbit', 'vulture'], add: 'scorpion' } },
-  { name: 'Dark Forest',    rMax: 2000, ground: 0x2c4a24, ground2: 0x24401f, dirt: 0x4a3a24,
-    fog: 0x2e3c2c, sky: 0x2c3a44, darkness: 0.62, light: 0.5,
-    foliage: [0x1e4a22, 0x27552a, 0x1a3f2e], trunk: 0x4c3520,
-    trees: { pine: 0.55, leafy: 0.25, birch: 0, dead: 0.2 }, snowy: false,
-    grass: 0x44663a, flowers: false, mushrooms: true,
-    enemies: ['spider', 'snake', 'wolf', 'venomspider', 'bat'], humanoids: ['bandit', 'banditBrute'], packs: { skulls: [0.7, 0.3, 0] }, treeDensity: 1.3, denseForests: true,
-    spiderHaunt: true, webField: true, critters: ['rabbit'], night: { remove: ['rabbit', 'snake'], add: 'venomspider' } },
-  { name: 'Murky Swamp',    rMax: 2900, ground: 0x565c30, ground2: 0x4a5230, dirt: 0x3a3c28,
+  { name: 'Jungle',         ground: 0x2f8a28, ground2: 0x3a9c32, dirt: 0x7a6030,
+    fog: 0x8ac878, sky: 0x8cc8e0,
+    foliage: [0x1f6b2a, 0x2d8a34, 0x39a03e], trunk: 0x5a4426,
+    trees: { pine: 0.1, leafy: 0.7, birch: 0.2, dead: 0 }, snowy: false,
+    grass: 0x4f8f3a, flowers: true, mushrooms: true, jungleFlora: true,
+    enemies: ['stormsnake', 'boar', 'bear', 'harpy', 'bogCrawler', 'snapper', 'panther'], humanoids: ['tribesman'], packs: { skulls: [0.7, 0.3, 0] }, treeDensity: 1.6, denseForests: true,
+    critters: ['rabbit', 'sheep', 'horse'], night: { remove: ['rabbit', 'sheep'], add: 'panther' } },
+  { name: 'Murky Swamp',    ground: 0x565c30, ground2: 0x4a5230, dirt: 0x3a3c28,
     fog: 0x3c4a44, sky: 0x3a4650, darkness: 0.4, light: 0.62,
     foliage: [0x3a5a30, 0x2e4a2a, 0x4a6438], trunk: 0x453a28,
     trees: { pine: 0.2, leafy: 0.5, birch: 0, dead: 0.3 }, snowy: false,
     grass: 0x60704a, flowers: false, mushrooms: true,
     enemies: ['snake', 'venomspider', 'stormsnake', 'boar', 'bogCrawler'], humanoids: ['tribesman', 'shaman'], packs: { skulls: [0.5, 0.4, 0.1] }, treeDensity: 0.9, denseForests: true,
     critters: ['horse'], night: { remove: ['horse', 'boar'], add: 'venomspider' } },
-  { name: 'Highlands',      rMax: 3800, ground: 0x9a8a50, ground2: 0xa89658, dirt: 0xa8874f,
-    fog: 0xc9c0a0, sky: 0x9db4c4,
-    foliage: [0x5c6e33, 0x6d7d3a, 0x4e5e2c], trunk: 0x5c4a33,
-    trees: { pine: 0.5, leafy: 0.1, birch: 0.1, dead: 0.3 }, snowy: false,
-    grass: 0x8f9060, flowers: false, mushrooms: false,
-    enemies: ['wolf', 'boar', 'elk', 'venomspider', 'stormsnake', 'harpy', 'cactusman'], humanoids: ['poacher'], packs: { skulls: [0.4, 0.4, 0.2] }, treeDensity: 0.7,
-    critters: ['rabbit', 'rabbit', 'sheep', 'horse'], night: { remove: ['rabbit', 'sheep'], add: 'wolf' } },
-  { name: 'Haunted Forest', rMax: 4700, ground: 0x3a3a44, ground2: 0x32323c, dirt: 0x4c4258,
+  { name: 'Dark Forest',    ground: 0x2c4a24, ground2: 0x24401f, dirt: 0x4a3a24,
+    fog: 0x2e3c2c, sky: 0x2c3a44, darkness: 0.62, light: 0.5,
+    foliage: [0x1e4a22, 0x27552a, 0x1a3f2e], trunk: 0x4c3520,
+    trees: { pine: 0.55, leafy: 0.25, birch: 0, dead: 0.2 }, snowy: false,
+    grass: 0x44663a, flowers: false, mushrooms: true,
+    enemies: ['spider', 'snake', 'wolf', 'venomspider', 'bat'], humanoids: ['bandit', 'banditBrute'], packs: { skulls: [0.4, 0.4, 0.2] }, treeDensity: 1.3, denseForests: true,
+    spiderHaunt: true, webField: true, critters: ['rabbit'], night: { remove: ['rabbit', 'snake'], add: 'venomspider' } },
+  { name: 'Haunted Forest', ground: 0x3a3a44, ground2: 0x32323c, dirt: 0x4c4258,
     fog: 0x3c3850, sky: 0x363044, darkness: 0.75, light: 0.48,
     foliage: [0x2a3a28, 0x1e2e20, 0x3a3448], trunk: 0x3a3230,
     trees: { pine: 0.3, leafy: 0.1, birch: 0, dead: 0.6 }, snowy: false,
     grass: 0x5c6650, flowers: false, mushrooms: true,
     enemies: ['zombie', 'bat', 'venomspider', 'wolf', 'treant', 'elk', 'ghost'], humanoids: ['shaman', 'poacher'], packs: { skulls: [0.3, 0.45, 0.25] }, treeDensity: 1.1, denseForests: true,
     spiderHaunt: true, critters: ['horse'], night: { remove: ['horse', 'elk'], add: 'ghost' } },
-  { name: 'Jungle',         rMax: 5100, ground: 0x2f8a28, ground2: 0x3a9c32, dirt: 0x7a6030,
-    fog: 0x8ac878, sky: 0x8cc8e0,
-    foliage: [0x1f6b2a, 0x2d8a34, 0x39a03e], trunk: 0x5a4426,
-    trees: { pine: 0.1, leafy: 0.7, birch: 0.2, dead: 0 }, snowy: false,
-    grass: 0x4f8f3a, flowers: true, mushrooms: true,
-    enemies: ['stormsnake', 'boar', 'bear', 'harpy', 'bogCrawler', 'snapper', 'panther'], humanoids: ['tribesman'], packs: { skulls: [0.2, 0.5, 0.3] }, treeDensity: 1.6, denseForests: true,
-    critters: ['rabbit', 'sheep', 'horse'], night: { remove: ['rabbit', 'sheep'], add: 'panther' } },
-  { name: 'Frozen Peak',    rMax: 99999, ground: 0xf2f6fa, ground2: 0xe4ecf3, dirt: 0xc9d6e1,
+  { name: 'Highlands',      ground: 0x9a8a50, ground2: 0xa89658, dirt: 0xa8874f,
+    fog: 0xc9c0a0, sky: 0x9db4c4,
+    foliage: [0x5c6e33, 0x6d7d3a, 0x4e5e2c], trunk: 0x5c4a33,
+    trees: { pine: 0.5, leafy: 0.1, birch: 0.1, dead: 0.3 }, snowy: false,
+    grass: 0x8f9060, flowers: false, mushrooms: false,
+    enemies: ['wolf', 'boar', 'elk', 'venomspider', 'stormsnake', 'harpy', 'cactusman'], humanoids: ['poacher'], packs: { skulls: [0.2, 0.5, 0.3] }, treeDensity: 0.7,
+    critters: ['rabbit', 'rabbit', 'sheep', 'horse'], night: { remove: ['rabbit', 'sheep'], add: 'wolf' } },
+  { name: 'Frozen Peak',    ground: 0xf2f6fa, ground2: 0xe4ecf3, dirt: 0xc9d6e1,
     fog: 0xf4f8fc, sky: 0xdfe9f2,
     foliage: [0x8fb0c0, 0x3d6155, 0xcfdfe8], trunk: 0x3d3229,
     trees: { pine: 0.7, leafy: 0, birch: 0, dead: 0.3 }, snowy: true,
@@ -74,16 +199,19 @@ export const BIOMES = [
     critters: ['horse'], night: { remove: ['horse', 'icespider'], add: 'wendigo' } },
 ];
 
-export function biomeIndexAt(x, z) {
-  const r = radiusOf(x, z);
-  for (let i = 0; i < BIOMES.length; i++) if (r <= BIOMES[i].rMax) return i;
-  return BIOMES.length - 1;
-}
+export function biomeIndexAt(x, z) { return zoneInfoAt(x, z).idx; }
 export function biomeAt(x, z) { return BIOMES[biomeIndexAt(x, z)]; }
 
-// 0..1 journey progress used for difficulty scaling
+// 0..1 journey progress used for difficulty scaling: the zone's tier plus
+// how deep into that zone you've pushed. Crossing into a higher-tier zone is
+// a difficulty CLIFF — the borders are real frontiers, WoW style.
 export function progressAt(x, z) {
-  return Math.min(1, radiusOf(x, z) / WORLD.goalR);
+  const r = radiusOf(x, z);
+  const idx = biomeIndexAt(x, z);
+  const depth = idx === 0
+    ? Math.min(1, r / WORLD.hubR)
+    : Math.max(0, Math.min(1, (r - WORLD.hubR) / (2400 - WORLD.hubR)));
+  return Math.min(1, (idx + depth) / BIOMES.length);
 }
 
 // ---- resources ----
@@ -226,6 +354,9 @@ export const ENEMY_TYPES = {
   griffin: { name: 'Griffin', icon: '🦅',
              hp: 700, dmg: 26, speed: 3.6, range: 2.0, attackCd: 1.1, xp: 110, meat: 6, hitR: 1.1, aggro: 24,
              flying: true, griffin: true },
+  villager: { name: 'Villager', icon: '🧑‍🌾',
+             hp: 40,  dmg: 0,  speed: 2.3, range: 0,   attackCd: 1.0, xp: 2,  meat: 1, hitR: 0.4, aggro: 0,
+             passive: true, herd: [3, 6] },
   griffinChick: { name: 'Griffin Fledgling', icon: '🐤',
              hp: 260, dmg: 11, speed: 3.8, range: 1.4, attackCd: 1.0, xp: 22, meat: 2, hitR: 0.55, aggro: 22,
              flying: true },
@@ -235,10 +366,9 @@ export const ENEMY_TYPES = {
 // Base XP already follows the hand-balanced creature roster, while the extra
 // terms reflect the real stat multipliers applied by Enemy at spawn time.
 export function biomeIndexForDifficulty(difficulty = 0) {
-  const distance = Math.max(0, difficulty) * WORLD.goalR;
-  let biomeIndex = BIOMES.findIndex(b => distance <= b.rMax);
-  if (biomeIndex < 0) biomeIndex = BIOMES.length - 1;
-  return biomeIndex;
+  // progressAt packs (tier + depth) / zoneCount into 0..1 — invert the tier
+  return Math.max(0, Math.min(BIOMES.length - 1,
+    Math.floor(Math.max(0, difficulty) * BIOMES.length)));
 }
 
 export function enemyLevelFor(type, difficulty = 0, bossRank = 0, elite = false) {
@@ -328,7 +458,7 @@ export function questXpFor(level) {
 export const SLOTS = ['weapon', 'offhand', 'head', 'chest', 'underlayer', 'legs', 'boots', 'back', 'mount', 'charm', 'companion'];
 export const SLOT_LABELS = { weapon: 'Weapon', offhand: 'Off-hand', head: 'Head', chest: 'Chest',
   underlayer: 'Underlayer', legs: 'Legs', boots: 'Boots', back: 'Back', mount: 'Mount',
-  charm: 'Charm', companion: 'Companion', placeable: 'Placeable' };
+  charm: 'Charm', companion: 'Companion', placeable: 'Placeable', skill: 'Skill' };
 
 // Gear progresses through the ages. `needs` gates an item behind a camp
 // building (survival): 'tent' → Hide Tent, 'cabin' → Wooden Cabin,
@@ -531,6 +661,9 @@ export const ITEMS = [
   { id: 'graveyardItem', slot: 'placeable', level: 5, supply: true, icon: '🪦', name: 'Graveyard',
     cost: { stone: 30, wood: 20, meat: 20 }, placeable: { kind: 'grave' },
     desc: 'Place a remote respawn shrine on solid ground. Death lets you choose the cave or this graveyard.' },
+  { id: 'swimming', slot: 'skill', level: 7, supply: true, icon: '🏊', name: 'Swimming Lessons',
+    cost: { meat: 50 }, training: 'swim',
+    desc: 'Learn to swim (permanent). Deep water — the ocean, border rapids, the black bog — stops drowning you, and you can paddle across it. Shallow water is always wadeable.' },
 
   // -- griffin nests: dropped by beaten griffins, never sold or looted
   // (free: true keeps them out of every random loot pool). Click one in the
@@ -538,10 +671,10 @@ export const ITEMS = [
   // between (stand next to a placed nest to open the flight map).
   { id: 'desertNest',   slot: 'nest', level: 1, icon: '🪺', name: 'Desert Griffin Nest', cost: null, free: true,
     nest: { biomeMax: 1 },
-    desc: 'The Desert griffin\'s nest. Click to place it where you stand (Desert or any earlier ring). Stand by a placed nest to call a griffin and fly between your roosts.' },
+    desc: 'The Desert griffin\'s nest. Click to place it where you stand (Desert or any earlier zone). Stand by a placed nest to call a griffin and fly between your roosts.' },
   { id: 'highlandNest', slot: 'nest', level: 1, icon: '🪺', name: 'Highland Griffin Nest', cost: null, free: true,
-    nest: { biomeMax: 4 },
-    desc: 'The Highland griffin\'s nest. Click to place it where you stand (Highlands or any earlier ring). Stand by a placed nest to call a griffin and fly between your roosts.' },
+    nest: { biomeMax: 6 },
+    desc: 'The Highland griffin\'s nest. Click to place it where you stand (Highlands or any earlier zone). Stand by a placed nest to call a griffin and fly between your roosts.' },
   { id: 'frozenNest',   slot: 'nest', level: 1, icon: '🪺', name: 'Frozen Griffin Nest', cost: null, free: true,
     nest: { biomeMax: 7 },
     desc: 'The Frozen Peak griffin\'s nest. Click to place it anywhere on solid ground. Stand by a placed nest to call a griffin and fly between your roosts.' },
@@ -553,18 +686,18 @@ export const ITEMS = [
     weapon: { kind: 'melee', style: 'sword', dmg: 95, cd: 0.6, range: 2.0, chop: 1, mine: 0, tier: 2,
       combo: [1, 1.2, 1.5], parry: true, burn: 8 },
     desc: 'UNIQUE — a blistering three-hit blade that parries and ignites enemies.' },
-  { id: 'widowShroud', slot: 'chest', level: 9, unique: true, icon: '🕸️', name: "Widow's Shroud",
-    stats: { hp: 210, regen: 1.0 }, desc: 'UNIQUE — dropped by Vess the Widow. +210 max health, +1.0 ❤️/s.' },
+  { id: 'widowShroud', slot: 'chest', level: 15, unique: true, icon: '🕸️', name: "Widow's Shroud",
+    stats: { hp: 235, regen: 1.2 }, desc: 'UNIQUE — dropped by Vess the Widow. +235 max health, +1.2 ❤️/s.' },
   { id: 'mireBoots', slot: 'boots', level: 12, unique: true, icon: '🥾', name: 'Mirewalker Boots',
     stats: { speed: 5, hp: 110, regen: 0.5 }, mudguard: 0.25,
     desc: 'UNIQUE — dropped by the Mire Hydra. +5 speed, +110 health, +0.5 ❤️/s; mud barely slows you.' },
-  { id: 'ironhornCrown', slot: 'head', level: 15, unique: true, icon: '👑', name: 'Ironhorn Crown',
-    stats: { hp: 230, regen: 1.0 }, desc: 'UNIQUE — dropped by Old Ironhorn. +230 max health, +1.0 ❤️/s.' },
+  { id: 'ironhornCrown', slot: 'head', level: 21, unique: true, icon: '👑', name: 'Ironhorn Crown',
+    stats: { hp: 290, regen: 1.5 }, desc: 'UNIQUE — dropped by Old Ironhorn. +290 max health, +1.5 ❤️/s.' },
   { id: 'shadeAmulet', slot: 'charm', level: 18, unique: true, icon: '👻', name: 'Amulet of the Shade',
     stats: { dmgPct: 0.30, regen: 1.2 }, desc: 'UNIQUE — dropped by the Weeping Shade. +30% damage, +1.2 ❤️/s.' },
-  { id: 'snapjawMaul', slot: 'weapon', level: 21, unique: true, icon: '🔨', name: 'Snapjaw Maul',
-    weapon: { kind: 'melee', style: 'club', dmg: 320, cd: 1.05, range: 2.35, chop: 3, mine: 2, tier: 4,
-      combo: [1, 1.35], stun: 1.0, armorBreak: 0.55 },
+  { id: 'snapjawMaul', slot: 'weapon', level: 9, unique: true, icon: '🔨', name: 'Snapjaw Maul',
+    weapon: { kind: 'melee', style: 'club', dmg: 135, cd: 1.05, range: 2.35, chop: 2, mine: 1, tier: 2,
+      combo: [1, 1.35], stun: 0.8, armorBreak: 0.35 },
     desc: 'UNIQUE — a crushing jungle maul that stuns and ruins armour.' },
   { id: 'frostMantle', slot: 'back', level: 24, unique: true, icon: '🧊', name: 'Mantle of the Colossus',
     stats: { hp: 300, regen: 2.0 }, rest: 8, coldproof: true,
@@ -582,21 +715,21 @@ export const BIOME_LAIRS = [
   { name: 'Kthara Sunfang',        type: 'scorpion',    drop: 'sunfangBlade',
     den: 'The Sunfang Burrow', mobs: ['scorpion', 'cobra'],
     theme: { floor: 0xb99a63, wall: 0x9a7c48, fog: 0x1a1408, prop: 'sand' } },
-  { name: 'Vess the Widow',        type: 'venomspider', drop: 'widowShroud',
-    den: "The Widow's Hollow", mobs: ['venomspider', 'bat'],
-    theme: { floor: 0x1f2a1c, wall: 0x243020, fog: 0x050805, prop: 'web' } },
-  { name: 'The Mire Hydra',        type: 'bogCrawler',  drop: 'mireBoots',
-    den: 'The Drowned Den', mobs: ['bogCrawler', 'snake'],
-    theme: { floor: 0x424a28, wall: 0x39402a, fog: 0x0b0f08, prop: 'mud' } },
-  { name: 'Old Ironhorn',          type: 'elk',         drop: 'ironhornCrown',
-    den: 'The Bonefield Barrow', mobs: ['elk', 'harpy'],
-    theme: { floor: 0x8a7c4c, wall: 0x6f6340, fog: 0x14120a, prop: 'bone' } },
-  { name: 'The Weeping Shade',     type: 'ghost',       drop: 'shadeAmulet',
-    den: 'The Weeping Crypt', mobs: ['ghost', 'zombie'],
-    theme: { floor: 0x2e2e38, wall: 0x3a3a48, fog: 0x08080e, prop: 'ghost' } },
   { name: 'Old Snapjaw',           type: 'snapper',     drop: 'snapjawMaul',
     den: 'The Overgrown Gullet', mobs: ['snapper', 'panther'],
     theme: { floor: 0x2c5c24, wall: 0x3a6a2e, fog: 0x061006, prop: 'vine' } },
+  { name: 'The Mire Hydra',        type: 'bogCrawler',  drop: 'mireBoots',
+    den: 'The Drowned Den', mobs: ['bogCrawler', 'snake'],
+    theme: { floor: 0x424a28, wall: 0x39402a, fog: 0x0b0f08, prop: 'mud' } },
+  { name: 'Vess the Widow',        type: 'venomspider', drop: 'widowShroud',
+    den: "The Widow's Hollow", mobs: ['venomspider', 'bat'],
+    theme: { floor: 0x1f2a1c, wall: 0x243020, fog: 0x050805, prop: 'web' } },
+  { name: 'The Weeping Shade',     type: 'ghost',       drop: 'shadeAmulet',
+    den: 'The Weeping Crypt', mobs: ['ghost', 'zombie'],
+    theme: { floor: 0x2e2e38, wall: 0x3a3a48, fog: 0x08080e, prop: 'ghost' } },
+  { name: 'Old Ironhorn',          type: 'elk',         drop: 'ironhornCrown',
+    den: 'The Bonefield Barrow', mobs: ['elk', 'harpy'],
+    theme: { floor: 0x8a7c4c, wall: 0x6f6340, fog: 0x14120a, prop: 'bone' } },
   // ring 7 — Frozen Peak: a COLOSSAL yeti, bigger and tougher than any lair boss
   { name: 'Grimfrost the Colossus', type: 'yeti',        drop: 'frostMantle', extraScale: 1.5, hpMult: 1.5,
     den: 'The Frostfather Cavern', mobs: ['icewolf', 'wendigo'],
@@ -1241,11 +1374,11 @@ export const QUEST_CATEGORY_LABELS = {
 const SIGNATURE_QUESTS = [
   { event: 'farm', name: '🏚️ A roof for the lost', desc: 'Find and restore the abandoned farmstead.' },
   { event: 'crypt', name: '🗝️ Sand-buried oath', desc: 'Clear and open a crypt in the Scorched Desert.' },
-  { event: 'crypt', name: '🕯️ Light below the roots', desc: 'Clear and open a crypt in the Dark Forest.' },
-  { event: 'tribeAlliance', name: '🪶 Terms with the marsh', desc: 'Earn safe passage from the swamp tribe at their village.' },
-  { event: 'raceWin', name: '🏁 The high road', desc: 'Win a mounted race through the Highlands.' },
-  { event: 'graveyardRest', name: '👻 Let the dead sleep', desc: 'Defend a haunted graveyard until its spirits rest.' },
   { event: 'temple', name: '🏛️ The broken map', desc: 'Clear a jungle temple and recover its hidden route.' },
+  { event: 'tribeAlliance', name: '🪶 Terms with the marsh', desc: 'Earn safe passage from the swamp tribe at their village.' },
+  { event: 'crypt', name: '🕯️ Light below the roots', desc: 'Clear and open a crypt in the Dark Forest.' },
+  { event: 'graveyardRest', name: '👻 Let the dead sleep', desc: 'Defend a haunted graveyard until its spirits rest.' },
+  { event: 'raceWin', name: '🏁 The high road', desc: 'Win a mounted race through the Highlands.' },
   { event: 'summit', name: '⛰️ Nothing above us', desc: 'Reach and claim the summit of the Frozen Peak.' },
 ];
 

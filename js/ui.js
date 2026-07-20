@@ -1,7 +1,7 @@
 // ---- HUD, spellbar, floating popups, boss labels, toasts, menus ----
 
 import * as THREE from 'three';
-import { WORLD, XP_LEVELS, MAX_LEVEL, MAX_SPELL_SLOTS, ENEMY_TYPES, RES_ICONS,
+import { XP_LEVELS, MAX_LEVEL, MAX_SPELL_SLOTS, ENEMY_TYPES, RES_ICONS,
          fmtResource, itemById, spellById, classSkillById, classActiveInfo } from './config.js';
 import { itemIcon, skillArt } from './icons.js';
 import { attachTip } from './tooltip.js';
@@ -118,7 +118,8 @@ export class UI {
       ? `Lv ${player.level} (MAX)`
       : `Lv ${player.level} — ${player.xp}/${XP_LEVELS[player.level + 1]} XP`;
     $('progress-bar').style.width = (progressPct * 100) + '%';
-    $('progress-text').textContent = `${Math.round(progressPct * WORLD.goalR)} m / ${WORLD.goalR} m from home`;
+    // progress is zone tier + depth now, not raw meters — show the journey %
+    $('progress-text').textContent = `Journey ${Math.round(progressPct * 100)}% — the summit awaits`;
     $('biome-name').textContent = biomeName;
 
     const questEl = $('active-quest');

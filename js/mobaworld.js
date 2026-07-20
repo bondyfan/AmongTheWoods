@@ -69,7 +69,8 @@ export class MobaWorld extends World {
     return h * Math.max(0.1, Math.min(1, flat));
   }
 
-  _genRings() { this.rings = []; }   // no ring barriers on the MOBA map
+  // no zone borders on the MOBA map (leaves _hasBorders unset → no barriers)
+  _genRings() { this.rings = []; this.edges = []; this.hubGates = []; this.borderLines = []; this.gateList = []; }
   _genLakes() { this.lakes = []; }   // no lakes (keeps lanes reliable)
   _genPois() { this.pois = []; }     // no survival landmarks either
   _genSmiths() { this.smiths = []; }

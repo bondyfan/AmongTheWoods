@@ -2,6 +2,7 @@
 // AI (melee, ranged spitters, flyers), damage ----
 
 import * as THREE from 'three';
+import { worldPatch } from './worldpatch.js';
 import { WORLD, ENEMY_TYPES, BOSS_RANKS, BIOMES, biomeAt, biomeIndexAt, progressAt,
          meatForHp, bossNameFor, enemyLevelFor, biomeIndexForDifficulty } from './config.js';
 import { makeEnemyMesh, makeCobweb, makeHumanCamp, makeCage } from './models.js';
@@ -20,6 +21,21 @@ const LEASH_TIME_BOSS = 16;
 // Units left far behind melt back into their zone's pool (they're remembered,
 // not respawned) and rematerialize when someone returns.
 const ZONE = 120;
+// deterministic per-cell RNG: with the one canonical world seed, every zone
+// rolls the SAME inhabitants in the same spots, session after session
+function mulberry32(seed) {
+  return function () {
+    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const cellSeed = (cx, cz, salt) => {
+  let h = (Math.round(cx) * 374761393 + Math.round(cz) * 668265263 + salt * 97) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return h ^ (h >>> 16);
+};
 const ZONE_ACTIVATE = 175;   // zones this close to a player materialize
 const ZONE_RELEASE = 205;    // live units further than this return to the pool
 const SPAWN_MIN_DIST = 62;   // nothing ever appears closer than this to a player
@@ -134,6 +150,7 @@ export class EnemyManager {
     const e = new Enemy(type, x, z, difficulty, bossRank, !!flags?.elite);
     if (flags) Object.assign(e, flags); // ambush/noReinforce BEFORE the hooks fire
     if (bossRank > 0 && !e.bossName) e.bossName = bossNameFor(type, e.id);
+    e.mesh.position.y = this.world.heightAt(x, z); // grounded from frame one
     this.scene.add(e.mesh);
     this.list.push(e);
     if (bossRank > 0) this.hooks.onBossSpawn(e);
@@ -193,7 +210,11 @@ export class EnemyManager {
   }
 
   _spawnAnchors(targets) {
-    return targets.filter(t => !t.dead && !this.world.isTargetSafe?.(t.pos));
+    // the editor's god-camera anchor must NEVER be dropped: the editor opens
+    // with the camera over the camp SAFE ZONE, and filtering it out silently
+    // disabled all mob population until the camera left it
+    return targets.filter(t => !t.dead
+      && (t.editorGhost || !this.world.isTargetSafe?.(t.pos)));
   }
 
   // ---------- persistent zone population ----------
@@ -201,9 +222,10 @@ export class EnemyManager {
   // Roll what LIVES in this zone: a few singles, maybe a pack with a boss
   // mother, maybe a grazing critter herd (with its lurking guardian).
   _generatePool(cx, cz) {
+    const rand = mulberry32(cellSeed(cx, cz, 11));
     const biome = biomeAt(cx, cz);
     const progress = progressAt(cx, cz);
-    const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+    const pick = (arr) => arr[Math.floor(rand() * arr.length)];
     const pool = [];
     // at night the roster shifts: two day types stay home, one predator prowls
     const night = (this.nightK || 0) > 0.5;
@@ -214,11 +236,11 @@ export class EnemyManager {
     const singles = Math.round((3 + progress * 7) * SPAWN_DENSITY * (1 + 0.6 * (this.nightK || 0)));
     for (let i = 0; i < singles; i++) pool.push({ type: pick(nightPool) });
 
-    if (biome.packs && Math.random() < 0.4) {
+    if (biome.packs && rand() < 0.4) {
       const type = pick(biome.enemies);
       let rank = 0;
-      if (Math.random() < 0.7) {
-        let roll = Math.random();
+      if (rand() < 0.7) {
+        let roll = rand();
         rank = 1;
         for (let i = 0; i < 3; i++) {
           roll -= biome.packs.skulls[i];
@@ -226,44 +248,64 @@ export class EnemyManager {
         }
       }
       const gid = nextGroupId++;
-      const count = rank > 0 ? BOSS_RANKS[rank - 1].packSize : 5 + Math.floor(Math.random() * 6);
+      const count = rank > 0 ? BOSS_RANKS[rank - 1].packSize : 5 + Math.floor(rand() * 6);
       for (let i = 0; i < count; i++) pool.push({ type, groupId: gid });
       if (rank > 0) pool.push({ type, bossRank: rank, groupId: gid });
     }
 
     // humanoids are RARE — but where they do settle, they build a proper
     // camp: a dwelling with a fire, and the whole band lives around it
-    if (biome.humanoids?.length && Math.random() < 0.12) {
+    if (biome.humanoids?.length && rand() < 0.12) {
       const type = pick(biome.humanoids);
       const gid = nextGroupId++;
-      const count = 3 + Math.floor(Math.random() * 4); // a camp of 3-6
+      const count = 3 + Math.floor(rand() * 4); // a camp of 3-6
       for (let i = 0; i < count; i++) pool.push({ type, groupId: gid, camp: true });
     }
 
     // spider-haunted woods: almost every zone hides a spider (or bat) nest,
     // usually with a brood mother — these packs drape the ground in webs
-    if (biome.spiderHaunt && Math.random() < 0.85) {
+    if (biome.spiderHaunt && rand() < 0.85) {
       const nest = biome.enemies.filter(t => /spider|bat/i.test(t));
       if (nest.length) {
         const type = pick(nest);
-        let rank = Math.random() < 0.6 ? 1 : 0;
-        if (rank && Math.random() < 0.25) rank = 2;
+        let rank = rand() < 0.6 ? 1 : 0;
+        if (rank && rand() < 0.25) rank = 2;
         const gid = nextGroupId++;
-        const count = rank > 0 ? BOSS_RANKS[rank - 1].packSize : 5 + Math.floor(Math.random() * 6);
+        const count = rank > 0 ? BOSS_RANKS[rank - 1].packSize : 5 + Math.floor(rand() * 6);
         for (let i = 0; i < count; i++) pool.push({ type, groupId: gid });
         if (rank > 0) pool.push({ type, bossRank: rank, groupId: gid });
       }
     }
 
     const critters = biome.critters ? biome.critters.filter(t => !nr.includes(t)) : null;
-    if (critters && critters.length && Math.random() < 0.55) {
+    if (critters && critters.length && rand() < 0.55) {
       const type = pick(critters);
       const cfg = ENEMY_TYPES[type];
       const [lo, hi] = cfg.herd ?? [3, 10];
       const gid = nextGroupId++;
-      const count = lo + Math.floor(Math.random() * (hi - lo + 1));
+      const count = lo + Math.floor(rand() * (hi - lo + 1));
       for (let i = 0; i < count; i++) pool.push({ type, groupId: gid });
       if (cfg.guardian) pool.push({ type: cfg.guardian, elite: true, groupId: gid, guardian: true });
+    }
+
+    // villagers stroll every town square (3+ buildings ≥ town threshold)
+    for (const tc of worldPatch.townCentersIn?.(cx, cz, ZONE) ?? []) {
+      const gid = nextGroupId++;
+      const n = Math.min(8, 3 + Math.floor(tc.size / 3));
+      for (let i = 0; i < n; i++) {
+        pool.push({ type: 'villager', groupId: gid, at: { x: tc.x, z: tc.z } });
+      }
+    }
+
+    // World-Editor placed camps: fixed packs that always live at their
+    // pinned spot in this cell (count / boss rank / camp flag from the patch)
+    for (const pk of worldPatch.packsIn(cx, cz, ZONE)) {
+      if (!ENEMY_TYPES[pk.enemy]) continue;
+      const gid = nextGroupId++;
+      const at = { x: pk.x, z: pk.z };
+      const n = Math.max(1, Math.min(12, pk.count ?? 4));
+      for (let i = 0; i < n; i++) pool.push({ type: pk.enemy, groupId: gid, at, camp: !!pk.camp });
+      if (pk.boss) pool.push({ type: pk.enemy, bossRank: Math.min(3, pk.boss), groupId: gid, at });
     }
     return pool;
   }
@@ -271,13 +313,15 @@ export class EnemyManager {
   // Materialize a zone's pool into live units — every placement is at least
   // SPAWN_MIN_DIST from every player, so nothing ever pops in on screen.
   _materializeZone(zone, key, cx, cz, targets) {
-    const living = targets.filter(t => !t.dead);
+    const mrand = mulberry32(cellSeed(cx, cz, 23)); // same spots every visit
+    const living = targets.filter(t => !t.dead && !t.editorGhost);
     const tryPoint = () => {
       for (let i = 0; i < 14; i++) {
-        const x = cx + (Math.random() - 0.5) * ZONE;
-        const z = cz + (Math.random() - 0.5) * ZONE;
+        const x = cx + (mrand() - 0.5) * ZONE;
+        const z = cz + (mrand() - 0.5) * ZONE;
         const r = Math.hypot(x, z);
         if (r < 45 || r > WORLD.radius - 6) continue;
+        if (this._drownableAt(x, z)) continue; // nothing spawns in drownable water
         if (living.some(t => Math.hypot(t.pos.x - x, t.pos.z - z) < SPAWN_MIN_DIST)) continue;
         return { x, z };
       }
@@ -296,19 +340,30 @@ export class EnemyManager {
     const mRemove = mNight && mBiome.night ? mBiome.night.remove : [];
     const remaining = [];
     for (const [, specs] of byGroup) {
-      if (this.alive().length >= MAX_ALIVE_HARD) { remaining.push(...specs); continue; }
+      if (this.alive().length >= (this.maxAlive ?? MAX_ALIVE_HARD)) { remaining.push(...specs); continue; }
       // after dark the day-only critters stay in the pool (they return at dawn)
       if (mRemove.length && specs.some(sp => mRemove.includes(sp.type))) { remaining.push(...specs); continue; }
       // humanoid bands settle a permanent camp site: first visit builds the
       // dwelling, and every re-materialization brings them home to it
       const isCamp = specs.some(sp => sp.camp);
       let at;
-      if (isCamp && zone.campAt) {
+      const pinned = specs.find(sp => sp.at)?.at; // World-Editor pinned packs
+      if (pinned && this._drownableAt(pinned.x, pinned.z)
+          && !specs.every(sp => ENEMY_TYPES[sp.type]?.flying)) {
+        continue; // the pin drowned (deep water painted over it) — never spawn
+      }
+      if (pinned) {
+        at = pinned;
+        if (living.some(t => Math.hypot(t.pos.x - at.x, t.pos.z - at.z) < SPAWN_MIN_DIST)) {
+          remaining.push(...specs); continue; // someone is looking at the spot
+        }
+      } else if (isCamp && zone.campAt && !this._drownableAt(zone.campAt.x, zone.campAt.z)) {
         at = zone.campAt;
         if (living.some(t => Math.hypot(t.pos.x - at.x, t.pos.z - at.z) < SPAWN_MIN_DIST)) {
           remaining.push(...specs); continue; // someone is looking at the camp
         }
       } else {
+        if (isCamp) zone.campAt = null; // (a drowned camp picks a new home)
         at = tryPoint();
         if (!at) { remaining.push(...specs); continue; }
       }
@@ -319,7 +374,7 @@ export class EnemyManager {
       const ringR = 1.5 + Math.sqrt(specs.length) * 1.6;
       specs.forEach((spec, i) => {
         const a = (i / specs.length) * Math.PI * 2;
-        const rr = specs.length > 1 ? ringR * (0.4 + Math.random() * 0.6) : 0;
+        const rr = specs.length > 1 ? ringR * (0.4 + mrand() * 0.6) : 0;
         const e = this._spawn(spec.type, at.x + Math.cos(a) * rr, at.z + Math.sin(a) * rr,
           progress, spec.bossRank || 0, {
             // repeat announcements are muted; herd guardians are always quiet
@@ -332,12 +387,117 @@ export class EnemyManager {
         e.groupId = spec.groupId || 0;
         // remembered when the unit melts back into the pool later
         e._spec = { type: spec.type, bossRank: spec.bossRank || 0, elite: spec.elite, camp: spec.camp,
-                    groupId: spec.groupId, guardian: spec.guardian, announced: true };
+                    groupId: spec.groupId, guardian: spec.guardian, at: spec.at, announced: true };
         if (spec.bossRank && !spec.guardian && !spec.announced) audio.sfx('lane_unlock', 0.45);
       });
       if (specs.length > 3 && /spider/i.test(specs[0].type)) this._spawnWebs(at);
     }
     zone.pool = remaining;
+  }
+
+  // deep water that actually kills placement/mobs — the swamp's natural
+  // bog is home turf for its fauna and must NOT count
+  _drownableAt(x, z) {
+    return this.world.waterKindAt?.(x, z) === 2
+      && this.world.swampZone?.(x, z) !== 'water';
+  }
+
+  // ---- World-Editor support ----
+  // Populate the spawn zones around the god camera (a ghost anchor: it
+  // activates zones but never blocks placement), leaving the mobs FROZEN —
+  // the editor never ticks their AI.
+  editorPopulate(center, avoid = null) {
+    // deep water drowns everything (except the swamp's own bog dwellers) —
+    // painting the sea over a mob removes it
+    for (let i = this.list.length - 1; i >= 0; i--) {
+      const e = this.list[i];
+      if (!e.cfg?.flying && this._drownableAt(e.pos.x, e.pos.z)) {
+        if (e.bossRank > 0) this.hooks.onBossDeath(e); // clear boss trackers
+        this._remove(e, i);
+      }
+    }
+    // the frozen sim never releases far mobs, so the alive cap would fill up
+    // around the start and leave every distant biome EMPTY — pool them here
+    const rel = ZONE_RELEASE * (this.zoneScale ?? 1);
+    for (let i = this.list.length - 1; i >= 0; i--) {
+      const e = this.list[i];
+      if (e.dying || !e.zoneKey) continue;
+      if (Math.hypot(e.pos.x - center.x, e.pos.z - center.z) <= rel) continue;
+      const zone = this.zones.get(e.zoneKey);
+      if (zone) {
+        (zone.pool ??= []).push(e._spec ?? {
+          type: e.type, bossRank: e.bossRank, groupId: e.groupId, announced: true });
+      }
+      if (e.bossRank > 0) this.hooks.onBossDeath(e); // clear boss trackers
+      this._remove(e, i);
+    }
+    // the parked player counts as a normal target, so SPAWN_MIN_DIST still
+    // keeps mobs off their head while the god camera roams
+    const targets = [{ pos: { x: center.x, z: center.z }, dead: false, editorGhost: true }];
+    if (avoid) targets.push({ pos: { x: avoid.x, z: avoid.z }, dead: false });
+    this._updateZones(targets);
+  }
+
+  // the admin re-sculpted the ground — stand every nearby mob back on the
+  // new terrain, stepping aside off fresh cliffs and out of new water
+  regroundMobs(x, z, r) {
+    const steepAt = (px, pz) => {
+      const h0 = this.world.heightAt(px, pz);
+      return Math.max(
+        Math.abs(this.world.heightAt(px + 1.2, pz) - h0),
+        Math.abs(this.world.heightAt(px, pz + 1.2) - h0)) / 1.2 > 1.15;
+    };
+    for (let i = this.list.length - 1; i >= 0; i--) {
+      const e = this.list[i];
+      if (e.cfg?.flying) continue;
+      if (Math.hypot(e.pos.x - x, e.pos.z - z) > r) continue;
+      if (this._drownableAt(e.pos.x, e.pos.z)) {
+        if (e.bossRank > 0) this.hooks.onBossDeath(e);
+        this._remove(e, i);
+        continue;
+      }
+      if (steepAt(e.pos.x, e.pos.z)) {
+        // spiral outward for gentler dry footing
+        let moved = false;
+        for (let rr = 3; rr <= 27 && !moved; rr += 3) {
+          for (let a = 0; a < Math.PI * 2; a += Math.PI / 4) {
+            const px = e.pos.x + Math.cos(a) * rr, pz = e.pos.z + Math.sin(a) * rr;
+            if (steepAt(px, pz) || this._drownableAt(px, pz)) continue;
+            e.pos.x = px; e.pos.z = pz;
+            moved = true;
+            break;
+          }
+        }
+      }
+      e.mesh.position.set(e.pos.x, this.world.heightAt(e.pos.x, e.pos.z), e.pos.z);
+    }
+    // static props re-seat on the new ground too
+    for (const c of this.campSites ?? []) {
+      if (Math.hypot(c.x - x, c.z - z) <= r) {
+        c.mesh.position.y = this.world.heightAt(c.x, c.z) - (c.dead ? 0.28 : 0);
+      }
+    }
+    for (const pr of this.prisoners ?? []) {
+      if (Math.hypot(pr.x - x, pr.z - z) <= r) pr.mesh.position.y = this.world.heightAt(pr.x, pr.z);
+    }
+    for (const wb of this.webs ?? []) {
+      if (Math.hypot(wb.x - x, wb.z - z) <= r) wb.mesh.position.y = this.world.heightAt(wb.x, wb.z) + 0.07;
+    }
+  }
+
+  // entity edits changed what should live where — wipe and let the next
+  // editorPopulate roll fresh pools (pinned camps included)
+  editorReset() {
+    this.clearAll(false);
+    this.zones.clear();
+    for (const c of this.campSites ?? []) {
+      this.scene.remove(c.mesh);
+      const i = this.world.obstacles?.indexOf(c.obstacle) ?? -1;
+      if (i >= 0) this.world.obstacles.splice(i, 1);
+    }
+    this.campSites = [];
+    for (const pr of this.prisoners ?? []) this.scene.remove(pr.mesh);
+    this.prisoners = [];
   }
 
   _updateZones(targets) {
@@ -351,14 +511,15 @@ export class EnemyManager {
     }
     const seen = new Set();
     for (const a of anchors) {
-      const z0 = Math.floor((a.pos.z - ZONE_ACTIVATE) / ZONE), z1 = Math.floor((a.pos.z + ZONE_ACTIVATE) / ZONE);
-      const x0 = Math.floor((a.pos.x - ZONE_ACTIVATE) / ZONE), x1 = Math.floor((a.pos.x + ZONE_ACTIVATE) / ZONE);
+      const act = ZONE_ACTIVATE * (this.zoneScale ?? 1);
+      const z0 = Math.floor((a.pos.z - act) / ZONE), z1 = Math.floor((a.pos.z + act) / ZONE);
+      const x0 = Math.floor((a.pos.x - act) / ZONE), x1 = Math.floor((a.pos.x + act) / ZONE);
       for (let zx = x0; zx <= x1; zx++) for (let zz = z0; zz <= z1; zz++) {
         const key = zx + ',' + zz;
         if (seen.has(key)) continue;
         seen.add(key);
         const cx = zx * ZONE + ZONE / 2, cz = zz * ZONE + ZONE / 2;
-        if (Math.hypot(cx - a.pos.x, cz - a.pos.z) > ZONE_ACTIVATE) continue;
+        if (Math.hypot(cx - a.pos.x, cz - a.pos.z) > act) continue;
         const zr = Math.hypot(cx, cz);
         if (zr < 60 || zr > WORLD.radius) continue; // the camp area stays wild-free
         let zone = this.zones.get(key);
@@ -744,7 +905,7 @@ export class EnemyManager {
       // with no recent attacker it's the nearest visible target. Creatures
       // never see across a biome border.
       const eBiome = biomeIndexAt(e.pos.x, e.pos.z);
-      const validTarget = (t) => t && !t.dead && !t.stealthed && t.pos
+      const validTarget = (t) => t && !t.dead && !t.stealthed && !t.testGhost && t.pos
         && !this.world.isTargetSafe?.(t.pos)
         && biomeIndexAt(t.pos.x, t.pos.z) === eBiome;
       let target = null, dist = Infinity;
@@ -778,7 +939,7 @@ export class EnemyManager {
       // left far behind → the unit melts back into its zone's pool (it's
       // REMEMBERED, not killed — it rematerializes when someone returns).
       // Dungeon dwellers never melt: the instance is small and theirs.
-      if (dist > ZONE_RELEASE && !e.dungeonMob) {
+      if (dist > ZONE_RELEASE * (this.zoneScale ?? 1) && !e.dungeonMob) {
         if (e.zoneKey) {
           const zone = this.zones.get(e.zoneKey);
           zone?.pool?.push(e._spec ?? {

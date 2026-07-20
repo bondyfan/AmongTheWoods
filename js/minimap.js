@@ -1,6 +1,6 @@
 // ---- Minimap with fog of war (bottom-left corner) ----
 
-import { WORLD, BIOMES, MOBA, biomeAt, radiusOf } from './config.js';
+import { WORLD, BIOMES, MOBA, biomeIndexAt, radiusOf, coastDistAt } from './config.js';
 import { lanePoint } from './mobaworld.js';
 
 const CELL = 25;                       // world units per discovery cell
@@ -123,6 +123,9 @@ export class Minimap {
     this.cols = Math.ceil(this.span / CELL);
     this.rows = this.cols;
     this.discovered = new Uint8Array(this.cols * this.rows);
+    // biomeAt is noise-based now — cache the zone per discovery cell so the
+    // big-map redraw doesn't reclassify the whole world every half second
+    this._biomeCell = new Int8Array(this.cols * this.rows).fill(-1);
     this.redrawT = 0;
     // zoom levels: how many world meters the minimap shows across. Level 0 is
     // the default close-up; +/- steps out 3 further (per user request).
@@ -161,6 +164,20 @@ export class Minimap {
     if (cx < 0 || cx >= this.cols || cz < 0 || cz >= this.rows) return false;
     return !!this.discovered[cz * this.cols + cx];
   }
+
+  // zone index of a discovery cell, classified once and cached (the zone
+  // map never changes within a session)
+  _biomeAtCell(cx, rz, wx, wz) {
+    const i = rz * this.cols + cx;
+    let b = this._biomeCell[i];
+    if (b < 0) {
+      b = this._biomeCell[i] = coastDistAt(wx, wz) < 0 ? 8 : biomeIndexAt(wx, wz);
+    }
+    return b; // 8 = the ocean
+  }
+
+  // World-Editor repainted the ground — reclassify cells lazily
+  clearBiomeCache() { this._biomeCell?.fill?.(-1); }
 
   reveal(x, z) { this.revealArea(x, z, REVEAL_RADIUS); }
 
@@ -226,7 +243,7 @@ export class Minimap {
     this.pings = this.pings.filter(p => (p.t -= dt) > 0);
     this.redrawT -= dt;
     // while the camera is turning, redraw every frame so the map spins smoothly
-    if ((this.rotation || 0) !== this._drawnRot) this.redrawT = 0;
+    if (Math.abs((this.rotation || 0) - this._drawnRot) > 0.045) this.redrawT = 0;
     if (this.redrawT <= 0) {
       this.redrawT = 0.25;
       this._draw(player, enemyMgr, partner);
@@ -277,8 +294,9 @@ export class Minimap {
         const wx = (cx + 0.5) * CELL - WORLD.radius;
         const wz = (rz + 0.5) * CELL - WORLD.radius;
         if (radiusOf(wx, wz) > WORLD.radius) continue;
-        const biome = biomeAt(wx, wz);
-        ctx.fillStyle = '#' + biome.ground.toString(16).padStart(6, '0');
+        const bi = this._biomeAtCell(cx, rz, wx, wz);
+        ctx.fillStyle = bi === 8 ? '#1d3a4f' // the ocean
+          : '#' + BIOMES[bi].ground.toString(16).padStart(6, '0');
         const p = toC(wx - CELL / 2, wz - CELL / 2);
         ctx.fillRect(p.x, p.y, CELL * scale + 1, CELL * scale + 1);
       }
@@ -303,25 +321,19 @@ export class Minimap {
       ctx.stroke();
       ctx.setLineDash([]);
     };
-    // ring borders (sampled into points so they clip to the fog like the road)
-    for (const ring of this.world.rings ?? []) {
-      const N = 160, circle = [];
-      for (let k = 0; k <= N; k++) { const a = (k / N) * Math.PI * 2; circle.push({ x: Math.sin(a) * ring.r, z: Math.cos(a) * ring.r }); }
-      drawClipped(circle, ring.type === 'river' ? 'rgba(120,180,230,0.5)' : 'rgba(190,160,115,0.55)', 1.3, [4, 3]);
-    }
+    // zone borders (sampled polylines, clipped to the fog like the road)
+    for (const bl of this.world.borderLines ?? [])
+      drawClipped(bl.pts, bl.type === 'river' ? 'rgba(120,180,230,0.5)' : 'rgba(190,160,115,0.55)', 1.3, [4, 3]);
     // all trails look IDENTICAL — the player can't tell which fork leads where
     for (const br of this.world.branches ?? [])
       drawClipped(br.pts, 'rgba(236, 210, 146, 0.85)', 2.2, [5, 4]);
     drawClipped(this.world.pathPts, 'rgba(236, 210, 146, 0.85)', 2.2, [5, 4]);
     // gate entrances — bold, only once discovered (bright doorway beacon)
-    for (const ring of this.world.rings ?? []) {
-      for (const gap of ring.gaps ?? []) {
-        const wx = Math.sin(gap.a) * ring.r, wz = Math.cos(gap.a) * ring.r;
-        if (!this._isDiscovered(wx, wz)) continue;
-        const gp = toC(wx, wz);
-        if (!inView(gp)) continue;
-        this._drawGate(ctx, gp.x, gp.y, -rot);
-      }
+    for (const g of this.world.gateList ?? []) {
+      if (!this._isDiscovered(g.x, g.z)) continue;
+      const gp = toC(g.x, g.z);
+      if (!inView(gp)) continue;
+      this._drawGate(ctx, gp.x, gp.y, -rot);
     }
 
     // home marker (only when it's inside the view)
@@ -378,6 +390,25 @@ export class Minimap {
     }
 
     // placed griffin roosts — the flight network is always shown
+    // harbors are landmarks sailors steer by — always on the map
+    for (const h of this.world.harbors ?? []) {
+      const p = toC(h.x, h.z);
+      if (!inView(p)) continue;
+      ctx.fillStyle = '#2e5f8e';
+      ctx.beginPath(); ctx.arc(p.x, p.y, 7, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#dfeaf2'; ctx.lineWidth = 1.2; ctx.stroke();
+      ctx.font = '9px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillStyle = '#eaf4fb';
+      text('⚓', p.x, p.y + 3);
+    }
+    // the ship, wherever she sails
+    if (this.world.shipPos) {
+      const sp = toC(this.world.shipPos.x, this.world.shipPos.z);
+      if (inView(sp)) {
+        ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+        text('⛵', sp.x, sp.y + 3);
+      }
+    }
     for (const n of this.flightNests ?? []) {
       const p = toC(n.x, n.z);
       if (!inView(p)) continue;
@@ -574,8 +605,9 @@ export class Minimap {
         const wx = (cx + 0.5) * CELL - WORLD.radius;
         const wz = (rz + 0.5) * CELL - WORLD.radius;
         if (radiusOf(wx, wz) > WORLD.radius) continue;
-        const biome = biomeAt(wx, wz);
-        ctx.fillStyle = '#' + biome.ground.toString(16).padStart(6, '0');
+        const bi = this._biomeAtCell(cx, rz, wx, wz);
+        ctx.fillStyle = bi === 8 ? '#1d3a4f' // the ocean
+          : '#' + BIOMES[bi].ground.toString(16).padStart(6, '0');
         ctx.fillRect(toX(wx - CELL / 2), toY(wz - CELL / 2),
           Math.max(1.5, CELL * scale + 0.5), Math.max(1.5, CELL * scale + 0.5));
       }
@@ -601,22 +633,16 @@ export class Minimap {
       ctx.stroke();
       ctx.setLineDash([]);
     };
-    for (const ring of this.world.rings ?? []) {
-      const N = 220, circle = [];
-      for (let k = 0; k <= N; k++) { const a = (k / N) * Math.PI * 2; circle.push({ x: Math.sin(a) * ring.r, z: Math.cos(a) * ring.r }); }
-      drawClippedBig(circle, ring.type === 'river' ? 'rgba(120,180,230,0.5)' : 'rgba(180,150,110,0.55)', 1.4, [5, 4]);
-    }
+    for (const bl of this.world.borderLines ?? [])
+      drawClippedBig(bl.pts, bl.type === 'river' ? 'rgba(120,180,230,0.5)' : 'rgba(180,150,110,0.55)', 1.4, [5, 4]);
     // every fork looks the SAME as the main road — no telling where each leads
     for (const br of this.world.branches ?? [])
       drawClippedBig(br.pts, 'rgba(232, 206, 140, 0.8)', roadW, dash);
     drawClippedBig(this.world.pathPts, 'rgba(232, 206, 140, 0.8)', roadW, dash);
     // gate entrances — bold beacons, only once their cell is discovered
-    for (const ring of this.world.rings ?? []) {
-      for (const gap of ring.gaps ?? []) {
-        const gx = Math.sin(gap.a) * ring.r, gz = Math.cos(gap.a) * ring.r;
-        if (!inView(gx, gz) || !this._isDiscovered(gx, gz)) continue;
-        this._drawGate(ctx, toX(gx), toY(gz), 0);
-      }
+    for (const g of this.world.gateList ?? []) {
+      if (!inView(g.x, g.z) || !this._isDiscovered(g.x, g.z)) continue;
+      this._drawGate(ctx, toX(g.x), toY(g.z), 0);
     }
 
     ctx.textAlign = 'center';
@@ -636,6 +662,21 @@ export class Minimap {
       ctx.font = '11px sans-serif';
     }
     // placed griffin roosts
+    // harbors + the ship line
+    for (const h of this.world.harbors ?? []) {
+      if (!inView(h.x, h.z)) continue;
+      const bx = toX(h.x), by = toY(h.z);
+      ctx.fillStyle = '#2e5f8e';
+      ctx.beginPath(); ctx.arc(bx, by, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#dfeaf2'; ctx.lineWidth = 1.2; ctx.stroke();
+      ctx.fillStyle = '#eaf4fb';
+      ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('⚓', bx, by + 3.5);
+    }
+    if (this.world.shipPos && inView(this.world.shipPos.x, this.world.shipPos.z)) {
+      ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('⛵', toX(this.world.shipPos.x), toY(this.world.shipPos.z) + 3.5);
+    }
     for (const n of this.flightNests ?? []) {
       if (!inView(n.x, n.z)) continue;
       const bx = toX(n.x), by = toY(n.z);

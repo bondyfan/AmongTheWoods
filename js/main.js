@@ -15,6 +15,9 @@ import { Camp } from './camp.js';
 import { audio } from './audio.js';
 import { input } from './input.js';
 import { World, latticeHash } from './world.js';
+import { ShipLine } from './ship.js';
+import { loadWorldPatch, applyTweaks } from './worldpatch.js';
+import { WorldEditor } from './editor.js';
 import { MobaWorld } from './mobaworld.js';
 import { DungeonWorld } from './dungeon.js';
 import { Moba } from './moba.js';
@@ -94,6 +97,7 @@ window.addEventListener('resize', () => {
 // ---------- game state ----------
 const DEVMODE = /(?:^|[?&])devmode/i.test(location.search); // admin tools only with ?devmode
 const devDistanceRadius = DEVMODE ? new DevDistanceRadius(scene) : null;
+let worldEditor = null; // created lazily on first F2 (DEVMODE only)
 const game = {
   mode: 'menu',   // menu | play | dead | won
   kind: 'survival', // survival | moba
@@ -102,7 +106,8 @@ const game = {
   tod: 8 / 24,    // time of day 0..1 (0 = midnight) — the day opens at 08:00
   nightK: 0,      // 0 = full day, 1 = deep night (drives lights/spawns/fireflies)
   biomeIndex: 0,
-  seed: 20260704,
+  seed: 1, // THE world seed — one canonical world everywhere (solo + multiplayer)
+  editorView: false, // admin World-Editor top-down mode (freezes the sim)
   devFly: false,
   // Serializable world snapshot for future multiplayer (host → guests).
   snapshot() {
@@ -239,6 +244,8 @@ const panels = new Panels({
   },
 });
 
+await loadWorldPatch(); // admin World-Editor overrides (assets/world-patch.json)
+applyTweaks();          // …including enemy/item stat tweaks from the object editor
 let world = new World(scene, game.seed);
 
 const player = new Player(scene, {
@@ -667,10 +674,10 @@ function tickTumbleweeds(dt) {
 // griffin will CARRY you to any other roost — WoW flight-master style.
 const GRIFFIN_BIOMES = {
   1: { fleeSpeed: 12, nestItem: 'desertNest' },   // Scorched Desert
-  4: { fleeSpeed: 24, nestItem: 'highlandNest' }, // Highlands
+  6: { fleeSpeed: 24, nestItem: 'highlandNest' }, // Highlands
   7: { fleeSpeed: 36, nestItem: 'frozenNest' },   // Frozen Peak
 };
-const griffinNextAt = { 1: 90, 4: 90, 7: 90 };    // game.time gate per biome
+const griffinNextAt = { 1: 90, 6: 90, 7: 90 };    // game.time gate per biome
 let griffinCheckT = 6;
 
 function tickGriffin(dt) {
@@ -691,7 +698,7 @@ function tickGriffin(dt) {
     const x = player.pos.x + Math.cos(a) * d, z = player.pos.z + Math.sin(a) * d;
     if (biomeIndexAt(x, z) !== bi || world.isWater(x, z)) continue;
     const h = world.heightAt(x, z);
-    if (!best || (bi === 4 && h > best.h)) best = { x, z, h };
+    if (!best || (bi === 6 && h > best.h)) best = { x, z, h };
   }
   if (!best) return;
   const prog = progressAt(best.x, best.z);
@@ -748,7 +755,7 @@ function confirmNestPlacement() {
   const x = aimPoint.x, z = aimPoint.z;
   if (world.isWater(x, z)) { ui.toast('🪺 Not on water — the twigs would drift apart.', ''); audio.sfx('error', 0.5); return true; }
   if (biomeIndexAt(x, z) > item.nest.biomeMax) {
-    ui.toast(`🪺 The ${item.name} only settles in the ${BIOMES[item.nest.biomeMax].name} or an earlier ring.`, ''); audio.sfx('error', 0.5); return true;
+    ui.toast(`🪺 The ${item.name} only settles in the ${BIOMES[item.nest.biomeMax].name} or an earlier zone.`, ''); audio.sfx('error', 0.5); return true;
   }
   if (Math.hypot(x - player.pos.x, z - player.pos.z) > 40) { ui.toast('🪺 Too far — pick a spot closer to you.', ''); audio.sfx('error', 0.5); return true; }
   const ix = player.invItems.indexOf(id);
@@ -958,6 +965,92 @@ function tickFlight(dt) {
     player.mesh.position.set(player.pos.x, flight.y + 0.95, player.pos.z);
     player.mesh.rotation.y = Math.atan2(dx, dz);
   }
+}
+
+// ---------- drowning: deep water is lethal without Swimming ----------
+let drownT = 0, drownWarned = false, drownTickT = 0;
+function tickDrowning(dt) {
+  const swimmer = !!player.upgrades?.swim;
+  const kind = world.waterKindAt?.(player.pos.x, player.pos.z) ?? 0;
+  const inDanger = game.kind === 'survival' && inPlay() && !player.dead
+    && kind === 2 && !swimmer && !boatMounted && !player.flying && !shipRiding();
+  if (!inDanger) {
+    drownT = Math.max(0, drownT - dt * 2);
+    if (drownT === 0) drownWarned = false;
+    return;
+  }
+  drownT += dt;
+  if (drownT > 0.6 && !drownWarned) {
+    drownWarned = true;
+    ui.toast('🌊 DEEP water — you can\'t swim! Get out or drown. (Swimming Lessons: Upgrades → Supplies, level 7)', 'boss');
+  }
+  if (drownT >= 1.4) {
+    drownTickT -= dt;
+    if (drownTickT <= 0) {
+      drownTickT = 0.8;
+      const dmg = Math.max(4, Math.round(player.maxHp * 0.06));
+      player.takeDamage(dmg, { silent: true });
+      ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 1.9), `-${dmg} 🌊`, '#6fc8ff');
+      audio.sfx('base_hit', 0.3);
+    }
+  }
+}
+
+// ---------- the pirate ship line (see ship.js for the timetable) ----------
+let shipLine = null;
+const shipRiding = () => shipLine?.rider === player;
+
+function tickShip() {
+  if (game.kind !== 'survival' || !world.harbors?.length) {
+    if (shipLine) { shipLine.dispose(); shipLine = null; }
+    return;
+  }
+  if (!shipLine || shipLine.world !== world) {
+    shipLine?.dispose();
+    shipLine = new ShipLine(scene, world);
+  }
+  const wasSailing = shipLine.state.phase !== 'docked';
+  const ev = shipLine.update(game.time);
+  world.shipPos = { x: shipLine.mesh.position.x, z: shipLine.mesh.position.z,
+    docked: shipLine.state.phase === 'docked' };
+  if (shipRiding()) {
+    // stand amidships: the deck carries the player mesh over the water
+    player.mesh.position.set(player.pos.x, shipLine.mesh.position.y + 2.75, player.pos.z);
+    player.mesh.rotation.y = shipLine.mesh.rotation.y;
+    if (!wasSailing && shipLine.state.phase !== 'docked') {
+      ui.toast('⛵ Cast off! She sails the long way around the island…', 'level');
+      audio.sfx('tower_build', 0.5);
+    }
+  }
+  if (ev === 'arrived') {
+    ui.toast(`⚓ ${shipLine.state.harbor?.name ?? 'Harbor'} — you step off onto the pier.`, 'level');
+    audio.sfx('kill_gold', 0.4);
+  }
+}
+
+// E at a pier while the ship is moored: climb aboard (or step off again)
+function shipTryBoard() {
+  if (!shipLine) return false;
+  if (shipRiding()) {
+    if (shipLine.state.phase === 'docked') {
+      const h = shipLine.state.harbor;
+      player.pos.x = h.x + h.outX * 19;
+      player.pos.z = h.z + h.outZ * 19;
+      shipLine.rider = null;
+      ui.toast('⚓ You step back onto the pier.', '');
+      return true;
+    }
+    ui.toast('🌊 Open sea in every direction — wait for the far harbor.', '');
+    return true;
+  }
+  const h = shipLine.boardableAt(player.pos, game.time);
+  if (!h) return false;
+  shipLine.board(player);
+  const dep = Math.ceil(shipLine.departureIn(game.time) ?? 0);
+  const dest = world.harbors.find(o => o !== h);
+  ui.toast(`⛵ Aboard! She casts off for ${dest?.name ?? 'the far harbor'} in ${dep} s.`, 'level');
+  audio.sfx('lane_unlock', 0.5);
+  return true;
 }
 
 // ---------- magical blue fireflies drift over the black swamp water ----------
@@ -2025,6 +2118,18 @@ const $id = (id) => document.getElementById(id);
 // ?devmode-only left-side tools: a world-space ruler and free RPG flight.
 // Opening the ruler panel turns its terrain-following circle on.
 if (DEVMODE) {
+  // main-menu shortcut straight into the World Editor
+  const modeSel = $id('mode-select');
+  if (modeSel) {
+    const web = document.createElement('button');
+    web.id = 'menu-world-editor';
+    web.innerHTML = '🛠️ World Editor<br><small>Admin: sculpt the island</small>';
+    web.addEventListener('click', () => {
+      startGame();
+      setTimeout(() => toggleWorldEditor(), 350);
+    });
+    modeSel.appendChild(web);
+  }
   const tool = $id('dev-distance-tool');
   const toggle = $id('dev-distance-toggle');
   const panel = $id('dev-distance-panel');
@@ -2156,7 +2261,13 @@ const settings = Object.assign(
   settings.hiShadows = false;
   settings.filmic = false;
   settings.texDetail ??= 0;
+  settings.shadows ??= true;
+  settings.resScale ??= 'auto';
+  settings.drawDist ??= 'normal';
   $id('set-texdetail').value = String(settings.texDetail);
+  $id('set-shadows').checked = settings.shadows !== false;
+  $id('set-resscale').value = String(settings.resScale);
+  $id('set-drawdist').value = String(settings.drawDist);
   applyGraphics();
   const saveGfx = () => {
     localStorage.setItem('atw-settings', JSON.stringify(settings));
@@ -2168,6 +2279,19 @@ const settings = Object.assign(
     saveGfx();
     world.regenChunks(); // ground tiles rebuild at the new detail
     world.update(0, player.pos);
+  });
+  $id('set-shadows').addEventListener('change', () => {
+    settings.shadows = $id('set-shadows').checked;
+    saveGfx();
+  });
+  $id('set-resscale').addEventListener('change', () => {
+    settings.resScale = $id('set-resscale').value;
+    saveGfx();
+  });
+  $id('set-drawdist').addEventListener('change', () => {
+    settings.drawDist = $id('set-drawdist').value;
+    saveGfx();
+    applyViewMode(); // fog baseline shifts with the new distance
   });
 
   // volume sliders (persisted); music slider maps 100% → volume 0.7
@@ -2610,11 +2734,20 @@ $id('mp-code-display').addEventListener('click', async () => {
 function buyItem(id) {
   const item = itemById(id);
   if (!item || player.level < item.level) return; // re-buying copies is fine
+  if (item.training && player.upgrades?.[item.training]) return; // skills are one-time
   if (player.invFullFor(id)) { ui.toast('🎒 Inventory full — drop or use something first.', ''); audio.sfx('error', 0.5); return; }
   if (item.needs && camp && !camp.has(item.needs)) return; // era gate (survival)
   const cost = costFor(item.cost, game.kind === 'moba');
   if (!Object.entries(cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
   for (const [k, v] of Object.entries(cost)) player[k] = roundResource(player[k] - v);
+  if (item.training) { // pure skill (e.g. Swimming) — learned, not carried
+    player.upgrades[item.training] = true;
+    ui.toast(`${item.icon} ${item.name} learned!`, 'level');
+    audio.sfx('upgrade', 0.5);
+    panels.refresh();
+    panels.flashCard(item.name);
+    return;
+  }
   player.ownItem(id);
   ui.toast(item.placeable
     ? `🎒 ${item.name} is in your bag — click it in Character (C) to place it.`
@@ -2814,7 +2947,7 @@ function useBarSlot(i) {
 }
 
 // ---------- keys ----------
-const inPlay = () => game.mode === 'play';
+const inPlay = () => game.mode === 'play' && !game.editorView;
 input.onKey('KeyU', () => inPlay() && panels.toggle('shop'));
 input.onKey('KeyB', () => inPlay() && openBasePanel());
 
@@ -3293,6 +3426,7 @@ input.onKey('KeyE', () => {
   }
   if (nearChest()) panels.toggle('chest');
   else if (nearPlacedBoat()) mountBoat();
+  else if (shipTryBoard()) { /* ship line boarding handled */ }
   else if (nearHome()) panels.toggle('base');
   else if (nearWildHorse()) tameHorse(nearWildHorse());
   else if (nearParkedHorse()) { mountUp(); audio.sfx('click', 0.5); }
@@ -3309,6 +3443,76 @@ input.onKey('KeyE', () => {
   else if (nearPoi()) claimPoi(nearPoi());
   else if (nearTreasure()) digTreasure();
 });
+
+// F2 — the admin World Editor: a top-down god view with brushes (DEVMODE)
+let edPopT = 0;
+function toggleWorldEditor() {
+  if (!DEVMODE || game.mode !== 'play' || game.kind !== 'survival' || mp?.active || game.dungeon) return;
+  worldEditor ??= new WorldEditor({
+    scene, world,
+    getAim: () => aimPoint,
+    getMobs: () => enemyMgr.list,
+    onTest: (x, z) => {
+      if ((world.waterKindAt?.(x, z) ?? 0) === 2) {
+        ui.toast('🌊 Deep water — pick a dry spot to test.', 'level');
+        return;
+      }
+      worldEditor.toggle(false);
+      if (shipLine?.rider === player) shipLine.rider = null; // never dragged back aboard
+      if (flight) { scene.remove(flight.mesh); flight = null; player.flying = false; }
+      player.pos.x = x;
+      player.pos.z = z;
+      player.y = null;           // snap onto the new ground — no phantom fall damage
+      player.testGhost = true;   // creatures can't see a test-ghost (survives stealth ticks)
+      game.testMode = true;
+      ui.toast('▶ TEST MODE — you are invisible to mobs. F2 returns to the editor.', 'level');
+    },
+    toast: (m) => ui.toast(m, 'level'),
+    onDirty: (kind, info = {}) => {
+      if (kind === 'entities') world.applyPatchEntities(true);
+      if (kind === 'ground' && info.area) {
+        // live brushing: repaint tiles in place — zero flicker
+        world.refreshGroundNear(info.area.x, info.area.z, info.area.r);
+      } else if (info.area) {
+        world.regenChunksNear(info.area.x, info.area.z, info.area.r);
+        if (kind === 'chunks') { // sculpt stroke finished: mobs follow the ground
+          enemyMgr.regroundMobs(info.area.x, info.area.z, info.area.r + 30);
+        }
+      } else if (kind === 'ground') {
+        world.refreshGroundAll(); // in-place repaint, amortized — no flash
+      } else {
+        world.regenChunks();
+      }
+      if (game.editorView && info.packs) { enemyMgr.editorReset(); edPopT = 0; }
+      minimap?.clearBiomeCache?.();
+    },
+    onToggle: (on) => {
+      game.editorView = on;
+      document.body.classList.toggle('we-on', on); // hides the game HUD
+      if (on && panels.open) panels.toggle(null);
+      enemyMgr.zoneScale = on ? 3 : 1;   // mobs stay alive across the whole view
+      enemyMgr.maxAlive = on ? 400 : null;
+      if (on) {
+        camera.far = 6500;               // god view must see kilometres
+        camera.updateProjectionMatrix();
+      }
+      if (on) {
+        player.testGhost = false;
+        game.testMode = false;
+        worldEditor.centerView(player.pos.x, player.pos.z);
+        world.viewRadius = 5;              // stream a wide apron of chunks
+        scene.fog.near = 400; scene.fog.far = 4000; // see the map, not the fog
+      } else {
+        world.viewRadius = null;
+        if (world.groundOnly) { world.groundOnly = false; world.regenChunks(); }
+        applyViewMode(); // restores fog / camera.far / view radius for the CURRENT mode
+      }
+    },
+  });
+  worldEditor.o.world = world; // survive world swaps
+  worldEditor.toggle();
+}
+input.onKey('F2', toggleWorldEditor);
 
 // H — the keybind legend; I — inventory; F / G — field consumables
 input.onKey('KeyH', () => { if (inPlay()) panels.toggle('help'); });
@@ -4031,7 +4235,7 @@ function tickDayNight(dt) {
     const N = 900, pos = new Float32Array(N * 3);
     for (let i = 0; i < N; i++) {
       // scatter over the upper dome, well beyond the world but inside camera.far
-      const a = Math.random() * Math.PI * 2, el = Math.random() * 0.9 + 0.08, r = 240;
+      const a = Math.random() * Math.PI * 2, el = Math.random() * 0.9 + 0.08, r = 95;
       pos[i*3] = Math.cos(a) * Math.cos(el) * r;
       pos[i*3+1] = Math.sin(el) * r;
       pos[i*3+2] = Math.sin(a) * Math.cos(el) * r;
@@ -4093,6 +4297,7 @@ function updateAtmosphere(dt) {
     scene.background.set(fogC);
     scene.fog.near = 18;
     scene.fog.far = 82;   // pulled back so the torch-lit room reads clearly
+    syncFarToFog();
     hemi.intensity = 0.34; // a faint base so you're never fully blind…
     sun.intensity = 0.16;  // …the torch does the real lighting on top
     $id('biome-gloom').style.opacity = 0.22; // a soft edge vignette only
@@ -4151,14 +4356,15 @@ function updateAtmosphere(dt) {
   sun.color.setRGB(1 - 0.25 * nightK, 0.95 - 0.2 * nightK + 0.05 * dusk, 0.87 - 0.15 * nightK - 0.15 * dusk);
   // the camera sits ~30 m away — keep the fog behind the hero so the cave
   // interior stays dimly visible while the outside world is swallowed
-  scene.fog.near = 35 - 14 * caveK;
-  scene.fog.far = 110 - 60 * caveK;
+  const fogK = FOG_SCALE[settings.drawDist ?? 'normal'] ?? 1;
+  scene.fog.near = (35 - 14 * caveK) * fogK;
+  scene.fog.far = (110 - 60 * caveK) * fogK;
+  syncFarToFog(); // the camera stops rendering what the fog already hides
 
   // caveK already fades smoothly with distance, so apply it directly; the
   // slow time-lerp is only for biome-to-biome transitions out in the open
-  const nightSky = new THREE.Color(0x0a1230), nightFog = new THREE.Color(0x141a34);
-  const fogTarget = new THREE.Color(biome.fog).lerp(nightFog, nightK * 0.8).lerp(caveFog, caveK);
-  const skyTarget = new THREE.Color(biome.sky).lerp(nightSky, nightK * 0.85).lerp(caveFog, caveK);
+  const fogTarget = _atmoA.set(biome.fog).lerp(NIGHT_FOG, nightK * 0.8).lerp(caveFog, caveK);
+  const skyTarget = _atmoB.set(biome.sky).lerp(NIGHT_SKY, nightK * 0.85).lerp(caveFog, caveK);
   if (caveK > 0.01) {
     fogColor.copy(fogTarget);
     skyColor.copy(skyTarget);
@@ -4168,6 +4374,21 @@ function updateAtmosphere(dt) {
   }
   scene.fog.color.copy(fogColor);
   scene.background.copy(skyColor);
+}
+
+// draw-distance option scales the fog wall; the camera far plane then hugs
+// the fog (plus a small margin) so nothing invisible is ever drawn or
+// shadow-cast — in RPG view this culls ~2/3 of the old frustum
+const FOG_SCALE = { short: 0.72, normal: 1, far: 1.5 };
+const NIGHT_SKY = new THREE.Color(0x0a1230), NIGHT_FOG = new THREE.Color(0x141a34);
+const _atmoA = new THREE.Color(), _atmoB = new THREE.Color();
+function syncFarToFog() {
+  if (game.editorView) return; // the god view manages its own far plane
+  const want = scene.fog.far * 1.22 + 14;
+  if (Math.abs(camera.far - want) > 2) {
+    camera.far = want;
+    camera.updateProjectionMatrix();
+  }
 }
 
 // ---------- camera ----------
@@ -4203,6 +4424,18 @@ function applyViewMode() {
 // graphics options: bloom pipeline, ground detail, shadow res, tone mapping
 function applyGraphics() {
   world.groundDetail = settings.texDetail ?? 0;
+  // shadows: user toggle (autoQuality stage 2 can still force them off)
+  const shadowsOn = settings.shadows !== false && autoQuality.stage < 2;
+  if (renderer.shadowMap.enabled !== shadowsOn) {
+    renderer.shadowMap.enabled = shadowsOn;
+    sun.castShadow = shadowsOn;
+    scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
+  }
+  // render resolution
+  const pr = settings.resScale === '1' ? 1
+    : settings.resScale === '1.5' ? Math.min(window.devicePixelRatio, 1.5)
+    : Math.min(window.devicePixelRatio, 2);
+  renderer.setPixelRatio(pr);
   if (settings.bloom && !postfx) postfx = new PostFX(renderer);
   // high shadows: sharper map over a wider area
   const size = settings.hiShadows ? 4096 : 2048;
@@ -4260,6 +4493,7 @@ function trackAutoRotate(dt) {
 }
 
 function updateCamera(dt = 0) {
+  if (game.editorView) { input.takeWheel(); return; } // the editor owns the camera
   trackAutoRotate(dt);
   const py = player.mesh.position.y;
   let sx = 0, sz = 0;
@@ -4333,7 +4567,7 @@ function step() {
   const dt = Math.min(clock.getDelta(), 0.05);
   if (!document.hidden) autoQuality.tick(dt);
 
-  if (game.mode === 'play' && !game.paused) {
+  if (game.mode === 'play' && !game.paused && !game.editorView) {
     game.time += dt;
     updateAim(dt);
     updateNestGhost();
@@ -4342,7 +4576,7 @@ function step() {
     const em = combatMgr(); // real mgr / co-op shadow / pvp arena / moba units
     // while a griffin carries you the flight drives your position — the
     // normal walk/attack simulation pauses until touchdown
-    if (!(flight && flight.phase === 'ride')) player.update(dt, {
+    if (!(flight && flight.phase === 'ride') && !shipRiding()) player.update(dt, {
       input, world, enemyMgr: em, projectiles, pickups, aimPoint,
       arenaZone: mp?.active ? mp.arenaZone() : null,
       mobaBounds: game.kind === 'moba' ? MOBA.half : null,
@@ -4450,6 +4684,8 @@ function step() {
         tickTempleTraps(dt);
         tickGriffin(dt);
         tickFlight(dt);
+        tickShip();
+        tickDrowning(dt);
         tickFireflies(dt);
         tickDustDevil(dt);
         tickCold(dt);
@@ -4539,8 +4775,10 @@ function step() {
 
       // crossing the whole wilds is a MILESTONE, not the end — celebrate once
       // (fat XP + fanfare) and keep the world running: Grimfrost, the summit
-      // and everything else are still out there
-      if (!game.crossedWilds && radiusOf(player.pos.x, player.pos.z) >= WORLD.goalR) {
+      // and everything else are still out there. It takes standing DEEP in
+      // the Frozen Peak — the last country of the spiral — to earn it.
+      if (!game.crossedWilds && game.biomeIndex === BIOMES.length - 1
+          && radiusOf(player.pos.x, player.pos.z) >= WORLD.goalR) {
         game.crossedWilds = true;
         const xp = questXpFor(player.level) * 4;
         player.addXp(xp);
@@ -4553,11 +4791,49 @@ function step() {
   }
 
   updateCamera(dt);
+  if (game.editorView && worldEditor) {
+    worldEditor.updateView(dt, camera, input);
+    // zoomed way out → terrain-only LOD chunks over a much wider radius,
+    // so a whole biome fits on screen at smooth FPS
+    // hysteresis: enter the terrain-only LOD past 300 m, leave under 235 m
+    const far = world.groundOnly
+      ? worldEditor.view.dist > 235
+      : worldEditor.view.dist > 300;
+    if (far !== !!world.groundOnly) {
+      world.groundOnly = far;
+      world.regenChunks();
+    }
+    world.viewRadius = far
+      ? Math.min(18, Math.round(worldEditor.view.dist / 70) + 6)
+      : Math.min(7, Math.round(worldEditor.view.dist / 60) + 3);
+    world.update(dt, worldEditor.viewTarget()); // chunks follow the editor camera
+    edPopT -= dt;
+    if (edPopT <= 0) { // wake the spawn zones under the camera (mobs stay frozen)
+      // populate the whole VISIBLE area, not a fixed ring: at far zoom the
+      // release/activate radii and the alive cap scale with the view (and
+      // the scan gets pricier, so the tick spaces out accordingly)
+      const zs = Math.min(9, Math.max(3, worldEditor.view.dist / 85));
+      edPopT = 0.25 + zs * 0.07;
+      enemyMgr.zoneScale = zs;
+      enemyMgr.maxAlive = Math.round(250 + zs * 90);
+      enemyMgr.editorPopulate(worldEditor.viewTarget(), player.pos);
+    }
+    // studio lighting: the frozen sim would otherwise leave night / cave
+    // gloom / dark-biome fog hanging over the whole map
+    hemi.intensity = 1.0;
+    sun.intensity = 1.45;
+    scene.fog.color.set(0xbcd4e6);
+    scene.background.set(0xbcd4e6);
+    scene.fog.near = 400;
+    scene.fog.far = 4000;
+  }
   devDistanceRadius?.update(player, world, game.mode === 'play');
+  worldEditor?.update(dt);
   ui.updateOverlays(dt, camera, player.pos);
   renderCharPreview(dt);
   renderSmithPreview(dt);
-  if (settings.bloom && postfx) postfx.render(scene, camera);
+  // the World Editor renders CLEAN — no bloom, no vignette shader
+  if (settings.bloom && postfx && !game.editorView) postfx.render(scene, camera);
   else { renderer.setRenderTarget(null); renderer.render(scene, camera); }
 }
 

@@ -1939,7 +1939,8 @@ export class Player {
     if (this.dashT > 0) {
       this.dashT -= dt;
       this.pos.addScaledVector(this.dashDir, 34 * dt);
-      world.collide(this.pos, 0.45, { boat: ctx.boat });
+      world.collide(this.pos, 0.45,
+        { boat: ctx.boat, wade: true, swimmer: (this.stats?.swim || 0) > 0 || !!this.upgrades?.swim });
       this._applyBounds(ctx);
       // dust kicked up behind a combat charge (Bull Charge, Shadowstep dashes)
       if (this.dashSpec) {
@@ -2004,10 +2005,13 @@ export class Player {
         this.moveDir = { x: mx, z: mz };
         // paddling is a touch slower than running; roast buff speeds you up;
         // the swamp (ctx.envSpeedMult) drags at your boots
-        const onWater = !ctx.devFly && ctx.boat && world.isWater?.(this.pos.x, this.pos.z);
+        const wk = ctx.devFly ? 0 : (world.waterKindAt?.(this.pos.x, this.pos.z) ?? 0);
         const guardSlow = this.blocking ? 0.48 : 1;
         const mountBonus = ctx.mounted ? 9 : ctx.boatMount ? 6 : 0;
-        const terrainMult = onWater ? (ctx.boatMount ? 0.65 : 0.4) : (ctx.boatMount ? 0.45 : 1);
+        const terrainMult = ctx.boatMount ? (wk > 0 ? 0.65 : 0.45)
+          : wk === 2 ? 0.5     // deep water: swimming (or flailing…)
+          : wk === 1 ? 0.62    // shallow water: wading
+          : 1;
         const speed = (this.speed + this.moveSpeedBonus + mountBonus) * terrainMult
           * guardSlow * (this.tameChannel ? 0 : this.castWindup ? 0.5 : 1)
           * (this.roastT > 0 ? 1.1 : 1) * (ctx.devFly ? 1 : (ctx.envSpeedMult ?? 1));
@@ -2020,12 +2024,11 @@ export class Player {
           const l = Math.hypot(dx, dz);
           if (l < 1e-6) return false;
           const ax = this.pos.x + (dx / l) * 0.9, az = this.pos.z + (dz / l) * 0.9;
-          // deep swamp water is a WALL without the boat — you may only reach it
-          // by paddling. (A step whose DESTINATION is water is blocked, so a
-          // player caught in water can still wade OUT toward any shore.)
-          if (!ctx.boat && world.swampZone?.(ax, az) === 'water'
-              && !world._lilypadAt?.(ax, az)) return false;
+          // water is no longer a wall: shallow is waded, deep is swum (and
+          // drowns non-swimmers — see main's drowning tick). Climbing OUT of
+          // a deep basin is always allowed, so nobody gets trapped in a pit.
           const ahead = world.heightAt(ax, az);
+          if ((world.waterKindAt?.(this.pos.x, this.pos.z) ?? 0) === 2 && ahead > h0) return true;
           return (ahead - h0) / 0.9 <= MAX_CLIMB_SLOPE;
         };
         const dx = mx * speed * dt, dz = mz * speed * dt;
@@ -2041,7 +2044,8 @@ export class Player {
           if (canStep(dx, dz)) { this.pos.x += dx; this.pos.z += dz; }
           else if (canStep(dx, 0)) this.pos.x += dx;
           else if (canStep(0, dz)) this.pos.z += dz;
-          world.collide(this.pos, 0.45, { boat: ctx.boat });
+          world.collide(this.pos, 0.45,
+            { boat: ctx.boat, wade: true, swimmer: (this.stats?.swim || 0) > 0 || !!this.upgrades?.swim });
         }
         this._applyBounds(ctx);
         this.walkT += dt * speed;
@@ -2055,6 +2059,14 @@ export class Player {
       this.facing.normalize();
     }
     this.mesh.position.set(this.pos.x, this._updateVertical(dt, world, ctx.devFly), this.pos.z);
+    // swimming: over deep water the body floats at the surface (sunk to the
+    // chest, bobbing), never walking the seabed
+    if (!ctx.devFly && !ctx.boatMount && !this.flying
+        && (world.waterKindAt?.(this.pos.x, this.pos.z) ?? 0) === 2) {
+      const wy = world.waterYAt?.(this.pos.x, this.pos.z) ?? this.mesh.position.y;
+      this.mesh.position.y = Math.max(this.mesh.position.y,
+        wy - 1.15 + Math.sin(this.walkT * 0.6) * 0.07);
+    }
     // local +z toward the aim point, so arm swings (toward +z) punch forward
     // Whirlwind: spin the whole body two full turns on top of the facing
     if (this.spinT > 0) this.spinT = Math.max(0, this.spinT - dt);
@@ -2336,7 +2348,7 @@ export class Player {
     for (const bush of (world.bushesNear?.(this.pos, w.range + 0.6) ?? [])) {
       if (!bush.berries || !this._inArc(bush.x, bush.z, w.range, bush.radius)) continue;
       if (world.pickBerries(bush)) {
-        pickups.spawn('berry', 1, new THREE.Vector3(bush.x, 0, bush.z), 0.7);
+        pickups.spawn('berry', bush.mult ?? 1, new THREE.Vector3(bush.x, 0, bush.z), 0.7);
         this.hooks.onBerry?.(bush.key); // co-op: the partner's bush empties too
       }
     }

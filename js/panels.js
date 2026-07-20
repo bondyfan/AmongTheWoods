@@ -437,7 +437,8 @@ export class Panels {
     // expedition gear first: real items now, each worn in its own slot
     for (const it of ITEMS.filter(i => i.supply)) {
       const placed = !!it.placeable && !!this.camp?.has(it.placeable.kind);
-      const owned = this.player.hasItem(it.id) || placed;
+      const owned = this.player.hasItem(it.id) || placed
+        || (!!it.training && !!this.player.upgrades?.[it.training]); // learned skills
       const rebuyable = !!it.torch && !it.torch.permanent; // ordinary torches burn out
       const locked = it.level > this.player.level;
       const eraLocked = !!it.needs && !!this.camp && !this.camp.has(it.needs);
