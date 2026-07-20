@@ -3042,7 +3042,7 @@ export function makePebbles(rng, color = 0x8a8a84) {
     const p = new THREE.Mesh(new THREE.DodecahedronGeometry(s, 0), mat(color));
     p.castShadow = false;
     const a = rng() * Math.PI * 2, r = rng() * 0.45;
-    p.position.set(Math.cos(a) * r, s * 0.62, Math.sin(a) * r); // slightly buried
+    p.position.set(Math.cos(a) * r, s * 0.85, Math.sin(a) * r); // slightly buried
     p.rotation.set(rng() * 3, rng() * 3, rng() * 3);
     g.add(p);
   }
