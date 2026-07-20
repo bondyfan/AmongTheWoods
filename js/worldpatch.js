@@ -345,7 +345,7 @@ export async function loadWorldPatch(url = 'assets/world-patch.json') {
 // re-applied from pristine values (and removed cleanly).
 import { ENEMY_TYPES, ITEMS, BIOMES } from './config.js';
 
-export const ENEMY_TWEAK_FIELDS = ['hp', 'dmg', 'speed', 'range', 'attackCd', 'xp', 'aggro', 'meat', 'spellCd'];
+export const ENEMY_TWEAK_FIELDS = ['hpMult', 'dmgMult', 'meleeDmgMult', 'xpMult', 'speed', 'range', 'attackCd', 'aggro', 'spellCd'];
 // per-biome globals: numbers + colors (colors edited as hex in the editor)
 export const BIOME_TWEAK_FIELDS = ['treeDensity', 'darkness', 'light'];
 export const BIOME_COLOR_FIELDS = ['ground', 'ground2', 'dirt', 'grass', 'fog', 'sky'];

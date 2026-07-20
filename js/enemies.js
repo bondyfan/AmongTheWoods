@@ -4,7 +4,8 @@
 import * as THREE from 'three';
 import { worldPatch } from './worldpatch.js';
 import { WORLD, ENEMY_TYPES, BOSS_RANKS, BIOMES, biomeAt, biomeIndexAt, progressAt,
-         meatForHp, bossNameFor, enemyLevelFor, biomeIndexForDifficulty } from './config.js';
+         meatForLevel, bossNameFor, enemyLevelFor, biomeIndexForDifficulty,
+         ENEMY_HP, ENEMY_DMG, xpKillFor } from './config.js';
 import { makeEnemyMesh, makeCobweb, makeHumanCamp, makeCage } from './models.js';
 import { audio } from './audio.js';
 
@@ -55,28 +56,30 @@ class Enemy {
     const eHp = this.elite ? 2 : 1, eDmg = this.elite ? 1.3 : 1;
 
     this.difficulty = difficulty; // kept for late spawns (lair-boss brood calls)
-    const biomeTier = biomeIndexForDifficulty(difficulty);
-    // Each biome is now a real power step, with a little smooth distance
-    // growth inside it. Across all eight rings this stays close to the old
-    // endgame multipliers while making each border matter.
-    const hpScale = 1 + biomeTier * 0.12 + difficulty * 0.2;
-    const dmgScale = 1 + biomeTier * 0.08 + difficulty * 0.16;
-    this.hp = base.hp * hpScale * (boss ? boss.hpMult : 1) * eHp
-      // +30 HP per level, but only from level 3 up — low-level mobs felt fine,
-      // higher-level ones were too flimsy.
-      + (this.level >= 3 ? this.level * 30 : 0);
+    // WoW-style: real stats come from the creature's LEVEL via the shared
+    // curves, shaped by its archetype multipliers. A zone's level band (and
+    // so its whole roster's power) is set in ZONE_LEVEL_BANDS in config.js.
+    this.hp = Math.round(ENEMY_HP(this.level) * (base.hpMult ?? 1)
+      * (boss ? boss.hpMult : 1) * eHp);
     this.maxHp = this.hp;
-    this.dmg = base.dmg * dmgScale * (boss ? boss.dmgMult : 1) * eDmg;
-    this.xp = Math.round(base.xp * (1 + biomeTier * 0.12)
+    this.dmg = ENEMY_DMG(this.level) * (base.dmgMult ?? 1) * (boss ? boss.dmgMult : 1) * eDmg;
+    this.xp = Math.round(xpKillFor(this.level) * (base.xpMult ?? 1)
       * (boss ? boss.xpMult : this.elite ? 2 : 1));
-    this.meat = meatForHp(this.maxHp); // 1 meat / 30 HP — bosses pay out big
+    this.meat = meatForLevel(this.level, base.hpMult ?? 1)
+      * (boss ? boss.meatMult : 1);
     this.sizeMult = boss ? boss.sizeMult : this.elite ? 1.2 : 1;
     this.hitR = base.hitR * this.sizeMult;
     this.range = base.range * this.sizeMult;
     this.speed = base.speed * (boss ? 0.9 : 1);
     if (boss) this.reinforceT = boss.reinforceInterval;
 
-    this.meleeDmg = (base.meleeDmg ?? base.dmg) * dmgScale * (boss ? boss.dmgMult : 1) * eDmg;
+    this.meleeDmg = ENEMY_DMG(this.level) * (base.meleeDmgMult ?? base.dmgMult ?? 1)
+      * (boss ? boss.dmgMult : 1) * eDmg;
+    // venomous types: poison DPS keeps pace with the victim's growing pool
+    this.poison = base.poison
+      ? { dps: Math.round(base.poison.dps * (0.5 + this.level * 0.12) * 10) / 10,
+          dur: base.poison.dur }
+      : null;
 
     this.pos = new THREE.Vector3(x, 0, z);
     this.mesh = makeEnemyMesh(type);
@@ -679,6 +682,7 @@ export class EnemyManager {
     enemy.chaseT = 0;
     enemy.flashT = 0.12;     // brief white-hot scale pop so hits READ
     enemy.threatLog.push({ src: srcId, dmg, t: this.world.time });
+    if (srcId === 'local') this.onLocalHit?.(); // flags the player "in combat"
     const applyDot = (kind, spec) => {
       if (!spec) return;
       const currentDamage = Math.max(0, enemy[kind + 'T'] || 0)
@@ -1185,11 +1189,15 @@ export class EnemyManager {
       }
 
       // aggro + leash: a chase that never reaches its target is abandoned
-      // after LEASH_TIME and the enemy jogs back to where it spawned
+      // after LEASH_TIME and the enemy jogs back to where it spawned.
+      // WoW-style level scaling: red-skull mobs smell you from much farther,
+      // grey mobs barely bother (±7% aggro radius per level of difference).
+      const lvlAg = target?.level
+        ? Math.max(0.6, Math.min(1.6, 1 + 0.07 * (e.level - target.level))) : 1;
       if (e.returning) {
         const nAg = 1 + 0.5 * (this.nightK || 0); // creatures hunt farther at night
-        if (target && dist < e.cfg.aggro * 0.5 * nAg && !this._pacified(e)) { e.returning = false; e.aggroed = true; e.chaseT = 0; }
-      } else if (target && dist < e.cfg.aggro * (1 + 0.5 * (this.nightK || 0)) && !this._pacified(e)) e.aggroed = true;
+        if (target && dist < e.cfg.aggro * 0.5 * nAg * lvlAg && !this._pacified(e)) { e.returning = false; e.aggroed = true; e.chaseT = 0; }
+      } else if (target && dist < e.cfg.aggro * (1 + 0.5 * (this.nightK || 0)) * lvlAg && !this._pacified(e)) e.aggroed = true;
       if (e.aggroed && target && !e.returning) {
         if (dist > e.range * 1.5) e.chaseT += dt; else e.chaseT = 0;
         if (e.chaseT > (e.bossRank ? LEASH_TIME_BOSS : LEASH_TIME)) {
@@ -1302,7 +1310,7 @@ export class EnemyManager {
           e.lungeT = 0.25;
           if (target && dist < e.range * 1.35) {
             target.takeDamage(e.meleeDmg * 1.25,
-              { id: e.id, name: e.bossName ?? e.cfg.name, pos: e.pos, range: e.range * 1.35, melee: true, poison: e.cfg.poison });
+              { id: e.id, name: e.bossName ?? e.cfg.name, pos: e.pos, range: e.range * 1.35, melee: true, poison: e.poison });
           }
           audio.creature(e.type, 'attack', 0.4, 110);
           e.atkAt = this.world.time;
@@ -1315,7 +1323,7 @@ export class EnemyManager {
         } else {
           e.lungeT = 0.25;
           target.takeDamage(e.meleeDmg,
-            { id: e.id, name: e.bossName ?? e.cfg.name, pos: e.pos, range: e.range, melee: true, poison: e.cfg.poison });
+            { id: e.id, name: e.bossName ?? e.cfg.name, pos: e.pos, range: e.range, melee: true, poison: e.poison });
           audio.creature(e.type, 'attack', 0.3, 110);
           e.atkAt = this.world.time;
         }

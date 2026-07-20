@@ -340,7 +340,7 @@ export class WorldEditor {
     if (spec.kind === 'hive') return ['🐝 Beehive', 'Destructible — bees & honey'];
     if (spec.kind === 'pack' || spec.kind === 'inspect') {
       const c = ENEMY_TYPES[spec.enemy] ?? {};
-      const stats = `❤️${c.hp ?? '?'} ⚔️${c.dmg ?? '?'} 🏃${c.speed ?? '?'}`;
+      const stats = `❤️×${c.hpMult ?? 1} ⚔️×${c.dmgMult ?? 1} 🏃${c.speed ?? '?'}`;
       return [`${c.icon ?? '👹'} ${c.name ?? spec.enemy}`,
         spec.kind === 'pack' ? `${spec.count}×${spec.boss ? ' + ' + '💀'.repeat(spec.boss) : ''} · ${stats}` : stats];
     }

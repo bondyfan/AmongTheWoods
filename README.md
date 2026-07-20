@@ -79,7 +79,7 @@ no build step, no CDN dependency.
   the level each rank requires. Heavy strikes (Heroic Strike, Ground Slam,
   Execute) wind up for half a second before landing, and warrior abilities ship
   with full effects: ground slashes, shockwave cracks, body-spin Whirlwind,
-  charge dust, buff auras and roars. New class ranks unlock through level 24.
+  charge dust, buff auras and roars. New class ranks unlock through level 50.
 - Enemy level bands rise by three per biome: Verdant Forest **1–3**, Scorched
   Desert **4–6**, Dark Forest **7–9**, Murky Swamp **10–12**, Highlands
   **13–15**, Haunted Forest **16–18**, Jungle **19–21**, Frozen Peak **22–24**.

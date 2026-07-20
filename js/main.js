@@ -2,9 +2,9 @@
 
 import * as THREE from 'three';
 import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOBA,
-         RESOURCES, RES_ICONS, HIDE_BEARING, VERDANT_HIDE_DROP, hideForHp, radiusOf, costFor,
+         RESOURCES, RES_ICONS, HIDE_BEARING, VERDANT_HIDE_DROP, hideForLevel, radiusOf, costFor,
          biomeIndexAt, progressAt, fmtResource, roundResource, itemById, spellById,
-         consumableById, essenceDropFor, MAX_LEVEL, questFor, repeatableQuestFor,
+         consumableById, essenceDropFor, MAX_LEVEL, XP_LEVELS, questFor, repeatableQuestFor,
          questXpFor, BIOME_LAIRS, CAMP_BUILDINGS, trainingLevelFor, CLASS_TREES,
          classTreeById, classSkillById, classSkillRequiredLevel, classSkillMeatCost,
          CLASS_CHOOSE_COST, firstClassSkillId } from './config.js';
@@ -408,7 +408,7 @@ function tickTempleTraps(dt) {
   if (firing && !player.dead) {
     const d = Math.hypot(temple.x - player.pos.x, temple.z - player.pos.z);
     if (d > 3.5 && d < 8) { // safe on the steps (centre) or outside the ring
-      player.takeDamage(9, { name: 'a temple dart trap' });
+      player.takeDamage(Math.max(9, Math.round(player.maxHp * 0.07)), { name: 'a temple dart trap' });
       ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2), '🏹 dart!', '#e8d84a');
     }
   }
@@ -449,7 +449,7 @@ function tickAvalanche(dt) {
     if (!b.hit && !player.dead
         && Math.hypot(player.pos.x - b.mesh.position.x, player.pos.z - b.mesh.position.z) < 1.9) {
       b.hit = true;
-      player.takeDamage(25, { name: 'an avalanche' });
+      player.takeDamage(Math.max(25, Math.round(player.maxHp * 0.18)), { name: 'an avalanche' });
       ui.toast('🏔️ Buried by the snow!', 'boss');
     }
     if (b.t > 3.5) { scene.remove(b.mesh); boulders.splice(i, 1); }
@@ -607,10 +607,10 @@ function tickBubbles(dt) {
       bubbleFx.delete(key);
       ui.popup(new THREE.Vector3(v.x, world.heightAt(v.x, v.z) + 1.6, v.z), '💨', '#e8d84a');
       if (Math.hypot(player.pos.x - v.x, player.pos.z - v.z) < 2.6 && !player.dead) {
-        player.takeDamage(12, { name: 'a sulfur geyser' });
+        player.takeDamage(Math.max(12, Math.round(player.maxHp * 0.08)), { name: 'a sulfur geyser' });
       }
       for (const e of enemyMgr.alive()) {
-        if (Math.hypot(e.pos.x - v.x, e.pos.z - v.z) < 2.6) enemyMgr.damage(e, 15, null, 'local');
+        if (Math.hypot(e.pos.x - v.x, e.pos.z - v.z) < 2.6) enemyMgr.damage(e, Math.max(15, Math.round(e.maxHp * 0.06)), null, 'tower');
       }
       audio.sfx('rock_crack', 0.35, 200);
     }
@@ -998,7 +998,7 @@ function tickDrowning(dt) {
   drownT += dt;
   if (drownT > 0.6 && !drownWarned) {
     drownWarned = true;
-    ui.toast('🌊 DEEP water — you can\'t swim! Get out or drown. (Swimming Lessons: Upgrades → Supplies, level 7)', 'boss');
+    ui.toast('🌊 DEEP water — you can\'t swim! Get out or drown. (Swimming Lessons: Upgrades → Supplies, level 14)', 'boss');
   }
   if (drownT >= 1.4) {
     drownTickT -= dt;
@@ -1288,7 +1288,7 @@ function tickCold(dt) {
     coldTickT -= dt;
     if (coldTickT <= 0) {
       coldTickT = 1;
-      player.takeDamage(2, { silent: true });
+      player.takeDamage(Math.max(2, Math.round(player.maxHp * 0.015)), { silent: true });
       ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 1.9), '-2 ❄️', '#9fe8ff');
     }
   } else coldTickT = 0;
@@ -1707,7 +1707,7 @@ const enemyMgr = new EnemyManager(scene, world, {
     if (enemy.type === 'sheep') pickups.spawn('wool', 1 + (Math.random() < 0.5 ? 1 : 0), enemy.pos, 0.8);
     if (enemy.type === 'snapper' && Math.random() < 0.65) pickups.spawn('venom', 1, enemy.pos, 0.7);
     if (HIDE_BEARING.has(enemy.type)) {
-      pickups.spawn('hide', hideForHp(enemy.maxHp), enemy.pos, 1.1 * enemy.sizeMult);
+      pickups.spawn('hide', hideForLevel(enemy.level), enemy.pos, 1.1 * enemy.sizeMult);
     } else if (biomeIndexAt(enemy.pos.x, enemy.pos.z) === 0 || enemy.type === 'bat') {
       pickups.spawn('hide', Math.random() < 0.1 ? 1 : VERDANT_HIDE_DROP, enemy.pos, 0.9);
     }
@@ -1793,6 +1793,9 @@ const enemyMgr = new EnemyManager(scene, world, {
     audio.sfx('victory', 0.5);
   },
 });
+// landing any hit flags the player "in combat" — pauses the fast WoW-style
+// out-of-combat recovery for a few seconds
+enemyMgr.onLocalHit = () => { player.combatNoiseT = 0; };
 
 const projectiles = new Projectiles(scene);
 const companions = new Companions(scene, {
@@ -1992,6 +1995,9 @@ function setupMobaWorld(seed, side) {
   const inward = side === 'player' ? 1 : -1;
   player.pos.set(bp.x + 9 * inward, 0, bp.z - 9 * inward);
   player.meat = 15;
+  // MOBA creep XP payouts are small flat values — boost the hero's XP intake
+  // so match pacing survives the much taller survival XP curve
+  player.xpMult = 2.5;
   $id('base-btn').classList.remove('hidden');
 }
 
@@ -2577,7 +2583,10 @@ function applyLoadedState(d) {
   const p = player;
   clearHunterTraps();
   p.level = Math.max(1, Math.min(MAX_LEVEL, d.level ?? 1));
-  p.xp = d.xp ?? 0;
+  // clamp saved XP into the loaded level's bracket — saves from before an
+  // XP-curve change would otherwise land outside the new table
+  p.xp = Math.max(XP_LEVELS[p.level],
+    Math.min(d.xp ?? 0, (XP_LEVELS[p.level + 1] ?? XP_LEVELS[p.level] + 1) - 1));
   for (const k of RESOURCES) p[k] = d.res?.[k] ?? 0;
   p.equipment = { weapon: 'fists', offhand: null, head: null, chest: null, underlayer: null,
                   legs: null, boots: null, back: null, mount: null, charm: null, companion: null,

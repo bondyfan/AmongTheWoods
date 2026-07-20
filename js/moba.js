@@ -9,7 +9,8 @@
 
 import * as THREE from 'three';
 import { MOBA, CREEP_TYPES, DEN_WAVES, MOBA_BUILDINGS, MOBA_AI_TIMELINE,
-         ENEMY_TYPES, meatForHp, roundResource, enemyLevelFor } from './config.js';
+         ENEMY_TYPES, meatForHp, roundResource, enemyLevelFor,
+         ENEMY_HP, ENEMY_DMG, xpKillFor } from './config.js';
 import { lanePoint } from './mobaworld.js';
 import { makeEnemyMesh, makeWolf, makeMobaTower, makeMobaBase, makeDenHut,
          makeSmallHut, makeTeamFlag, TEAM_COLORS } from './models.js';
@@ -110,14 +111,19 @@ export class Moba {
       const type = camp.cfg.types[i];
       const cfg = ENEMY_TYPES[type];
       const a = (i / camp.cfg.types.length) * Math.PI * 2;
+      // jungle-camp neutrals: survival level curves at the starter band,
+      // with the same 1.4× camp toughness bump as before
+      const level = enemyLevelFor(type, 0);
+      const hp = Math.round(ENEMY_HP(level) * (cfg.hpMult ?? 1) * 1.4);
       const u = this._makeUnit({
         kind: 'neutral', team: 'neutral', type, cfg,
         mesh: makeEnemyMesh(type),
         x: camp.cfg.x + Math.cos(a) * 2, z: camp.cfg.z + Math.sin(a) * 2,
-        hp: cfg.hp * 1.4, dmg: (cfg.meleeDmg ?? cfg.dmg), speed: cfg.speed,
+        hp, dmg: ENEMY_DMG(level) * (cfg.meleeDmgMult ?? cfg.dmgMult ?? 1), speed: cfg.speed,
         range: cfg.range, hitR: cfg.hitR, cd: cfg.attackCd,
-        xp: cfg.xp, meat: meatForHp(cfg.hp * 1.4), camp,
-        level: enemyLevelFor(type, 0),
+        shotDmg: Math.round(ENEMY_DMG(level) * (cfg.dmgMult ?? 1)),
+        xp: Math.round(xpKillFor(level) * (cfg.xpMult ?? 1)), meat: meatForHp(hp), camp,
+        level,
       });
       camp.unitIds.push(u.id);
       this.hooks.discover?.(type);
@@ -414,7 +420,7 @@ export class Moba {
           u.spellT = u.cfg.spellCd;
           this.projectiles.spawnEnemyShot(
             u.mesh.position.clone().setY(u.mesh.position.y + 0.8), target,
-            { dmg: u.cfg.dmg, speed: u.cfg.projectileSpeed, color: u.cfg.shotColor, stun: u.cfg.stun || 0 });
+            { dmg: u.shotDmg ?? u.dmg, speed: u.cfg.projectileSpeed, color: u.cfg.shotColor, stun: u.cfg.stun || 0 });
           audio.sfx('attack_ranged', 0.15, 250);
         }
       }

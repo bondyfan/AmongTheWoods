@@ -233,183 +233,227 @@ export const fmtResource = (value) => {
 
 // hide drops only from animals that realistically have one
 export const HIDE_BEARING = new Set(['wolf', 'boar', 'elk', 'bear', 'icewolf', 'wendigo', 'yeti']);
-export const hideForHp = (hp) => Math.max(1, Math.round(hp / 430)); // hp x5.4 total, hides didn't
+// hides scale with the creature's LEVEL (mob HP is level-driven now)
+export const hideForLevel = (level) => Math.max(1, Math.round(level / 8));
 export const VERDANT_HIDE_DROP = 0.1;
 
-// ---- Enemies. Spiders are the weak starter enemy; the animals get bigger
-// and meaner the further north you go. ----
+// ---- Enemies, WoW style: a creature's real hit points and damage come from
+// its LEVEL (ENEMY_HP/ENEMY_DMG curves above) times the ARCHETYPE multipliers
+// here. hpMult ≈ bulk (0.05 rabbit … 2.6 ice golem), dmgMult ≈ hitting power,
+// meleeDmgMult (ranged types) = bite vs shot, xpMult ≈ kill-reward quality.
 // Ranged enemies chase and melee like everyone else, but ALSO have a shot
 // "spell": every spellCd seconds they stop for half a second, fire, then run
-// again (a charge bar above them shows the spell loading). dmg = shot damage,
-// meleeDmg = bite/claw damage. Flying enemies hover above the ground.
+// again (a charge bar above them shows the spell loading).
+// Flying enemies hover above the ground.
 export const ENEMY_TYPES = {
   // -- Verdant Forest --
   rabbit: { name: 'Rabbit', icon: '🐇',
-             hp: 1,   dmg: 0,  speed: 7.5, range: 0,   attackCd: 1.0, xp: 1,  meat: 1, hitR: 0.35, aggro: 0,
+             hpMult: 0.05,   dmgMult: 0,  speed: 7.5, range: 0,   attackCd: 1.0, xpMult: 0.15,  hitR: 0.35, aggro: 0,
              passive: true, herd: [3, 10] },
   sheep:  { name: 'Sheep', icon: '🐑',
-             hp: 40,  dmg: 0,  speed: 3.5, range: 0,   attackCd: 1.0, xp: 4,  hitR: 0.6, aggro: 0,
+             hpMult: 0.3,  dmgMult: 0,  speed: 3.5, range: 0,   attackCd: 1.0, xpMult: 0.3,  hitR: 0.6, aggro: 0,
              passive: true, herd: [10, 20], guardian: 'wolf' },
   horse:   { name: 'Wild Horse', icon: '🐴',
-             hp: 120, dmg: 0,  speed: 10.5, range: 0,  attackCd: 1.0, xp: 6,  meat: 2, hitR: 0.8, aggro: 0,
+             hpMult: 0.8, dmgMult: 0,  speed: 10.5, range: 0,  attackCd: 1.0, xpMult: 0.4,  hitR: 0.8, aggro: 0,
              passive: true, herd: [4, 9] }, // saddle one (E) and RIDE it
   rat:     { name: 'Giant Rat', icon: '🐀',
-             hp: 65,  dmg: 4,  speed: 5, range: 1.2, attackCd: 0.9, xp: 5,  meat: 1, hitR: 0.5,  aggro: 13 },
+             hpMult: 0.75,  dmgMult: 0.75,  speed: 5, range: 1.2, attackCd: 0.9, xpMult: 0.8,  hitR: 0.5,  aggro: 13 },
   spider:  { name: 'Forest Spider', icon: '🕷️',
-             hp: 110,  dmg: 6,  speed: 6, range: 1.3, attackCd: 1.0, xp: 8,  meat: 1, hitR: 0.7,  aggro: 13 },
+             hpMult: 1,  dmgMult: 0.9,  speed: 6, range: 1.3, attackCd: 1.0, xpMult: 1,  hitR: 0.7,  aggro: 13 },
   snake:   { name: 'Grass Snake', icon: '🐍',
-             hp: 85,  dmg: 8,  speed: 4.5, range: 1.5, attackCd: 1.3, xp: 10, meat: 1, hitR: 0.6,  aggro: 12 },
+             hpMult: 0.85,  dmgMult: 1.1,  speed: 4.5, range: 1.5, attackCd: 1.3, xpMult: 1, hitR: 0.6,  aggro: 12 },
   // -- Desert (2nd ring) --
   scorpion: { name: 'Sand Scorpion', icon: '🦂',
-             hp: 150, dmg: 9,  speed: 6,   range: 1.4, attackCd: 1.1, xp: 8,  meat: 1, hitR: 0.55, aggro: 14,
+             hpMult: 0.9, dmgMult: 0.95,  speed: 6,   range: 1.4, attackCd: 1.1, xpMult: 1,  hitR: 0.55, aggro: 14,
              poison: { dps: 2, dur: 3 } }, // a venomous sting
   cobra:   { name: 'Spitting Cobra', icon: '🐍',
-             hp: 130, dmg: 7,  meleeDmg: 6, speed: 5,  range: 1.4, attackCd: 1.2, xp: 9, meat: 1, hitR: 0.55, aggro: 15,
+             hpMult: 0.8, dmgMult: 1,  meleeDmgMult: 0.8, speed: 5,  range: 1.4, attackCd: 1.2, xpMult: 1, hitR: 0.55, aggro: 15,
              ranged: true, shootRange: 8, spellCd: 2.4, projectileSpeed: 18, shotColor: 0xc9e05a },
   vulture: { name: 'Desert Vulture', icon: '🦅',
-             hp: 105, dmg: 6,  speed: 11,  range: 1.4, attackCd: 1.1, xp: 7,  meat: 1, hitR: 0.55, aggro: 16, flying: true },
+             hpMult: 0.7, dmgMult: 0.85,  speed: 11,  range: 1.4, attackCd: 1.1, xpMult: 0.9,  hitR: 0.55, aggro: 16, flying: true },
   bee: { name: 'Angry Bee', icon: '🐝',
-             hp: 8, dmg: 3, speed: 9, range: 1.0, attackCd: 0.8, xp: 1, meat: 0, hitR: 0.3, aggro: 40, flying: true },
+             hpMult: 0.04, dmgMult: 0.35, speed: 9, range: 1.0, attackCd: 0.8, xpMult: 0.1, hitR: 0.3, aggro: 40, flying: true },
   cactusman: { name: 'Saguaro Sentinel', icon: '🌵',
-             hp: 520, dmg: 9, speed: 0, range: 1.6, attackCd: 1.2, xp: 24, meat: 0, hitR: 0.7, aggro: 9,
+             hpMult: 2.4, dmgMult: 0.9, speed: 0, range: 1.6, attackCd: 1.2, xpMult: 1.3, hitR: 0.7, aggro: 9,
              ranged: true, shootRange: 10, spellCd: 2.6, projectileSpeed: 16, shotColor: 0xbfe07a, radial: 12 },
   // -- Dark Forest --
   wolf:    { name: 'Black Wolf', icon: '🐺',
-             hp: 245,  dmg: 10, speed: 9.5, range: 1.6, attackCd: 1.0, xp: 15, meat: 2, hitR: 0.8,  aggro: 16, behavior: 'pack' },
+             hpMult: 0.95,  dmgMult: 1, speed: 9.5, range: 1.6, attackCd: 1.0, xpMult: 1, hitR: 0.8,  aggro: 16, behavior: 'pack' },
   venomspider: { name: 'Venom Spider', icon: '☣️',
-             hp: 300,  dmg: 11, meleeDmg: 7, speed: 6.5, range: 1.4, attackCd: 1.1, xp: 20, meat: 2, hitR: 0.8, aggro: 18,
+             hpMult: 1.1,  dmgMult: 1.05, meleeDmgMult: 0.8, speed: 6.5, range: 1.4, attackCd: 1.1, xpMult: 1.1, hitR: 0.8, aggro: 18,
              ranged: true, shootRange: 8.5, spellCd: 2.5, projectileSpeed: 15, shotColor: 0x8aff3a, behavior: 'kite' },
   bat:     { name: 'Cave Bat', icon: '🦇',
-             hp: 95,  dmg: 6,  speed: 11, range: 1.4, attackCd: 1.1, xp: 12, meat: 1, hitR: 0.6,  aggro: 18, flying: true },
+             hpMult: 0.55,  dmgMult: 0.8,  speed: 11, range: 1.4, attackCd: 1.1, xpMult: 0.7, hitR: 0.6,  aggro: 18, flying: true },
   // -- Haunted Forest --
   zombie:  { name: 'Zombie', icon: '🧟',
-             hp: 485,  dmg: 14, speed: 4, range: 1.7, attackCd: 1.3, xp: 28, meat: 2, hitR: 0.85, aggro: 19,
+             hpMult: 1.6,  dmgMult: 1.15, speed: 4, range: 1.7, attackCd: 1.3, xpMult: 1.2, hitR: 0.85, aggro: 19,
              poison: { dps: 2, dur: 4 } }, // rotting claws fester — Haunted Forest hazard
   // -- Highlands --
   boar:    { name: 'Wild Boar', icon: '🐗',
-             hp: 430,  dmg: 16, speed: 8, range: 1.7, attackCd: 1.1, xp: 25, meat: 3, hitR: 0.9,  aggro: 14 },
+             hpMult: 1.35,  dmgMult: 1.2, speed: 8, range: 1.7, attackCd: 1.1, xpMult: 1.1, hitR: 0.9,  aggro: 14 },
   elk:     { name: 'Mad Elk', icon: '🦌',
-             hp: 595, dmg: 20, speed: 10.5, range: 1.9, attackCd: 1.4, xp: 32, meat: 4, hitR: 1.0,  aggro: 14 },
+             hpMult: 1.5, dmgMult: 1.3, speed: 10.5, range: 1.9, attackCd: 1.4, xpMult: 1.2, hitR: 1.0,  aggro: 14 },
   stormsnake: { name: 'Storm Serpent', icon: '⚡',
-             hp: 380,  dmg: 8,  meleeDmg: 9, speed: 5.5, range: 1.5, attackCd: 1.2, xp: 28, meat: 3, hitR: 0.6, aggro: 18,
+             hpMult: 0.95,  dmgMult: 0.9,  meleeDmgMult: 1, speed: 5.5, range: 1.5, attackCd: 1.2, xpMult: 1.1, hitR: 0.6, aggro: 18,
              ranged: true, shootRange: 10, spellCd: 3.0, projectileSpeed: 30, shotColor: 0xffe94a, stun: 1.2 },
   // -- Ice creatures (Frozen Peak) --
   icewolf: { name: 'Ice Wolf', icon: '❄️',
-             hp: 650, dmg: 18, speed: 10, range: 1.6, attackCd: 0.9, xp: 35, meat: 4, hitR: 0.8,  aggro: 17, behavior: 'pack' },
+             hpMult: 1, dmgMult: 1.1, speed: 10, range: 1.6, attackCd: 0.9, xpMult: 1, hitR: 0.8,  aggro: 17, behavior: 'pack' },
   icespider: { name: 'Frost Spider', icon: '🕸️',
-             hp: 540, dmg: 16, meleeDmg: 10, speed: 7, range: 1.4, attackCd: 1.1, xp: 30, meat: 3, hitR: 0.8, aggro: 18,
+             hpMult: 1.1, dmgMult: 1, meleeDmgMult: 0.85, speed: 7, range: 1.4, attackCd: 1.1, xpMult: 1, hitR: 0.8, aggro: 18,
              ranged: true, shootRange: 9, spellCd: 2.2, projectileSpeed: 17, shotColor: 0x8ae0ff, behavior: 'kite' },
   bear:    { name: 'Grizzly Bear', icon: '🐻',
-             hp: 970, dmg: 26, speed: 8.5, range: 2.1, attackCd: 1.5, xp: 45, meat: 5, hitR: 1.2,  aggro: 16, behavior: 'heavy' },
+             hpMult: 1.9, dmgMult: 1.45, speed: 8.5, range: 2.1, attackCd: 1.5, xpMult: 1.4, hitR: 1.2,  aggro: 16, behavior: 'heavy' },
   // -- Frozen Peak --
   wendigo: { name: 'Wendigo', icon: '👹',
-             hp: 1190, dmg: 30, speed: 11, range: 2.0, attackCd: 1.2, xp: 55, meat: 6, hitR: 0.9,  aggro: 20 },
+             hpMult: 1.5, dmgMult: 1.35, speed: 11, range: 2.0, attackCd: 1.2, xpMult: 1.2, hitR: 0.9,  aggro: 20 },
   yeti:    { name: 'Yeti', icon: '🏔️',
-             hp: 1890, dmg: 40, speed: 9, range: 2.5, attackCd: 1.7, xp: 70, meat: 8, hitR: 1.5,  aggro: 18, behavior: 'heavy' },
+             hpMult: 2.3, dmgMult: 1.6, speed: 9, range: 2.5, attackCd: 1.7, xpMult: 1.5, hitR: 1.5,  aggro: 18, behavior: 'heavy' },
   // -- humanoids: bandits, tribes & other two-legged trouble. Rarer than
   // beasts, and they travel in small camps (2-5 together). --
   bandit:  { name: 'Bandit', icon: '🗡️',
-             hp: 90,  dmg: 9,  meleeDmg: 5, speed: 6, range: 1.4, attackCd: 1.2, xp: 10, meat: 1, hitR: 0.55, aggro: 15,
+             hpMult: 0.7,  dmgMult: 0.9,  meleeDmgMult: 0.6, speed: 6, range: 1.4, attackCd: 1.2, xpMult: 0.9, hitR: 0.55, aggro: 15,
              humanoid: true, ranged: true, spear: true, shootRange: 10, spellCd: 2.4, projectileSpeed: 20, shotColor: 0xb08a5a },
   banditBrute: { name: 'Bandit Brute', icon: '🪓',
-             hp: 280, dmg: 13, speed: 6.5, range: 1.7, attackCd: 1.2, xp: 22, meat: 2, hitR: 0.8, aggro: 15,
+             hpMult: 1.3, dmgMult: 1.1, speed: 6.5, range: 1.7, attackCd: 1.2, xpMult: 1.1, hitR: 0.8, aggro: 15,
              humanoid: true },
   tribesman: { name: 'Wild Tribesman', icon: '🪃',
-             hp: 400, dmg: 14, meleeDmg: 10, speed: 7, range: 1.5, attackCd: 1.1, xp: 28, meat: 2, hitR: 0.6, aggro: 16,
+             hpMult: 1, dmgMult: 1, meleeDmgMult: 0.85, speed: 7, range: 1.5, attackCd: 1.1, xpMult: 1, hitR: 0.6, aggro: 16,
              humanoid: true, ranged: true, shootRange: 9.5, spellCd: 2.4, projectileSpeed: 24, shotColor: 0xc96f3a },
   shaman:  { name: 'Bog Shaman', icon: '🔮',
-             hp: 320, dmg: 12, meleeDmg: 8, speed: 5, range: 1.4, attackCd: 1.3, xp: 30, meat: 2, hitR: 0.6, aggro: 17,
+             hpMult: 0.85, dmgMult: 1.05, meleeDmgMult: 0.7, speed: 5, range: 1.4, attackCd: 1.3, xpMult: 1.1, hitR: 0.6, aggro: 17,
              humanoid: true, ranged: true, shootRange: 10, spellCd: 2.8, projectileSpeed: 16, shotColor: 0xb26fff },
   poacher: { name: 'Poacher', icon: '🎯',
-             hp: 450, dmg: 16, meleeDmg: 11, speed: 6.5, range: 1.5, attackCd: 1.2, xp: 30, meat: 2, hitR: 0.6, aggro: 18,
+             hpMult: 1.1, dmgMult: 1.1, meleeDmgMult: 0.85, speed: 6.5, range: 1.5, attackCd: 1.2, xpMult: 1.1, hitR: 0.6, aggro: 18,
              humanoid: true, ranged: true, shootRange: 11, spellCd: 2.6, projectileSpeed: 26, shotColor: 0xd8d0b0 },
   // -- new beasts --
   thornling: { name: 'Thornling', icon: '🌿',
-             hp: 70,  dmg: 6,  meleeDmg: 4, speed: 4, range: 1.2, attackCd: 1.2, xp: 8,  meat: 1, hitR: 0.5, aggro: 12,
+             hpMult: 0.5,  dmgMult: 0.7,  meleeDmgMult: 0.6, speed: 4, range: 1.2, attackCd: 1.2, xpMult: 0.5,  hitR: 0.5, aggro: 12,
              ranged: true, shootRange: 8, spellCd: 2.6, projectileSpeed: 14, shotColor: 0x7fce4f },
   treant:  { name: 'Treant', icon: '🌳',
-             hp: 520, dmg: 18, speed: 4.5, range: 1.9, attackCd: 1.5, xp: 32, meat: 2, hitR: 1.1, aggro: 13, behavior: 'heavy' },
+             hpMult: 1.6, dmgMult: 1.1, speed: 4.5, range: 1.9, attackCd: 1.5, xpMult: 1.1, hitR: 1.1, aggro: 13, behavior: 'heavy' },
   bogCrawler: { name: 'Bog Crawler', icon: '🦀',
-             hp: 380, dmg: 15, speed: 7, range: 1.5, attackCd: 1.1, xp: 26, meat: 3, hitR: 0.8, aggro: 15 },
+             hpMult: 1.15, dmgMult: 1.05, speed: 7, range: 1.5, attackCd: 1.1, xpMult: 1, hitR: 0.8, aggro: 15 },
   harpy:   { name: 'Harpy', icon: '🦅',
-             hp: 380, dmg: 14, meleeDmg: 9, speed: 10, range: 1.5, attackCd: 1.1, xp: 30, meat: 2, hitR: 0.7, aggro: 18,
+             hpMult: 0.9, dmgMult: 0.95, meleeDmgMult: 0.9, speed: 10, range: 1.5, attackCd: 1.1, xpMult: 1, hitR: 0.7, aggro: 18,
              flying: true, ranged: true, shootRange: 8, spellCd: 2.5, projectileSpeed: 20, shotColor: 0xe8e0c0 },
   frostWisp: { name: 'Frost Wisp', icon: '💠',
-             hp: 500, dmg: 20, meleeDmg: 8, speed: 6, range: 1.2, attackCd: 1.4, xp: 40, meat: 1, hitR: 0.6, aggro: 16,
+             hpMult: 1.05, dmgMult: 1.15, meleeDmgMult: 0.7, speed: 6, range: 1.2, attackCd: 1.4, xpMult: 1.1, hitR: 0.6, aggro: 16,
              flying: true, ranged: true, shootRange: 10, spellCd: 2.2, projectileSpeed: 18, shotColor: 0x9fe8ff },
   snapper: { name: 'Snapjaw Bloom', icon: '🪷',
-             hp: 640, dmg: 22, speed: 0, range: 2.3, attackCd: 1.0, xp: 30, meat: 1, hitR: 0.8, aggro: 6 },
+             hpMult: 1.9, dmgMult: 1.4, speed: 0, range: 2.3, attackCd: 1.0, xpMult: 1.2, hitR: 0.8, aggro: 6 },
   icegolem: { name: 'Ice Golem', icon: '🗿',
-             hp: 2160, dmg: 45, meleeDmg: 30, speed: 4, range: 2.2, attackCd: 1.8, xp: 80, meat: 9, hitR: 1.4, aggro: 18,
+             hpMult: 2.6, dmgMult: 1.7, meleeDmgMult: 1.2, speed: 4, range: 2.2, attackCd: 1.8, xpMult: 1.6, hitR: 1.4, aggro: 18,
              ranged: true, shootRange: 10, spellCd: 4.0, projectileSpeed: 13, shotColor: 0xbfe8ff, stun: 0.8 },
   // -- Haunted Forest: restless spirits drift between the dead trees --
   ghost:   { name: 'Restless Ghost', icon: '👻',
-             hp: 520, dmg: 18, meleeDmg: 10, speed: 7, range: 1.4, attackCd: 1.3, xp: 42, meat: 0, hitR: 0.7, aggro: 19,
+             hpMult: 0.95, dmgMult: 1.05, meleeDmgMult: 0.85, speed: 7, range: 1.4, attackCd: 1.3, xpMult: 1.1, hitR: 0.7, aggro: 19,
              flying: true, ranged: true, shootRange: 9, spellCd: 3.0, projectileSpeed: 16, shotColor: 0xbfc8ff, stun: 0.7 },
   // -- Jungle: the canopy hides ambush predators --
   panther: { name: 'Shadow Panther', icon: '🐆',
-             hp: 900, dmg: 30, speed: 11.5, range: 1.6, attackCd: 0.9, xp: 55, meat: 4, hitR: 0.8, aggro: 24 },
+             hpMult: 1.25, dmgMult: 1.5, speed: 11.5, range: 1.6, attackCd: 0.9, xpMult: 1.3, hitR: 0.8, aggro: 24 },
   // -- Griffins: flight-master bosses of the open rings. They never truly
   // die — beaten, they drop their nest and fly beyond the horizon --
   griffin: { name: 'Griffin', icon: '🦅',
-             hp: 700, dmg: 26, speed: 3.6, range: 2.0, attackCd: 1.1, xp: 110, meat: 6, hitR: 1.1, aggro: 24,
+             hpMult: 1.6, dmgMult: 1.3, speed: 3.6, range: 2.0, attackCd: 1.1, xpMult: 2, hitR: 1.1, aggro: 24,
              flying: true, griffin: true },
   villager: { name: 'Villager', icon: '🧑‍🌾',
-             hp: 40,  dmg: 0,  speed: 2.3, range: 0,   attackCd: 1.0, xp: 2,  meat: 1, hitR: 0.4, aggro: 0,
+             hpMult: 0.3,  dmgMult: 0,  speed: 2.3, range: 0,   attackCd: 1.0, xpMult: 0.2,  hitR: 0.4, aggro: 0,
              passive: true, herd: [3, 6] },
   griffinChick: { name: 'Griffin Fledgling', icon: '🐤',
-             hp: 260, dmg: 11, speed: 3.8, range: 1.4, attackCd: 1.0, xp: 22, meat: 2, hitR: 0.55, aggro: 22,
+             hpMult: 0.8, dmgMult: 0.75, speed: 3.8, range: 1.4, attackCd: 1.0, xpMult: 0.6, hitR: 0.55, aggro: 22,
              flying: true },
 };
 
-// A readable threat level for comparing a creature with the player's level.
-// Base XP already follows the hand-balanced creature roster, while the extra
-// terms reflect the real stat multipliers applied by Enemy at spawn time.
+// ---- WoW-style level curves. EVERYTHING combat-related keys off level now:
+// creature hit points and damage come from these curves times the creature's
+// archetype multipliers (hpMult/dmgMult in ENEMY_TYPES), the player's base
+// pool comes from PLAYER_HP. Tuned so an equal-level standard mob takes
+// ~7-11 s to kill with era-appropriate gear and ~14-17 hits to kill YOU. ----
+export const PLAYER_HP = (level) => Math.round(82 + 18 * level + 0.9 * level * level);
+export const ENEMY_HP = (level) => Math.round(120 + 60 * level + 5.2 * level * level);
+export const ENEMY_DMG = (level) => Math.round((5 + 2.6 * level + 0.06 * level * level) * 10) / 10;
+// XP paid by a standard mob of a level (elites ×2, bosses × their rank mult)
+export const xpKillFor = (level) => Math.round(14 + 5.2 * level);
+// Out-of-combat recovery, WoW style: no damage dealt or taken for OOC_DELAY
+// seconds and you knit back OOC_REGEN_PCT of max health every second (a full
+// heal in ~12 s at any level). Rest gear (bedroll etc.) speeds even that up.
+export const OOC_DELAY = 5;
+export const OOC_REGEN_PCT = 0.08;
+
+// Each zone covers a WoW-style level band (index = difficulty tier). The gap
+// between Verdant and the Desert is intentional — the first border bites.
+export const ZONE_LEVEL_BANDS = [[1, 5], [7, 12], [13, 18], [19, 24],
+  [25, 30], [31, 36], [37, 43], [44, 50]];
+
 export function biomeIndexForDifficulty(difficulty = 0) {
   // progressAt packs (tier + depth) / zoneCount into 0..1 — invert the tier
   return Math.max(0, Math.min(BIOMES.length - 1,
     Math.floor(Math.max(0, difficulty) * BIOMES.length)));
 }
 
+// creature "threat" used to spread a zone's roster across its level band
+const enemyThreat = (t) => {
+  const c = ENEMY_TYPES[t] ?? {};
+  return (c.hpMult ?? 1) * 0.6 + (c.dmgMult ?? 1) * 0.4;
+};
+
 export function enemyLevelFor(type, difficulty = 0, bossRank = 0, elite = false) {
   const cfg = ENEMY_TYPES[type] ?? {};
   const biomeIndex = biomeIndexForDifficulty(difficulty);
-  if (cfg.passive) return 1 + Math.round((biomeIndex / (BIOMES.length - 1)) * 4);
+  const [lo, hi] = ZONE_LEVEL_BANDS[biomeIndex];
+  if (cfg.passive) return lo;
 
   const biome = BIOMES[biomeIndex];
   const roster = [...new Set([...(biome.enemies ?? []), ...(biome.humanoids ?? []),
     ...(biome.night?.add ? [biome.night.add] : [])])]
     .filter(t => !ENEMY_TYPES[t]?.passive)
-    .sort((a, b) => (ENEMY_TYPES[a]?.xp ?? 0) - (ENEMY_TYPES[b]?.xp ?? 0));
-  const xp = cfg.xp ?? 1;
-  const position = Math.max(0, roster.filter(t => (ENEMY_TYPES[t]?.xp ?? 0) <= xp).length - 1);
+    .sort((a, b) => enemyThreat(a) - enemyThreat(b));
+  const position = Math.max(0, roster.indexOf(type));
   const strengthOffset = roster.length <= 1 ? 1
     : Math.min(2, Math.floor((position / (roster.length - 1)) * 3));
-  const baseLevel = 1 + biomeIndex * 3 + strengthOffset;
+  // how deep into the zone the spawn sits pushes it up its band
+  const depth = Math.max(0, Math.min(1, difficulty * BIOMES.length - biomeIndex));
+  const baseLevel = lo + Math.round(depth * Math.max(0, hi - lo - 2)) + strengthOffset;
   const eliteLevels = elite ? 2 : 0;
-  const bossLevels = bossRank * 3;
-  let level = Math.min(36, baseLevel + eliteLevels + bossLevels);
+  const bossLevels = bossRank * 2;
+  let level = Math.min(hi, baseLevel) + eliteLevels + bossLevels;
+  level = Math.min(MAX_LEVEL + 5, level);
   // Verdant Forest (the starter ring) must stay gentle: its snakes and
-  // spiders never climb above level 2, even as elites.
-  if (biomeIndex === 0 && (type === 'snake' || type === 'spider')) level = Math.min(2, level);
+  // spiders never climb above level 3, even as elites.
+  if (biomeIndex === 0 && (type === 'snake' || type === 'spider')) level = Math.min(3, level);
   return level;
+}
+
+// The level a creature typically spawns at (mid-depth of its home zone) —
+// used by the bestiary and other displays that need stats without a spawn.
+export function enemyTypicalLevel(type) {
+  const bi = BIOMES.findIndex(b => b.enemies?.includes(type)
+    || b.humanoids?.includes(type) || b.night?.add === type || b.critters?.includes(type));
+  const biomeIndex = Math.max(0, bi);
+  return enemyLevelFor(type, (biomeIndex + 0.5) / BIOMES.length);
 }
 
 // Pack bosses ("the mother") by skull rank (index 0 = 1 skull).
 // packSize = minions spawned with her; while she lives, reinforceCount minions
 // keep arriving from all directions every reinforceInterval seconds.
+// NOTE: bosses ALSO sit +2 levels per skull on the level curves now, so these
+// multipliers stack on top of already-bigger level stats. Tuned for WoW-style
+// fight lengths: 1-skull ≈ 20-30 s, 3-skull ≈ 60-90 s of sustained damage.
 export const BOSS_RANKS = [
-  { skulls: 1, hpMult: 4,  dmgMult: 1.5, sizeMult: 1.5, xpMult: 3,  meatMult: 3, dropChance: 0.10,
+  { skulls: 1, hpMult: 2,   dmgMult: 1.4, sizeMult: 1.5, xpMult: 3,  meatMult: 3, dropChance: 0.10,
     packSize: 8,  reinforceInterval: 6.0, reinforceCount: 1 },
-  { skulls: 2, hpMult: 8,  dmgMult: 2.0, sizeMult: 1.8, xpMult: 6,  meatMult: 5, dropChance: 0.25,
+  { skulls: 2, hpMult: 3,   dmgMult: 1.8, sizeMult: 1.8, xpMult: 6,  meatMult: 5, dropChance: 0.25,
     packSize: 11, reinforceInterval: 4.0, reinforceCount: 2 },
-  { skulls: 3, hpMult: 15, dmgMult: 3.0, sizeMult: 2.2, xpMult: 10, meatMult: 8, dropChance: 0.50,
+  { skulls: 3, hpMult: 4.5, dmgMult: 2.4, sizeMult: 2.2, xpMult: 10, meatMult: 8, dropChance: 0.50,
     packSize: 14, reinforceInterval: 2.5, reinforceCount: 3 },
 ];
 
-// Meat dropped by a killed unit, scaled by its (max) HP: 1 meat up to 30 HP,
-// then +1 per additional 30 HP. Tougher enemies (and bosses) pay out more.
-export const meatForHp = (hp) => Math.max(1, Math.ceil(hp / 160)); // hp x5.4 total, meat didn't
+// Meat dropped by a killed unit. Survival mobs pay by LEVEL and bulk
+// (archetype hpMult); meatForHp stays for MOBA creeps whose HP is still flat.
+export const meatForLevel = (level, hpMult = 1) =>
+  Math.max(1, Math.round((0.8 + level * 0.16) * Math.min(2.2, Math.max(0.5, hpMult))));
+export const meatForHp = (hp) => Math.max(1, Math.ceil(hp / 160));
 
 // Boss "pack mothers" carry NAMES — picked per creature family at spawn.
 export const BOSS_NAMES = {
@@ -435,18 +479,24 @@ export function bossNameFor(type, id) {
   return pool[id % pool.length];
 }
 
-// Cumulative XP required to reach each level (index = level).
-export const XP_LEVELS = [0, 0, 40, 110, 220, 380, 600, 880, 1230, 1660, 2200,
-  2850, 3620, 4520, 5560, 6760, 8140, 9720, 11520, 13560, 15860, 18440,
-  21320, 24520, 28070];
-export const MAX_LEVEL = 24;
+// Cumulative XP required to reach each level (index = level). WoW-style
+// cadence: ~6 equal-level kills for the first ding, ~40+ near the cap
+// (quests shoulder a big share of the climb).
+export const XP_LEVELS = [0, 0, 109, 265, 483, 763, 1113, 1541, 2054, 2670, 3387,
+  4212, 5153, 6217, 7427, 8776, 10271, 11920, 13731, 15729, 17904, 20264,
+  22816, 25568, 28550, 31747, 35167, 38818, 42707, 46867, 51281, 55956,
+  60900, 66120, 71654, 77480, 83605, 90037, 96784, 103886, 111318, 119088,
+  127203, 135671, 144537, 153771, 163381, 173375, 183760, 194584, 205815];
+export const MAX_LEVEL = 50;
 
 // quest XP scale: fraction of the CURRENT level's xp-to-next a quest pays,
-// front-loaded hard (a lvl-1 quest levels you outright, endgame quests are
-// a nudge). Index by player level; past the table it stays at 1%.
-export const QUEST_XP_PCT = [0, 1.2, 1.0, 0.8, 0.6, 0.4, 0.25, 0.18, 0.14, 0.12,
-  0.10, 0.09, 0.08, 0.07, 0.06, 0.06, 0.06, 0.06, 0.06, 0.06, 0.06, 0.06,
-  0.06, 0.06, 0.06];
+// front-loaded (early quests are near a whole level, endgame quests a solid
+// nudge). Index by player level; past the table it stays at the last value.
+export const QUEST_XP_PCT = [0, 1.0, 0.85, 0.7, 0.6, 0.5, 0.45, 0.4, 0.36, 0.33,
+  0.30, 0.28, 0.26, 0.25, 0.24, 0.23, 0.22, 0.21, 0.20, 0.19, 0.18, 0.18,
+  0.17, 0.17, 0.16, 0.16, 0.15, 0.15, 0.14, 0.14, 0.13, 0.13, 0.12, 0.12,
+  0.12, 0.11, 0.11, 0.11, 0.10, 0.10, 0.10, 0.10, 0.09, 0.09, 0.09, 0.09,
+  0.08, 0.08, 0.08, 0.08, 0.08];
 export function questXpFor(level) {
   const pct = QUEST_XP_PCT[Math.min(level, QUEST_XP_PCT.length - 1)] ?? 0.01;
   const span = (XP_LEVELS[Math.min(level + 1, XP_LEVELS.length - 1)] ?? 0) - (XP_LEVELS[level] ?? 0);
@@ -469,199 +519,199 @@ export const ITEMS = [
     weapon: { kind: 'melee', style: 'fists', dmg: 12, cd: 0.64, range: 1.5, chop: 0, mine: 0, tier: 0,
       combo: [1, 1.08, 1.2] },
     desc: 'Fast three-hit combo. Bare hands can\'t fell trees or mine — craft tools!' },
-  { id: 'club',       slot: 'weapon', level: 2, icon: '🦴', name: 'Bone Club',   cost: { meat: 10 },
+  { id: 'club',       slot: 'weapon', level: 3, icon: '🦴', name: 'Bone Club',   cost: { meat: 10 },
     weapon: { kind: 'melee', style: 'club', dmg: 22, cd: 0.82, range: 1.7, chop: 0.5, mine: 0, tier: 1,
       combo: [1, 1.25], stun: 0.35, armorBreak: 0.16 },
     desc: 'Slow crushing blows stagger enemies and break armour; fells trees slowly.' },
-  { id: 'stoneAxe',   slot: 'weapon', level: 3, icon: '🪓', name: 'Stone Axe',     cost: { wood: 12, stone: 10 },
+  { id: 'stoneAxe',   slot: 'weapon', level: 5, icon: '🪓', name: 'Stone Axe',     cost: { wood: 12, stone: 10 },
     weapon: { kind: 'melee', style: 'axe', dmg: 38, cd: 0.86, range: 1.8, chop: 2, mine: 0, tier: 1,
       combo: [1, 1.15], bleed: 4 },
     desc: 'Wide, deliberate swings cause bleeding and chop trees fast.' },
-  { id: 'steelAxe',   slot: 'weapon', level: 6, icon: '⚒️', name: 'Iron Axe',      cost: { wood: 18, iron: 6 }, needs: 'furnace',
+  { id: 'steelAxe',   slot: 'weapon', level: 12, icon: '⚒️', name: 'Iron Axe',      cost: { wood: 18, iron: 6 }, needs: 'furnace',
     weapon: { kind: 'melee', style: 'axe', dmg: 68, cd: 0.9, range: 1.9, chop: 3, mine: 0, tier: 2,
       combo: [1, 1.18], bleed: 7 },
     desc: 'Heavy sweeping strikes bleed groups and tear through any tree.' },
-  { id: 'warAxe',     slot: 'weapon', level: 8, icon: '🔥', name: 'War Axe',       cost: { wood: 25, iron: 16, hide: 6 }, needs: 'furnace',
+  { id: 'warAxe',     slot: 'weapon', level: 16, icon: '🔥', name: 'War Axe',       cost: { wood: 25, iron: 16, hide: 6 }, needs: 'furnace',
     weapon: { kind: 'melee', style: 'axe', dmg: 120, cd: 0.96, range: 2.0, chop: 4, mine: 0, tier: 3,
       combo: [1, 1.2], bleed: 12 },
     desc: 'A brutal war axe: very wide swings and severe bleeding.' },
   // -- tools: pickaxes are the ONLY way to mine rock --
-  { id: 'bonePick',   slot: 'weapon', level: 3, icon: '⛏️', name: 'Bone Pickaxe',  cost: { wood: 10, hide: 2, meat: 8 },
+  { id: 'bonePick',   slot: 'weapon', level: 5, icon: '⛏️', name: 'Bone Pickaxe',  cost: { wood: 10, hide: 2, meat: 8 },
     weapon: { kind: 'melee', style: 'pick', dmg: 20, cd: 0.79, range: 1.7, chop: 0, mine: 1, tier: 1,
       pick: true, armoredBonus: 1.65, armorBreak: 0.2 },
     desc: 'Mines rock slowly, but punches through golems and armoured creatures.' },
-  { id: 'ironPick',   slot: 'weapon', level: 6, icon: '⚒️', name: 'Iron Pickaxe',  cost: { wood: 15, iron: 8 }, needs: 'furnace',
+  { id: 'ironPick',   slot: 'weapon', level: 12, icon: '⚒️', name: 'Iron Pickaxe',  cost: { wood: 15, iron: 8 }, needs: 'furnace',
     weapon: { kind: 'melee', style: 'pick', dmg: 55, cd: 0.82, range: 1.8, chop: 0.5, mine: 2.5, tier: 2,
       pick: true, armoredBonus: 1.8, armorBreak: 0.28 },
     desc: 'Cracks rocks and armoured hides alike; strong armour-breaking strikes.' },
-  { id: 'obsidianPick', slot: 'weapon', level: 9, icon: '⛏️', name: 'Obsidian Pickaxe', cost: { iron: 18, stone: 30, essence: 6 }, needs: 'keep',
+  { id: 'obsidianPick', slot: 'weapon', level: 18, icon: '⛏️', name: 'Obsidian Pickaxe', cost: { iron: 18, stone: 30, essence: 6 }, needs: 'keep',
     weapon: { kind: 'melee', style: 'pick', dmg: 100, cd: 0.88, range: 1.9, chop: 1, mine: 4, tier: 3,
       pick: true, armoredBonus: 2, armorBreak: 0.35 },
     desc: 'Volcanic point shatters rock, golems and armour with charged hits.' },
-  { id: 'huntSpear',  slot: 'weapon', level: 5, icon: '🔱', name: 'Hunting Spear', cost: { wood: 20, stone: 8, hide: 3 },
+  { id: 'huntSpear',  slot: 'weapon', level: 10, icon: '🔱', name: 'Hunting Spear', cost: { wood: 20, stone: 8, hide: 3 },
     weapon: { kind: 'melee', style: 'spear', dmg: 52, cd: 0.82, range: 2.8, chop: 0, mine: 0, tier: 1,
       combo: [1, 1.2], chargeLunge: 1.25 },
     desc: 'Safe, narrow reach. Charged attacks lunge forward into exposed weak points.' },
   // -- weapons: ranged (invented with the Wooden Cabin era; train Range to extend) --
-  { id: 'huntingBow', slot: 'weapon', level: 4, icon: '🏹', name: 'Hunting Bow',   cost: { wood: 25, hide: 4 }, needs: 'cabin',
+  { id: 'huntingBow', slot: 'weapon', level: 7, icon: '🏹', name: 'Hunting Bow',   cost: { wood: 25, hide: 4 }, needs: 'cabin',
     weapon: { kind: 'bow', style: 'bow', dmg: 16, cd: 1.07, range: 3.5, pierce: false, tier: 1 },
     desc: 'Hold and release for an accurate weak-point shot. Supports special arrows.' },
-  { id: 'longbow',    slot: 'weapon', level: 6, icon: '🎯', name: 'Longbow',       cost: { wood: 40, hide: 8, iron: 4 }, needs: 'furnace',
+  { id: 'longbow',    slot: 'weapon', level: 12, icon: '🎯', name: 'Longbow',       cost: { wood: 40, hide: 8, iron: 4 }, needs: 'furnace',
     weapon: { kind: 'bow', style: 'bow', dmg: 32, cd: 0.89, range: 7, pierce: false, tier: 2 },
     desc: 'Long-ranged precision bow; fully drawn shots find weak points.' },
-  { id: 'recurveBow', slot: 'weapon', level: 7, icon: '🏹', name: 'Recurve Bow',   cost: { wood: 45, hide: 10, iron: 6 }, needs: 'furnace',
+  { id: 'recurveBow', slot: 'weapon', level: 14, icon: '🏹', name: 'Recurve Bow',   cost: { wood: 45, hide: 10, iron: 6 }, needs: 'furnace',
     weapon: { kind: 'bow', style: 'bow', dmg: 26, cd: 0.69, range: 8.5, pierce: false, tier: 2 },
     desc: 'Snappy recurve limbs support fast follow-up shots and special arrows.' },
-  { id: 'rapidBow',   slot: 'weapon', level: 8, icon: '🌀', name: 'Windstorm Bow', cost: { wood: 45, iron: 14, hide: 10 }, needs: 'furnace',
+  { id: 'rapidBow',   slot: 'weapon', level: 16, icon: '🌀', name: 'Windstorm Bow', cost: { wood: 45, iron: 14, hide: 10 }, needs: 'furnace',
     weapon: { kind: 'bow', style: 'bow', dmg: 30, cd: 0.5, range: 10, pierce: true, tier: 3 },
     desc: 'Very fast piercing arrows; charged shots tear through a whole line.' },
   // -- medieval (Age 5, needs the Keep) --
-  { id: 'steelSword', slot: 'weapon', level: 9, icon: '⚔️', name: 'Knight\'s Sword', cost: { iron: 25, wood: 10, hide: 8 }, needs: 'keep',
+  { id: 'steelSword', slot: 'weapon', level: 18, icon: '⚔️', name: 'Knight\'s Sword', cost: { iron: 25, wood: 10, hide: 8 }, needs: 'keep',
     weapon: { kind: 'melee', style: 'sword', dmg: 150, cd: 0.6, range: 2.1, chop: 1.5, mine: 0, tier: 3,
       combo: [1, 1.18, 1.55], parry: true },
     desc: 'A fast three-hit combo. Guard at the right moment to parry and stun attackers.' },
-  { id: 'crossbow',   slot: 'weapon', level: 9, icon: '🎯', name: 'Crossbow',       cost: { wood: 50, iron: 20 }, needs: 'keep',
+  { id: 'crossbow',   slot: 'weapon', level: 18, icon: '🎯', name: 'Crossbow',       cost: { wood: 50, iron: 20 }, needs: 'keep',
     weapon: { kind: 'bow', style: 'crossbow', dmg: 90, cd: 1.65, range: 12, pierce: true, tier: 3,
       armorPierce: 0.75, armorBreak: 0.25 },
     desc: 'Slow to reload, but launches an extremely powerful armour-piercing bolt.' },
   // -- late-game signature weapons: one memorable choice per deep biome --
-  { id: 'highlandSpear', slot: 'weapon', level: 13, icon: '⚡', name: 'Highland Greatspear',
+  { id: 'highlandSpear', slot: 'weapon', level: 27, icon: '⚡', name: 'Highland Greatspear',
     cost: { wood: 55, iron: 38, hide: 18, essence: 14 }, needs: 'runic',
     weapon: { kind: 'melee', style: 'spear', dmg: 210, cd: 0.92, range: 3.3, chop: 0, mine: 0, tier: 4,
       combo: [1, 1.25], chargeLunge: 1.5 },
     desc: 'A storm-tempered reach weapon. Charged attacks lunge deep into exposed weak points.' },
-  { id: 'serpentBow', slot: 'weapon', level: 20, icon: '🐍', name: 'Serpent Bow',
+  { id: 'serpentBow', slot: 'weapon', level: 41, icon: '🐍', name: 'Serpent Bow',
     cost: { wood: 85, hide: 35, iron: 45, essence: 35 }, needs: 'spirit',
     weapon: { kind: 'bow', style: 'bow', dmg: 95, cd: 0.62, range: 14, pierce: true, tier: 4 },
     desc: 'A recurved jungle bow: fast 95-damage arrows pierce through packed enemies.' },
-  { id: 'frostAxe', slot: 'weapon', level: 22, icon: '🧚', name: 'Frostforged Axe',
+  { id: 'frostAxe', slot: 'weapon', level: 46, icon: '🧚', name: 'Frostforged Axe',
     cost: { wood: 90, iron: 70, hide: 30, essence: 55 }, needs: 'primal',
     weapon: { kind: 'melee', style: 'axe', dmg: 260, cd: 0.82, range: 2.35, chop: 6, mine: 1, tier: 4,
       combo: [1, 1.25], bleed: 20 },
     desc: 'Frozen iron with a brutal edge. Wide swings leave severe bleeding wounds.' },
-  { id: 'woodShield', slot: 'offhand', level: 3, icon: '🛡️', name: 'Wooden Shield', cost: { wood: 18, hide: 3 },
+  { id: 'woodShield', slot: 'offhand', level: 5, icon: '🛡️', name: 'Wooden Shield', cost: { wood: 18, hide: 3 },
     shield: { block: 0.55 }, desc: 'Hold Ctrl to block 55% incoming damage. Replaces your torch.' },
-  { id: 'ironShield', slot: 'offhand', level: 7, icon: '🛡️', name: 'Iron Shield', cost: { iron: 14, wood: 12, hide: 5 }, needs: 'furnace',
+  { id: 'ironShield', slot: 'offhand', level: 14, icon: '🛡️', name: 'Iron Shield', cost: { iron: 14, wood: 12, hide: 5 }, needs: 'furnace',
     shield: { block: 0.72 }, desc: 'Hold Ctrl to block 72% incoming damage. Replaces your torch.' },
   // -- head (crafted from hides at the tent) --
-  { id: 'leatherCap', slot: 'head', level: 3, icon: '🧢', name: 'Hide Cap',      cost: { hide: 4, meat: 10 }, needs: 'tent', stats: { hp: 25 },
+  { id: 'leatherCap', slot: 'head', level: 5, icon: '🧢', name: 'Hide Cap',      cost: { hide: 4, meat: 10 }, needs: 'tent', stats: { hp: 25 },
     desc: '+25 max health.' },
-  { id: 'boneHelm',   slot: 'head', level: 5, icon: '🦴', name: 'Bone Helm',     cost: { hide: 6, meat: 20 }, needs: 'tent', stats: { hp: 45, regen: 0.2 },
+  { id: 'boneHelm',   slot: 'head', level: 10, icon: '🦴', name: 'Bone Helm',     cost: { hide: 6, meat: 20 }, needs: 'tent', stats: { hp: 45, regen: 0.2 },
     desc: '+45 max health, +0.2 ❤️/s regeneration.' },
-  { id: 'furHood',    slot: 'head', level: 6, icon: '🎩', name: 'Fur Hood',      cost: { hide: 10, meat: 25 }, needs: 'tent', stats: { hp: 60, regen: 0.3 },
+  { id: 'furHood',    slot: 'head', level: 12, icon: '🎩', name: 'Fur Hood',      cost: { hide: 10, meat: 25 }, needs: 'tent', stats: { hp: 60, regen: 0.3 },
     desc: '+60 max health, +0.3 ❤️/s regeneration.' },
-  { id: 'ironHelm',   slot: 'head', level: 7, icon: '🪖', name: 'Iron Helm',     cost: { iron: 10, hide: 6 }, needs: 'furnace', stats: { hp: 85 },
+  { id: 'ironHelm',   slot: 'head', level: 14, icon: '🪖', name: 'Iron Helm',     cost: { iron: 10, hide: 6 }, needs: 'furnace', stats: { hp: 85 },
     desc: '+85 max health.' },
-  { id: 'bearHelm',   slot: 'head', level: 9, icon: '⛑️', name: 'Bearskull Helm', cost: { hide: 18, iron: 8, meat: 40 }, needs: 'furnace', stats: { hp: 110, regen: 0.6 },
+  { id: 'bearHelm',   slot: 'head', level: 18, icon: '⛑️', name: 'Bearskull Helm', cost: { hide: 18, iron: 8, meat: 40 }, needs: 'furnace', stats: { hp: 110, regen: 0.6 },
     desc: '+110 max health, +0.6 ❤️/s regeneration.' },
   // -- chest (you start NAKED with a leaf — clothing is crafted from hides) --
-  { id: 'leatherArmor', slot: 'chest', level: 3, icon: '🦺', name: 'Hide Tunic',     cost: { hide: 7, meat: 15 }, needs: 'tent', stats: { hp: 50 },
+  { id: 'leatherArmor', slot: 'chest', level: 5, icon: '🦺', name: 'Hide Tunic',     cost: { hide: 7, meat: 15 }, needs: 'tent', stats: { hp: 50 },
     desc: '+50 max health. Finally, actual clothes.' },
-  { id: 'furCoat',      slot: 'chest', level: 6, icon: '🧥', name: 'Fur Coat',       cost: { hide: 14, meat: 30 }, needs: 'tent', stats: { hp: 100, regen: 0.4 },
+  { id: 'furCoat',      slot: 'chest', level: 12, icon: '🧥', name: 'Fur Coat',       cost: { hide: 14, meat: 30 }, needs: 'tent', stats: { hp: 100, regen: 0.4 },
     desc: '+100 max health, +0.4 ❤️/s regeneration.' },
-  { id: 'ironChest',    slot: 'chest', level: 7, icon: '🥋', name: 'Iron Cuirass',   cost: { iron: 14, hide: 8 }, needs: 'furnace', stats: { hp: 135 },
+  { id: 'ironChest',    slot: 'chest', level: 14, icon: '🥋', name: 'Iron Cuirass',   cost: { iron: 14, hide: 8 }, needs: 'furnace', stats: { hp: 135 },
     desc: '+135 max health.' },
-  { id: 'bearHide',     slot: 'chest', level: 9, icon: '🛡️', name: 'Bearhide Plate', cost: { hide: 24, iron: 12, meat: 45 }, needs: 'furnace', stats: { hp: 170, regen: 0.8 },
+  { id: 'bearHide',     slot: 'chest', level: 18, icon: '🛡️', name: 'Bearhide Plate', cost: { hide: 24, iron: 12, meat: 45 }, needs: 'furnace', stats: { hp: 170, regen: 0.8 },
     desc: '+170 max health, +0.8 ❤️/s regeneration.' },
-  { id: 'graveplate', slot: 'chest', level: 17, icon: '⚰️', name: 'Graveplate',
+  { id: 'graveplate', slot: 'chest', level: 35, icon: '⚰️', name: 'Graveplate',
     cost: { iron: 55, hide: 30, essence: 32 }, needs: 'mountain', stats: { hp: 275, regen: 1.1 },
     desc: 'Spirit-bound plate from the haunted woods. +275 max health, +1.1 ❤️/s.' },
-  { id: 'iceplate', slot: 'chest', level: 23, icon: '🧊', name: 'Iceplate',
+  { id: 'iceplate', slot: 'chest', level: 48, icon: '🧊', name: 'Iceplate',
     cost: { iron: 90, hide: 45, essence: 70 }, needs: 'primal', stats: { hp: 390, regen: 1.5 },
     desc: 'Armor built for the summit. +390 max health, +1.5 ❤️/s.' },
   // -- boots --
-  { id: 'swiftBoots',   slot: 'boots', level: 3, icon: '👢', name: 'Hide Wraps',     cost: { hide: 5, meat: 10 }, needs: 'tent', stats: { speed: 1.5 },
+  { id: 'swiftBoots',   slot: 'boots', level: 5, icon: '👢', name: 'Hide Wraps',     cost: { hide: 5, meat: 10 }, needs: 'tent', stats: { speed: 1.5 },
     desc: '+1.5 movement speed.' },
-  { id: 'huntersBoots', slot: 'boots', level: 6, icon: '🥾', name: "Hunter's Boots", cost: { hide: 10, meat: 25 }, needs: 'tent', stats: { speed: 2.5 },
+  { id: 'huntersBoots', slot: 'boots', level: 12, icon: '🥾', name: "Hunter's Boots", cost: { hide: 10, meat: 25 }, needs: 'tent', stats: { speed: 2.5 },
     desc: '+2.5 movement speed.' },
-  { id: 'ironBoots',    slot: 'boots', level: 7, icon: '🥾', name: 'Iron-Shod Boots', cost: { iron: 8, hide: 6 }, needs: 'furnace', stats: { speed: 3, hp: 35 },
+  { id: 'ironBoots',    slot: 'boots', level: 14, icon: '🥾', name: 'Iron-Shod Boots', cost: { iron: 8, hide: 6 }, needs: 'furnace', stats: { speed: 3, hp: 35 },
     desc: '+3 movement speed, +35 max health.' },
-  { id: 'windBoots',    slot: 'boots', level: 9, icon: '💨', name: 'Windwalkers',    cost: { hide: 14, iron: 8, meat: 40 }, needs: 'furnace', stats: { speed: 4.5, regen: 0.5 },
+  { id: 'windBoots',    slot: 'boots', level: 18, icon: '💨', name: 'Windwalkers',    cost: { hide: 14, iron: 8, meat: 40 }, needs: 'furnace', stats: { speed: 4.5, regen: 0.5 },
     desc: '+4.5 movement speed, +0.5 ❤️/s regeneration.' },
-  { id: 'pantherBoots', slot: 'boots', level: 19, icon: '🐆', name: 'Pantherstep Boots',
+  { id: 'pantherBoots', slot: 'boots', level: 39, icon: '🐆', name: 'Pantherstep Boots',
     cost: { hide: 45, iron: 25, essence: 30 }, needs: 'spirit', stats: { speed: 6, hp: 90, regen: 0.8 },
     desc: 'Silent jungle boots. +6 movement speed, +90 health, +0.8 ❤️/s.' },
   // -- charms (mid-game trinkets — ONE charm slot, pick your bonus) --
-  { id: 'wolfPendant', slot: 'charm', level: 5, icon: '🦷', name: 'Wolf-Fang Pendant',
+  { id: 'wolfPendant', slot: 'charm', level: 10, icon: '🦷', name: 'Wolf-Fang Pendant',
     cost: { hide: 8, meat: 30 }, needs: 'tent', stats: { dmgPct: 0.10 },
     desc: '+10% weapon damage.' },
-  { id: 'hawkAmulet', slot: 'charm', level: 7, icon: '🪶', name: 'Hawk-Feather Amulet',
+  { id: 'hawkAmulet', slot: 'charm', level: 14, icon: '🪶', name: 'Hawk-Feather Amulet',
     cost: { hide: 12, iron: 4, meat: 40 }, needs: 'cabin', stats: { aspd: 0.10, regen: 0.3 },
     desc: '+10% attack speed, +0.3 ❤️/s regeneration.' },
-  { id: 'copperRing', slot: 'charm', level: 3, icon: '💍', name: 'Copper Ring',
+  { id: 'copperRing', slot: 'charm', level: 5, icon: '💍', name: 'Copper Ring',
     cost: { stone: 8, meat: 15 }, stats: { regen: 0.3 },
     desc: '+0.3 ❤️/s regeneration — wounds close on their own.' },
-  { id: 'bloodAmulet', slot: 'charm', level: 9, icon: '🩸', name: 'Bloodstone Amulet',
+  { id: 'bloodAmulet', slot: 'charm', level: 18, icon: '🩸', name: 'Bloodstone Amulet',
     cost: { hide: 15, iron: 10, essence: 10 }, needs: 'furnace', stats: { regen: 1.2, hp: 40 },
     desc: '+1.2 ❤️/s regeneration, +40 max health.' },
   // -- pet (companion) --
-  { id: 'tamedWolf', slot: 'companion', level: 4, icon: '🐺', name: 'Tamed Wolf', cost: { meat: 165, essence: 3 }, pet: { dmg: 14 },
+  { id: 'tamedWolf', slot: 'companion', level: 7, icon: '🐺', name: 'Tamed Wolf', cost: { meat: 165, essence: 3 }, pet: { dmg: 14 },
     desc: 'A loyal wolf fights by your side (100 HP — train it up in Training).' },
-  { id: 'alphaWolf', slot: 'companion', level: 8, icon: '👑', name: 'Alpha Wolf', cost: { meat: 360, essence: 8 }, pet: { dmg: 32 },
+  { id: 'alphaWolf', slot: 'companion', level: 16, icon: '👑', name: 'Alpha Wolf', cost: { meat: 360, essence: 8 }, pet: { dmg: 32 },
     desc: 'A huge alpha. Bites for 32.' },
   // -- orb (guardian sphere — iron-age wonder) --
-  { id: 'guardianSphere', slot: 'companion', level: 5,  icon: '🔮', name: 'Guardian Sphere', cost: { meat: 50, stone: 30, iron: 6, essence: 4 }, needs: 'furnace',
+  { id: 'guardianSphere', slot: 'companion', level: 10,  icon: '🔮', name: 'Guardian Sphere', cost: { meat: 50, stone: 30, iron: 6, essence: 4 }, needs: 'furnace',
     orb: { count: 1, targets: 1, dmg: 12 },
     desc: 'Orbits you and fires bolts at enemies.' },
-  { id: 'twinSphere',     slot: 'companion', level: 8,  icon: '✨', name: 'Twin-bolt Sphere', cost: { meat: 90, iron: 14, stone: 40, essence: 8 }, needs: 'furnace',
+  { id: 'twinSphere',     slot: 'companion', level: 16,  icon: '✨', name: 'Twin-bolt Sphere', cost: { meat: 90, iron: 14, stone: 40, essence: 8 }, needs: 'furnace',
     orb: { count: 1, targets: 2, dmg: 14 },
     desc: 'Fires two bolts at once (14 dmg each).' },
-  { id: 'frostSphere',    slot: 'companion', level: 7,  icon: '❄️', name: 'Frost Sphere',   cost: { meat: 80, stone: 35, essence: 6 }, needs: 'furnace',
+  { id: 'frostSphere',    slot: 'companion', level: 14,  icon: '❄️', name: 'Frost Sphere',   cost: { meat: 80, stone: 35, essence: 6 }, needs: 'furnace',
     orb: { count: 1, targets: 1, dmg: 22 },
     desc: 'A cold-burning orb: single heavy bolts for 22 damage.' },
-  { id: 'duoSphere',      slot: 'companion', level: 10, icon: '🌐', name: 'Gemini Spheres',  cost: { meat: 130, iron: 24, stone: 60, essence: 12 }, needs: 'furnace',
+  { id: 'duoSphere',      slot: 'companion', level: 20, icon: '🌐', name: 'Gemini Spheres',  cost: { meat: 130, iron: 24, stone: 60, essence: 12 }, needs: 'furnace',
     orb: { count: 2, targets: 2, dmg: 14 },
     desc: 'TWO spheres, each firing twin bolts.' },
   // -- expedition gear (Supplies tab): wearable comfort items, each with its
   // own WoW-style slot. supply: true keeps them out of the weapon/gear shops.
   // torches BURN: one stick lasts ~5 real minutes (5 in-game hours), then it
   // crumbles to ash and vanishes from your hand — carry spares!
-  { id: 'torch',   slot: 'offhand', level: 2, supply: true, icon: '🔦', name: 'Torch',
+  { id: 'torch',   slot: 'offhand', level: 3, supply: true, icon: '🔦', name: 'Torch',
     cost: { wood: 6, hide: 1 }, torch: { radius: 5 },
     desc: 'A burning stick held in your off-hand — you SEE it blaze as you walk. Lights ~5 m around you in the dark (night, dark biomes, lairs) and its warmth slows the Frozen Peak\'s chill. Burns out after 5 minutes.' },
-  { id: 'torchoil', slot: 'offhand', level: 5, supply: true, icon: '🛢️', name: 'Oiled Torch',
+  { id: 'torchoil', slot: 'offhand', level: 10, supply: true, icon: '🛢️', name: 'Oiled Torch',
     cost: { wood: 12, hide: 3, essence: 1 }, torch: { radius: 10 },
     desc: 'Soaked in alchemist\'s oil — burns brighter: lights ~10 m around you. Burns out after 5 minutes.' },
-  { id: 'torchember', slot: 'offhand', level: 8, supply: true, icon: '🔥', name: 'Emberheart Torch',
+  { id: 'torchember', slot: 'offhand', level: 16, supply: true, icon: '🔥', name: 'Emberheart Torch',
     cost: { wood: 20, iron: 4, essence: 5 }, torch: { radius: 15 },
     desc: 'A molten ember lashed into a torch head — a blazing ~15 m circle of light. Burns out after 5 minutes.' },
-  { id: 'spiritLantern', slot: 'offhand', level: 16, supply: true, icon: '🏮', name: 'Spirit Lantern',
+  { id: 'spiritLantern', slot: 'offhand', level: 33, supply: true, icon: '🏮', name: 'Spirit Lantern',
     cost: { iron: 25, essence: 28 }, needs: 'mountain', torch: { radius: 20, permanent: true }, stats: { regen: 0.5 },
     desc: 'A permanent pale flame: lights ~20 m, never burns out, and grants +0.5 ❤️/s.' },
-  { id: 'socks',   slot: 'legs', level: 3, supply: true, icon: '🧦', name: 'Thick Wool Socks',
+  { id: 'socks',   slot: 'legs', level: 5, supply: true, icon: '🧦', name: 'Thick Wool Socks',
     cost: { wool: 10, meat: 20 }, mudguard: 0.5,
     desc: 'Worn on your legs: swamp mud and spider webs slow you only HALF as much.' },
-  { id: 'lining',  slot: 'underlayer', level: 4, supply: true, icon: '🧥', name: 'Quilted Wool Lining',
+  { id: 'lining',  slot: 'underlayer', level: 7, supply: true, icon: '🧥', name: 'Quilted Wool Lining',
     cost: { wool: 14, hide: 8 }, dmgCut: 0.08,
     desc: 'Wool padding worn under everything else: all damage taken −8%.' },
-  { id: 'bogscaleLining', slot: 'underlayer', level: 11, supply: true, icon: '🐊', name: 'Bogscale Lining',
+  { id: 'bogscaleLining', slot: 'underlayer', level: 22, supply: true, icon: '🐊', name: 'Bogscale Lining',
     cost: { hide: 25, wool: 20, essence: 12 }, needs: 'keep', dmgCut: 0.12, poisonCut: 0.5,
     desc: 'Layered swamp scales: all damage −12% and poison damage −50%.' },
-  { id: 'bedroll', slot: 'back', level: 3, supply: true, icon: '🛏️', name: 'Wool Bedroll',
+  { id: 'bedroll', slot: 'back', level: 5, supply: true, icon: '🛏️', name: 'Wool Bedroll',
     cost: { wool: 8, hide: 4 }, rest: 6,
-    desc: 'Strapped across your back. Stand still for a moment out of combat and you regenerate 6× faster.' },
-  { id: 'stormcloak', slot: 'back', level: 14, supply: true, icon: '🌩️', name: 'Stormcloak',
+    desc: 'Strapped across your back. Standing still out of combat, your fast recovery is 60% quicker.' },
+  { id: 'stormcloak', slot: 'back', level: 29, supply: true, icon: '🌩️', name: 'Stormcloak',
     cost: { hide: 30, wool: 28, iron: 15, essence: 20 }, needs: 'runic', stats: { hp: 120, regen: 0.8 }, rest: 5,
-    desc: 'Highland storm wool: +120 health, +0.8 ❤️/s and 5× resting regeneration.' },
-  { id: 'saddle',  slot: 'mount', level: 4, supply: true, icon: '🐴', name: 'Riding Saddle',
+    desc: 'Highland storm wool: +120 health, +0.8 ❤️/s and 50% faster resting recovery.' },
+  { id: 'saddle',  slot: 'mount', level: 7, supply: true, icon: '🐴', name: 'Riding Saddle',
     cost: { hide: 12, iron: 4, meat: 30 },  saddle: true,
     desc: 'Saddle a wild horse (E nearby). Riding grants +9 speed; mounted attacks hit harder but recover slower. X dismounts.' },
 
   // -- placeable camp items: bought into the backpack, then positioned in
   // the world by clicking them. They are items, never camp upgrades.
-  { id: 'storageChest', slot: 'placeable', level: 3, supply: true, icon: '📦', name: 'Storage Chest',
+  { id: 'storageChest', slot: 'placeable', level: 5, supply: true, icon: '📦', name: 'Storage Chest',
     cost: { wood: 25 }, placeable: { kind: 'chest' },
     desc: 'Place it on solid ground. Press E beside it to store resources safely through death.' },
-  { id: 'logBoat', slot: 'mount', level: 4, supply: true, icon: '🛶', name: 'Log Boat',
+  { id: 'logBoat', slot: 'mount', level: 7, supply: true, icon: '🛶', name: 'Log Boat',
     cost: { wood: 30, hide: 4 }, placeable: { kind: 'boat' }, boatMount: true,
     desc: 'Place it on solid ground near the water, then press E beside it to mount. X dismounts and parks it at your position.' },
-  { id: 'guardTower', slot: 'placeable', level: 8, supply: true, icon: '🗼', name: 'Guard Tower',
+  { id: 'guardTower', slot: 'placeable', level: 16, supply: true, icon: '🗼', name: 'Guard Tower',
     cost: { wood: 60, stone: 40, iron: 10 }, placeable: { kind: 'tower' },
     desc: 'Place it on solid ground. It automatically shoots enemies within 20 metres.' },
-  { id: 'graveyardItem', slot: 'placeable', level: 5, supply: true, icon: '🪦', name: 'Graveyard',
+  { id: 'graveyardItem', slot: 'placeable', level: 10, supply: true, icon: '🪦', name: 'Graveyard',
     cost: { stone: 30, wood: 20, meat: 20 }, placeable: { kind: 'grave' },
     desc: 'Place a remote respawn shrine on solid ground. Death lets you choose the cave or this graveyard.' },
-  { id: 'swimming', slot: 'skill', level: 7, supply: true, icon: '🏊', name: 'Swimming Lessons',
+  { id: 'swimming', slot: 'skill', level: 14, supply: true, icon: '🏊', name: 'Swimming Lessons',
     cost: { meat: 50 }, training: 'swim',
     desc: 'Learn to swim (permanent). Deep water — the ocean, border rapids, the black bog — stops drowning you, and you can paddle across it. Shallow water is always wadeable.' },
 
@@ -680,28 +730,28 @@ export const ITEMS = [
     desc: 'The Frozen Peak griffin\'s nest. Click to place it anywhere on solid ground. Stand by a placed nest to call a griffin and fly between your roosts.' },
 
   // ---- UNIQUE boss drops: guaranteed from each biome's lair boss, never sold ----
-  { id: 'verdantHeart', slot: 'charm', level: 3, unique: true, icon: '🌿', name: 'Verdant Heart',
+  { id: 'verdantHeart', slot: 'charm', level: 5, unique: true, icon: '🌿', name: 'Verdant Heart',
     stats: { regen: 1.0, dmgPct: 0.10 }, desc: 'UNIQUE — dropped by Sythe the Broodmother. +1.0 ❤️/s and +10% damage.' },
-  { id: 'sunfangBlade', slot: 'weapon', level: 6, unique: true, icon: '🗡️', name: 'Sunfang Blade',
+  { id: 'sunfangBlade', slot: 'weapon', level: 12, unique: true, icon: '🗡️', name: 'Sunfang Blade',
     weapon: { kind: 'melee', style: 'sword', dmg: 95, cd: 0.6, range: 2.0, chop: 1, mine: 0, tier: 2,
       combo: [1, 1.2, 1.5], parry: true, burn: 8 },
     desc: 'UNIQUE — a blistering three-hit blade that parries and ignites enemies.' },
-  { id: 'widowShroud', slot: 'chest', level: 15, unique: true, icon: '🕸️', name: "Widow's Shroud",
+  { id: 'widowShroud', slot: 'chest', level: 31, unique: true, icon: '🕸️', name: "Widow's Shroud",
     stats: { hp: 235, regen: 1.2 }, desc: 'UNIQUE — dropped by Vess the Widow. +235 max health, +1.2 ❤️/s.' },
-  { id: 'mireBoots', slot: 'boots', level: 12, unique: true, icon: '🥾', name: 'Mirewalker Boots',
+  { id: 'mireBoots', slot: 'boots', level: 24, unique: true, icon: '🥾', name: 'Mirewalker Boots',
     stats: { speed: 5, hp: 110, regen: 0.5 }, mudguard: 0.25,
     desc: 'UNIQUE — dropped by the Mire Hydra. +5 speed, +110 health, +0.5 ❤️/s; mud barely slows you.' },
-  { id: 'ironhornCrown', slot: 'head', level: 21, unique: true, icon: '👑', name: 'Ironhorn Crown',
+  { id: 'ironhornCrown', slot: 'head', level: 44, unique: true, icon: '👑', name: 'Ironhorn Crown',
     stats: { hp: 290, regen: 1.5 }, desc: 'UNIQUE — dropped by Old Ironhorn. +290 max health, +1.5 ❤️/s.' },
-  { id: 'shadeAmulet', slot: 'charm', level: 18, unique: true, icon: '👻', name: 'Amulet of the Shade',
+  { id: 'shadeAmulet', slot: 'charm', level: 37, unique: true, icon: '👻', name: 'Amulet of the Shade',
     stats: { dmgPct: 0.30, regen: 1.2 }, desc: 'UNIQUE — dropped by the Weeping Shade. +30% damage, +1.2 ❤️/s.' },
-  { id: 'snapjawMaul', slot: 'weapon', level: 9, unique: true, icon: '🔨', name: 'Snapjaw Maul',
+  { id: 'snapjawMaul', slot: 'weapon', level: 18, unique: true, icon: '🔨', name: 'Snapjaw Maul',
     weapon: { kind: 'melee', style: 'club', dmg: 135, cd: 1.05, range: 2.35, chop: 2, mine: 1, tier: 2,
       combo: [1, 1.35], stun: 0.8, armorBreak: 0.35 },
     desc: 'UNIQUE — a crushing jungle maul that stuns and ruins armour.' },
-  { id: 'frostMantle', slot: 'back', level: 24, unique: true, icon: '🧊', name: 'Mantle of the Colossus',
+  { id: 'frostMantle', slot: 'back', level: 50, unique: true, icon: '🧊', name: 'Mantle of the Colossus',
     stats: { hp: 300, regen: 2.0 }, rest: 8, coldproof: true,
-    desc: 'UNIQUE — skinned from Grimfrost. +300 ❤️, +2.0 ❤️/s, 8× resting regeneration and complete cold protection.' },
+    desc: 'UNIQUE — skinned from Grimfrost. +300 ❤️, +2.0 ❤️/s, 80% faster resting recovery and complete cold protection.' },
 ];
 
 // One named boss per biome ring (7 = Frozen Peak already has the summit Ymir),
@@ -740,12 +790,13 @@ export const itemById = (id) => ITEMS.find(i => i.id === id);
 
 // ---- Consumables: cheap repeatable meat sinks, used with F / G in the field.
 export const CONSUMABLES = [
+  // heals are a FRACTION of max health so potions stay relevant at level 50
   { id: 'salve', icon: '🧪', name: 'Healing Salve', key: 'F', cost: { berry: 5 },
-    heal: 100, desc: 'Brewed from 5 blueberries. Drink with F: restores 100 health.' },
+    healPct: 0.4, desc: 'Brewed from 5 blueberries. Drink with F: restores 40% of your health.' },
   { id: 'roast', icon: '🍗', name: 'Roasted Meat', key: 'G', cost: { meat: 10 },
-    heal: 15, speedDur: 30, desc: 'Eat with G: +15 health and +10% speed for 30 s.' },
+    healPct: 0.12, speedDur: 30, desc: 'Eat with G: +12% health and +10% speed for 30 s.' },
   { id: 'honey', icon: '🍯', name: 'Wild Honey', found: true,
-    heal: 45, desc: 'Raided from a beehive. Click it in the inventory: +45 health.' },
+    healPct: 0.25, desc: 'Raided from a beehive. Click it in the inventory: +25% health.' },
   { id: 'venom', icon: '☠️', name: 'Snapjaw Venom', found: true, venomDur: 60,
     desc: 'Milked from a carnivorous bloom. Click to coat your weapon: attacks poison for 60 s.' },
   { id: 'scroll', icon: '📜', name: 'Scroll of Discovery', found: true, reveal: 300,
@@ -770,29 +821,29 @@ export function costFor(cost, mobaMode) {
 // cast with keys 1-6. cd in seconds. ----
 export const MAX_SPELL_SLOTS = 6;
 export const SPELLS = [
-  { id: 'haste',     level: 4,  icon: '⚡', name: 'Haste',       cost: { meat: 40, essence: 2 }, cd: 90,
+  { id: 'haste',     level: 7,  icon: '⚡', name: 'Haste',       cost: { meat: 40, essence: 2 }, cd: 90,
     desc: 'Double attack speed for 10 s.' },
-  { id: 'powerDash', level: 5,  icon: '💨', name: 'Power Dash',  cost: { meat: 45, essence: 3 }, cd: 25,
+  { id: 'powerDash', level: 10,  icon: '💨', name: 'Power Dash',  cost: { meat: 45, essence: 3 }, cd: 25,
     desc: 'Dash forward, dealing 40 damage to everything in your path.' },
-  { id: 'heal',      level: 6,  icon: '💚', name: 'Mend Wounds', cost: { meat: 50, essence: 4 }, cd: 60,
+  { id: 'heal',      level: 12,  icon: '💚', name: 'Mend Wounds', cost: { meat: 50, essence: 4 }, cd: 60,
     desc: 'Instantly restore 50 health.' },
-  { id: 'stunDash',  level: 7,  icon: '🌪️', name: 'Stun Dash',   cost: { meat: 70, essence: 5 }, cd: 35,
+  { id: 'stunDash',  level: 14,  icon: '🌪️', name: 'Stun Dash',   cost: { meat: 70, essence: 5 }, cd: 35,
     desc: 'Dash that damages (30) and stuns enemies for 3 s.' },
-  { id: 'shockwave', level: 8,  icon: '💥', name: 'Shockwave',   cost: { meat: 85, essence: 6 }, cd: 45,
+  { id: 'shockwave', level: 16,  icon: '💥', name: 'Shockwave',   cost: { meat: 85, essence: 6 }, cd: 45,
     desc: 'Blast all nearby enemies: 25 damage + knockback.' },
-  { id: 'frostNova', level: 9,  icon: '❄️', name: 'Frost Nova',  cost: { meat: 100, essence: 8 }, cd: 50,
+  { id: 'frostNova', level: 18,  icon: '❄️', name: 'Frost Nova',  cost: { meat: 100, essence: 8 }, cd: 50,
     desc: 'Freeze all nearby enemies for 4 s.' },
-  { id: 'rage',      level: 10, icon: '😡', name: 'Rage',        cost: { meat: 120, essence: 10 }, cd: 90,
+  { id: 'rage',      level: 20, icon: '😡', name: 'Rage',        cost: { meat: 120, essence: 10 }, cd: 90,
     desc: '+50% damage for 12 s.' },
-  { id: 'stoneSkin', level: 12, icon: '🪨', name: 'Stone Skin', cost: { meat: 160, stone: 80, essence: 14 }, cd: 80,
+  { id: 'stoneSkin', level: 24, icon: '🪨', name: 'Stone Skin', cost: { meat: 160, stone: 80, essence: 14 }, cd: 80,
     desc: 'Harden your skin for 12 s, reducing incoming damage by 40%.' },
-  { id: 'whirlwind', level: 15, icon: '🌪️', name: 'Whirlwind', cost: { meat: 210, iron: 25, essence: 20 }, cd: 38,
+  { id: 'whirlwind', level: 31, icon: '🌪️', name: 'Whirlwind', cost: { meat: 210, iron: 25, essence: 20 }, cd: 38,
     desc: 'Strike every nearby enemy for 75% weapon damage and knock them back.' },
-  { id: 'spiritWard', level: 18, icon: '👻', name: 'Spirit Ward', cost: { meat: 260, essence: 32 }, cd: 75,
+  { id: 'spiritWard', level: 37, icon: '👻', name: 'Spirit Ward', cost: { meat: 260, essence: 32 }, cd: 75,
     desc: 'A spectral ward reduces damage by 30% and prevents poison for 15 s.' },
-  { id: 'venomRain', level: 21, icon: '☣️', name: 'Venom Rain', cost: { meat: 330, hide: 30, essence: 45 }, cd: 55,
+  { id: 'venomRain', level: 44, icon: '☣️', name: 'Venom Rain', cost: { meat: 330, hide: 30, essence: 45 }, cd: 55,
     desc: 'Poison every enemy within 9 m: immediate damage plus a vicious 6 s venom.' },
-  { id: 'blizzard', level: 24, icon: '🌨️', name: 'Blizzard', cost: { meat: 450, iron: 50, essence: 70 }, cd: 90,
+  { id: 'blizzard', level: 50, icon: '🌨️', name: 'Blizzard', cost: { meat: 450, iron: 50, essence: 70 }, cd: 90,
     desc: 'A summit storm damages and freezes every enemy within 11 m.' },
 ];
 
@@ -803,8 +854,8 @@ export const spellById = (id) => SPELLS.find(s => s.id === id);
 // 10 tiers. Costs turn linear after tier 6 so late training stays attainable. ----
 const trainCost = (base) => (t) =>
   t <= 6 ? base * t * t : base * 36 + base * 10 * (t - 6);
-const ADVANCED_TRAINING_LEVELS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 18, 21, 24];
-const DEEP_TRAINING_LEVELS = [1, 2, 3, 4, 5, 12, 18, 24];
+const ADVANCED_TRAINING_LEVELS = [1, 3, 5, 7, 10, 12, 14, 16, 18, 20, 24, 31, 37, 44, 50];
+const DEEP_TRAINING_LEVELS = [1, 3, 5, 7, 10, 24, 37, 50];
 export const STAT_TRACKS = [
   { id: 'range', icon: '📏', name: 'Range Training', max: 10,
     desc: '+2 m bow range, +0.1 m melee reach per level. Level 10 reaches across the whole screen.',
@@ -837,187 +888,187 @@ export const CLASS_TREES = [
   { id: 'warrior', icon: '🛡️', name: 'Warrior', color: '#d99b62',
     summary: 'Heavy melee fighter with health, brutal weapon skills and lasting bleeds.',
     passives: [
-      P('war_vitality', '❤️', 'Vitality', 2, 'Greatly boosts your maximum health (gear & camp included).', { hpPct: [0.15, 0.30, 0.50] }),
-      P('war_arms', '⚔️', 'Arms Mastery', 3, 'Sharpens every melee blow.', { meleeDmg: [0.10, 0.22, 0.35] }),
-      P('war_thick_skin', '🪨', 'Thick Skin', 4, 'Toughens your hide against all damage.', { damageCut: [0.04, 0.09, 0.15] }),
-      P('war_cleave', '🪓', 'Cleave Training', 7, 'Widens your melee swing arc so you hit more foes at once.', { arcBonus: [0.12, 0.24, 0.38] }),
-      P('war_executioner', '☠️', 'Executioner', 9, 'Deals extra damage to wounded enemies (below 50% health).', { executeDmg: [0.15, 0.30, 0.50] }),
-      P('war_blood_drinker', '🩸', 'Blood Drinker', 11, 'Every kill restores a chunk of your health.', { lifeOnKillPct: [0.02, 0.045, 0.08] }),
-      P('war_heavy_hands', '🔨', 'Heavy Hands', 13, 'Your hits can stagger enemies mid-attack.', { staggerChance: [0.08, 0.16, 0.26] }),
-      P('war_unshaken', '⛰️', 'Unshaken', 15, 'Shortens every stun and disable used against you.', { stunResist: [0.18, 0.34, 0.55] }),
-      P('war_iron_guard', '🛡️', 'Iron Guard', 18, 'Blocks far more damage when guarding.', { blockBonus: [0.08, 0.16, 0.26] }),
-      P('war_tactician', '📯', 'Battle Tactician', 21, 'Cuts the cooldown of every Warrior ability.', { classCdReduction: [0.08, 0.15, 0.24] }),
+      P('war_vitality', '❤️', 'Vitality', 3, 'Greatly boosts your maximum health (gear & camp included).', { hpPct: [0.15, 0.30, 0.50] }),
+      P('war_arms', '⚔️', 'Arms Mastery', 5, 'Sharpens every melee blow.', { meleeDmg: [0.10, 0.22, 0.35] }),
+      P('war_thick_skin', '🪨', 'Thick Skin', 7, 'Toughens your hide against all damage.', { damageCut: [0.04, 0.09, 0.15] }),
+      P('war_cleave', '🪓', 'Cleave Training', 14, 'Widens your melee swing arc so you hit more foes at once.', { arcBonus: [0.12, 0.24, 0.38] }),
+      P('war_executioner', '☠️', 'Executioner', 18, 'Deals extra damage to wounded enemies (below 50% health).', { executeDmg: [0.15, 0.30, 0.50] }),
+      P('war_blood_drinker', '🩸', 'Blood Drinker', 22, 'Every kill restores a chunk of your health.', { lifeOnKillPct: [0.02, 0.045, 0.08] }),
+      P('war_heavy_hands', '🔨', 'Heavy Hands', 27, 'Your hits can stagger enemies mid-attack.', { staggerChance: [0.08, 0.16, 0.26] }),
+      P('war_unshaken', '⛰️', 'Unshaken', 31, 'Shortens every stun and disable used against you.', { stunResist: [0.18, 0.34, 0.55] }),
+      P('war_iron_guard', '🛡️', 'Iron Guard', 37, 'Blocks far more damage when guarding.', { blockBonus: [0.08, 0.16, 0.26] }),
+      P('war_tactician', '📯', 'Battle Tactician', 44, 'Cuts the cooldown of every Warrior ability.', { classCdReduction: [0.08, 0.15, 0.24] }),
     ],
     actives: [
-      A('war_heroic_strike', '⚔️', 'Heroic Strike', 2, 'Wind up, then land a crushing single-target strike.', 'target',
+      A('war_heroic_strike', '⚔️', 'Heroic Strike', 3, 'Wind up, then land a crushing single-target strike.', 'target',
         { cd: 10, range: 3.2, weaponMult: [2.0, 2.5, 3.0], windup: 0.55 }),
-      A('war_rend', '🩸', 'Rend', 4, 'Stab one target; it loses a percentage of max HP over 30 s.', 'target',
+      A('war_rend', '🩸', 'Rend', 7, 'Stab one target; it loses a percentage of max HP over 30 s.', 'target',
         { cd: 22, range: 3.2, weaponMult: [1.0, 1.4, 1.8], bleedPct: [0.18, 0.30, 0.45], bleedDur: 30 }),
-      A('war_cry', '📯', 'War Cry', 6, 'Temporarily increases damage and damage reduction.', 'buff',
+      A('war_cry', '📯', 'War Cry', 12, 'Temporarily increases damage and damage reduction.', 'buff',
         { cd: 40, buff: 'warCry', duration: [8, 10, 12], power: [0.20, 0.32, 0.45] }),
-      A('war_ground_slam', '💥', 'Ground Slam', 8, 'Slam the earth: damage and stun all nearby enemies.', 'aoe',
+      A('war_ground_slam', '💥', 'Ground Slam', 16, 'Slam the earth: damage and stun all nearby enemies.', 'aoe',
         { cd: 22, radius: [4.5, 5.2, 6], weaponMult: [1.2, 1.6, 2.1], stun: [1.5, 2.2, 3.0], windup: 0.45 }),
-      A('war_charge', '🐂', 'Bull Charge', 10, 'Rush forward, striking and stunning enemies in your path.', 'dash',
+      A('war_charge', '🐂', 'Bull Charge', 20, 'Rush forward, striking and stunning enemies in your path.', 'dash',
         { cd: 20, weaponMult: [1.4, 1.9, 2.5], stun: [1.2, 1.8, 2.5], distance: [7, 9, 11] }),
-      A('war_whirlwind', '🌪️', 'Whirlwind', 12, 'A powerful spinning melee attack that hits everything around you.', 'aoe',
+      A('war_whirlwind', '🌪️', 'Whirlwind', 24, 'A powerful spinning melee attack that hits everything around you.', 'aoe',
         { cd: 16, radius: [5, 5.5, 6.5], weaponMult: [1.5, 2.0, 2.6] }),
-      A('war_cleaving_wave', '🌊', 'Cleaving Wave', 14, 'Send a broad damaging wave in front of you.', 'cone',
+      A('war_cleaving_wave', '🌊', 'Cleaving Wave', 29, 'Send a broad damaging wave in front of you.', 'cone',
         { cd: 15, range: [7, 8.5, 10], weaponMult: [1.4, 1.9, 2.4] }),
-      A('war_blood_fury', '🔥', 'Blood Fury', 16, 'Gain attack speed and life steal for a short time.', 'buff',
+      A('war_blood_fury', '🔥', 'Blood Fury', 33, 'Gain attack speed and life steal for a short time.', 'buff',
         { cd: 46, buff: 'bloodFury', duration: [8, 10, 12], power: [0.18, 0.26, 0.35] }),
-      A('war_execute', '🪓', 'Execute', 20, 'Wind up a massive killing blow on a target below 35% health.', 'execute',
+      A('war_execute', '🪓', 'Execute', 41, 'Wind up a massive killing blow on a target below 35% health.', 'execute',
         { cd: 18, range: 3.2, weaponMult: [3.2, 4.4, 5.8], threshold: 0.35, windup: 0.6 }),
-      A('war_avatar', '🗿', 'Avatar', 24, 'Become a juggernaut with damage, protection and a health shield.', 'buff',
+      A('war_avatar', '🗿', 'Avatar', 50, 'Become a juggernaut with damage, protection and a health shield.', 'buff',
         { cd: 85, buff: 'avatar', duration: [10, 13, 16], power: [0.30, 0.42, 0.55] }),
     ] },
 
   { id: 'beastmaster', icon: '🏹', name: 'Beastmaster', color: '#9bc56b',
     summary: 'The only class able to equip bows, crossbows and companions; controls traps and arrow storms.',
     passives: [
-      P('beast_ranged_license', '🏹', 'Ranged Discipline', 2, 'Beastmaster training permits ranged weapons and sharpens them.', { rangedDmg: [0.03, 0.06, 0.10] }),
-      P('beast_marksman', '🎯', 'Marksman', 3, 'Extends the reach of your bows and crossbows.', { rangedRange: [3, 7, 15] }),
-      P('beast_quickdraw', '⚡', 'Quick Draw', 5, 'Loose arrows far faster.', { rangedSpeed: [0.08, 0.16, 0.26] }),
-      P('beast_trapper', '🪤', 'Trapper', 7, 'Your traps hit much harder.', { trapPower: [0.30, 0.60, 1.00] }),
-      P('beast_pack_tactics', '🐺', 'Pack Tactics', 11, 'Companions move and strike faster.', { petSpeed: [0.10, 0.20, 0.32] }),
-      P('beast_keen_eye', '👁️', 'Keen Eye', 13, 'A strong boost to ranged critical chance.', { rangedCrit: [0.05, 0.11, 0.18] }),
-      P('beast_broadheads', '🩸', 'Broadheads', 15, 'Every arrow leaves a vicious bleeding wound.', { arrowBleed: [0.04, 0.08, 0.14] }),
-      P('beast_scavenger', '🍖', 'Scavenger', 18, 'Collect far more meat from every kill.', { meatMult: [0.10, 0.22, 0.36] }),
-      P('beast_handler', '🫶', 'Animal Handler', 21, 'Your companion regenerates rapidly.', { petRegen: [0.30, 0.65, 1.10] }),
+      P('beast_ranged_license', '🏹', 'Ranged Discipline', 3, 'Beastmaster training permits ranged weapons and sharpens them.', { rangedDmg: [0.03, 0.06, 0.10] }),
+      P('beast_marksman', '🎯', 'Marksman', 5, 'Extends the reach of your bows and crossbows.', { rangedRange: [3, 7, 15] }),
+      P('beast_quickdraw', '⚡', 'Quick Draw', 10, 'Loose arrows far faster.', { rangedSpeed: [0.08, 0.16, 0.26] }),
+      P('beast_trapper', '🪤', 'Trapper', 14, 'Your traps hit much harder.', { trapPower: [0.30, 0.60, 1.00] }),
+      P('beast_pack_tactics', '🐺', 'Pack Tactics', 22, 'Companions move and strike faster.', { petSpeed: [0.10, 0.20, 0.32] }),
+      P('beast_keen_eye', '👁️', 'Keen Eye', 27, 'A strong boost to ranged critical chance.', { rangedCrit: [0.05, 0.11, 0.18] }),
+      P('beast_broadheads', '🩸', 'Broadheads', 31, 'Every arrow leaves a vicious bleeding wound.', { arrowBleed: [0.04, 0.08, 0.14] }),
+      P('beast_scavenger', '🍖', 'Scavenger', 37, 'Collect far more meat from every kill.', { meatMult: [0.10, 0.22, 0.36] }),
+      P('beast_handler', '🫶', 'Animal Handler', 44, 'Your companion regenerates rapidly.', { petRegen: [0.30, 0.65, 1.10] }),
     ],
     actives: [
-      A('beast_bond', '🐾', 'Tame Beast', 9, 'Channel for 20 s on a wild beast ahead of you — one with four or more legs, or with wings. It is charmed to fight at your side for 20 s. The channel will not start with no beast in front of you.', 'tame',
+      A('beast_bond', '🐾', 'Tame Beast', 18, 'Channel for 20 s on a wild beast ahead of you — one with four or more legs, or with wings. It is charmed to fight at your side for 20 s. The channel will not start with no beast in front of you.', 'tame',
         { cd: 60, channel: 20, tameDur: 20, range: 7 }),
-      A('beast_snare', '🪤', 'Snare Trap', 2, 'Place a trap that damages, bleeds and stuns its first victim.', 'world',
+      A('beast_snare', '🪤', 'Snare Trap', 3, 'Place a trap that damages, bleeds and stuns its first victim.', 'world',
         { cd: 60, worldAction: 'trap', count: [1, 1, 2], power: [1.5, 2.2, 3.0], trapDmgPct: 0.55, trapStun: 3.5 }),
-      A('beast_arrow_haste', '⚡', 'Arrow Haste', 4, 'Greatly increases ranged attack speed.', 'buff',
+      A('beast_arrow_haste', '⚡', 'Arrow Haste', 7, 'Greatly increases ranged attack speed.', 'buff',
         { cd: 36, buff: 'arrowHaste', duration: [8, 11, 14], power: [0.40, 0.55, 0.70] }),
-      A('beast_ten_arrows', '🏹', 'Ten-Arrow Volley', 6, 'Fire ten arrows in a wide fan.', 'multishot',
+      A('beast_ten_arrows', '🏹', 'Ten-Arrow Volley', 12, 'Fire ten arrows in a wide fan.', 'multishot',
         { cd: 15, count: 10, spread: 1.05, weaponMult: [0.40, 0.55, 0.72] }),
-      A('beast_arrow_rain', '🌧️', 'Rain of Arrows', 8, 'Mark the ground; arrows rain over the area for 10 s.', 'zone',
+      A('beast_arrow_rain', '🌧️', 'Rain of Arrows', 16, 'Mark the ground; arrows rain over the area for 10 s.', 'zone',
         { cd: 32, zone: 'arrows', castRange: 20, radius: [5, 6, 7], duration: 10, weaponMult: [0.30, 0.42, 0.55], interval: 1 }),
-      A('beast_piercing_shot', '➶', 'Piercing Shot', 10, 'A high-damage arrow that pierces every enemy in line.', 'multishot',
+      A('beast_piercing_shot', '➶', 'Piercing Shot', 20, 'A high-damage arrow that pierces every enemy in line.', 'multishot',
         { cd: 13, count: 1, pierce: true, spread: 0, weaponMult: [1.8, 2.4, 3.2] }),
-      A('beast_explosive_arrow', '💣', 'Explosive Arrow', 12, 'Detonate a burning blast at the aimed location.', 'zoneBurst',
+      A('beast_explosive_arrow', '💣', 'Explosive Arrow', 24, 'Detonate a burning blast at the aimed location.', 'zoneBurst',
         { cd: 20, castRange: 20, radius: [3.5, 4.2, 5], weaponMult: [1.3, 1.8, 2.3], burn: [8, 13, 18] }),
-      A('beast_mend_pet', '🫶', 'Mend Companion', 14, 'Restore companion health and empower its next attacks.', 'world',
+      A('beast_mend_pet', '🫶', 'Mend Companion', 29, 'Restore companion health and empower its next attacks.', 'world',
         { cd: 26, worldAction: 'mendPet', power: [0.40, 0.65, 0.95] }),
-      A('beast_hunt_command', '📣', 'Hunt Command', 16, 'Order your companion to savage the aimed enemy.', 'world',
+      A('beast_hunt_command', '📣', 'Hunt Command', 33, 'Order your companion to savage the aimed enemy.', 'world',
         { cd: 8, worldAction: 'petCommand', power: [0.20, 0.40, 0.65] }),
-      A('beast_trap_field', '⛓️', 'Trap Field', 20, 'Place several powerful snares around you.', 'world',
+      A('beast_trap_field', '⛓️', 'Trap Field', 41, 'Place several powerful snares around you.', 'world',
         { cd: 40, worldAction: 'trapField', count: [3, 4, 5], power: [1.6, 2.2, 2.8], trapDmgPct: 0.55, trapStun: 3.5 }),
-      A('beast_stampede', '🐗', 'Stampede', 24, 'Your living companion calls a stampede through every nearby enemy.', 'petAoe',
+      A('beast_stampede', '🐗', 'Stampede', 50, 'Your living companion calls a stampede through every nearby enemy.', 'petAoe',
         { cd: 70, radius: [7, 8.5, 10], petMult: [4, 6, 9], stun: [1.2, 1.8, 2.5] }),
     ] },
 
   { id: 'rogue', icon: '🗡️', name: 'Rogue', color: '#8ec6c9',
     summary: 'Fast assassin using stealth, poison, evasion and devastating attacks from behind.',
     passives: [
-      P('rogue_precision', '🎯', 'Precision', 3, 'Big boost to your melee critical-hit chance.', { meleeCrit: [0.06, 0.12, 0.20] }),
-      P('rogue_light_foot', '🪶', 'Light Foot', 5, 'Nimble footwork softens the blows that land.', { damageCut: [0.03, 0.06, 0.10] }),
-      P('rogue_shadow_training', '🌑', 'Shadow Training', 7, 'Your stealth lasts considerably longer.', { stealthDuration: [1.5, 3, 5] }),
-      P('rogue_evasion', '💨', 'Evasion Mastery', 9, 'Widens the window of your evade.', { evadeDuration: [0.2, 0.45, 0.75] }),
-      P('rogue_backstab', '🔪', 'Backstabber', 11, 'Devastating extra damage when you strike from behind.', { backstab: [0.20, 0.42, 0.70] }),
-      P('rogue_poisoner', '☠️', 'Poisoner', 13, 'Empowers all of your weapon poisons.', { poisonPower: [0.25, 0.55, 0.90] }),
-      P('rogue_combo', '⚔️', 'Combo Mastery', 15, 'Your blades fly faster.', { meleeSpeed: [0.08, 0.16, 0.26] }),
-      P('rogue_escape', '🌫️', 'Escape Artist', 18, 'Taking damage grants a burst of speed to escape.', { hurtSpeed: [0.25, 0.5, 0.85] }),
-      P('rogue_assassin', '💀', 'Assassin', 21, 'Extra damage to wounded targets (below 50% health).', { executeDmg: [0.15, 0.30, 0.50] }),
+      P('rogue_precision', '🎯', 'Precision', 5, 'Big boost to your melee critical-hit chance.', { meleeCrit: [0.06, 0.12, 0.20] }),
+      P('rogue_light_foot', '🪶', 'Light Foot', 10, 'Nimble footwork softens the blows that land.', { damageCut: [0.03, 0.06, 0.10] }),
+      P('rogue_shadow_training', '🌑', 'Shadow Training', 14, 'Your stealth lasts considerably longer.', { stealthDuration: [1.5, 3, 5] }),
+      P('rogue_evasion', '💨', 'Evasion Mastery', 18, 'Widens the window of your evade.', { evadeDuration: [0.2, 0.45, 0.75] }),
+      P('rogue_backstab', '🔪', 'Backstabber', 22, 'Devastating extra damage when you strike from behind.', { backstab: [0.20, 0.42, 0.70] }),
+      P('rogue_poisoner', '☠️', 'Poisoner', 27, 'Empowers all of your weapon poisons.', { poisonPower: [0.25, 0.55, 0.90] }),
+      P('rogue_combo', '⚔️', 'Combo Mastery', 31, 'Your blades fly faster.', { meleeSpeed: [0.08, 0.16, 0.26] }),
+      P('rogue_escape', '🌫️', 'Escape Artist', 37, 'Taking damage grants a burst of speed to escape.', { hurtSpeed: [0.25, 0.5, 0.85] }),
+      P('rogue_assassin', '💀', 'Assassin', 44, 'Extra damage to wounded targets (below 50% health).', { executeDmg: [0.15, 0.30, 0.50] }),
     ],
     actives: [
-      A('rogue_fleet', '🥾', 'Fleet Foot', 2, 'Dash off with a surge of movement speed for a short time.', 'buff',
+      A('rogue_fleet', '🥾', 'Fleet Foot', 3, 'Dash off with a surge of movement speed for a short time.', 'buff',
         { cd: 60, buff: 'sprint', duration: [5, 8, 15], power: [4, 6, 8] }),
-      A('rogue_stealth', '🌑', 'Stealth', 2, 'Become nearly invisible; attacking breaks stealth.', 'stealth',
+      A('rogue_stealth', '🌑', 'Stealth', 3, 'Become nearly invisible; attacking breaks stealth.', 'stealth',
         { cd: 26, duration: [8, 11, 15] }),
-      A('rogue_evade', '💨', 'Evade', 4, 'Avoid every incoming attack during a short glowing window.', 'evade',
+      A('rogue_evade', '💨', 'Evade', 7, 'Avoid every incoming attack during a short glowing window.', 'evade',
         { cd: 22, duration: [1, 1.4, 2] }),
-      A('rogue_backstab_active', '🔪', 'Backstab', 6, 'A brutal strike that is far stronger from behind.', 'target',
+      A('rogue_backstab_active', '🔪', 'Backstab', 12, 'A brutal strike that is far stronger from behind.', 'target',
         { cd: 10, range: 3.2, weaponMult: [2.0, 2.7, 3.5], backstab: true }),
-      A('rogue_shadowstep', '🌘', 'Shadowstep', 8, 'Teleport behind the aimed enemy and strike.', 'shadowstep',
+      A('rogue_shadowstep', '🌘', 'Shadowstep', 16, 'Teleport behind the aimed enemy and strike.', 'shadowstep',
         { cd: 18, range: [10, 13, 16], weaponMult: [1.5, 2.1, 2.8] }),
-      A('rogue_poison_blades', '☠️', 'Poison Blades', 10, 'Coat weapons with powerful poison.', 'buff',
+      A('rogue_poison_blades', '☠️', 'Poison Blades', 20, 'Coat weapons with powerful poison.', 'buff',
         { cd: 34, buff: 'poisonBlades', duration: [10, 14, 18], power: [1.2, 1.8, 2.6] }),
-      A('rogue_fan_knives', '🗡️', 'Fan of Knives', 12, 'Hit every nearby enemy with poisoned knives.', 'aoe',
+      A('rogue_fan_knives', '🗡️', 'Fan of Knives', 24, 'Hit every nearby enemy with poisoned knives.', 'aoe',
         { cd: 16, radius: [5, 6, 7], weaponMult: [1.0, 1.4, 1.9], poison: [6, 11, 16] }),
-      A('rogue_smoke_bomb', '🌫️', 'Smoke Bomb', 14, 'Create a smoke zone that hides you from enemies.', 'zone',
+      A('rogue_smoke_bomb', '🌫️', 'Smoke Bomb', 29, 'Create a smoke zone that hides you from enemies.', 'zone',
         { cd: 40, zone: 'smoke', castRange: 20, radius: [4.5, 5.5, 6.5], duration: [7, 9, 11], interval: 0.5 }),
-      A('rogue_sprint', '🏃', 'Sprint', 16, 'Gain a tremendous burst of movement speed.', 'buff',
+      A('rogue_sprint', '🏃', 'Sprint', 33, 'Gain a tremendous burst of movement speed.', 'buff',
         { cd: 35, buff: 'sprint', duration: [6, 8, 10], power: [5, 8, 11] }),
-      A('rogue_kidney_shot', '⚡', 'Kidney Shot', 20, 'Stun one target and deal weapon damage.', 'target',
+      A('rogue_kidney_shot', '⚡', 'Kidney Shot', 41, 'Stun one target and deal weapon damage.', 'target',
         { cd: 24, range: 3.2, weaponMult: [1.0, 1.4, 1.9], stun: [3, 4, 5] }),
-      A('rogue_assassinate', '💀', 'Assassinate', 24, 'Execute a wounded target with immense damage.', 'execute',
+      A('rogue_assassinate', '💀', 'Assassinate', 50, 'Execute a wounded target with immense damage.', 'execute',
         { cd: 42, range: 3.2, weaponMult: [3.5, 4.8, 6.2], threshold: 0.4 }),
     ] },
 
   { id: 'mage', icon: '🧙', name: 'Mage', color: '#9c9cff',
     summary: 'Elemental damage dealer wielding fire, frost, barriers and destructive ground spells.',
     passives: [
-      P('mage_power', '✨', 'Spell Power', 2, '+6% class spell damage per rank.', { spellPower: 0.06 }),
-      P('mage_fire', '🔥', 'Fire Mastery', 3, '+8% fire damage per rank.', { firePower: 0.08 }),
-      P('mage_frost', '❄️', 'Frost Mastery', 5, '+8% frost damage per rank.', { frostPower: 0.08 }),
-      P('mage_focus', '⏳', 'Arcane Focus', 7, 'Mage cooldowns -4% per rank.', { classCdReduction: 0.04 }),
-      P('mage_essence', '🧪', 'Essence Affinity', 9, '+10% essence collected per rank.', { essenceMult: 0.1 }),
-      P('mage_barrier', '🔷', 'Barrier Mastery', 11, 'Magical shields +12% per rank.', { shieldPower: 0.12 }),
-      P('mage_pyromaniac', '🌋', 'Pyromaniac', 13, 'Fire area size +8% per rank.', { fireRadius: 0.08 }),
-      P('mage_winter_reach', '🌨️', 'Winter Reach', 15, 'Frost area size +8% per rank.', { frostRadius: 0.08 }),
-      P('mage_surge', '💫', 'Elemental Surge', 18, '+4% class spell critical chance per rank.', { spellCrit: 0.04 }),
-      P('mage_archmage', '🔮', 'Archmage', 21, 'Ground spells last 10% longer per rank.', { zoneDuration: 0.1 }),
+      P('mage_power', '✨', 'Spell Power', 3, '+6% class spell damage per rank.', { spellPower: 0.06 }),
+      P('mage_fire', '🔥', 'Fire Mastery', 5, '+8% fire damage per rank.', { firePower: 0.08 }),
+      P('mage_frost', '❄️', 'Frost Mastery', 10, '+8% frost damage per rank.', { frostPower: 0.08 }),
+      P('mage_focus', '⏳', 'Arcane Focus', 14, 'Mage cooldowns -4% per rank.', { classCdReduction: 0.04 }),
+      P('mage_essence', '🧪', 'Essence Affinity', 18, '+10% essence collected per rank.', { essenceMult: 0.1 }),
+      P('mage_barrier', '🔷', 'Barrier Mastery', 22, 'Magical shields +12% per rank.', { shieldPower: 0.12 }),
+      P('mage_pyromaniac', '🌋', 'Pyromaniac', 27, 'Fire area size +8% per rank.', { fireRadius: 0.08 }),
+      P('mage_winter_reach', '🌨️', 'Winter Reach', 31, 'Frost area size +8% per rank.', { frostRadius: 0.08 }),
+      P('mage_surge', '💫', 'Elemental Surge', 37, '+4% class spell critical chance per rank.', { spellCrit: 0.04 }),
+      P('mage_archmage', '🔮', 'Archmage', 44, 'Ground spells last 10% longer per rank.', { zoneDuration: 0.1 }),
     ],
     actives: [
-      A('mage_fireball', '🔥', 'Fireball', 2, 'Blast one target and ignite it.', 'magicTarget',
+      A('mage_fireball', '🔥', 'Fireball', 3, 'Blast one target and ignite it.', 'magicTarget',
         { cd: 7, element: 'fire', range: 15, damage: [45, 75, 110], burn: [5, 9, 14] }),
-      A('mage_frostbolt', '❄️', 'Frostbolt', 4, 'Damage and briefly freeze one target.', 'magicTarget',
+      A('mage_frostbolt', '❄️', 'Frostbolt', 7, 'Damage and briefly freeze one target.', 'magicTarget',
         { cd: 8, element: 'frost', range: 15, damage: [38, 65, 95], stun: [1.2, 1.8, 2.5] }),
-      A('mage_flamestrike', '🌋', 'Flamestrike', 6, 'Burn the aimed ground for several seconds.', 'zone',
+      A('mage_flamestrike', '🌋', 'Flamestrike', 12, 'Burn the aimed ground for several seconds.', 'zone',
         { cd: 22, zone: 'fire', castRange: 20, radius: [4, 5, 6], duration: [6, 8, 10], damage: [20, 32, 46], interval: 1 }),
-      A('mage_blizzard', '🌨️', 'Blizzard', 8, 'A frost storm damages and slows an aimed area.', 'zone',
+      A('mage_blizzard', '🌨️', 'Blizzard', 16, 'A frost storm damages and slows an aimed area.', 'zone',
         { cd: 28, zone: 'frost', castRange: 20, radius: [5, 6, 7], duration: [7, 9, 11], damage: [16, 26, 38], interval: 1, stun: 0.35 }),
-      A('mage_frost_nova', '🧊', 'Frost Nova', 10, 'Freeze all enemies around you.', 'magicAoe',
+      A('mage_frost_nova', '🧊', 'Frost Nova', 20, 'Freeze all enemies around you.', 'magicAoe',
         { cd: 24, element: 'frost', radius: [5, 6, 7], damage: [25, 42, 62], stun: [2.5, 3.5, 4.5] }),
-      A('mage_meteor', '☄️', 'Meteor', 12, 'Call a devastating burning impact at the aimed point.', 'zoneBurst',
+      A('mage_meteor', '☄️', 'Meteor', 24, 'Call a devastating burning impact at the aimed point.', 'zoneBurst',
         { cd: 38, element: 'fire', castRange: 20, radius: [4, 5, 6], damage: [120, 185, 260], burn: [10, 16, 24] }),
-      A('mage_fire_breath', '🐉', 'Dragon Breath', 14, 'Scorch every enemy in a cone.', 'magicCone',
+      A('mage_fire_breath', '🐉', 'Dragon Breath', 29, 'Scorch every enemy in a cone.', 'magicCone',
         { cd: 18, element: 'fire', range: [7, 9, 11], damage: [65, 100, 145], burn: [6, 10, 15] }),
-      A('mage_ice_barrier', '🔷', 'Ice Barrier', 16, 'Gain a large frost shield.', 'shield',
+      A('mage_ice_barrier', '🔷', 'Ice Barrier', 33, 'Gain a large frost shield.', 'shield',
         { cd: 45, amount: [100, 170, 250] }),
-      A('mage_combustion', '🔥', 'Combustion', 20, 'Greatly empower fire spells for a short time.', 'buff',
+      A('mage_combustion', '🔥', 'Combustion', 41, 'Greatly empower fire spells for a short time.', 'buff',
         { cd: 65, buff: 'combustion', duration: [10, 13, 16], power: [0.35, 0.5, 0.7] }),
-      A('mage_elemental_storm', '🌩️', 'Elemental Storm', 24, 'Fire and ice ravage a huge aimed area.', 'zone',
+      A('mage_elemental_storm', '🌩️', 'Elemental Storm', 50, 'Fire and ice ravage a huge aimed area.', 'zone',
         { cd: 90, zone: 'elemental', castRange: 20, radius: [7, 8.5, 10], duration: [9, 12, 15], damage: [35, 52, 72], interval: 1, stun: 0.5 }),
     ] },
 
   { id: 'priest', icon: '⛪', name: 'Priest', color: '#f0df91',
     summary: 'Dedicated healer with renewal, holy shields, cleansing and survival miracles.',
     passives: [
-      P('priest_healing', '💚', 'Greater Healing', 2, '+8% class healing per rank.', { healPower: 0.08 }),
-      P('priest_benediction', '🙏', 'Benediction', 3, 'Priest cooldowns -4% per rank.', { classCdReduction: 0.04 }),
-      P('priest_fortitude', '❤️', 'Fortitude', 5, '+3.5% maximum health per rank.', { hpPct: 0.035 }),
-      P('priest_renewal', '🌿', 'Renewal Mastery', 7, 'Healing-over-time +12% per rank.', { hotPower: 0.12 }),
-      P('priest_shields', '🛡️', 'Divine Aegis', 9, 'Holy shields +12% per rank.', { shieldPower: 0.12 }),
-      P('priest_purity', '✨', 'Purity', 11, 'Poison damage -12% per rank.', { poisonCut: 0.12 }),
-      P('priest_mercy', '🕊️', 'Mercy', 13, 'Healing on targets below half health +10% per rank.', { lowHpHeal: 0.1 }),
-      P('priest_radiance', '☀️', 'Radiance', 15, 'Healing and holy areas +10% per rank.', { healRadius: 0.1 }),
-      P('priest_guardian', '👼', 'Guardian Faith', 18, 'Guardian miracles +15% per rank.', { guardianPower: 0.15 }),
-      P('priest_high_priest', '✝️', 'High Priest', 21, 'Holy damage +7% per rank.', { holyPower: 0.07 }),
+      P('priest_healing', '💚', 'Greater Healing', 3, '+8% class healing per rank.', { healPower: 0.08 }),
+      P('priest_benediction', '🙏', 'Benediction', 5, 'Priest cooldowns -4% per rank.', { classCdReduction: 0.04 }),
+      P('priest_fortitude', '❤️', 'Fortitude', 10, '+3.5% maximum health per rank.', { hpPct: 0.035 }),
+      P('priest_renewal', '🌿', 'Renewal Mastery', 14, 'Healing-over-time +12% per rank.', { hotPower: 0.12 }),
+      P('priest_shields', '🛡️', 'Divine Aegis', 18, 'Holy shields +12% per rank.', { shieldPower: 0.12 }),
+      P('priest_purity', '✨', 'Purity', 22, 'Poison damage -12% per rank.', { poisonCut: 0.12 }),
+      P('priest_mercy', '🕊️', 'Mercy', 27, 'Healing on targets below half health +10% per rank.', { lowHpHeal: 0.1 }),
+      P('priest_radiance', '☀️', 'Radiance', 31, 'Healing and holy areas +10% per rank.', { healRadius: 0.1 }),
+      P('priest_guardian', '👼', 'Guardian Faith', 37, 'Guardian miracles +15% per rank.', { guardianPower: 0.15 }),
+      P('priest_high_priest', '✝️', 'High Priest', 44, 'Holy damage +7% per rank.', { holyPower: 0.07 }),
     ],
     actives: [
-      A('priest_heal', '💚', 'Heal', 2, 'Restore a large amount of health.', 'heal',
+      A('priest_heal', '💚', 'Heal', 3, 'Restore a large amount of health.', 'heal',
         { cd: 9, amount: [55, 90, 135] }),
-      A('priest_renew', '🌿', 'Renew', 4, 'Regenerate health over time.', 'hot',
+      A('priest_renew', '🌿', 'Renew', 7, 'Regenerate health over time.', 'hot',
         { cd: 14, duration: [8, 11, 14], amount: [7, 11, 16] }),
-      A('priest_flash_heal', '✨', 'Flash Heal', 6, 'A fast emergency heal with a longer cooldown.', 'heal',
+      A('priest_flash_heal', '✨', 'Flash Heal', 12, 'A fast emergency heal with a longer cooldown.', 'heal',
         { cd: 16, amount: [90, 145, 215] }),
-      A('priest_prayer', '🙏', 'Prayer of Healing', 8, 'Heal yourself and a nearby ally.', 'world',
+      A('priest_prayer', '🙏', 'Prayer of Healing', 16, 'Heal yourself and a nearby ally.', 'world',
         { cd: 25, worldAction: 'groupHeal', amount: [65, 105, 155], radius: [8, 10, 12] }),
-      A('priest_shield', '🛡️', 'Power Word: Shield', 10, 'Absorb incoming damage.', 'shield',
+      A('priest_shield', '🛡️', 'Power Word: Shield', 20, 'Absorb incoming damage.', 'shield',
         { cd: 28, amount: [90, 150, 225] }),
-      A('priest_purify', '🕊️', 'Purify', 12, 'Remove poison and harmful effects; restore some health.', 'cleanse',
+      A('priest_purify', '🕊️', 'Purify', 24, 'Remove poison and harmful effects; restore some health.', 'cleanse',
         { cd: 22, amount: [25, 45, 70] }),
-      A('priest_holy_nova', '☀️', 'Holy Nova', 14, 'Heal yourself while damaging nearby enemies.', 'holyNova',
+      A('priest_holy_nova', '☀️', 'Holy Nova', 29, 'Heal yourself while damaging nearby enemies.', 'holyNova',
         { cd: 20, radius: [5, 6.5, 8], amount: [45, 75, 110], damage: [35, 60, 90] }),
-      A('priest_guardian_spirit', '👼', 'Guardian Spirit', 16, 'Prevent one lethal hit and restore health.', 'guardian',
+      A('priest_guardian_spirit', '👼', 'Guardian Spirit', 33, 'Prevent one lethal hit and restore health.', 'guardian',
         { cd: 75, duration: [10, 14, 18], amount: [0.25, 0.4, 0.55] }),
-      A('priest_sanctuary', '⛪', 'Sanctuary', 20, 'Consecrate the aimed ground with sustained healing.', 'zone',
+      A('priest_sanctuary', '⛪', 'Sanctuary', 41, 'Consecrate the aimed ground with sustained healing.', 'zone',
         { cd: 42, zone: 'healing', castRange: 20, radius: [5, 6.5, 8], duration: [8, 11, 14], amount: [8, 13, 19], interval: 1 }),
-      A('priest_resurrection', '✝️', 'Resurrection', 24, 'Revive a fallen ally or grant yourself a massive heal.', 'world',
+      A('priest_resurrection', '✝️', 'Resurrection', 50, 'Revive a fallen ally or grant yourself a massive heal.', 'world',
         { cd: 100, worldAction: 'resurrection', amount: [0.45, 0.7, 1] }),
     ] },
 ];
@@ -1031,14 +1082,14 @@ export const classSkillById = (id) => {
   return null;
 };
 export const classSkillRequiredLevel = (skill, rank) =>
-  Math.min(MAX_LEVEL, skill.level + Math.max(0, rank - 1) * 3);
+  Math.min(MAX_LEVEL, skill.level + Math.max(0, rank - 1) * 6);
 // Committing to a class costs a token of meat; the first skill along the path
 // is just as cheap so a brand-new class can be started for 10 + 10 meat.
 export const CLASS_CHOOSE_COST = 10;
 export const CLASS_FIRST_SKILL_COST = 10;
 export const classSkillMeatCost = (skill, rank, firstOfClass = false) => {
   if (firstOfClass && rank <= 1) return CLASS_FIRST_SKILL_COST;
-  const base = (skill.type === 'active' ? 40 : 25) + skill.level * 4;
+  const base = (skill.type === 'active' ? 40 : 25) + skill.level * 2;
   return Math.ceil(base * rank * (1 + 0.3 * Math.max(0, rank - 1)) / 5) * 5;
 };
 // The skills of a class laid out as a single progression "path": passives and
@@ -1200,39 +1251,39 @@ export const CAMP_BUILDINGS = [
     names: ['Hide Tent', 'Wooden Cabin', 'Stone House', 'Medieval Keep', 'Runic Hall',
       'Mountain Fortress', 'Spirit Bastion', 'Primal Citadel', 'Frosthold'],
     levels: [
-      { level: 2, cost: { hide: 6, wood: 10 },
+      { level: 3, cost: { hide: 6, wood: 10 },
         desc: 'Age 2 — your cave becomes a hide tent. Unlocks hide clothing. +20 max health.' },
-      { level: 4, cost: { wood: 60, stone: 10 },
+      { level: 7, cost: { wood: 60, stone: 10 },
         desc: 'Age 3 — a timber cabin. Unlocks bows. +60 max health, loot magnet reaches further.' },
-      { level: 7, cost: { stone: 80, wood: 30, iron: 6 },
+      { level: 14, cost: { stone: 80, wood: 30, iron: 6 },
         desc: 'Age 4 — an iron-age stone house. +120 max health, +25% chopping & mining power.' },
-      { level: 9, cost: { stone: 200, wood: 150, iron: 30, hide: 20, meat: 100 },
+      { level: 18, cost: { stone: 200, wood: 150, iron: 30, hide: 20, meat: 100 },
         desc: 'Age 5 — a MEDIEVAL KEEP. Unlocks knightly gear. +180 max health, +15% XP.' },
-      { level: 12, cost: { stone: 320, wood: 240, iron: 55, hide: 30, essence: 18 },
+      { level: 24, cost: { stone: 320, wood: 240, iron: 55, hide: 30, essence: 18 },
         desc: 'Age 6 — a RUNIC HALL. Unlocks runic gear and Forge Tier I (+10% gear power).' },
-      { level: 15, cost: { stone: 460, wood: 330, iron: 85, hide: 45, essence: 30 },
+      { level: 31, cost: { stone: 460, wood: 330, iron: 85, hide: 45, essence: 30 },
         desc: 'Age 7 — a MOUNTAIN FORTRESS. Unlocks storm gear and Forge Tier II (+20%).' },
-      { level: 18, cost: { stone: 620, wood: 430, iron: 120, hide: 60, essence: 48 },
+      { level: 37, cost: { stone: 620, wood: 430, iron: 120, hide: 60, essence: 48 },
         desc: 'Age 8 — a SPIRIT BASTION. Unlocks spirit gear and Forge Tier III (+30%).' },
-      { level: 21, cost: { stone: 800, wood: 560, iron: 165, hide: 80, essence: 70 },
+      { level: 44, cost: { stone: 800, wood: 560, iron: 165, hide: 80, essence: 70 },
         desc: 'Age 9 — a PRIMAL CITADEL. Unlocks primal gear and Forge Tier IV (+40%).' },
-      { level: 24, cost: { stone: 1050, wood: 720, iron: 230, hide: 110, essence: 105 },
+      { level: 50, cost: { stone: 1050, wood: 720, iron: 230, hide: 110, essence: 105 },
         desc: 'Age 10 — FROSTHOLD. Unlocks summit gear and Forge Tier V (+50%).' },
     ] },
   { id: 'furnace', icon: '🔥', max: 1,
     names: ['Stone Furnace'],
     levels: [
-      { level: 5, cost: { stone: 40, wood: 15 },
+      { level: 10, cost: { stone: 40, wood: 15 },
         desc: 'Smelts iron: automatically turns 4 🪨 into 1 🔩 every 20 s. Unlocks the iron age.' },
     ] },
   { id: 'banner', icon: '🚩', max: 3,
     names: ['War Banner', 'Rallying Standard', 'Grand Ensign'],
     levels: [
-      { level: 5,  cost: { meat: 120, wood: 120, hide: 20 },
+      { level: 10,  cost: { meat: 120, wood: 120, hide: 20 },
         desc: 'Raise a war banner over camp. +8% XP and the loot magnet reaches further. (A late-game meat/wood sink.)' },
-      { level: 8,  cost: { meat: 320, wood: 260, iron: 20, hide: 40 },
+      { level: 16,  cost: { meat: 320, wood: 260, iron: 20, hide: 40 },
         desc: 'A rallying standard. +16% XP, wider loot magnet, +40 max health.' },
-      { level: 11, cost: { meat: 700, wood: 550, iron: 60, essence: 15 },
+      { level: 22, cost: { meat: 700, wood: 550, iron: 60, essence: 15 },
         desc: 'A grand ensign flying over your keep. +25% XP, widest magnet, +90 max health.' },
     ] },
 ];

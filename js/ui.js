@@ -19,7 +19,8 @@ export function mobLevelBadge(level) {
 function updateMobLevelBadge(el, playerLevel) {
   const level = Number(el.dataset.level) || 1;
   const delta = level - playerLevel;
-  const tier = delta <= -2 ? 'low' : delta <= 1 ? 'tough' : delta <= 3 ? 'dangerous' : 'deadly';
+  // WoW-style con colors over the 1-50 span: grey / even / orange / red
+  const tier = delta <= -3 ? 'low' : delta <= 2 ? 'tough' : delta <= 5 ? 'dangerous' : 'deadly';
   el.classList.remove('low', 'tough', 'dangerous', 'deadly');
   el.classList.add(tier);
   el.title = `Level ${level} · ${delta > 0 ? '+' + delta : delta} vs you`;

@@ -6,7 +6,8 @@
 import * as THREE from 'three';
 import { WORLD, XP_LEVELS, MAX_LEVEL, itemById, spellById, consumableById,
          biomeIndexAt, RESOURCES, MAX_SPELL_SLOTS, classSkillById,
-         classEffectsFor, requiredClassForItem, isTameableBeast } from './config.js';
+         classEffectsFor, requiredClassForItem, isTameableBeast,
+         PLAYER_HP, OOC_DELAY, OOC_REGEN_PCT } from './config.js';
 import { makeMan, makeAxe, makeBow, makePickaxe, makeTorchMesh, makeClub,
          makeSword, makeHandSpear, makeCrossbow, makeShield } from './models.js';
 import { audio } from './audio.js';
@@ -68,6 +69,7 @@ export class Player {
     this.upgrades = {};   // rare boolean perks (tribePass); supply gear is real items now
     this.idleT = 0;       // seconds standing still (bedroll rest bonus)
     this.hurtT = 999;     // seconds since last damage taken
+    this.combatNoiseT = 999; // seconds since we last swung/shot at something
     this.killedBy = null; // name of the last source that damaged us (death recap)
     // blacksmith quest line: one active quest, per-biome completion counters
     this.quest = null;        // { biome, idx, type, need, count, name, ... }
@@ -375,7 +377,8 @@ export class Player {
     audio.sfx('special', 0.45);
 
     const { enemyMgr } = ctx;
-    const spellPower = this.spellPower || 1;
+    // legacy world spells are authored at level-1 scale too — grow them
+    const spellPower = (this.spellPower || 1) * this.levelSpellMult;
     const spellDuration = this.spellDuration || 1;
     if (!['haste', 'rage', 'heal', 'stoneSkin', 'spiritWard'].includes(id)) this.breakStealth();
     switch (id) {
@@ -579,18 +582,25 @@ export class Player {
     return mult;
   }
 
+  // Flat class-skill numbers (fireballs, heals, shields) are authored at
+  // level-1 scale; this multiplier grows them with the level curves so a
+  // Lv40 Fireball still hurts a Lv40 wolf (≈ ×3.7 at the level cap).
+  get levelSpellMult() {
+    return 1 + 0.055 * (this.level - 1);
+  }
+
   _classMagicDamage(base, element = null) {
-    const amount = base * this._classMagicMultiplier(element);
+    const amount = base * this.levelSpellMult * this._classMagicMultiplier(element);
     const crit = Math.random() < (this.classEffects.spellCrit || 0);
     return { amount: amount * (crit ? CRIT_MULT : 1), crit };
   }
 
   _classBurnDamage(base) {
-    return base * this._classMagicMultiplier('fire');
+    return base * this.levelSpellMult * this._classMagicMultiplier('fire');
   }
 
   _classHeal(base, target = this) {
-    let amount = base * (1 + (this.classEffects.healPower || 0));
+    let amount = base * this.levelSpellMult * (1 + (this.classEffects.healPower || 0));
     if ((target?.hp ?? target?.maxHp ?? 1) / Math.max(1, target?.maxHp || 1) < 0.5) {
       amount *= 1 + (this.classEffects.lowHpHeal || 0);
     }
@@ -915,7 +925,7 @@ export class Player {
 
     if (skill.action === 'shield') {
       this.classShield = Math.max(this.classShield,
-        rv('amount') * (1 + (this.classEffects.shieldPower || 0)));
+        rv('amount') * this.levelSpellMult * (1 + (this.classEffects.shieldPower || 0)));
       this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
         `🛡️ ${Math.round(this.classShield)} shield`, '#8ed8ff');
       return true;
@@ -1338,7 +1348,9 @@ export class Player {
     const oldMax = this.maxHp || 100;
     this.classEffects = classEffectsFor(this.selectedClass, this.classTraining);
     this.gearMult = 1 + 0.1 * (this.forgeTier || 0);
-    let hp = 100 + (this.level - 1) * 10 + (this.shrineBonus || 0)
+    // WoW-style quadratic health curve: each level is a real step up
+    // (Lv1 ≈ 100 … Lv50 ≈ 3200 before gear/camp)
+    let hp = PLAYER_HP(this.level) + (this.shrineBonus || 0)
       + (this.upgrades.questHp || 0), speedAdd = 0;
     for (const slot of ['head', 'chest', 'boots', 'charm', 'offhand', 'underlayer', 'legs', 'back', 'mount']) {
       const it = equipped(slot);
@@ -1349,13 +1361,13 @@ export class Player {
     this.maxHp = Math.round(hp);
     if (this.maxHp > oldMax) this.hp += this.maxHp - oldMax;
     this.hp = Math.min(this.hp, this.maxHp);
-    // every level keeps granting +10 hp, +0.1 speed and +0.1 regen; weapon
-    // power gains +1% per level while attack-speed growth softens after Lv14
     const lvl = this.level - 1;
-    this.speed = 5.5 + 0.1 * lvl + speedAdd + (this.upgrades.trailblazer || 0) * 0.2
+    this.speed = 5.5 + 0.04 * lvl + speedAdd + (this.upgrades.trailblazer || 0) * 0.2
       + (this.classEffects.speed || 0);
-    // passive regeneration: everyone knits back slowly; gear can stack it up
-    let regen = 0.1 + 0.1 * lvl;
+    // hpRegen is the IN-COMBAT trickle (small; gear can stack it up). The real
+    // WoW-style recovery happens out of combat: OOC_REGEN_PCT of max health
+    // per second once nothing has hurt you (or been hit by you) for OOC_DELAY.
+    let regen = 0.3 + 0.06 * lvl;
     for (const slot of ['head', 'chest', 'boots', 'charm', 'offhand', 'underlayer', 'legs', 'back', 'mount']) {
       const it = equipped(slot);
       if (it?.stats?.regen) regen += it.stats.regen * this.gearMult;
@@ -1365,9 +1377,9 @@ export class Player {
     // effective weapon = base weapon + training (range/power/swift tracks)
     const base = equipped('weapon')?.weapon || itemById('fists').weapon;
     const s = this.stats;
-    // Keep the established attack-speed curve through Lv14, then slow it so
-    // late levels do not erase the identity of slow and fast weapons.
-    this.levelAttackSpeedBonus = 0.1 * Math.min(lvl, 13) + 0.025 * Math.max(0, lvl - 13);
+    // A gentle attack-speed drip over 50 levels — weapons keep their identity,
+    // gear tiers (not levels) carry the damage growth.
+    this.levelAttackSpeedBonus = 0.006 * lvl;
     this.levelDamage = lvl; // flat +1 weapon damage per level (lvl = this.level - 1)
     const lvlCd = (cd) => 1 / (1 / cd + this.levelAttackSpeedBonus);
     this.weapon = {
@@ -1424,8 +1436,8 @@ export class Player {
     const petBase = comp?.pet;
     const petPower = this.classEffects.petPower || 0;
     this.pet = petBase
-      ? { dmg: petBase.dmg * (1 + 0.25 * s.pet) * (1 + 0.03 * this.level) * this.gearMult * (1 + petPower),
-          maxHp: Math.round((100 + 100 * s.pet + 50 * Math.floor(this.level / 2)) * this.gearMult * (1 + petPower)),
+      ? { dmg: petBase.dmg * (1 + 0.25 * s.pet) * (1 + 0.06 * this.level) * this.gearMult * (1 + petPower),
+          maxHp: Math.round((100 + 100 * s.pet + 60 * Math.floor(this.level / 2)) * this.gearMult * (1 + petPower)),
           classPowerApplied: true }
       : null;
     const orbBase = comp?.orb;
@@ -1605,7 +1617,8 @@ export class Player {
         const fall = this.fallFrom - ground;
         this.fallFrom = null; this.vy = 0;
         if (fall > SAFE_FALL) {
-          const dmg = Math.round((fall - SAFE_FALL) * 6);
+          // a % of the pool so cliffs stay scary at every level
+          const dmg = Math.round((fall - SAFE_FALL) * this.maxHp * 0.035);
           this.hooks.popup?.(this.mesh.position.clone().setY(this.mesh.position.y + 2), `-${dmg} 🩸 fall`, '#ff6a5a');
           audio.sfx('hit', 0.5, 60);
           this.takeDamage(dmg, { silent: true, name: 'a nasty fall' });
@@ -1722,6 +1735,7 @@ export class Player {
     }
     if (!(damage > 0)) return false;
     this.hp -= damage;
+    this.hurtT = 0; // burning/bleeding keeps you in combat — no fast recovery
     this.combatDotTickT -= dt;
     if (this.combatDotTickT <= 0) {
       this.combatDotTickT = 1;
@@ -1749,8 +1763,9 @@ export class Player {
   eatBerry() {
     if (this.dead || this.berry < 1) return false;
     this.berry = Math.round((this.berry - 1) * 10) / 10;
-    this.hp = Math.min(this.maxHp, this.hp + 7);
-    this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2), '🫐 +7 ❤️', '#c9a4ff');
+    const heal = Math.max(7, Math.round(this.maxHp * 0.05)); // 5% of the pool
+    this.hp = Math.min(this.maxHp, this.hp + heal);
+    this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2), `🫐 +${heal} ❤️`, '#c9a4ff');
     audio.sfx('eat_food', 0.55, 300);
     return true;
   }
@@ -1772,10 +1787,11 @@ export class Player {
       audio.sfx('special', 0.5);
       return true;
     }
-    this.hp = Math.min(this.maxHp, this.hp + c.heal);
+    const heal = c.healPct ? Math.round(this.maxHp * c.healPct) : (c.heal || 0);
+    this.hp = Math.min(this.maxHp, this.hp + heal);
     if (c.speedDur) this.roastT = c.speedDur;
     this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
-      `${c.icon} +${c.heal} ❤️${c.speedDur ? ' +🏃' : ''}`, '#7fe07f');
+      `${c.icon} +${heal} ❤️${c.speedDur ? ' +🏃' : ''}`, '#7fe07f');
     audio.sfx('eat_food', 0.6, 250);
     return true;
   }
@@ -1844,9 +1860,21 @@ export class Player {
       }
     } else this._torchWarned = false;
 
-    // wool bedroll (worn on the back): stillness out of combat knits wounds fast
-    const rest = (this.restMult > 1 && this.idleT > 3 && this.hurtT > 5) ? this.restMult : 1;
-    if (this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.hpRegen * rest * dt);
+    // WoW-style recovery: after OOC_DELAY seconds without taking damage or
+    // swinging at anything, health surges back at OOC_REGEN_PCT of the pool
+    // per second (a full heal in ~12 s at ANY level). While fighting, only
+    // the small hpRegen trickle (base + gear) applies. Rest gear (bedroll,
+    // stormcloak…) speeds the out-of-combat surge further.
+    this.combatNoiseT += dt;
+    if (this.hp < this.maxHp) {
+      const outOfCombat = this.hurtT > OOC_DELAY && this.combatNoiseT > OOC_DELAY;
+      let rate = this.hpRegen;
+      if (outOfCombat) {
+        const restBonus = this.restMult > 1 && this.idleT > 1 ? 1 + this.restMult / 10 : 1;
+        rate = Math.max(rate, this.maxHp * OOC_REGEN_PCT * restBonus);
+      }
+      this.hp = Math.min(this.maxHp, this.hp + rate * dt);
+    }
     for (const id in this.spellCds) this.spellCds[id] = Math.max(0, this.spellCds[id] - dt);
     // ---- ability wind-up: raise the weapon, then land the strike ----
     if (this.castWindup) {
@@ -1903,6 +1931,7 @@ export class Player {
       if (this.poisonTickT <= 0) {
         this.poisonTickT = 1;
         this.hp -= this.poisonDps;
+        this.hurtT = 0; // festering poison keeps you in combat
         this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 1.9), `-${this.poisonDps} ☠️`, '#8aff3a');
         if (this.hp <= 0 && this.guardianSpiritT > 0) {
           this.guardianSpiritT = 0;

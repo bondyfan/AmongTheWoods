@@ -7,7 +7,9 @@ import { SHOP_GROUPS, SMITH_GROUPS, questFor, repeatableQuestFor, questXpFor,
          MAX_SPELL_SLOTS, fmtResource, itemById, spellById, costFor,
          CLASS_TREES, classTreeById, classSkillById, classSkillRequiredLevel,
          classSkillMeatCost, classPathSkills, firstClassSkillId, CLASS_CHOOSE_COST,
-         classActiveInfo, classPassiveInfo, requiredClassForItem } from './config.js';
+         classActiveInfo, classPassiveInfo, requiredClassForItem,
+         PLAYER_HP, ENEMY_HP, ENEMY_DMG, xpKillFor, meatForLevel,
+         enemyTypicalLevel } from './config.js';
 
 const NEED_NAMES = { tent: 'Hide Tent', cabin: 'Wooden Cabin', furnace: 'Stone Furnace',
   keep: 'Medieval Keep', runic: 'Runic Hall', mountain: 'Mountain Fortress',
@@ -747,8 +749,8 @@ export class Panels {
     if (charm?.stats?.aspd) asParts.push(`+${Math.round(charm.stats.aspd * 100)}% ${charm.name}`);
     rows.push(['⚡ Attacks/s', (1 / p.weapon.cd).toFixed(2), asParts.join(' · ')]);
 
-    const hpParts = ['100 base'];
-    if (p.level > 1) hpParts.push(`+${(p.level - 1) * 10} level`);
+    const hpParts = [`${PLAYER_HP(1)} base`];
+    if (p.level > 1) hpParts.push(`+${PLAYER_HP(p.level) - PLAYER_HP(1)} level`);
     for (const slot of ['head', 'chest', 'boots', 'charm', 'offhand', 'underlayer', 'legs', 'back', 'mount']) {
       const it = itemById(p.equipment[slot]);
       if (it?.stats?.hp) hpParts.push(`+${Math.round(it.stats.hp * p.gearMult)} ${it.name}`);
@@ -759,7 +761,7 @@ export class Panels {
     rows.push(['❤️ Max health', p.maxHp, hpParts.join(' · ')]);
 
     const spParts = ['5.5 base'];
-    if (p.level > 1) spParts.push(`+${((p.level - 1) * 0.1).toFixed(1)} level`);
+    if (p.level > 1) spParts.push(`+${((p.level - 1) * 0.04).toFixed(1)} level`);
     const boots = itemById(p.equipment.boots);
     if (boots?.stats?.speed) spParts.push(`+${boots.stats.speed} ${boots.name}`);
     if (classEffects.speed) spParts.push(`+${classEffects.speed.toFixed(1)} ${classTree?.name ?? 'class'}`);
@@ -779,13 +781,14 @@ export class Panels {
     if (classEffects.classCdReduction) rows.push(['✨ Class recovery', `-${Math.round(classEffects.classCdReduction * 100)}%`,
       `${classTree?.name ?? 'Class'} passive training`]);
 
-    // regen row
-    const regenParts = ['0.1 base'];
-    if (p.level > 1) regenParts.push(`+${((p.level - 1) * 0.1).toFixed(1)} level`);
+    // regen row: the small in-combat trickle, plus the fast out-of-combat rate
+    const regenParts = ['0.3 base'];
+    if (p.level > 1) regenParts.push(`+${((p.level - 1) * 0.06).toFixed(1)} level`);
     for (const slot of ['head', 'chest', 'boots', 'charm', 'offhand', 'underlayer', 'legs', 'back', 'mount']) {
       const it = itemById(p.equipment[slot]);
       if (it?.stats?.regen) regenParts.push(`+${(it.stats.regen * p.gearMult).toFixed(1)} ${it.name}`);
     }
+    regenParts.push(`out of combat: ${Math.round(p.maxHp * 0.08)}/s`);
     rows.push(['💚 Regen', `${(Math.round(p.hpRegen * 10) / 10)}/s`, regenParts.join(' · ')]);
 
     $('char-stats').innerHTML = rows.map(([label, val, parts]) =>
@@ -888,7 +891,7 @@ export class Panels {
     const cells = [];
     for (const key of RESOURCES) {
       if (p[key] > 0) cells.push({ kind: 'res', id: key, icon: resIcon(key, RES_ICONS[key]), count: p[key],
-        title: key === 'berry' ? 'Blueberries — click to eat one (+7 ❤️), drag out to drop' : `${key} — drag out to drop 5` });
+        title: key === 'berry' ? 'Blueberries — click to eat one (+5% ❤️), drag out to drop' : `${key} — drag out to drop 5` });
     }
     for (const c of CONSUMABLES) {
       const n = p.consumables?.[c.id] ?? 0;
@@ -1222,9 +1225,13 @@ export class Panels {
       const known = this.discovered.has(type);
       const card = document.createElement('div');
       card.className = 'card' + (known ? '' : ' locked');
+      const lvl = enemyTypicalLevel(type);
+      const hp = Math.round(ENEMY_HP(lvl) * (cfg.hpMult ?? 1));
+      const dmg = Math.round(ENEMY_DMG(lvl) * (cfg.dmgMult ?? 1));
+      const xp = Math.round(xpKillFor(lvl) * (cfg.xpMult ?? 1));
       card.innerHTML = known
-        ? `<div class="card-head"><span class="icon">${cfg.icon}</span><span class="name">${cfg.name}</span></div>
-           <div class="desc">❤️ ${cfg.hp} · ⚔️ ${cfg.dmg} · ⭐ ${cfg.xp} XP · 🍖 ${cfg.meat}</div>`
+        ? `<div class="card-head"><span class="icon">${cfg.icon}</span><span class="name">${cfg.name}</span><span class="mob-level">Lv ${lvl}</span></div>
+           <div class="desc">❤️ ${hp} · ⚔️ ${dmg} · ⭐ ${xp} XP · 🍖 ${meatForLevel(lvl, cfg.hpMult ?? 1)}</div>`
         : `<div class="card-head"><span class="icon">❓</span><span class="name">???</span></div>
            <div class="desc">Not discovered yet. Travel further north…</div>`;
       wrap.appendChild(card);

@@ -82,7 +82,7 @@ class PetWolf {
     // out of combat the wolf licks its wounds
     this.regenPause -= dt;
     if (this.regenPause <= 0 && this.hp < this.maxHp) {
-      this.hp = Math.min(this.maxHp, this.hp + 4 * (1 + (classEffects.petRegen || 0)) * dt);
+      this.hp = Math.min(this.maxHp, this.hp + Math.max(4, this.maxHp * 0.06) * (1 + (classEffects.petRegen || 0)) * dt);
     }
 
     this.mesh.position.set(this.pos.x, world.heightAt(this.pos.x, this.pos.z), this.pos.z);

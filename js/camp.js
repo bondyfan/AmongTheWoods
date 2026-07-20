@@ -196,7 +196,7 @@ export class Camp {
     const d = Math.hypot(this.player.pos.x, this.player.pos.z); // home = center
     if (this.levels.home >= 1 && !this.player.dead
         && d < HOME_HEAL_RADIUS && this.player.hp < this.player.maxHp) {
-      this.player.hp = Math.min(this.player.maxHp, this.player.hp + HOME_HEAL_PER_SEC * dt);
+      this.player.hp = Math.min(this.player.maxHp, this.player.hp + Math.max(HOME_HEAL_PER_SEC, this.player.maxHp * 0.12) * dt);
       if (this.healPopupT <= 0) {
         this.healPopupT = 1.2;
         this.hooks.popup?.(this.player.mesh.position.clone().setY(this.player.mesh.position.y + 2.3), '+ heal', '#7dff8a');
