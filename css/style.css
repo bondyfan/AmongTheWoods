@@ -402,8 +402,36 @@ body.slotting .spell-slot.empty {
 .empty-note { font-size: 13px; opacity: 0.55; margin: 4px 0; }
 
 /* ---------- settings panel ---------- */
-#settings { width: min(520px, 94vw); }
-#settings-body { padding: 18px 22px; overflow-y: auto; }
+#settings { width: min(720px, 94vw); }
+#settings-tabs {
+  display: flex; gap: 6px; padding: 12px 22px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.08); flex: 0 0 auto; flex-wrap: wrap;
+}
+#settings-body { padding: 18px 22px; overflow-y: auto; min-height: 300px; }
+.settings-page { display: none; }
+.settings-page.active { display: block; animation: panel-in 0.16s ease-out; }
+/* graphics options laid out as a tidy 2-col grid of labelled fields */
+.settings-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
+}
+.opt-field {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 14px; border-radius: 10px; cursor: pointer;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);
+}
+.opt-field:hover { border-color: rgba(232,201,106,0.5); }
+.opt-field .opt-label { font-weight: bold; font-size: 14px; }
+.opt-field select {
+  background: rgba(0,0,0,0.35); color: inherit; border: 1px solid rgba(255,255,255,0.25);
+  border-radius: 7px; padding: 5px 8px; font-size: 13px; cursor: pointer;
+}
+.opt-field.opt-toggle input[type="checkbox"] {
+  width: 20px; height: 20px; margin: 0; cursor: pointer; accent-color: #86b45e;
+}
+.settings-note { font-size: 12px; opacity: 0.6; margin: 14px 2px 0; line-height: 1.5; }
+@media (max-width: 560px) {
+  .settings-grid { grid-template-columns: 1fr; }
+}
 .setting-row {
   display: flex; align-items: flex-start; gap: 14px; cursor: pointer;
   padding: 10px 12px; border-radius: 10px;

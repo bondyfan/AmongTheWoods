@@ -234,99 +234,123 @@
   <!-- settings -->
   <div id="settings" class="panel hidden">
     <div class="panel-head">
-      <h2>Settings</h2>
+      <h2>⚙️ Settings</h2>
       <button class="panel-close">✕</button>
     </div>
+    <div id="settings-tabs">
+      <button class="tab active" data-page="graphics">🎨 Graphics</button>
+      <button class="tab" data-page="controls">🎮 Controls</button>
+      <button class="tab" data-page="audio">🔊 Audio</button>
+      <button class="tab" data-page="general">🎒 General</button>
+    </div>
     <div id="settings-body">
-      <label class="setting-row">
-        <input type="checkbox" id="set-mousemove">
-        <span><b>Mouse-directed movement</b><br>
-          <small>Hold <kbd>W</kbd> to run toward the cursor (<kbd>S</kbd> backs away,
-          <kbd>A</kbd>/<kbd>D</kbd> strafe). Off&nbsp;=&nbsp;classic WASD directions.</small></span>
-      </label>
-      <div class="setting-row" style="display:block">
-        <b>🎨 Graphics</b><br>
-        <label style="display:inline-flex;align-items:center;gap:6px;margin:6px 12px 0 0">
-          Texture detail
-          <select id="set-texdetail">
-            <option value="0" selected>Low</option>
-            <option value="1">Medium</option>
-            <option value="2">High</option>
-          </select>
+
+      <!-- ========== GRAPHICS ========== -->
+      <div class="settings-page active" data-page="graphics">
+        <div class="settings-grid">
+          <label class="opt-field">
+            <span class="opt-label">Texture detail</span>
+            <select id="set-texdetail">
+              <option value="0" selected>Low</option>
+              <option value="1">Medium</option>
+              <option value="2">High</option>
+            </select>
+          </label>
+          <label class="opt-field">
+            <span class="opt-label">Resolution</span>
+            <select id="set-resscale">
+              <option value="1">Fast (1×)</option>
+              <option value="1.5">Balanced (1.5×)</option>
+              <option value="auto" selected>Sharp (native)</option>
+            </select>
+          </label>
+          <label class="opt-field">
+            <span class="opt-label">Draw distance</span>
+            <select id="set-drawdist">
+              <option value="short">Short (fastest)</option>
+              <option value="normal" selected>Normal</option>
+              <option value="far">Far (heavier)</option>
+            </select>
+          </label>
+          <label class="opt-field opt-toggle">
+            <span class="opt-label">Shadows</span>
+            <input type="checkbox" id="set-shadows" checked>
+          </label>
+        </div>
+        <p class="settings-note">Lower these if the 3D view stutters — resolution and shadows
+          have the biggest impact on framerate.</p>
+      </div>
+
+      <!-- ========== CONTROLS ========== -->
+      <div class="settings-page" data-page="controls">
+        <label class="setting-row">
+          <input type="checkbox" id="set-rpgview">
+          <span><b>🎮 RPG view mode</b><br>
+            <small>Third-person camera behind your character (MMORPG style).
+            <kbd>A</kbd>/<kbd>D</kbd> turn, <kbd>W</kbd>/<kbd>S</kbd> move — attacks hit what you face.</small></span>
         </label>
-        <label style="display:inline-flex;align-items:center;gap:6px;margin:6px 12px 0 0">
-          Resolution
-          <select id="set-resscale">
-            <option value="1">Fast (1×)</option>
-            <option value="1.5">Balanced (1.5×)</option>
-            <option value="auto" selected>Sharp (native)</option>
-          </select>
+        <label class="setting-row rpg-only hidden" id="mouselook-row">
+          <input type="checkbox" id="set-mouselook">
+          <span><b>🖱️ Free mouse-look</b> <small>(RPG view only)</small><br>
+            <small>The mouse ALWAYS steers the camera (cursor locks into the game —
+            <kbd>Esc</kbd> frees it). <kbd>A</kbd>/<kbd>D</kbd> strafe instead of turning.</small></span>
         </label>
-        <label style="display:inline-flex;align-items:center;gap:6px;margin:6px 12px 0 0">
-          Draw distance
-          <select id="set-drawdist">
-            <option value="short">Short (fastest)</option>
-            <option value="normal" selected>Normal</option>
-            <option value="far">Far (heavier)</option>
-          </select>
+        <label class="setting-row topdown-only" id="mousemove-row">
+          <input type="checkbox" id="set-mousemove">
+          <span><b>🖱️ Mouse-directed movement</b> <small>(top-down only)</small><br>
+            <small>Hold <kbd>W</kbd> to run toward the cursor (<kbd>S</kbd> backs away,
+            <kbd>A</kbd>/<kbd>D</kbd> strafe). Off&nbsp;=&nbsp;classic WASD directions.</small></span>
         </label>
-        <label style="display:inline-flex;align-items:center;gap:6px;margin:6px 12px 0 0">
-          <input type="checkbox" id="set-shadows" checked> Shadows
+        <label class="setting-row topdown-only" id="autorotate-row">
+          <input type="checkbox" id="set-autorotate">
+          <span><b>🔄 Auto camera rotate</b> <small>(top-down only)</small><br>
+            <small>Move in ONE direction for 5&nbsp;s and the camera swings around to face
+            where you're going (the minimap turns with it).</small></span>
         </label>
       </div>
-      <label class="setting-row">
-        <input type="checkbox" id="set-rpgview">
-        <span><b>🎮 RPG view mode</b><br>
-          <small>Third-person camera behind your character (MMORPG style).
-          <kbd>A</kbd>/<kbd>D</kbd> turn, <kbd>W</kbd>/<kbd>S</kbd> move — attacks hit what you face.</small></span>
-      </label>
-      <label class="setting-row" id="mouselook-row" style="margin-left:26px">
-        <input type="checkbox" id="set-mouselook">
-        <span><b>🖱️ Free mouse-look</b> <small>(RPG view only)</small><br>
-          <small>The mouse ALWAYS steers the camera (cursor locks into the game —
-          <kbd>Esc</kbd> frees it). <kbd>A</kbd>/<kbd>D</kbd> strafe instead of turning.</small></span>
-      </label>
-      <label class="setting-row">
-        <input type="checkbox" id="set-autorotate">
-        <span><b>🔄 Auto camera rotate</b><br>
-          <small>Move in ONE direction for 5&nbsp;s and the camera swings around to face
-          where you're going (the minimap turns with it). In RPG view, backing up
-          (<kbd>S</kbd>) for 5&nbsp;s spins the camera behind you instead.</small></span>
-      </label>
-      <div class="setting-row resource-setting">
-        <span><b>🎒 Resources shown in the HUD</b><br>
-          <small>Choose which resource totals stay visible at the top of the gameplay screen.</small></span>
-        <div id="set-hud-resources" class="resource-setting-grid"></div>
+
+      <!-- ========== AUDIO ========== -->
+      <div class="settings-page" data-page="audio">
+        <label class="setting-row">
+          <input type="checkbox" id="set-mute">
+          <span><b>🔇 Mute audio</b><br>
+            <small>Silence all music and sound effects.</small></span>
+        </label>
+        <label class="setting-row">
+          <span style="flex:1"><b>SFX volume</b></span>
+          <input type="range" id="set-sfx" min="0" max="100" step="5" style="width:160px">
+        </label>
+        <label class="setting-row">
+          <span style="flex:1"><b>Music volume</b></span>
+          <input type="range" id="set-music" min="0" max="100" step="5" style="width:160px">
+        </label>
       </div>
-      <label class="setting-row">
-        <input type="checkbox" id="set-mute">
-        <span><b>Mute audio</b><br>
-          <small>Silence all music and sound effects.</small></span>
-      </label>
-      <label class="setting-row">
-        <span style="flex:1"><b>SFX volume</b></span>
-        <input type="range" id="set-sfx" min="0" max="100" step="5" style="width:140px">
-      </label>
-      <label class="setting-row">
-        <span style="flex:1"><b>Music volume</b></span>
-        <input type="range" id="set-music" min="0" max="100" step="5" style="width:140px">
-      </label>
-      <label class="setting-row" id="admin-row" style="display:none">
-        <input type="checkbox" id="set-admin">
-        <span><b>🛠 Admin mode</b> <small>(singleplayer only)</small><br>
-          <small>Edit any stat in the Character panel and spawn items into
-          the inventory — for testing.</small></span>
-      </label>
-      <div class="setting-row" id="cloud-row" style="display:none">
-        <span style="flex:1"><b>☁️ Cloud save</b> <small id="cloud-who"></small><br>
-          <small>Save/Load your character to the cloud (co-op survival only).</small></span>
-        <button id="set-savegame" class="mini-btn">💾 Save</button>
-        <button id="set-loadgame" class="mini-btn">📂 Load</button>
+
+      <!-- ========== GENERAL ========== -->
+      <div class="settings-page" data-page="general">
+        <div class="setting-row resource-setting">
+          <span><b>🎒 Resources shown in the HUD</b><br>
+            <small>Choose which resource totals stay visible at the top of the gameplay screen.</small></span>
+          <div id="set-hud-resources" class="resource-setting-grid"></div>
+        </div>
+        <div class="setting-row" id="mpcode-row">
+          <span><b>Multiplayer code:</b> <span id="set-mpcode" style="font-family:monospace;font-size:18px;letter-spacing:2px">—</span><br>
+            <small>Share this code so a friend can join your running game.</small></span>
+        </div>
+        <div class="setting-row" id="cloud-row" style="display:none">
+          <span style="flex:1"><b>☁️ Cloud save</b> <small id="cloud-who"></small><br>
+            <small>Save/Load your character to the cloud (co-op survival only).</small></span>
+          <button id="set-savegame" class="mini-btn">💾 Save</button>
+          <button id="set-loadgame" class="mini-btn">📂 Load</button>
+        </div>
+        <label class="setting-row" id="admin-row" style="display:none">
+          <input type="checkbox" id="set-admin">
+          <span><b>🛠 Admin mode</b> <small>(singleplayer only)</small><br>
+            <small>Edit any stat in the Character panel and spawn items into
+            the inventory — for testing.</small></span>
+        </label>
       </div>
-      <div class="setting-row" id="mpcode-row">
-        <span><b>Multiplayer code:</b> <span id="set-mpcode" style="font-family:monospace;font-size:18px;letter-spacing:2px">—</span><br>
-          <small>Share this code so a friend can join your running game.</small></span>
-      </div>
+
     </div>
   </div>
 

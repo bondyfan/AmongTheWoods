@@ -2314,6 +2314,19 @@ const settings = Object.assign(
     localStorage.setItem('atw-settings', JSON.stringify(settings));
   });
 
+  // settings tabs (Graphics / Controls / Audio / General) — click a header to
+  // swap the visible page; only one page is in the DOM flow at a time.
+  const settingsTabs = [...$id('settings-tabs').querySelectorAll('.tab')];
+  const settingsPages = [...document.querySelectorAll('#settings-body .settings-page')];
+  const showSettingsPage = (page) => {
+    settingsTabs.forEach(t => t.classList.toggle('active', t.dataset.page === page));
+    settingsPages.forEach(p => p.classList.toggle('active', p.dataset.page === page));
+  };
+  settingsTabs.forEach(t => t.addEventListener('click', () => {
+    showSettingsPage(t.dataset.page);
+    audio.sfx('click', 0.35);
+  }));
+
   // show the room code so a friend can join the running game; admin mode
   // is offered only in singleplayer (it would wreck a shared session)
   $id('settings-btn').addEventListener('click', () => {
@@ -4411,8 +4424,11 @@ function applyViewMode() {
   const rpg = !!settings.rpgView;
   game.rpgView = rpg;
   input.rpgMode = rpg;
-  // the free mouse-look option only makes sense in RPG view — hide it otherwise
-  $id('mouselook-row').classList.toggle('hidden', !rpg);
+  // controls that only apply to ONE camera mode are hidden in the other:
+  // free mouse-look is RPG-only; mouse-directed movement and auto-rotate are
+  // top-down-only (they don't do anything meaningful behind-the-shoulder).
+  document.querySelectorAll('.rpg-only').forEach(el => el.classList.toggle('hidden', !rpg));
+  document.querySelectorAll('.topdown-only').forEach(el => el.classList.toggle('hidden', rpg));
   scene.fog.near = rpg ? 45 : 35;
   scene.fog.far = rpg ? (autoQuality.stage >= 3 ? 150 : 195) : (autoQuality.stage >= 3 ? 90 : 110);
   camera.far = rpg ? 340 : 300;
