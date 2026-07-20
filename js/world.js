@@ -18,7 +18,8 @@ import { makeTree, makeRock, makeGrassTuft, makeFlower, makeMushroom, makeBush,
          makeCursedStatue, makeVillage, makeRaceFlag, makeNest, makeLilypad,
          makeTemple, makeLianaPole, makeBonfire, makeSummitCairn, makeCactus,
          makeLairEntrance, makeCage, makeFern, makeTownHouse, makeChurch,
-         makeFountain, makeWheatTuft, makeJunglePlant } from './models.js';
+         makeFountain, makeWheatTuft, makeJunglePlant, makeReeds, makePebbles,
+         makePalm, makeGroundLeaves } from './models.js';
 import { makePier } from './ship.js';
 import { bakeGroup, bakeAccumulator, buildBakedMesh, bakeAt, BAKED_MAT,
          isSharedMaterial } from './models.js';
@@ -165,6 +166,7 @@ export class World {
     this.onWoodLog = null;       // main turns decorative fallen logs into pickups
     this._woodLogDrops = new Set();
     this.time = 0;               // world clock (drives berry regrowth)
+    this.foliageMult = 1;        // graphics setting: scatter-density multiplier
     this._berryEaten = new Map(); // bush key -> world time it was harvested
     this.pois = [];              // landmarks: shrines / monoliths / crypts
     this.onPoiSpawned = null;    // main hooks this to post crypt guards
@@ -1682,7 +1684,9 @@ export class World {
         ? (rng() < 0.12 ? 0 : rng() < 0.5 ? 1 : 2)
         : (rng() < 0.45 ? 0 : rng() < 0.75 ? 1 : 2);
       const made = makeTree(size, biome, rng);
-      const mesh = bakeGroup(made.mesh); // one draw call per tree
+      // one draw call per tree; the canopy gets a subtle wind ripple
+      // (trunk anchored below y0, leaves at full amplitude by y1)
+      const mesh = bakeGroup(made.mesh, true, { amp: 0.35, y0: 1.6, y1: 6 });
       this._place(mesh, x, z);
       mesh.rotation.y = rng() * Math.PI * 2;
       group.add(mesh);
@@ -1709,13 +1713,17 @@ export class World {
     }
 
     // -- decorations (visual only): ALL of them bake into a single
-    // per-chunk mesh — grass, ferns, flowers, cacti, pads… one draw call --
+    // per-chunk mesh — grass, ferns, flowers, cacti, pads… one draw call.
+    // Foliage density scales with the user's graphics setting; sway makes
+    // plants ride the wind shader and part around the walking player --
+    const fm = this.foliageMult ?? 1;
     const deco = bakeAccumulator();
-    const scatter = (n, maker) => {
+    const scatter = (n, maker, sway = null, filter = null) => {
       for (let i = 0; i < n; i++) {
         const x = cxw + rng() * CHUNK, z = czw + rng() * CHUNK;
         if (!inBounds(x, z)) continue;
-        bakeAt(deco, maker(), x, this.heightAt(x, z), z, rng() * Math.PI * 2);
+        if (filter && !filter(x, z)) continue;
+        bakeAt(deco, maker(), x, this.heightAt(x, z), z, rng() * Math.PI * 2, 1, sway);
       }
     };
     // biome-signature chunk props: silk cocoons & firefly glades (Dark Forest)
@@ -1781,7 +1789,8 @@ export class World {
           const pz = (gz + 0.2 + (h * 13 % 0.6)) * CELLP;
           if (px < cxw || px >= cxw + CHUNK || pz < czw || pz >= czw + CHUNK) continue;
           if (this.swampZone(px, pz) !== 'water') continue;
-          bakeAt(deco, makeLilypad(rng), px, this.heightAt(px, pz) + 0.96, pz, 0, 1.5);
+          bakeAt(deco, makeLilypad(rng), px, this.heightAt(px, pz) + 0.96, pz, 0, 1.5,
+            { amp: 0.12, h: 0.3 }); // pads drift gently on the bog water
         }
       }
     }
@@ -1804,16 +1813,50 @@ export class World {
       }
     }
 
-    scatter(22 + Math.floor(rng() * 12), () => makeGrassTuft(biome.grass, rng));
+    // sway profiles: {amp = how far tips lean, h = height of full amplitude}
+    const SW_GRASS = { amp: 1, h: 0.6 }, SW_FERN = { amp: 0.8, h: 0.7 };
+    const SW_PLANT = { amp: 0.7, h: 1.2 }, SW_BUSH = { amp: 0.45, h: 0.8 };
+    const SW_FLOWER = { amp: 0.9, h: 0.35 }, SW_REED = { amp: 1, h: 1.5 };
+    const SW_LEAF = { amp: 0.6, h: 0.4 }, SW_PALM = { amp: 0.5, h: 3.2 };
+    scatter(Math.round((22 + rng() * 12) * fm), () => makeGrassTuft(biome.grass, rng), SW_GRASS);
     if (biome.jungleFlora) {
-      scatter(10 + Math.floor(rng() * 6), () => makeFern(rng));
-      scatter(3 + Math.floor(rng() * 4), () => makeJunglePlant(rng));
-      scatter(8 + Math.floor(rng() * 6), () => makeGrassTuft(0x3f8a30, rng));
+      // RAINFOREST layers: understory palms above banana plants above a
+      // floor of ferns, broad leaves and grass — wall-to-wall green
+      scatter(Math.round((3 + rng() * 3) * Math.min(fm, 2)), () => makePalm(rng), SW_PALM);
+      scatter(Math.round((7 + rng() * 5) * fm), () => makeJunglePlant(rng), SW_PLANT);
+      scatter(Math.round((14 + rng() * 8) * fm), () => makeFern(rng), SW_FERN);
+      scatter(Math.round((10 + rng() * 6) * fm), () => makeGroundLeaves(rng), SW_LEAF);
+      scatter(Math.round((12 + rng() * 8) * fm), () => makeGrassTuft(0x3f8a30, rng), SW_GRASS);
+      scatter(Math.round((3 + rng() * 3) * fm), () => {
+        const b = makeBush(biome.foliage[1 + Math.floor(rng() * 2)], rng);
+        b.scale.setScalar(1.2 + rng() * 0.4);
+        return b;
+      }, SW_BUSH);
+    } else if (denseWood) {
+      // thick woods grow a forest floor: ferns, low leaves, mushroom rings
+      scatter(Math.round((6 + rng() * 4) * fm), () => makeFern(rng), SW_FERN);
+      scatter(Math.round((4 + rng() * 3) * fm), () => makeGroundLeaves(rng), SW_LEAF);
+      scatter(Math.round((2 + rng() * 3) * fm), () => makeMushroom(rng));
     }
-    scatter(2 + Math.floor(rng() * 3), () => makeBush(biome.foliage[0], rng));
+    if (biome.name === 'Murky Swamp') {
+      scatter(Math.round((5 + rng() * 4) * fm), () => makeGroundLeaves(rng), SW_LEAF);
+    }
+    scatter(Math.round((2 + rng() * 3) * Math.min(fm, 2)), () => makeBush(biome.foliage[0], rng), SW_BUSH);
     scatter(1 + Math.floor(rng() * 2), () => makeRock(rng));
-    if (biome.flowers) scatter(2 + Math.floor(rng() * 5), () => makeFlower(rng));
-    if (biome.mushrooms) scatter(1 + Math.floor(rng() * 3), () => makeMushroom(rng));
+    scatter(Math.round((2 + rng() * 3) * Math.min(fm, 2)),
+      () => makePebbles(rng, rng() < 0.5 ? 0x8a8a84 : biome.trunk));
+    if (biome.flowers) scatter(Math.round((3 + rng() * 5) * fm), () => makeFlower(rng), SW_FLOWER);
+    if (biome.mushrooms) scatter(Math.round((1 + rng() * 3) * fm), () => makeMushroom(rng));
+    // waterside reeds hug the banks of bog pools, lakes and rivers (not the
+    // open ocean beach — coastDist keeps them inland, except in the swamp)
+    if (biome.name !== 'Scorched Desert' && biome.name !== 'Frozen Peak') {
+      const nearWater = (x, z) =>
+        (biome.name === 'Murky Swamp' || coastDistAt(x, z) > 30)
+        && (this.isWater(x + 1.6, z) || this.isWater(x - 1.6, z)
+         || this.isWater(x, z + 1.6) || this.isWater(x, z - 1.6));
+      scatter(Math.round((biome.name === 'Murky Swamp' ? 10 : 5) * fm),
+        () => makeReeds(rng), SW_REED, nearWater);
+    }
     if (rng() < 0.175) {
       const x = cxw + rng() * CHUNK, z = czw + rng() * CHUNK;
       if (inBounds(x, z)) {
@@ -1881,7 +1924,7 @@ export class World {
           : e.variant === 'dead' ? { ...BIOMES[5], trees: { pine: 0, leafy: 0, birch: 0, dead: 1 } }
           : biomeAt(e.x, e.z);
         const made2 = makeTree(size, tb, drng);
-        const mesh = bakeGroup(made2.mesh);
+        const mesh = bakeGroup(made2.mesh, true, { amp: 0.35, y0: 1.6, y1: 6 });
         const radius = made2.radius;
         this._place(mesh, e.x, e.z);
         mesh.rotation.y = drng() * Math.PI * 2;
@@ -1907,7 +1950,8 @@ export class World {
             r: e.type === 'church' ? 3.4 : e.type === 'fountain' ? 1.9 : 2.3 });
         }
       } else if (e.kind === 'deco') {
-        // single decorations (visual only): cactus, fern, bush, mushroom…
+        // single decorations (visual only) join the chunk's baked deco mesh —
+        // and pick up the same wind/trample sway as generated foliage
         const obj = e.type === 'cactus' ? makeCactus(drng)
           : e.type === 'fern' ? makeFern(drng)
           : e.type === 'bush' ? makeBush(biomeAt(e.x, e.z).foliage[0], drng)
@@ -1915,10 +1959,12 @@ export class World {
           : e.type === 'flower' ? makeFlower(drng)
           : e.type === 'log' ? makeLog(biomeAt(e.x, e.z).trunk, drng)
           : makeGrassTuft(biomeAt(e.x, e.z).grass, drng);
-        this._place(obj, e.x, e.z);
-        obj.rotation.y = drng() * Math.PI * 2;
-        obj.traverse((o) => { o.updateMatrix(); o.matrixAutoUpdate = false; });
-        group.add(obj);
+        const dsway = e.type === 'fern' ? { amp: 0.8, h: 0.7 }
+          : e.type === 'bush' ? { amp: 0.45, h: 0.8 }
+          : e.type === 'flower' ? { amp: 0.9, h: 0.35 }
+          : e.type === 'grass' || !['cactus', 'mushroom', 'log'].includes(e.type)
+            ? { amp: 1, h: 0.6 } : null;
+        bakeAt(deco, obj, e.x, this.heightAt(e.x, e.z), e.z, drng() * Math.PI * 2, 1, dsway);
       } else if (e.kind === 'berry') {
         // a harvestable berry bush; raspberries pay out DOUBLE
         const rasp = e.type === 'rasp';
@@ -1953,10 +1999,14 @@ export class World {
           const fx = e.x + Math.cos(a) * rr, fz = e.z + Math.sin(a) * rr;
           if (fx < cxw || fx >= cxw + CHUNK || fz < czw || fz >= czw + CHUNK) continue;
           if (this.isWater(fx, fz)) continue;
-          let obj;
-          if (e.type === 'wheat') obj = makeWheatTuft(drng);
-          else { obj = makeGrassTuft(0x7fa04e, drng); obj.scale.y = 1.9 + drng() * 0.5; }
-          bakeAt(deco, obj, fx, this.heightAt(fx, fz), fz, drng() * Math.PI * 2);
+          let obj, fsway;
+          if (e.type === 'wheat') { obj = makeWheatTuft(drng); fsway = { amp: 1, h: 1.1 }; }
+          else {
+            obj = makeGrassTuft(0x7fa04e, drng);
+            obj.scale.y = 1.9 + drng() * 0.5;
+            fsway = { amp: 1, h: 1.4 };
+          }
+          bakeAt(deco, obj, fx, this.heightAt(fx, fz), fz, drng() * Math.PI * 2, 1, fsway);
         }
       } else if (e.kind === 'meadow') {
         // a flower meadow: the same flowers every visit, only the ones
@@ -1968,8 +2018,10 @@ export class World {
           const fx = e.x + Math.cos(a) * rr, fz = e.z + Math.sin(a) * rr;
           if (fx < cxw || fx >= cxw + CHUNK || fz < czw || fz >= czw + CHUNK) continue;
           if (this.isWater(fx, fz)) continue;
-          const f = drng() < 0.8 ? makeFlower(drng) : makeGrassTuft(0x6fa04c, drng);
-          bakeAt(deco, f, fx, this.heightAt(fx, fz), fz, drng() * Math.PI * 2);
+          const flower = drng() < 0.8;
+          const f = flower ? makeFlower(drng) : makeGrassTuft(0x6fa04c, drng);
+          bakeAt(deco, f, fx, this.heightAt(fx, fz), fz, drng() * Math.PI * 2, 1,
+            flower ? { amp: 0.9, h: 0.35 } : { amp: 1, h: 0.6 });
         }
       }
     }

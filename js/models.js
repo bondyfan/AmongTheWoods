@@ -12,9 +12,78 @@ const matCache = new Map();
 // forest chunk drops from ~600 draw calls to ~75.
 export const BAKED_MAT = new THREE.MeshLambertMaterial({ vertexColors: true });
 
+// ---- foliage animation ----
+// Every baked vertex carries a `sway` weight (0 = rigid). The shared baked
+// material gets a vertex-shader patch with three world-space effects:
+//   1. WIND — a cheap two-sine field that ripples grass, fronds and canopies.
+//   2. CONTACT PUSH — foliage parts radially around the player's position.
+//   3. DISTURBANCE TRAIL — the player lays down up to 8 recent "footstep"
+//      disturbances; each one rings with a damped cosine (spring physics),
+//      so vegetation you brush through keeps shaking and settles back down
+//      after you have passed instead of snapping straight.
+// All driven by shared uniforms updated once per frame from main.js —
+// zero per-object cost, every chunk still renders as one draw call.
+export const FOL_TRAIL = 8; // trail slots (must match the GLSL array size)
+BAKED_MAT.userData.shaders = [];
+BAKED_MAT.onBeforeCompile = (shader) => {
+  shader.uniforms.uTime = { value: 0 };
+  shader.uniforms.uPlayer = { value: new THREE.Vector3(0, -9999, 0) };
+  shader.uniforms.uWind = { value: 1 };
+  shader.uniforms.uPush = { value: 1 };
+  shader.uniforms.uDist = {
+    value: Array.from({ length: FOL_TRAIL }, () => new THREE.Vector4(0, 0, -99, 0)),
+  };
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', `#include <common>
+attribute float sway;
+uniform float uTime;
+uniform vec3 uPlayer;
+uniform float uWind;
+uniform float uPush;
+uniform vec4 uDist[${FOL_TRAIL}];`)
+    .replace('#include <begin_vertex>', `#include <begin_vertex>
+if (sway > 0.001) {
+  vec3 wpFol = (modelMatrix * vec4(transformed, 1.0)).xyz;
+  float phFol = wpFol.x * 0.37 + wpFol.z * 0.29;
+  float gust = sin(uTime * 1.6 + phFol) + 0.55 * sin(uTime * 3.3 + phFol * 1.9);
+  vec2 offFol = vec2(0.83, 0.55) * (gust * 0.5 + 0.45) * 0.2 * sway * uWind;
+  // contact: part around the player standing/walking in the foliage
+  vec2 dpFol = wpFol.xz - uPlayer.xz;
+  float dFol = length(dpFol);
+  float pkFol = (1.0 - smoothstep(0.15, 1.35, dFol))
+    * (1.0 - smoothstep(0.9, 2.0, abs(wpFol.y - uPlayer.y))) * uPush;
+  if (pkFol > 0.001 && dFol > 0.02) {
+    offFol += (dpFol / dFol) * pkFol * 0.5 * sway;
+    transformed.y -= pkFol * 0.26 * sway;
+  }
+  // trail: damped spring ring-down where the player recently passed
+  for (int i = 0; i < ${FOL_TRAIL}; i++) {
+    vec4 dFt = uDist[i];
+    float age = uTime - dFt.z;
+    if (age < 0.0) age += 900.0;  // uTime wraps every 900 s
+    if (age < 2.2 && dFt.w > 0.001) {
+      vec2 ddFt = wpFol.xz - dFt.xy;
+      float dlFt = length(ddFt);
+      float fallFt = (1.0 - smoothstep(0.1, 1.25, dlFt)) * dFt.w * sway * uPush;
+      if (fallFt > 0.001) {
+        float oscFt = cos(age * 9.5) * exp(-age * 2.8);
+        offFol += (ddFt / max(dlFt, 0.05)) * oscFt * 0.55 * fallFt;
+        transformed.y -= max(oscFt, 0.0) * 0.2 * fallFt;
+      }
+    }
+  }
+  transformed.xz += offFol;
+}`);
+  BAKED_MAT.userData.shaders.push(shader);
+};
+
 const _bakeMat4 = new THREE.Matrix4();
 const _bakeNrm = new THREE.Matrix3();
 const _bakeV = new THREE.Vector3();
+
+// while set, baked vertices get a sway weight ramped by height:
+// 0 at y0 (anchored base) → amp at y1 and above (free tips)
+let _swayCtx = null;
 
 function _bakeInto(node, parentMatrix, out) {
   _bakeMat4.compose(node.position, node.quaternion, node.scale);
@@ -30,9 +99,13 @@ function _bakeInto(node, parentMatrix, out) {
       const base = out.pos.length / 3;
       _bakeNrm.getNormalMatrix(m);
       const c = mat.color;
+      const sc = _swayCtx;
       for (let i = 0; i < pos.count; i++) {
         _bakeV.fromBufferAttribute(pos, i).applyMatrix4(m);
         out.pos.push(_bakeV.x, _bakeV.y, _bakeV.z);
+        out.sway.push(sc
+          ? sc.amp * Math.min(1, Math.max(0, (_bakeV.y - sc.y0) / (sc.y1 - sc.y0)))
+          : 0);
         if (nrm) {
           _bakeV.fromBufferAttribute(nrm, i).applyMatrix3(_bakeNrm).normalize();
           out.nrm.push(_bakeV.x, _bakeV.y, _bakeV.z);
@@ -60,6 +133,10 @@ export function buildBakedMesh(out, castShadow = true) {
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(out.pos), 3));
   geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(out.nrm), 3));
   geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(out.col), 3));
+  // only spend the memory when something in the batch actually moves
+  if (out.sway.some(w => w > 0)) {
+    geo.setAttribute('sway', new THREE.BufferAttribute(new Float32Array(out.sway), 1));
+  }
   geo.setIndex(out.idx);
   const mesh = new THREE.Mesh(geo, BAKED_MAT);
   mesh.castShadow = castShadow;
@@ -67,15 +144,19 @@ export function buildBakedMesh(out, castShadow = true) {
   return mesh;
 }
 
-export const bakeAccumulator = () => ({ pos: [], nrm: [], col: [], idx: [], extras: [] });
+export const bakeAccumulator = () => ({ pos: [], nrm: [], col: [], idx: [], sway: [], extras: [] });
 const _identity = new THREE.Matrix4();
 
 // bake ONE model (tree, hive, building, landmark…) → a single mesh that
 // keeps the original's outer transform semantics (rotate/scale/position it
 // exactly like the old group). Un-bakeable parts ride along as children.
-export function bakeGroup(root, castShadow = true) {
+// Optional sway = {amp, y0, y1} in the model's LOCAL space (trees: canopy
+// leaves ripple, trunk stays rigid).
+export function bakeGroup(root, castShadow = true, sway = null) {
   const out = bakeAccumulator();
+  _swayCtx = sway;
   _bakeInto(root, _identity, out);
+  _swayCtx = null;
   const mesh = buildBakedMesh(out, castShadow);
   if (!mesh) return root; // nothing bakeable — return the original
   for (const ex of out.extras) {
@@ -88,14 +169,17 @@ export function bakeGroup(root, castShadow = true) {
 }
 
 // bake a model INTO a shared per-chunk accumulator at a world offset —
-// whole-chunk decoration ends up as one mesh total
+// whole-chunk decoration ends up as one mesh total. Optional sway = {amp, h}:
+// the plant bends from its base (y) up to full amplitude at height h.
 const _bakeRootM = new THREE.Matrix4(); // MUST be distinct from _bakeMat4 —
 // _bakeInto composes node transforms into _bakeMat4 and would clobber it
-export function bakeAt(out, root, x, y, z, rotY = 0, scale = 1) {
+export function bakeAt(out, root, x, y, z, rotY = 0, scale = 1, sway = null) {
   _bakeRootM.makeRotationY(rotY);
   _bakeRootM.setPosition(x, y, z);
   if (scale !== 1) _bakeRootM.scale(new THREE.Vector3(scale, scale, scale));
+  _swayCtx = sway ? { amp: sway.amp, y0: y + 0.02, y1: y + (sway.h ?? 0.55) } : null;
   _bakeInto(root, _bakeRootM, out);
+  _swayCtx = null;
 }
 // identity check for the shared color-keyed materials — anything else
 // (clones, sprites, custom mats) is safe to dispose
@@ -633,23 +717,116 @@ export function makeBerryBush(rng = Math.random, berryColor = 0x4a6de0) {
 }
 
 // a broad-leafed jungle plant (banana-like): drooping paddles + a bloom
+// one gracefully ARCHED leaf built from tapering segments: rises from the
+// base, bends over, tip droops — the building block of banana plants, palms
+// and ferns. Returns a group whose origin is the leaf base.
+function arcLeaf(len, w, color, lift, droop, segs = 3) {
+  const g = new THREE.Group();
+  const segLen = len / segs;
+  let ang = lift;                 // current elevation of the segment
+  let px = 0, py = 0;             // running tip position in the leaf's plane
+  for (let s = 0; s < segs; s++) {
+    const sw = w * (1 - s * 0.28);           // taper toward the tip
+    const seg = box(sw, segLen, 0.025, color);
+    seg.castShadow = false;
+    // orient the segment along `ang` (0 = straight up)
+    seg.rotation.x = ang;
+    seg.position.set(0,
+      py + Math.cos(ang) * segLen * 0.5,
+      px + Math.sin(ang) * segLen * 0.5);
+    g.add(seg);
+    py += Math.cos(ang) * segLen;
+    px += Math.sin(ang) * segLen;
+    ang += droop;                            // each segment bends further over
+  }
+  return g;
+}
+
+// a banana-style jungle plant: short pseudo-stem + a crown of arched leaves
+// (v2 — the old flat 1.7 m slabs looked like green debris on the ground)
 export function makeJunglePlant(rng = Math.random) {
   const g = new THREE.Group();
-  const leaves = 4 + Math.floor(rng() * 3);
-  const c = [0x2d8a34, 0x1f6b2a, 0x39a03e][Math.floor(rng() * 3)];
+  const c = [0x2d8a34, 0x1f6b2a, 0x39a03e, 0x2a9a44][Math.floor(rng() * 4)];
+  const size = 0.8 + rng() * 0.55;           // 0.8-1.35 m stems
+  const stem = cyl(0.05 * size, 0.08 * size, 0.5 * size, 0x3a6b2a, 5);
+  stem.castShadow = false;
+  stem.position.y = 0.25 * size;
+  g.add(stem);
+  const leaves = 5 + Math.floor(rng() * 3);
   for (let i = 0; i < leaves; i++) {
-    const len = 1.0 + rng() * 0.7;
-    const leaf = box(0.34, len, 0.03, c);
     const a = (i / leaves) * Math.PI * 2 + rng() * 0.5;
-    leaf.position.set(Math.cos(a) * 0.28, len * 0.42, Math.sin(a) * 0.28);
-    leaf.rotation.y = -a + Math.PI / 2;
-    leaf.rotation.x = 0.7 + rng() * 0.5; // droop outward
+    const leaf = arcLeaf((0.7 + rng() * 0.4) * size, 0.2 * size, c,
+      0.35 + rng() * 0.3, 0.55 + rng() * 0.25);
+    leaf.position.y = 0.42 * size;
+    leaf.rotation.y = a;
     g.add(leaf);
   }
-  if (rng() < 0.35) { // an occasional jungle bloom
-    const bloom = sphere(0.14, 0xd95f8a, 6);
-    bloom.position.y = 0.75;
+  // young center leaves stand nearly upright
+  for (let i = 0; i < 2; i++) {
+    const leaf = arcLeaf(0.5 * size, 0.14 * size, c, 0.1, 0.3, 2);
+    leaf.position.y = 0.45 * size;
+    leaf.rotation.y = rng() * Math.PI * 2;
+    g.add(leaf);
+  }
+  if (rng() < 0.3) { // an occasional jungle bloom
+    const bloom = sphere(0.1 * size, 0xd95f8a, 6);
+    bloom.position.y = 0.62 * size;
     g.add(bloom);
+  }
+  return g;
+}
+
+// an understory palm: leaning ringed trunk + a burst of long drooping fronds
+export function makePalm(rng = Math.random) {
+  const g = new THREE.Group();
+  const h = 2.2 + rng() * 1.8;               // 2.2-4 m
+  const lean = (rng() - 0.5) * 0.5;          // whole tree leans a little
+  const segs = 4;
+  let px = 0, py = 0;
+  for (let s = 0; s < segs; s++) {
+    const segLen = h / segs;
+    const t = cyl(0.09 * (1 - s * 0.12), 0.11 * (1 - s * 0.12), segLen, 0x7a5c3a, 6);
+    const ang = lean * (s / segs);
+    t.rotation.z = ang;
+    t.position.set(px + Math.sin(ang) * segLen * 0.5, py + Math.cos(ang) * segLen * 0.5, 0);
+    g.add(t);
+    px += Math.sin(ang) * segLen;
+    py += Math.cos(ang) * segLen;
+  }
+  const crown = new THREE.Group();
+  crown.position.set(px, py, 0);
+  const fronds = 7 + Math.floor(rng() * 4);
+  const fc = rng() < 0.5 ? 0x2f8a2e : 0x27793a;
+  for (let i = 0; i < fronds; i++) {
+    const a = (i / fronds) * Math.PI * 2 + rng() * 0.4;
+    const f = arcLeaf(1.1 + rng() * 0.6, 0.16, fc, 0.9 + rng() * 0.4, 0.5, 3);
+    f.rotation.y = a;
+    crown.add(f);
+  }
+  // a couple of coconuts under the crown
+  if (rng() < 0.6) {
+    for (let i = 0; i < 2; i++) {
+      const nut = sphere(0.09, 0x6b4a2d, 5);
+      nut.position.set((rng() - 0.5) * 0.25, -0.12, (rng() - 0.5) * 0.25);
+      crown.add(nut);
+    }
+  }
+  g.add(crown);
+  return g;
+}
+
+// low broad-leaf ground cover: a handful of short wide leaves hugging the
+// floor — fills the understory without reading as debris
+export function makeGroundLeaves(rng = Math.random) {
+  const g = new THREE.Group();
+  const c = [0x2d7a30, 0x266b2c, 0x358a38][Math.floor(rng() * 3)];
+  const n = 3 + Math.floor(rng() * 3);
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2 + rng() * 0.6;
+    const leaf = arcLeaf(0.3 + rng() * 0.2, 0.16, c, 0.55, 0.5, 2);
+    leaf.rotation.y = a;
+    leaf.position.y = 0.02;
+    g.add(leaf);
   }
   return g;
 }
@@ -2696,35 +2873,78 @@ export function makeWheatTuft(rng) {
   return g;
 }
 
-// a fern: a rosette of arched flat blades (jungle undergrowth)
+// a fern: a rosette of arching segmented fronds (v2 — the old single flat
+// boxes read as stiff green planks from any distance)
 export function makeFern(rng) {
   const g = new THREE.Group();
-  const blades = 6 + Math.floor(rng() * 4);
+  const fronds = 6 + Math.floor(rng() * 4);
   const color = [0x2f7a2e, 0x3a8a34, 0x27682a][Math.floor(rng() * 3)];
-  for (let i = 0; i < blades; i++) {
-    const len = 0.5 + rng() * 0.45;
-    const b = box(0.09, len, 0.015, color);
-    const a = (i / blades) * Math.PI * 2 + rng() * 0.4;
-    b.position.set(Math.cos(a) * 0.12, len * 0.42, Math.sin(a) * 0.12);
-    b.rotation.y = -a + Math.PI / 2;
-    b.rotation.x = 0.85 + rng() * 0.35; // arch outward
-    b.rotation.z = (rng() - 0.5) * 0.2;
-    b.castShadow = false;
-    g.add(b);
+  const size = 0.75 + rng() * 0.45;
+  for (let i = 0; i < fronds; i++) {
+    const a = (i / fronds) * Math.PI * 2 + rng() * 0.4;
+    const f = arcLeaf((0.42 + rng() * 0.2) * size, 0.1 * size, color,
+      0.5 + rng() * 0.3, 0.6 + rng() * 0.2, 2);
+    f.rotation.y = a;
+    f.position.y = 0.03;
+    g.add(f);
   }
+  // a couple of young fronds standing in the middle
+  const young = arcLeaf(0.3 * size, 0.07 * size, color, 0.15, 0.35, 2);
+  young.rotation.y = rng() * Math.PI * 2;
+  young.position.y = 0.03;
+  g.add(young);
   return g;
 }
 
 export function makeGrassTuft(color, rng) {
   const g = new THREE.Group();
-  const blades = 3 + Math.floor(rng() * 3);
+  const blades = 4 + Math.floor(rng() * 4);
   for (let i = 0; i < blades; i++) {
-    const h = 0.42 + rng() * 0.3;
-    const b = cone(0.055, h, color, 4);
+    const h = 0.42 + rng() * 0.34;
+    const b = cone(0.05, h, color, 4);
     b.castShadow = false;
-    b.position.set((rng() - 0.5) * 0.4, h / 2, (rng() - 0.5) * 0.4);
-    b.rotation.set((rng() - 0.5) * 0.5, 0, (rng() - 0.5) * 0.5);
+    b.position.set((rng() - 0.5) * 0.48, h / 2, (rng() - 0.5) * 0.48);
+    b.rotation.set((rng() - 0.5) * 0.55, 0, (rng() - 0.5) * 0.55);
     g.add(b);
+  }
+  return g;
+}
+
+// waterside reeds: tall thin stalks, a few tipped with cattail heads
+export function makeReeds(rng) {
+  const g = new THREE.Group();
+  const stalks = 5 + Math.floor(rng() * 5);
+  for (let i = 0; i < stalks; i++) {
+    const h = 1.1 + rng() * 0.8;
+    const s = box(0.035, h, 0.035, rng() < 0.5 ? 0x5a7d3a : 0x6b8a44);
+    s.castShadow = false;
+    const a = rng() * Math.PI * 2, r = rng() * 0.28;
+    s.position.set(Math.cos(a) * r, h / 2, Math.sin(a) * r);
+    s.rotation.z = (rng() - 0.5) * 0.18;
+    g.add(s);
+    if (rng() < 0.45) {
+      const head = cyl(0.05, 0.05, 0.24, 0x6b4a2d, 5);
+      head.castShadow = false;
+      head.position.set(s.position.x + s.rotation.z * -h * 0.5, h + 0.1, s.position.z);
+      head.rotation.z = s.rotation.z;
+      g.add(head);
+    }
+  }
+  return g;
+}
+
+// a small cluster of ground pebbles — cheap terrain detail for every biome
+export function makePebbles(rng, color = 0x8a8a84) {
+  const g = new THREE.Group();
+  const n = 3 + Math.floor(rng() * 4);
+  for (let i = 0; i < n; i++) {
+    const s = 0.05 + rng() * 0.1;
+    const p = new THREE.Mesh(new THREE.DodecahedronGeometry(s, 0), mat(color));
+    p.castShadow = false;
+    const a = rng() * Math.PI * 2, r = rng() * 0.45;
+    p.position.set(Math.cos(a) * r, s * 0.62, Math.sin(a) * r); // slightly buried
+    p.rotation.set(rng() * 3, rng() * 3, rng() * 3);
+    g.add(p);
   }
   return g;
 }
@@ -2756,10 +2976,17 @@ export function makeMushroom(rng) {
 
 export function makeBush(color, rng) {
   const g = new THREE.Group();
-  for (let i = 0; i < 2 + Math.floor(rng() * 2); i++) {
-    const s = sphere(0.2 + rng() * 0.14, color, 6);
-    s.position.set((rng() - 0.5) * 0.4, 0.18, (rng() - 0.5) * 0.4);
-    s.scale.y = 0.75;
+  // a rounded mound of overlapping puffs with slight shade variation
+  const puffs = 4 + Math.floor(rng() * 3);
+  const c = new THREE.Color(color);
+  for (let i = 0; i < puffs; i++) {
+    const shade = c.clone().multiplyScalar(0.85 + rng() * 0.3);
+    const s = new THREE.Mesh(new THREE.SphereGeometry(0.16 + rng() * 0.14, 6, 5),
+      new THREE.MeshLambertMaterial({ color: shade }));
+    s.castShadow = false;
+    const a = rng() * Math.PI * 2, r = rng() * 0.3;
+    s.position.set(Math.cos(a) * r, 0.12 + rng() * 0.16, Math.sin(a) * r);
+    s.scale.y = 0.8;
     g.add(s);
   }
   return g;
