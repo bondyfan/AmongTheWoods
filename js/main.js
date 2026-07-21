@@ -112,7 +112,7 @@ const TREE_DETAIL = { low: 0, medium: 1, high: 2 };
 // geometric-mean display luma we drive toward; the EXP clamps stop the sky from
 // greying out (floor) or deep shade from blowing to white (ceiling).
 let _expCur = 1, _expTarget = 1;
-const AE_TARGET = 0.40, AE_EXP_MIN = 0.5, AE_EXP_MAX = 2.2;
+const AE_TARGET = 0.45, AE_EXP_MIN = 0.62, AE_EXP_MAX = 2.2;
 // shadow-distance rigs: {b = ortho half-extent m, s = map px}. The far plane
 // and the sun's stand-off distance are derived from b so the whole frustum is
 // always covered (updateCamera parks the sun at b*2 along the fixed sun dir).
@@ -5159,14 +5159,13 @@ function applyGraphics() {
     renderer.toneMappingExposure = settings.filmic ? 1.12 : 1;
     _expCur = renderer.toneMappingExposure;
   }
-  // vivid grading: a free GPU-composited CSS filter on the canvas. When the post
-  // path runs (bloom/AO/auto-exp) we DROP the contrast/brightness multipliers so
-  // they don't stack on top of AO (which was crushing contrast) — keeping only a
-  // saturation pop. The metering loop absorbs the ~3% brightness either way.
-  const postActive = settings.bloom || settings.ssao || settings.autoExp;
-  renderer.domElement.style.filter = settings.vivid === false ? ''
-    : postActive ? 'saturate(1.08)'
-    : 'contrast(1.06) brightness(1.03)';
+  // vivid grading: a free GPU-composited CSS filter on the canvas. It is now the
+  // SAME whether or not the post path runs, so toggling AO / auto-exposure no
+  // longer causes an incidental brightness/contrast jump — you see ONLY the AO
+  // or exposure effect. (AO is localized by the SSAO above-plane guard, so a
+  // mild global contrast here doesn't stack into a crush.)
+  renderer.domElement.style.filter = settings.vivid === false
+    ? '' : 'contrast(1.06) brightness(1.03)';
   scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
 }
 
@@ -5681,7 +5680,7 @@ function step() {
   if (usePost) {
     postfx.render(scene, camera, {
       ssao: !!settings.ssao, bloom: !!settings.bloom,
-      aoRadius: 1.8, aoStrength: 0.55, aoFloor: 0.55,
+      aoRadius: 1.8, aoStrength: 0.85, aoFloor: 0.30,
       meter: !!settings.autoExp && game.mode === 'play',
     });
   } else { renderer.setRenderTarget(null); renderer.render(scene, camera); }

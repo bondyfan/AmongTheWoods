@@ -181,12 +181,15 @@ const COMPOSITE_FRAG = /* glsl */`
   void main() {
     vec3 c = useFXAA ? fxaa(vUv) : texture2D(tScene, vUv).rgb;
     if (useAO) {
-      float ao = texture2D(tAO, vUv).r;            // 1 = open, <1 = occluded
-      ao = mix(1.0, ao, aoStrength);               // dialled-back strength
-      ao = max(ao, aoFloor);                       // never crush to black
-      float luma = dot(c, LUMA);                   // fade AO out of bright/lit pixels
-      float ambientW = 1.0 - smoothstep(0.55, 0.92, luma);
-      float f = mix(1.0, ao, ambientW);
+      float ao = texture2D(tAO, vUv).r;            // 1 = open (guard pins it), <1 = occluded
+      ao = mix(1.0, ao, aoStrength);               // scale the occlusion amount
+      ao = max(ao, aoFloor);                       // deepest allowed darkening
+      // open ground is ALREADY 1.0 (SSAO above-plane guard), so let AO show
+      // FULLY in crevices/contacts — only spare near-white highlights so
+      // speculars don't get gouged. (The old ambient-weight faded AO out of
+      // everything bright, which is why it looked like nothing happened.)
+      float hl = smoothstep(0.9, 1.0, dot(c, LUMA));
+      float f = mix(ao, 1.0, hl);
       c = l2s(s2l(c) * f);                          // multiply in LINEAR light
     }
     if (useBloom) c += texture2D(tBloom, vUv).rgb * bloomStrength;
@@ -242,7 +245,7 @@ export class PostFX {
     this.compositeMat = mat(COMPOSITE_FRAG, {
       tScene: { value: null }, tAO: { value: null }, tBloom: { value: null },
       texel: { value: new THREE.Vector2() },
-      aoStrength: { value: 0.55 }, aoFloor: { value: 0.55 }, bloomStrength: { value: 0.55 },
+      aoStrength: { value: 0.85 }, aoFloor: { value: 0.30 }, bloomStrength: { value: 0.55 },
       useAO: { value: false }, useBloom: { value: false }, useFXAA: { value: false },
     });
 
@@ -336,8 +339,8 @@ export class PostFX {
     c.useAO.value = !!opts.ssao;
     c.useBloom.value = !!opts.bloom;
     c.useFXAA.value = true;
-    c.aoStrength.value = opts.aoStrength ?? 0.55;
-    c.aoFloor.value = opts.aoFloor ?? 0.55;
+    c.aoStrength.value = opts.aoStrength ?? 0.85;
+    c.aoFloor.value = opts.aoFloor ?? 0.30;
     this._pass(this.compositeMat, null);
 
     if (opts.meter) this._reduceLuma(this.rtScene);
