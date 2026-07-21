@@ -2564,12 +2564,12 @@ export class Player {
         leftArm.rotation.x = -1.5;
         rightArm.rotation.x = -0.4 - k * 0.85; // drawing the string back
       } else {
-        // raise the weapon straight OVERHEAD (θ≈3.05 points the hanging arm
-        // almost vertically up). Eased so the arm shoots up early and then
-        // hovers high — the player clearly sees the axe held above the head.
-        const raise = Math.pow(k, 0.6);
-        rightArm.rotation.x = 3.05 * raise;                   // up over the shoulder
-        rightArm.rotation.z = -0.4 * raise * this.swingSide;  // tilted to this swing's side
+        // Lift the axe overhead UP THE FRONT — negative θ swings the hanging
+        // arm forward-and-up (never behind the back). Ease-out (√k) so it
+        // snaps up and then HOVERS above the head, waiting for the chop.
+        const raise = Math.pow(k, 0.5);
+        rightArm.rotation.x = -2.7 * raise;                   // hanging → overhead, via the FRONT
+        rightArm.rotation.z = -0.3 * raise * this.swingSide;  // tilted to this swing's side
       }
     } else if (this.attackT > 0) {
       this.attackT -= dt;
@@ -2578,16 +2578,15 @@ export class Player {
         leftArm.rotation.x = -1.5;
         rightArm.rotation.x = -1.2 * Math.sin(k * Math.PI);
       } else {
-        // the windup parked the arm straight overhead (+3.05). The chop must
-        // CONTINUE FORWARD over the top — θ increasing 3.05 → 5.78 carries the
-        // hand over the crown and down the FRONT, ending buried forward-low
-        // (5.78 ≡ -0.5). Decreasing θ instead would swing down the BACK and
-        // scoop up from below — the exact underhand poke this replaces.
+        // the windup parked the arm overhead-forward (θ = -2.7). The chop
+        // sweeps DOWN THE FRONT to buried-low (θ = -0.4): θ rises the whole
+        // way so the hand stays on the front, arcing top → forward → down.
+        // Ease-in (k²) so the axe dwells at the top a beat, then whips down.
         const side = this.attackSide || 1;
-        const whip = k * k * (3 - 2 * k); // smoothstep over the whole swing
-        rightArm.rotation.x = 3.05 + 2.73 * whip;          // over the top → down the front
-        rightArm.rotation.z = (-0.4 + 0.7 * whip) * side;  // sweep across the body
-        rightSocket.rotation.x = -0.6 * whip * (1 - k * 0.4); // blade bites forward-down
+        const p = k * k;                                   // ease-in: wait high, then swing
+        rightArm.rotation.x = -2.7 + 2.3 * p;              // overhead → forward-low, all front
+        rightArm.rotation.z = (-0.3 + 0.6 * p) * side;     // sweep across the body
+        rightSocket.rotation.x = 0.5 * p;                  // wrist snaps the blade down
       }
     } else {
       rightArm.rotation.x = -swing * 0.6;
