@@ -57,9 +57,11 @@ const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerH
 const skyDome = makeSkyDome(45);
 scene.add(skyDome);
 
-const hemi = new THREE.HemisphereLight(0xdfeadf, 0x3a4a35, 0.9);
+// lighting leans DIRECTIONAL: a strong warm sun against a modest ambient —
+// deep readable shadows and punchy sun-lit faces instead of a flat wash
+const hemi = new THREE.HemisphereLight(0xdfeadf, 0x2e3c2a, 0.74);
 scene.add(hemi);
-const sun = new THREE.DirectionalLight(0xfff2dd, 1.4);
+const sun = new THREE.DirectionalLight(0xfff2dd, 1.8);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.camera.left = -40; sun.shadow.camera.right = 40;
@@ -2386,6 +2388,24 @@ const settings = Object.assign(
     saveGfx();
   });
 
+  // sky/world extras — each is a straight uniform or radius gate, so
+  // toggling is instant (no chunk rebuilds except distant terrain's tiles)
+  settings.clouds ??= true;
+  settings.farTerrain ??= true;
+  settings.waterFx ??= true;
+  settings.vivid ??= true;
+  $id('set-clouds').checked = settings.clouds !== false;
+  $id('set-farterrain').checked = settings.farTerrain !== false;
+  $id('set-waterfx').checked = settings.waterFx !== false;
+  $id('set-vivid').checked = settings.vivid !== false;
+  for (const [id, key] of [['set-clouds', 'clouds'], ['set-farterrain', 'farTerrain'],
+                           ['set-waterfx', 'waterFx'], ['set-vivid', 'vivid']]) {
+    $id(id).addEventListener('change', () => {
+      settings[key] = $id(id).checked;
+      saveGfx();
+    });
+  }
+
   // volume sliders (persisted); music slider maps 100% → volume 0.7
   const sfxSlider = $id('set-sfx'), musicSlider = $id('set-music');
   settings.sfxVol ??= 100;
@@ -4466,8 +4486,8 @@ function updateAtmosphere(dt) {
   // themselves — the screen overlay alone left the geometry too bright
   biomeLightK += (Math.min(1, biome.light ?? 1) - biomeLightK) * Math.min(1, dt * 1.5);
   const nightK = game.nightK || 0;
-  hemi.intensity = (0.9 - 0.62 * caveK) * biomeLightK * (1 - 0.68 * nightK);
-  sun.intensity = 1.4 * (1 - 0.8 * caveK) * biomeLightK * (1 - 0.85 * nightK);
+  hemi.intensity = (0.74 - 0.5 * caveK) * biomeLightK * (1 - 0.68 * nightK);
+  sun.intensity = 1.8 * (1 - 0.8 * caveK) * biomeLightK * (1 - 0.85 * nightK);
   // warm the sun at dawn/dusk, silver it at deep night
   const dusk = Math.max(0, 1 - Math.abs(nightK - 0.5) * 4); // peaks at the twilight band
   sun.color.setRGB(1 - 0.25 * nightK, 0.95 - 0.2 * nightK + 0.05 * dusk, 0.87 - 0.15 * nightK - 0.15 * dusk);
@@ -4477,12 +4497,16 @@ function updateAtmosphere(dt) {
   // the far-LOD chunk tier (world.farRadius) fills the land out to it.
   const fogK = (FOG_SCALE[settings.drawDist ?? 'normal'] ?? 1)
     * (autoQuality.stage >= 3 ? 0.75 : 1);
+  // with distant terrain OFF the land still ends at viewRadius, so the fog
+  // wall pulls in to hide the edge (the pre-far-LOD look, cheapest)
+  const farLod = settings.farTerrain !== false;
   const baseNear = game.rpgView ? 46 : 35;
-  const baseFar = game.rpgView ? 205 : 115;
+  const baseFar = game.rpgView ? (farLod ? 205 : 150) : (farLod ? 115 : 110);
   scene.fog.near = (baseNear - 16 * caveK) * fogK;
   scene.fog.far = (baseFar - (baseFar - 50) * caveK) * fogK;
+  if (!farLod) scene.fog.far = Math.min(scene.fog.far, 150);
   syncFarToFog(); // the camera stops rendering what the fog already hides
-  world.farRadius = game.kind === 'survival'
+  world.farRadius = (game.kind === 'survival' && farLod)
     ? Math.min(14, Math.ceil((scene.fog.far * 1.05) / 40) + 1)
     : 0; // MOBA / arena maps are small and walled — no far tier
 
@@ -4576,6 +4600,10 @@ function applyGraphics() {
   }
   renderer.toneMapping = settings.filmic ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
   renderer.toneMappingExposure = settings.filmic ? 1.12 : 1;
+  // vivid grading: a free GPU-composited CSS filter on the canvas — richer
+  // saturation and a touch of contrast, no render cost at all
+  renderer.domElement.style.filter = settings.vivid !== false
+    ? 'saturate(1.22) contrast(1.06) brightness(1.03)' : '';
   scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
 }
 
@@ -4744,9 +4772,11 @@ function step() {
   // water surfaces (ocean/lakes/rivers) share the same clock + sun direction
   _waterSunDir.set(24, 19, 15).normalize(); // matches the fixed sun offset in updateCamera
   if (WATER_SHADERS.length) {
+    const waterFx = settings.waterFx !== false ? 1 : 0;
     for (const sh of WATER_SHADERS) {
       sh.uniforms.uTime.value = _windT;
       sh.uniforms.uSunDir.value.copy(_waterSunDir);
+      sh.uniforms.uFx.value = waterFx;
     }
   }
   // sky dome: re-center on the camera (no parallax at any radius/zoom).
@@ -4766,7 +4796,8 @@ function step() {
   // then collapses to the plain fog/sky gradient — no sun in a dungeon)
   const dayK = game.dungeon ? 0 : (1 - (game.nightK || 0) * 0.92) * (1 - atmoCaveK);
   skyU.uDay.value = dayK;
-  skyU.uCloudAmt.value = game.dungeon ? 0 : 0.9 * (1 - atmoCaveK);
+  skyU.uCloudAmt.value = (game.dungeon || settings.clouds === false)
+    ? 0 : 0.82 * (1 - atmoCaveK);
 
   // on-screen FPS meter (smoothed; refreshes the label ~5×/s)
   if (settings.showFps && dt > 0) {

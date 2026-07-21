@@ -247,10 +247,10 @@ const SKY_FRAG = /* glsl */`
     if (h > 0.015 && uCloudAmt > 0.001) {
       vec2 cuv = dir.xz / (h + 0.18) * 0.55 + uTime * vec2(0.0065, 0.0028);
       float den = cfbm(cuv * 1.1) * 0.72 + cfbm(cuv * 3.1 + 40.0) * 0.28;
-      cov = smoothstep(0.5, 0.7, den) * smoothstep(0.015, 0.14, h) * uCloudAmt;
-      float thick = smoothstep(0.5, 0.92, den);
-      vec3 cLight = mix(vec3(0.17, 0.19, 0.26), vec3(1.03, 1.01, 0.98), uDay);
-      vec3 cShade = mix(vec3(0.09, 0.10, 0.15), vec3(0.62, 0.66, 0.75), uDay);
+      cov = smoothstep(0.54, 0.72, den) * smoothstep(0.015, 0.14, h) * uCloudAmt;
+      float thick = smoothstep(0.54, 0.95, den);
+      vec3 cLight = mix(vec3(0.17, 0.19, 0.26), vec3(1.08, 1.06, 1.02), uDay);
+      vec3 cShade = mix(vec3(0.09, 0.10, 0.15), vec3(0.72, 0.76, 0.84), uDay);
       vec3 cloudCol = mix(cLight, cShade, thick);
       // silver lining: cloud edges facing the sun catch its color
       cloudCol += uSunColor * pow(sunDot, 4.0) * 0.35 * (1.0 - thick) * uDay;
@@ -322,16 +322,18 @@ export function waterMaterial(color, opacity = 0.9) {
   m.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = { value: 0 };
     shader.uniforms.uSunDir = { value: new THREE.Vector3(0.35, 0.85, 0.25) };
+    shader.uniforms.uFx = { value: 1 }; // water-effects setting: 0 = still water
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>
 varying vec3 vWaterWP;
 varying vec3 vSunDirView;
 uniform float uTime;
-uniform vec3 uSunDir;`)
+uniform vec3 uSunDir;
+uniform float uFx;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
 vec3 wpWater = (modelMatrix * vec4(transformed, 1.0)).xyz;
-transformed.y += sin(uTime * 0.55 + wpWater.x * 0.05 + wpWater.z * 0.04) * 0.06
-  + sin(uTime * 0.9 - wpWater.x * 0.11 + wpWater.z * 0.07) * 0.03;
+transformed.y += (sin(uTime * 0.55 + wpWater.x * 0.05 + wpWater.z * 0.04) * 0.06
+  + sin(uTime * 0.9 - wpWater.x * 0.11 + wpWater.z * 0.07) * 0.03) * uFx;
 vWaterWP = wpWater;
 vSunDirView = normalize(mat3(viewMatrix) * uSunDir);`);
     shader.fragmentShader = shader.fragmentShader
@@ -344,7 +346,7 @@ vec3 vDirWater = normalize(vViewPosition);
 float fresWater = pow(1.0 - max(dot(vDirWater, normal), 0.0), 2.5);
 outgoingLight += diffuse * fresWater * 0.35;
 vec3 halfWater = normalize(vDirWater + vSunDirView);
-float glintWater = pow(max(dot(normal, halfWater), 0.0), 60.0);
+float glintWater = pow(max(dot(normal, halfWater), 0.0), 60.0) * uFx;
 float rippleWater = sin(vWaterWP.x * 2.6 + uTime * 1.4) * sin(vWaterWP.z * 2.2 - uTime * 1.1);
 glintWater *= smoothstep(0.3, 1.0, rippleWater * 0.5 + 0.5);
 outgoingLight += vec3(1.0, 0.98, 0.9) * glintWater * 1.6;

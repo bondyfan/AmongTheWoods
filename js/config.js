@@ -141,9 +141,9 @@ export function zoneInfoAt(x, z, shallow = false) {
 // trees = weights for tree variants, snowy adds snow caps to pines.
 // packs: null = no packs in this zone, otherwise spawn config.
 export const BIOMES = [
-  { name: 'Verdant Forest', ground: 0x55803c, ground2: 0x669147, dirt: 0x8a6b42,
-    fog: 0xc8dcae, sky: 0xaecfe8,
-    foliage: [0x2d6a2d, 0x3c7f37, 0x4c8f3f], trunk: 0x6b4a2d,
+  { name: 'Verdant Forest', ground: 0x5a8a3e, ground2: 0x6f9d4a, dirt: 0x8a6b42,
+    fog: 0xd8ecc2, sky: 0x8ecdf2,
+    foliage: [0x2f7a2f, 0x429340, 0x55a648], trunk: 0x6b4a2d,
     trees: { pine: 0.4, leafy: 0.4, birch: 0.2, dead: 0 }, snowy: false,
     grass: 0x6fa04c, flowers: true, mushrooms: false,
     enemies: ['rat', 'spider', 'snake'], humanoids: ['bandit'], packs: null, treeDensity: 1.0, denseForests: true,
