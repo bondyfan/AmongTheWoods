@@ -23,6 +23,7 @@ import { MobaWorld } from './mobaworld.js';
 import { DungeonWorld } from './dungeon.js';
 import { Moba } from './moba.js';
 import { Player } from './player.js';
+import { preloadHumanModel, humanModelEnabled } from './humanmodel.js';
 import { EnemyManager } from './enemies.js';
 import { Projectiles } from './projectiles.js';
 import { Companions } from './companions.js';
@@ -272,6 +273,9 @@ const panels = new Panels({
 
 await loadWorldPatch(); // admin World-Editor overrides (assets/world-patch.json)
 applyTweaks();          // …including enemy/item stat tweaks from the object editor
+if (humanModelEnabled()) { // experimental rigged-human avatar (Graphics settings)
+  try { await preloadHumanModel(); } catch (e) { console.warn('[human] model load failed, using box man', e); }
+}
 let world = new World(scene, game.seed);
 
 const player = new Player(scene, {
@@ -530,52 +534,60 @@ function setRain(on, dt) {
   }
 }
 
-// ---------- whiteout weather: Frozen Peak blizzards & Desert sandstorms ----------
-let blizzard = { on: false, t: 0, cd: 45 };
+// ---------- whiteout weather: blizzards, sandstorms, downpours, mists ----------
+// blizzard.k is the SMOOTHED storm intensity (0..1) that updateAtmosphere
+// blends the fog toward spec.fog/fogC with — the old code nudged scene.fog
+// AFTER the atmosphere reset it each frame, so storms barely registered.
+let blizzard = { on: false, t: 0, cd: 45, k: 0, spec: null };
 function tickBlizzard(dt) {
   const name = BIOMES[game.biomeIndex]?.name;
   const spec = name === 'Frozen Peak'
-      ? { fog: 60, tint: 'rgba(230,238,245,0.62)', dur: 22, cdMin: 70, cdRng: 50,
+      ? { fog: 13, fogC: 0xdfe7ee, tint: 'rgba(230,238,245,0.85)', dur: 22, cdMin: 70, cdRng: 50,
           on: '🌨️ A BLIZZARD swallows the world — stay close to the bonfires!', off: '🌨️ The blizzard passes…' }
     : name === 'Scorched Desert'
-      ? { fog: 70, tint: 'rgba(224,196,130,0.55)', dur: 15, cdMin: 55, cdRng: 45,
-          on: '🏜️ A SANDSTORM rolls in — visibility drops!', off: '🏜️ The sandstorm settles…' }
+      ? { fog: 15, fogC: 0xd8bc86, tint: 'rgba(224,196,130,0.82)', dur: 15, cdMin: 55, cdRng: 45,
+          on: '🏜️ A SANDSTORM rolls in — you can barely see your hands!', off: '🏜️ The sandstorm settles…' }
     : name === 'Jungle'
-      ? { fog: 80, tint: 'rgba(120,150,170,0.32)', dur: 26, cdMin: 45, cdRng: 40, rain: true,
+      ? { fog: 55, fogC: 0x7b98a8, tint: 'rgba(120,150,170,0.32)', dur: 26, cdMin: 45, cdRng: 40, rain: true,
           on: '🌧️ A jungle downpour opens up!', off: '🌧️ The rain eases off…' }
     : name === 'Murky Swamp'
-      ? { fog: 55, tint: 'rgba(150,160,150,0.42)', dur: 30, cdMin: 40, cdRng: 45,
+      ? { fog: 30, fogC: 0x99a495, tint: 'rgba(150,160,150,0.5)', dur: 30, cdMin: 40, cdRng: 45,
           on: '🌫️ A thick fog rolls across the mire — you can barely see.', off: '🌫️ The fog thins…' }
+    : name === 'Dark Forest'
+      ? { fog: 26, fogC: 0x2c342c, tint: 'rgba(120,130,120,0.42)', dur: 24, cdMin: 50, cdRng: 55,
+          on: '🌫️ A cold mist creeps between the trees…', off: '🌫️ The mist lifts…' }
     : null;
   const el = $id('blizzard');
   if (!spec) {
-    if (blizzard.on) { blizzard.on = false; applyViewMode(); }
+    blizzard.on = false;
     setRain(false, dt); // leaving a weather biome kills the downpour + its rain loop
-    el.style.opacity = 0;
-    return;
-  }
-  el.style.background = `radial-gradient(ellipse at center, ${spec.tint.replace(/[\d.]+\)$/, '0.15)')} 0%, ${spec.tint} 100%)`;
-  setRain(!!(blizzard.on && spec.rain), dt);
-  if (blizzard.on) {
-    blizzard.t -= dt;
-    scene.fog.far += (spec.fog - scene.fog.far) * Math.min(1, dt * 2);
-    el.style.opacity = spec.rain ? 0.28 : 0.55; // rain is a light wash, not a whiteout
-    if (blizzard.t <= 0) {
-      blizzard.on = false;
-      blizzard.cd = spec.cdMin + Math.random() * spec.cdRng;
-      applyViewMode(); // restores the mode's fog distance
-      ui.toast(spec.off, '');
-    }
   } else {
-    blizzard.cd -= dt;
-    el.style.opacity = 0;
-    if (blizzard.cd <= 0) {
-      blizzard.on = true;
-      blizzard.t = spec.dur;
-      ui.toast(spec.on, 'boss');
-      audio.sfx('special', 0.4);
+    el.style.background = `radial-gradient(ellipse at center, ${spec.tint.replace(/[\d.]+\)$/, '0.15)')} 0%, ${spec.tint} 100%)`;
+    setRain(!!(blizzard.on && spec.rain), dt);
+    if (blizzard.on) {
+      blizzard.t -= dt;
+      if (blizzard.t <= 0) {
+        blizzard.on = false;
+        blizzard.cd = spec.cdMin + Math.random() * spec.cdRng;
+        ui.toast(spec.off, '');
+      }
+    } else {
+      blizzard.cd -= dt;
+      if (blizzard.cd <= 0) {
+        blizzard.on = true;
+        blizzard.t = spec.dur;
+        ui.toast(spec.on, 'boss');
+        audio.sfx('special', 0.4);
+      }
     }
   }
+  // intensity ramps in over ~2 s and fades out over ~3; the last spec is
+  // kept while fading so leaving the biome mid-storm eases out gracefully
+  if (blizzard.on && spec) blizzard.spec = spec;
+  blizzard.k += ((blizzard.on ? 1 : 0) - blizzard.k) * Math.min(1, dt * (blizzard.on ? 0.7 : 0.45));
+  if (!blizzard.on && blizzard.k < 0.01) blizzard.spec = null;
+  el.style.opacity = blizzard.spec
+    ? ((blizzard.spec.rain ? 0.3 : 0.85) * blizzard.k).toFixed(3) : 0;
 }
 
 // ---------- swamp sulfur bubbles: telegraphed geysers on a hash grid ----------
@@ -2351,6 +2363,7 @@ const settings = Object.assign(
   settings.drawDist ??= 'far'; // default to a generous view distance
   settings.showFps ??= false;
   settings.fpsCap ??= 0; // 0 = unlimited
+  settings.humanModel ??= false; // experimental rigged-human avatar
   $id('set-texdetail').value = String(settings.texDetail);
   $id('set-shadows').checked = settings.shadows !== false;
   $id('set-resscale').value = String(settings.resScale);
@@ -2366,6 +2379,19 @@ const settings = Object.assign(
     $id('fps-meter').classList.toggle('hidden', !settings.showFps);
     localStorage.setItem('atw-settings', JSON.stringify(settings));
     audio.sfx('click', 0.4);
+  });
+
+  // Experimental rigged-human avatar — applied on the next page load (the player
+  // mesh is built once, during early boot).
+  const humanBox = $id('set-humanmodel');
+  humanBox.checked = !!settings.humanModel;
+  humanBox.addEventListener('change', () => {
+    settings.humanModel = humanBox.checked;
+    localStorage.setItem('atw-settings', JSON.stringify(settings));
+    audio.sfx('click', 0.4);
+    ui.toast(humanBox.checked
+      ? '🧍 Human avatar ON — reload the page to apply'
+      : '🧍 Human avatar OFF — reload the page to apply', 'info');
   });
 
   // FPS cap slider (150 on the track = unlimited → stored as 0)
@@ -4551,18 +4577,40 @@ function updateAtmosphere(dt) {
   const farLod = settings.farTerrain !== false;
   const baseNear = game.rpgView ? 46 : 35;
   const baseFar = game.rpgView ? (farLod ? 205 : 150) : (farLod ? 115 : 110);
-  scene.fog.near = (baseNear - 16 * caveK) * fogK;
-  scene.fog.far = (baseFar - (baseFar - 50) * caveK) * fogK;
-  if (!farLod) scene.fog.far = Math.min(scene.fog.far, 150);
-  syncFarToFog(); // the camera stops rendering what the fog already hides
+  let fogNear = (baseNear - 16 * caveK) * fogK;
+  let fogFar = (baseFar - (baseFar - 50) * caveK) * fogK;
+  if (!farLod) fogFar = Math.min(fogFar, 150);
+  // gloomy biomes CAP the fog wall in absolute meters (Dark Forest ~90,
+  // Haunted ~42 — darkness ahead, whatever the draw-distance setting says);
+  // smoothed so crossing the border closes the dark in over a few seconds
+  _fogCap += ((biome.fogCap ?? 999) - _fogCap) * Math.min(1, dt * 1.1);
+  if (_fogCap < fogFar) {
+    fogFar = _fogCap;
+    fogNear = Math.min(fogNear, _fogCap * 0.3);
+  }
+  // far tier sized from the CALM weather fog — storms are temporary and must
+  // not evict/rebuild hundreds of far tiles on every gust
   world.farRadius = (game.kind === 'survival' && farLod)
-    ? Math.min(14, Math.ceil((scene.fog.far * 1.05) / 40) + 1)
+    ? Math.min(14, Math.ceil((fogFar * 1.05) / 40) + 1)
     : 0; // MOBA / arena maps are small and walled — no far tier
+  // STORMS crush visibility toward the spec as their intensity ramps
+  if (blizzard.k > 0.01 && blizzard.spec) {
+    fogFar += (blizzard.spec.fog - fogFar) * blizzard.k;
+    fogNear = Math.min(fogNear, fogFar * 0.25);
+  }
+  scene.fog.near = fogNear;
+  scene.fog.far = fogFar;
+  syncFarToFog(); // the camera stops rendering what the fog already hides
 
   // caveK already fades smoothly with distance, so apply it directly; the
   // slow time-lerp is only for biome-to-biome transitions out in the open
   const fogTarget = _atmoA.set(biome.fog).lerp(NIGHT_FOG, nightK * 0.8).lerp(caveFog, caveK);
   const skyTarget = _atmoB.set(biome.sky).lerp(NIGHT_SKY, nightK * 0.85).lerp(caveFog, caveK);
+  if (blizzard.k > 0.01 && blizzard.spec?.fogC) {
+    // the storm has its own air color (white blizzard, ochre sand wall…)
+    fogTarget.lerp(_stormC.set(blizzard.spec.fogC), blizzard.k * 0.9);
+    skyTarget.lerp(_stormC, blizzard.k * 0.9);
+  }
   if (caveK > 0.01) {
     fogColor.copy(fogTarget);
     skyColor.copy(skyTarget);
@@ -4580,6 +4628,8 @@ function updateAtmosphere(dt) {
 const FOG_SCALE = { short: 0.72, normal: 1, far: 1.6, furthest: 2.4 };
 const NIGHT_SKY = new THREE.Color(0x0a1230), NIGHT_FOG = new THREE.Color(0x141a34);
 const _atmoA = new THREE.Color(), _atmoB = new THREE.Color();
+const _stormC = new THREE.Color();
+let _fogCap = 999; // smoothed per-biome fog ceiling (Dark/Haunted close in)
 function syncFarToFog() {
   if (game.editorView) return; // the god view manages its own far plane
   const want = scene.fog.far * 1.22 + 14;

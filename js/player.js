@@ -11,6 +11,7 @@ import { WORLD, XP_LEVELS, MAX_LEVEL, itemById, spellById, consumableById,
 import { makeMan, makeAxe, makeBow, makePickaxe, makeTorchMesh, makeClub,
          makeSword, makeHandSpear, makeCrossbow, makeShield } from './models.js';
 import { audio } from './audio.js';
+import { makeHumanMan, humanReady, humanModelEnabled } from './humanmodel.js';
 
 const MAX_CLIMB_SLOPE = 1.0; // steeper ground than this is a wall
 const GRAVITY = 34;
@@ -28,7 +29,7 @@ export class Player {
   constructor(scene, hooks) {
     this.hooks = hooks; // { popup, onLevelUp, onDeath, onHurt, onEquipChange }
     this.scene = scene;
-    this.mesh = makeMan();
+    this.mesh = (humanReady() && humanModelEnabled()) ? makeHumanMan() : makeMan();
     scene.add(this.mesh);
     this.slashes = []; // short-lived melee swing arcs
     this.levelFx = []; // short-lived level-up burst pieces
