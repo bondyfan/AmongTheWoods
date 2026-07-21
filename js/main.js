@@ -107,8 +107,12 @@ let _fpsSmooth = 60, _fpsMeterT = 0;
 // high = "lush" (the classic look); ultra switches on the dense grass-fill
 const FOLIAGE_MULT = { low: 0.35, normal: 1, high: 1.7, ultra: 3.2 };
 const TREE_DETAIL = { low: 0, medium: 1, high: 2 };
-// auto-exposure (eye adaptation) state: smoothed toneMappingExposure
+// auto-exposure (eye adaptation) state: smoothed toneMappingExposure, driven by
+// a servo that meters the ACTUAL rendered frame (postfx.readLuma). TARGET is the
+// geometric-mean display luma we drive toward; the EXP clamps stop the sky from
+// greying out (floor) or deep shade from blowing to white (ceiling).
 let _expCur = 1, _expTarget = 1;
+const AE_TARGET = 0.40, AE_EXP_MIN = 0.5, AE_EXP_MAX = 2.2;
 // shadow-distance rigs: {b = ortho half-extent m, s = map px}. The far plane
 // and the sun's stand-off distance are derived from b so the whole frustum is
 // always covered (updateCamera parks the sun at b*2 along the fixed sun dir).
@@ -5071,13 +5075,18 @@ function tickAutoExposure(dt) {
     renderer.toneMappingExposure = _expCur;
     return;
   }
-  const bg = scene.background;
-  const skyLuma = bg.r * 0.3 + bg.g * 0.5 + bg.b * 0.2;
-  const luma = sun.intensity * 0.62 + hemi.intensity * 0.95 + skyLuma * 0.2;
-  _expTarget = Math.max(0.85, Math.min(1.6, 1.9 / Math.max(0.25, luma)));
-  // slow to brighten (adapting into the dark), quicker to darken (into light)
-  const rate = _expTarget > _expCur ? 0.6 : 1.4;
-  _expCur += (_expTarget - _expCur) * Math.min(1, dt * rate);
+  // meter the ACTUAL rendered frame (last frame's 1x1 log-avg luma) — THIS is
+  // what makes exposure view-dependent: point at bright sky -> M rises ->
+  // exposure drops; look into shade -> M falls -> exposure rises.
+  const M = postfx ? postfx.readLuma() : null;
+  if (M == null) { renderer.toneMappingExposure = _expCur; return; } // no frame yet: hold
+  const m = Math.min(1.2, Math.max(0.004, M));
+  let want = _expCur * (AE_TARGET / m);          // proportional; fixed point at M == TARGET
+  want = Math.max(AE_EXP_MIN, Math.min(AE_EXP_MAX, want));
+  // human asymmetric lag: fast to stop down in light, slow to dark-adapt. Uses
+  // 1-exp(-dt/tau) so the rate is frame-rate INDEPENDENT.
+  const tau = (want < _expCur) ? 0.25 : 1.6;
+  _expCur += (want - _expCur) * (1 - Math.exp(-dt / tau));
   renderer.toneMappingExposure = _expCur;
 }
 
@@ -5116,8 +5125,9 @@ function applyGraphics() {
     : settings.resScale === '1.5' ? Math.min(window.devicePixelRatio, 1.5)
     : Math.min(window.devicePixelRatio, 2);
   renderer.setPixelRatio(pr);
-  // the post stack is needed for bloom OR ambient occlusion
-  if ((settings.bloom || settings.ssao) && !postfx) {
+  // the post stack is needed for bloom, ambient occlusion, OR auto-exposure
+  // (which meters the offscreen frame)
+  if ((settings.bloom || settings.ssao || settings.autoExp) && !postfx) {
     postfx = new PostFX(renderer);
     postfx.setSize(renderer.domElement.width, renderer.domElement.height);
   }
@@ -5149,10 +5159,14 @@ function applyGraphics() {
     renderer.toneMappingExposure = settings.filmic ? 1.12 : 1;
     _expCur = renderer.toneMappingExposure;
   }
-  // vivid grading: a free GPU-composited CSS filter on the canvas — richer
-  // saturation and a touch of contrast, no render cost at all
-  renderer.domElement.style.filter = settings.vivid !== false
-    ? 'contrast(1.06) brightness(1.03)' : '';
+  // vivid grading: a free GPU-composited CSS filter on the canvas. When the post
+  // path runs (bloom/AO/auto-exp) we DROP the contrast/brightness multipliers so
+  // they don't stack on top of AO (which was crushing contrast) — keeping only a
+  // saturation pop. The metering loop absorbs the ~3% brightness either way.
+  const postActive = settings.bloom || settings.ssao || settings.autoExp;
+  renderer.domElement.style.filter = settings.vivid === false ? ''
+    : postActive ? 'saturate(1.08)'
+    : 'contrast(1.06) brightness(1.03)';
   scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
 }
 
@@ -5660,12 +5674,15 @@ function step() {
   renderCharPreview(dt);
   renderSmithPreview(dt);
   tickAutoExposure(dt);
-  // the World Editor renders CLEAN — no bloom / AO / vignette
-  const usePost = (settings.bloom || settings.ssao) && postfx && !game.editorView;
+  // the World Editor renders CLEAN — no bloom / AO / vignette. Auto-exposure
+  // also needs the post path so it has a frame to meter (composite passes the
+  // scene straight through when AO/bloom are off).
+  const usePost = (settings.bloom || settings.ssao || settings.autoExp) && postfx && !game.editorView;
   if (usePost) {
     postfx.render(scene, camera, {
       ssao: !!settings.ssao, bloom: !!settings.bloom,
-      aoRadius: 1.8, aoStrength: 0.9,
+      aoRadius: 1.8, aoStrength: 0.55, aoFloor: 0.55,
+      meter: !!settings.autoExp && game.mode === 'play',
     });
   } else { renderer.setRenderTarget(null); renderer.render(scene, camera); }
 }
