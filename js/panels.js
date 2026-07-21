@@ -281,7 +281,7 @@ export class Panels {
       else if (needMissing) status = `<span class="tag">🏕️ Needs ${NEED_NAMES[entry.needs] ?? entry.needs}</span>`;
       else if (owned && isSpells) status = '<span class="tag ok">✔ Owned</span>';
       else status = (owned ? '<span class="tag ok">✔ Owned</span> ' : '') +
-        `<button class="buy-btn" data-id="${entry.id}">Buy${owned ? ' another' : ''} — ${this._costStr(cost)}</button>`;
+        `<button class="buy-btn${owned ? ' owned' : ''}" data-id="${entry.id}">Buy${owned ? ' another' : ''} — ${this._costStr(cost)}</button>`;
 
       const slotTag = isSpells ? '📖 spell' : SLOT_LABELS[entry.slot].toLowerCase();
       card.innerHTML = `
@@ -348,7 +348,7 @@ export class Panels {
         : `<span class="tag">🔒 Lv ${entry.level}</span>`;
       else if (needMissing) status = `<span class="tag">🏕️ Needs ${NEED_NAMES[entry.needs] ?? entry.needs}</span>`;
       else status = (owned ? '<span class="tag ok">✔ Owned</span> ' : '') +
-        `<button class="buy-btn" data-id="${entry.id}">Forge${owned ? ' another' : ''} — ${this._costStr(cost)}</button>`;
+        `<button class="buy-btn${owned ? ' owned' : ''}" data-id="${entry.id}">Forge${owned ? ' another' : ''} — ${this._costStr(cost)}</button>`;
       card.innerHTML = `
         <div class="card-head"><span class="icon">${itemIcon(entry)}</span>
           <span class="name">${entry.name}</span><span class="lv">${SLOT_LABELS[entry.slot].toLowerCase()}</span></div>
@@ -455,7 +455,7 @@ export class Panels {
         : eraLocked ? `<span class="tag">🔒 Needs ${NEED_NAMES[it.needs] ?? it.needs}</span>`
         : (owned && !rebuyable) ? `<span class="tag ok">✔ ${placed ? 'Placed' : it.placeable ? 'In backpack — click to place' : 'Owned — equip in Character (C)'}</span>`
         : (owned ? '<span class="tag ok">✔ Owned</span> ' : '')
-          + `<button class="buy-btn" data-supply="${it.id}">Buy${owned ? ' another' : ''} — ${this._costStr(it.cost)}</button>`;
+          + `<button class="buy-btn${owned ? ' owned' : ''}" data-supply="${it.id}">Buy${owned ? ' another' : ''} — ${this._costStr(it.cost)}</button>`;
       card.innerHTML = `
         <div class="card-head"><span class="icon">${itemIcon(it)}</span>
           <span class="name">${it.name}</span><span class="lv">${SLOT_LABELS[it.slot].toLowerCase()}</span></div>

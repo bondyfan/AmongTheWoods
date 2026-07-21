@@ -1052,6 +1052,13 @@ export const CLASS_TREES = [
         { cd: 45, amount: [100, 170, 250] }),
       A('mage_combustion', '🔥', 'Combustion', 41, 'Greatly empower fire spells for a short time.', 'buff',
         { cd: 65, buff: 'combustion', duration: [10, 13, 16], power: [0.35, 0.5, 0.7] }),
+      // Pyroblast — a colossal Fireball with a long 6 s wind-up. Same targeted
+      // fire bolt as Fireball (element/burn/range), but its damage array is 3×
+      // Fireball's [45,75,110] → [135,225,330]; burn is tripled to match. The
+      // shared `windup` machinery raises a cast bar + ground telegraph and lands
+      // the hit when it fills (interrupted only by a stun).
+      A('mage_pyroblast', '💥', 'Pyroblast', 45, 'Channel a colossal fireball for 6 s, then unleash it for triple Fireball damage.', 'magicTarget',
+        { cd: 18, element: 'fire', range: 20, windup: 6, damage: [135, 225, 330], burn: [15, 27, 42] }),
       A('mage_elemental_storm', '🌩️', 'Elemental Storm', 50, 'Fire and ice ravage a huge aimed area.', 'zone',
         { cd: 90, zone: 'elemental', castRange: 20, radius: [7, 8.5, 10], duration: [9, 12, 15], damage: [35, 52, 72], interval: 1, stun: 0.5 }),
       // Summoned arcane spheres (formerly buyable companions): they orbit the

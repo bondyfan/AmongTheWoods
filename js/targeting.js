@@ -82,7 +82,9 @@ export class Targeting {
     // rank every candidate by how close it projects to the screen centre
     const cands = [];
     for (const e of alive || []) {
-      if (!e || e.dying || e.dead || !e.pos || e.cfg?.passive) continue;
+      // critters (passive herds) can be Shift-locked too now — some abilities
+      // hunt them for meat/XP, so they must be markable like any other unit.
+      if (!e || e.dying || e.dead || !e.pos) continue;
       const dx = e.pos.x - player.pos.x, dz = e.pos.z - player.pos.z;
       if (dx * dx + dz * dz > MAX_RANGE_2) continue;
       this._v.copy(e.mesh?.position ?? e.pos).project(this.camera);
