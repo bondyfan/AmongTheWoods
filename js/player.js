@@ -2538,7 +2538,7 @@ export class Player {
         const guardSlow = this.blocking ? 0.48 : 1;
         const mountBonus = ctx.mounted ? 9 : ctx.boatMount ? 6 : 0;
         const terrainMult = ctx.boatMount ? (wk > 0 ? 0.65 : 0.45)
-          : wk === 2 ? 0.5     // deep water: swimming (or flailing…)
+          : wk === 2 ? 0.6     // deep water: swimming at 60% speed
           : wk === 1 ? 0.62    // shallow water: wading
           : 1;
         const speed = (this.speed + this.moveSpeedBonus + mountBonus) * terrainMult
@@ -2588,13 +2588,19 @@ export class Player {
       this.facing.normalize();
     }
     this.mesh.position.set(this.pos.x, this._updateVertical(dt, world, ctx.devFly), this.pos.z);
-    // swimming: over deep water the body floats at the surface (sunk to the
-    // chest, bobbing), never walking the seabed
-    if (!ctx.devFly && !ctx.boatMount && !this.flying
-        && (world.waterKindAt?.(this.pos.x, this.pos.z) ?? 0) === 2) {
+    // SWIMMING: over deep water the hero lies prone at the surface and does a
+    // breaststroke (see _animate); the body floats level, just submerged
+    const wkNow = world.waterKindAt?.(this.pos.x, this.pos.z) ?? 0;
+    this.swimming = wkNow === 2 && !ctx.devFly && !ctx.boatMount && !this.flying
+      && !ctx.mounted && !ctx.onShip;
+    if (this.swimming) {
+      this.swimT = (this.swimT || 0) + dt;
       const wy = world.waterYAt?.(this.pos.x, this.pos.z) ?? this.mesh.position.y;
-      this.mesh.position.y = Math.max(this.mesh.position.y,
-        wy - 1.15 + Math.sin(this.walkT * 0.6) * 0.07);
+      // float horizontal, chest just under the surface, gentle bob
+      this.mesh.position.y = wy - 0.55 + Math.sin(this.swimT * 1.6) * 0.06;
+      this.mesh.rotation.x = -1.32;              // lie face-down, head forward
+    } else if (this.mesh.rotation.x !== 0) {
+      this.mesh.rotation.x = 0;                  // stand back up on land
     }
     // local +z toward the aim point, so arm swings (toward +z) punch forward
     // Whirlwind: spin the whole body two full turns on top of the facing
@@ -3024,6 +3030,24 @@ export class Player {
 
   _animate(dt, moving) {
     const { leftLeg, rightLeg, leftArm, rightArm, rightSocket } = this.mesh.userData;
+    // SWIMMING: a breaststroke — arms reach forward together then sweep out
+    // and back, legs do a frog kick a half-beat behind
+    if (this.swimming) {
+      const t = this.swimT || 0;
+      const stroke = (Math.sin(t * 2.4) + 1) * 0.5;         // 0 reach → 1 pull
+      leftArm.rotation.x = -1.55 + stroke * 1.5;
+      rightArm.rotation.x = -1.55 + stroke * 1.5;
+      leftArm.rotation.z = 0.15 + stroke * 0.7;
+      rightArm.rotation.z = -0.15 - stroke * 0.7;
+      rightSocket.rotation.x = 0;
+      const kick = (Math.sin(t * 2.4 - 1.9) + 1) * 0.5;     // frog kick, delayed
+      leftLeg.rotation.x = -0.15 - kick * 0.5;
+      rightLeg.rotation.x = -0.15 - kick * 0.5;
+      leftLeg.rotation.z = 0.05 + kick * 0.45;
+      rightLeg.rotation.z = -0.05 - kick * 0.45;
+      return;
+    }
+    if (leftLeg.rotation.z !== 0) { leftLeg.rotation.z = 0; rightLeg.rotation.z = 0; }
     const swing = moving ? Math.sin(this.walkT * 1.4) * 0.55 : 0;
     leftLeg.rotation.x = swing;
     rightLeg.rotation.x = -swing;

@@ -23,7 +23,7 @@ import { makeTree, makeRock, makeGrassTuft, makeGrassBlades, makeGrainStalk, mak
          makePalm, makeGroundLeaves, impostorTemplate } from './models.js';
 import { makePier } from './ship.js';
 import { bakeGroup, bakeAccumulator, buildBakedMesh, bakeAt, BAKED_MAT,
-         isSharedMaterial, waterMaterial, bakeTemplate, stampTemplate,
+         isSharedMaterial, waterMaterial, makeWaterDisc, bakeTemplate, stampTemplate,
          templateMesh, tplRng } from './models.js';
 import { worldPatch } from './worldpatch.js';
 import { audio } from './audio.js';
@@ -1325,26 +1325,35 @@ export class World {
     mesh.position.y = -4.2;
     this._addStatic(mesh);
     // the OCEAN — a ring hugging the coastline (a full-map sheet would leak
-    // through every inland dip and flood the deserts with phantom water)
-    const SEG = 240;
-    const verts = new Float32Array((SEG + 1) * 2 * 3);
+    // through every inland dip and flood the deserts with phantom water).
+    // RINGS radially subdivide it near the coast so the wave shader has
+    // vertices to ripple (denser toward the shore, where the sea is seen).
+    const SEG = 240, RINGS = 8;
+    const rowT = (k) => Math.pow(k / RINGS, 2.2); // vertices bunch near the coast
+    const verts = new Float32Array((SEG + 1) * (RINGS + 1) * 3);
     for (let i = 0; i <= SEG; i++) {
       const a = (i / SEG) * Math.PI * 2;
       const sa = Math.sin(a), ca = Math.cos(a);
       const inner = coastRAt(sa * 2000, ca * 2000) - 8;
       const outer = WORLD.radius + 300;
-      verts.set([sa * inner, 0, ca * inner, sa * outer, 0, ca * outer], i * 6);
+      for (let k = 0; k <= RINGS; k++) {
+        const r = inner + (outer - inner) * rowT(k);
+        const o = (i * (RINGS + 1) + k) * 3;
+        verts[o] = sa * r; verts[o + 1] = 0; verts[o + 2] = ca * r;
+      }
     }
     const sidx = [];
     for (let i = 0; i < SEG; i++) {
-      const b = i * 2;
-      sidx.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
+      for (let k = 0; k < RINGS; k++) {
+        const b = i * (RINGS + 1) + k, n = (i + 1) * (RINGS + 1) + k;
+        sidx.push(b, b + 1, n, b + 1, n + 1, n);
+      }
     }
     const seaGeo = new THREE.BufferGeometry();
     seaGeo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
     seaGeo.setIndex(sidx);
     seaGeo.computeVertexNormals();
-    const sea = new THREE.Mesh(seaGeo, waterMaterial(0x2e5f8e, 0.92));
+    const sea = new THREE.Mesh(seaGeo, waterMaterial(0x27618e, 0.95));
     sea.position.y = -0.85;
     this._addStatic(sea);
   }
@@ -1924,8 +1933,7 @@ export class World {
     const chunkLakes = this.lakesNear(cxw + CHUNK / 2, czw + CHUNK / 2);
     for (const lake of chunkLakes) {
       if (lake.x < cxw || lake.x >= cxw + CHUNK || lake.z < czw || lake.z >= czw + CHUNK) continue;
-      const mesh = new THREE.Mesh(new THREE.CircleGeometry(lake.r, 20), waterMaterial(0x3f6f9e, 0.87));
-      mesh.rotation.x = -Math.PI / 2;
+      const mesh = makeWaterDisc(lake.r, 0x2f6a9e, 0.9);
       mesh.position.set(lake.x, this.heightAt(lake.x, lake.z) + 0.22, lake.z);
       group.add(mesh);
       if (lake.island) {
@@ -2395,8 +2403,7 @@ export class World {
     // lakes read as water even from afar (visual only — no treasure hooks)
     for (const lake of this.lakesNear(cxw + CHUNK / 2, czw + CHUNK / 2)) {
       if (lake.x < cxw || lake.x >= cxw + CHUNK || lake.z < czw || lake.z >= czw + CHUNK) continue;
-      const mesh = new THREE.Mesh(new THREE.CircleGeometry(lake.r, 14), waterMaterial(0x3f6f9e, 0.87));
-      mesh.rotation.x = -Math.PI / 2;
+      const mesh = makeWaterDisc(lake.r, 0x2f6a9e, 0.9);
       mesh.position.set(lake.x, this.heightAt(lake.x, lake.z) + 0.22, lake.z);
       group.add(mesh);
     }

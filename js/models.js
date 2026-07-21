@@ -484,40 +484,80 @@ export function waterMaterial(color, opacity = 0.9) {
   m.userData.shared = true;
   m.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = { value: 0 };
-    shader.uniforms.uSunDir = { value: new THREE.Vector3(0.35, 0.85, 0.25) };
-    shader.uniforms.uFx = { value: 1 }; // water-effects setting: 0 = still water
+    shader.uniforms.uSunDir = { value: new THREE.Vector3(0.7, 0.55, 0.44) };
+    shader.uniforms.uFx = { value: 1 }; // 0 = still water (setting off)
+    // ---- vertex: sum of directional GERSTNER-ish waves → real 3D chop,
+    // with the surface normal derived analytically so glints ride the crests
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>
 varying vec3 vWaterWP;
-varying vec3 vSunDirView;
+varying vec3 vWaterN;
 uniform float uTime;
-uniform vec3 uSunDir;
-uniform float uFx;`)
+uniform float uFx;
+// one wave: advances h and the xz slope (for the normal)
+void _wave(vec2 p, vec2 dir, float freq, float amp, float spd, float t, inout float h, inout vec2 slope){
+  float ph = dot(dir, p) * freq + t * spd;
+  h += sin(ph) * amp;
+  slope += dir * (cos(ph) * amp * freq);
+}`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
-vec3 wpWater = (modelMatrix * vec4(transformed, 1.0)).xyz;
-transformed.y += (sin(uTime * 0.55 + wpWater.x * 0.05 + wpWater.z * 0.04) * 0.06
-  + sin(uTime * 0.9 - wpWater.x * 0.11 + wpWater.z * 0.07) * 0.03) * uFx;
-vWaterWP = wpWater;
-vSunDirView = normalize(mat3(viewMatrix) * uSunDir);`);
+vec3 wpW = (modelMatrix * vec4(transformed, 1.0)).xyz;
+float hW = 0.0; vec2 slW = vec2(0.0);
+float A = uFx;
+_wave(wpW.xz, normalize(vec2( 0.85, 0.35)), 0.085, 0.34 * A, 1.05, uTime, hW, slW);
+_wave(wpW.xz, normalize(vec2(-0.45, 0.9 )), 0.16 , 0.16 * A, 1.6 , uTime, hW, slW);
+_wave(wpW.xz, normalize(vec2( 0.2 ,-0.75)), 0.33 , 0.07 * A, 2.4 , uTime, hW, slW);
+transformed.y += hW;
+vWaterWP = wpW + vec3(0.0, hW, 0.0);
+vWaterN = normalize(vec3(-slW.x, 1.0, -slW.y));`);
+    // ---- fragment: depth/fresnel body colour, sky-reflection rim, a crisp
+    // moving sun glint and fine sparkle — reads as real, moving water
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>
 varying vec3 vWaterWP;
-varying vec3 vSunDirView;
-uniform float uTime;`)
+varying vec3 vWaterN;
+uniform float uTime;
+uniform float uFx;
+uniform vec3 uSunDir;`)
       .replace('#include <opaque_fragment>', `
-vec3 vDirWater = normalize(vViewPosition);
-float fresWater = pow(1.0 - max(dot(vDirWater, normal), 0.0), 2.5);
-outgoingLight += diffuse * fresWater * 0.35;
-vec3 halfWater = normalize(vDirWater + vSunDirView);
-float glintWater = pow(max(dot(normal, halfWater), 0.0), 60.0) * uFx;
-float rippleWater = sin(vWaterWP.x * 2.6 + uTime * 1.4) * sin(vWaterWP.z * 2.2 - uTime * 1.1);
-glintWater *= smoothstep(0.3, 1.0, rippleWater * 0.5 + 0.5);
-outgoingLight += vec3(1.0, 0.98, 0.9) * glintWater * 1.6;
+vec3 Nw = normalize(vWaterN);
+vec3 Vw = normalize(cameraPosition - vWaterWP);
+float facing = clamp(dot(Vw, Nw), 0.0, 1.0);
+float fres = pow(1.0 - facing, 3.5);
+// looking straight down = deep blue; grazing = brighter sky-tinted teal
+vec3 deepC = diffuse * 0.5;
+vec3 shallowC = diffuse * 1.35 + vec3(0.0, 0.06, 0.09);
+vec3 body = mix(deepC, shallowC, facing);
+outgoingLight = mix(outgoingLight, body, 0.7);
+outgoingLight += vec3(0.55, 0.72, 0.85) * fres * 0.55 * uFx;   // sky-reflection rim
+// sun glint off the wave normal (sharp, moves with the crests)
+vec3 Hn = normalize(Vw + normalize(uSunDir));
+float spec = pow(max(dot(Nw, Hn), 0.0), 140.0);
+// break the specular up with a fast ripple so it shimmers rather than smears
+float shim = sin(vWaterWP.x * 3.1 + uTime * 2.2) * sin(vWaterWP.z * 2.7 - uTime * 1.8);
+spec *= smoothstep(0.15, 1.0, shim * 0.5 + 0.55);
+outgoingLight += vec3(1.0, 0.97, 0.86) * spec * 2.4 * uFx;
 #include <opaque_fragment>`);
     WATER_SHADERS.push(shader);
   };
   waterMatCache.set(key, m);
   return m;
+}
+
+// a subdivided water disc (lakes / ponds) so the wave shader has vertices to
+// ripple — a plain CircleGeometry is a flat fan and would stay dead still
+export function makeWaterDisc(r, color, opacity) {
+  const seg = Math.max(6, Math.min(20, Math.round(r * 1.6)));
+  const geo = new THREE.PlaneGeometry(r * 2, r * 2, seg, seg);
+  geo.rotateX(-Math.PI / 2);
+  // clip the square corners into a disc
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), z = pos.getZ(i), d = Math.hypot(x, z);
+    if (d > r) { pos.setX(i, x / d * r); pos.setZ(i, z / d * r); }
+  }
+  geo.computeVertexNormals();
+  return new THREE.Mesh(geo, waterMaterial(color, opacity));
 }
 
 function box(w, h, d, color) {

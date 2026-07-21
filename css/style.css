@@ -1361,3 +1361,25 @@ html.standalone, html.standalone body { height: 100%; }
 /* heavy graphics options flagged red in the dropdown */
 .opt-warn { color: #e0605a; }
 select:has(> option.opt-warn:checked) { color: #e0605a; border-color: rgba(224,96,90,0.6); }
+
+/* ---------- underwater tint while swimming ---------- */
+#underwater {
+  position: fixed; inset: 0; z-index: 9; pointer-events: none; opacity: 0;
+  transition: opacity 0.5s ease;
+  background:
+    radial-gradient(ellipse at 50% 40%, rgba(40,120,170,0.18), rgba(12,54,92,0.5) 70%, rgba(6,30,60,0.72) 100%);
+  mix-blend-mode: normal;
+}
+#underwater.on { opacity: 1; }
+/* soft drifting caustic light bands */
+.uw-caustics {
+  position: absolute; inset: -20%;
+  background:
+    repeating-linear-gradient(58deg, rgba(180,230,255,0.06) 0 3px, transparent 3px 26px),
+    repeating-linear-gradient(-52deg, rgba(150,220,255,0.05) 0 3px, transparent 3px 30px);
+  animation: uw-drift 7s linear infinite; opacity: 0.8;
+}
+@keyframes uw-drift {
+  0% { transform: translate(0, 0); }
+  100% { transform: translate(40px, 26px); }
+}

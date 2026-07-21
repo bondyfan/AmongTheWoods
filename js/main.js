@@ -623,24 +623,24 @@ function buildStormFx(kind, tintC) {
     return { kind, mesh, spd, baseOp: 0.95 };
   }
   if (kind === 'sand') {
-    // fast low streaks racing across the dunes
-    const N = 1500;
-    const pos = new Float32Array(N * 2 * 3);
+    // a DENSE wall of blowing sand — thousands of big soft ochre motes packed
+    // tight around the camera, so the desert genuinely blinds you
+    const N = 3000;
+    const pos = new Float32Array(N * 3);
     const spd = new Float32Array(N);
-    const dl = Math.hypot(STORM_DIR.x, STORM_DIR.z);
-    const sx = STORM_DIR.x / dl, sz = STORM_DIR.z / dl;
     for (let i = 0; i < N; i++) {
-      const x = (Math.random() - 0.5) * 90, y = 0.3 + Math.random() * 11, z = (Math.random() - 0.5) * 90;
-      const len = 1.1 + Math.random() * 1.2;
-      pos.set([x, y, z, x + sx * len, y + Math.random() * 0.12, z + sz * len], i * 6);
-      spd[i] = 0.75 + Math.random() * 0.6;
+      pos[i * 3] = (Math.random() - 0.5) * 64;
+      pos[i * 3 + 1] = Math.random() * 17;
+      pos[i * 3 + 2] = (Math.random() - 0.5) * 64;
+      spd[i] = 0.7 + Math.random() * 0.8;
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    const mesh = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({
-      color: 0xd8b878, transparent: true, opacity: 0, depthWrite: false }));
+    const mesh = new THREE.Points(geo, new THREE.PointsMaterial({
+      color: 0xcaa869, size: 3.6, map: softDotTex(), transparent: true,
+      opacity: 0, depthWrite: false }));
     mesh.frustumCulled = false;
-    return { kind, mesh, spd, baseOp: 0.5 };
+    return { kind, mesh, spd, baseOp: 0.95 };
   }
   // mist: a few dozen huge soft banks drifting between the trees
   const N = 34;
@@ -691,15 +691,17 @@ function tickStormFx(dt) {
       if (arr[i + 2] > 40) arr[i + 2] -= 80; else if (arr[i + 2] < -40) arr[i + 2] += 80;
     }
   } else if (stormFx.kind === 'sand') {
-    for (let seg = 0; seg < stormFx.spd.length; seg++) {
-      const i = seg * 6;
-      const v = 26 * stormFx.spd[seg] * gust * dt;
-      const dx = STORM_DIR.x * v, dz = STORM_DIR.z * v;
-      arr[i] += dx; arr[i + 2] += dz; arr[i + 3] += dx; arr[i + 5] += dz;
-      if (arr[i] > 45) { arr[i] -= 90; arr[i + 3] -= 90; }
-      else if (arr[i] < -45) { arr[i] += 90; arr[i + 3] += 90; }
-      if (arr[i + 2] > 45) { arr[i + 2] -= 90; arr[i + 5] -= 90; }
-      else if (arr[i + 2] < -45) { arr[i + 2] += 90; arr[i + 5] += 90; }
+    // driven hard along the wind with a slow settle; wrapped tight (±32) so
+    // the cloud stays packed around the camera
+    const w = 32 * gust * dt;
+    for (let i = 0; i < arr.length; i += 3) {
+      const s = stormFx.spd[i / 3];
+      arr[i] += STORM_DIR.x * w * s;
+      arr[i + 1] -= (0.8 + 1.4 * s) * dt;
+      arr[i + 2] += STORM_DIR.z * w * s;
+      if (arr[i + 1] < 0) arr[i + 1] += 17;
+      if (arr[i] > 32) arr[i] -= 64; else if (arr[i] < -32) arr[i] += 64;
+      if (arr[i + 2] > 32) arr[i + 2] -= 64; else if (arr[i + 2] < -32) arr[i + 2] += 64;
     }
   } else { // mist banks crawl
     for (let i = 0; i < arr.length; i += 3) {
@@ -763,8 +765,12 @@ function tickBlizzard(dt) {
   if (blizzard.on && spec) blizzard.spec = spec;
   blizzard.k += ((blizzard.on ? 1 : 0) - blizzard.k) * Math.min(1, dt * (blizzard.on ? 0.7 : 0.45));
   if (!blizzard.on && blizzard.k < 0.01) blizzard.spec = null;
-  el.style.opacity = blizzard.spec
-    ? ((blizzard.spec.rain ? 0.3 : 0.85) * blizzard.k).toFixed(3) : 0;
+  // screen wash: sand blinds hardest, snow next, rain barely
+  const washMax = blizzard.spec
+    ? (blizzard.spec.rain ? 0.3 : blizzard.spec.fx === 'sand' ? 0.94
+      : blizzard.spec.fx === 'snow' ? 0.88 : 0.8)
+    : 0;
+  el.style.opacity = (washMax * blizzard.k).toFixed(3);
   tickStormFx(dt); // the volumetric half: particle walls riding the wind
 }
 
@@ -5245,6 +5251,8 @@ function step() {
       }
     }
   }
+  // underwater blue tint fades in while the hero is swimming submerged
+  $id('underwater').classList.toggle('on', game.mode === 'play' && !!player.swimming);
   // water surfaces (ocean/lakes/rivers) share the same clock + sun direction
   _waterSunDir.set(24, 19, 15).normalize(); // matches the fixed sun offset in updateCamera
   if (WATER_SHADERS.length) {
@@ -5308,6 +5316,7 @@ function step() {
       boatPlacing: boatPlaceT > 0,
       rpgView: game.rpgView,
       mounted: player.mounted,
+      onShip: shipRiding(), // riding the ferry over the sea isn't swimming
       mouseLook: game.rpgView && settings.mouseLook && !!input.locked,
       devFly: DEVMODE && game.devFly && game.rpgView && !player.flying,
       devFlyPitch: rpgPitch,
