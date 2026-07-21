@@ -2203,16 +2203,17 @@ export class Player {
     return dot > minDot;
   }
 
-  // Visible swing arc. Basic strikes draw a VERTICAL crescent chopping down
-  // in front of the player (attacks hit forward only now); AoE abilities
-  // (Whirlwind, Ground Slam…) pass wide=true for the old flat sweeping ring.
-  // Outer radius matches the weapon's reach so it never oversells the hit.
+  // Visible swing FX. Basic strikes chop straight FORWARD: a slim blade streak
+  // that stabs out along the facing direction (from the top-down camera it
+  // reads as a vertical chop in front of you — no sideways arc, no ring).
+  // AoE abilities (Whirlwind, Ground Slam…) pass wide=true for the old flat
+  // sweeping ring. Length matches the weapon's reach so it never oversells.
   _spawnSlash(wide = false) {
     const r = this.weapon.range;
     const baseRy = Math.atan2(this.facing.x, this.facing.z);
     const mat = new THREE.MeshBasicMaterial({
       color: this.weapon.tier > 0 ? 0xffd98a : 0xffffff,
-      transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false,
+      transparent: true, opacity: 0.78, side: THREE.DoubleSide, depthWrite: false,
     });
     if (wide) {
       const geo = new THREE.RingGeometry(r * 0.4, r, 14, 1, Math.PI / 2 - 1.1, 2.2);
@@ -2224,18 +2225,21 @@ export class Player {
       this.slashes.push({ mesh, baseRy, t: 0, life: 0.2 });
       return;
     }
-    // vertical chop: an upright crescent standing in the facing plane,
-    // sweeping top-to-bottom with the strike
-    const geo = new THREE.RingGeometry(r * 0.35, r * 0.95, 12, 1, Math.PI / 2 - 0.75, 1.5);
-    const mesh = new THREE.Mesh(geo, mat); // ring lives in the XY plane — already upright
-    mesh.position.set(
-      this.pos.x + this.facing.x * r * 0.25,
-      this.mesh.position.y + 1.0,
-      this.pos.z + this.facing.z * r * 0.25);
+    // a slim pointed blade lying flat in front of the player, tip pointing
+    // forward. Built in the shape's XY plane then laid onto the ground (XZ),
+    // so local +Z is the facing direction.
+    const reach = r * 1.05, halfW = 0.24;
+    const shape = new THREE.Shape();
+    shape.moveTo(0, 0.35);
+    shape.quadraticCurveTo(halfW, reach * 0.55, 0, reach);
+    shape.quadraticCurveTo(-halfW, reach * 0.55, 0, 0.35);
+    const geo = new THREE.ShapeGeometry(shape);
+    geo.rotateX(Math.PI / 2); // (x,y)→(x,0,y): blade lies flat, points along +z
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(this.pos.x, this.mesh.position.y + 0.35, this.pos.z);
     mesh.rotation.y = baseRy;
-    mesh.rotation.z = 0.55; // start high, _updateSlashes chops it downward
     this.scene.add(mesh);
-    this.slashes.push({ mesh, baseRy, t: 0, life: 0.18, vertical: true });
+    this.slashes.push({ mesh, baseRy, t: 0, life: 0.16, forward: true });
   }
 
   // ---------- level-up burst ----------
@@ -2323,13 +2327,14 @@ export class Player {
       const s = this.slashes[i];
       s.t += dt;
       const k = Math.min(1, s.t / s.life);
-      if (s.vertical) {
-        s.mesh.rotation.z = 0.55 - k * 1.35;                // chop top → bottom
+      if (s.forward) {
+        s.mesh.scale.set(1, 1, 0.5 + k * 0.55);             // blade thrusts forward to full reach
+        s.mesh.material.opacity = 0.78 * (1 - k);
       } else {
         s.mesh.rotation.y = s.baseRy - 0.5 + k * 1.1;       // sweep across the arc
+        s.mesh.scale.setScalar(0.92 + k * 0.08);            // settles at 1.0 = full reach
+        s.mesh.material.opacity = 0.7 * (1 - k);
       }
-      s.mesh.material.opacity = 0.7 * (1 - k);
-      s.mesh.scale.setScalar(0.92 + k * 0.08);              // settles at 1.0 = full reach
       if (s.t >= s.life) {
         this.scene.remove(s.mesh);
         s.mesh.geometry.dispose();
