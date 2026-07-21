@@ -4648,7 +4648,7 @@ function applyGraphics() {
   // vivid grading: a free GPU-composited CSS filter on the canvas — richer
   // saturation and a touch of contrast, no render cost at all
   renderer.domElement.style.filter = settings.vivid !== false
-    ? 'saturate(1.22) contrast(1.06) brightness(1.03)' : '';
+    ? 'contrast(1.06) brightness(1.03)' : '';
   scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
 }
 
