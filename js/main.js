@@ -111,6 +111,10 @@ let _fpsSmooth = 60, _fpsMeterT = 0;
 // high = "lush" (the classic look); ultra switches on the dense grass-fill
 const FOLIAGE_MULT = { low: 0.35, normal: 1, high: 1.7, ultra: 3.2 };
 const TREE_DETAIL = { low: 0, medium: 1, high: 2 };
+// vegetation draw distance: metres past which ground vegetation (grass carpet +
+// baked scatter) is culled per chunk. "furthest" = everything that's generated
+// (the old behaviour); the shorter tiers trade far grass for fill-rate.
+const VEG_DRAW_DIST = { short: 46, medium: 85, far: 130, furthest: Infinity };
 // shadow-distance rigs: {b = ortho half-extent m, s = map px}. The far plane
 // and the sun's stand-off distance are derived from b so the whole frustum is
 // always covered (updateCamera parks the sun at b*2 along the fixed sun dir).
@@ -2611,12 +2615,14 @@ const settings = Object.assign(
   settings.fpsCap ??= 0; // 0 = unlimited
   settings.humanModel ??= false; // experimental rigged-human avatar
   settings.vegQuality ??= false; // quality-vegetation glTF kit
+  settings.vegDist ??= 'furthest'; // ground-vegetation draw distance
   $id('set-texdetail').value = String(settings.texDetail);
   $id('set-shadows').checked = settings.shadows !== false;
   $id('set-resscale').value = String(settings.resScale);
   $id('set-drawdist').value = String(settings.drawDist);
   $id('set-treedetail').value = String(settings.treeDetail);
   $id('set-shadowdist').value = String(settings.shadowDist);
+  $id('set-vegdist').value = String(settings.vegDist);
   $id('set-ssao').checked = !!settings.ssao;
   applyGraphics();
 
@@ -2715,6 +2721,11 @@ const settings = Object.assign(
   $id('set-shadowdist').addEventListener('change', () => {
     settings.shadowDist = $id('set-shadowdist').value;
     saveGfx(); // applyGraphics resizes the shadow frustum + map
+  });
+  $id('set-vegdist').addEventListener('change', () => {
+    settings.vegDist = $id('set-vegdist').value;
+    saveGfx(); // applyGraphics sets world.vegDrawDist
+    world.refreshVegVisibility(player.pos); // apply live (sim is paused here)
   });
   $id('set-ssao').addEventListener('change', () => {
     settings.ssao = $id('set-ssao').checked;
@@ -5285,6 +5296,7 @@ function applyGraphics() {
   world.groundDetail = settings.texDetail ?? 0;
   world.treeDetail = TREE_DETAIL[settings.treeDetail ?? 'low'] ?? 0;
   world.qualityVeg = !!settings.vegQuality && vegKit.ready();
+  world.vegDrawDist = VEG_DRAW_DIST[settings.vegDist ?? 'furthest'] ?? Infinity;
   // shadows: purely the user's toggle now (auto-downgrade removed, so the
   // stage < 2 guard is always true — kept only so the expression is explicit)
   const shadowsOn = settings.shadows !== false && autoQuality.stage < 2;

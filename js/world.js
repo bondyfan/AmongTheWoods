@@ -180,6 +180,10 @@ export class World {
     this.foliageMult = 1;        // graphics setting: scatter-density multiplier
     this.treeDetail = 0;         // graphics setting: 0 low / 1 med / 2 high canopies
     this.qualityVeg = false;     // graphics setting: swap to the glTF nature kit
+    this.vegDrawDist = Infinity; // graphics setting: metres past which ground
+                                 // vegetation (grass carpet + baked scatter) is
+                                 // hidden — the ground + rigid props stay
+    this._vegDrawSq = Infinity;  // cached vegDrawDist² (update() compares squared)
     this.farChunks = new Map();  // cheap far-LOD tiles (terrain + tree impostors)
     this.farRadius = 0;          // chunks of far tier past viewRadius (main sets it)
     this._berryEaten = new Map(); // bush key -> world time it was harvested
@@ -1684,6 +1688,35 @@ export class World {
     return obj;
   }
 
+  // vegetation draw distance: hide a chunk's ground vegetation (dense grass
+  // carpet + baked scatter) once its centre is past vegDrawDist metres from the
+  // player. Cheap squared-distance compare; the ground tile + rigid props stay.
+  // Uses the player position cached by update(); before the first update (warm-
+  // up) it defaults to visible and the next frame corrects it.
+  _applyVegVisibility(cx, cz, chunk) {
+    if (!chunk || (!chunk.grass && !chunk.deco)) return;
+    let show = true;
+    if (this._vegDrawSq !== Infinity && this._vegPX !== undefined) {
+      const ccx = (cx + 0.5) * CHUNK, ccz = (cz + 0.5) * CHUNK;
+      const dx = this._vegPX - ccx, dz = this._vegPZ - ccz;
+      show = (dx * dx + dz * dz) <= this._vegDrawSq;
+    }
+    if (chunk.grass && chunk.grass.visible !== show) chunk.grass.visible = show;
+    if (chunk.deco && chunk.deco.visible !== show) chunk.deco.visible = show;
+  }
+
+  // re-cull every loaded chunk right now (used when the setting changes from the
+  // Settings menu, where the sim is paused so update() isn't ticking)
+  refreshVegVisibility(pos) {
+    this._vegPX = pos.x; this._vegPZ = pos.z;
+    this._vegDrawSq = this.vegDrawDist === Infinity ? Infinity
+      : this.vegDrawDist * this.vegDrawDist;
+    for (const [key, chunk] of this.chunks) {
+      const [cx, cz] = key.split(',').map(Number);
+      this._applyVegVisibility(cx, cz, chunk);
+    }
+  }
+
   // is the quality-vegetation glTF kit active for THIS chunk? (opt-in Graphics
   // toggle, kit finished loading, a biome the kit suits, and NOT the god-view
   // editor's forced-fast render)
@@ -1852,6 +1885,7 @@ export class World {
     }
     const field = q ? veg.grassField(inst) : makeGrassField(inst);
     if (field) group.add(field);
+    return field; // stored on the chunk so vegDrawDist can toggle its visibility
   }
 
   // can vegetation stand here? (shared by chunk gen and the far-LOD tier)
@@ -2196,7 +2230,8 @@ export class World {
     const bn = biome.name;
     // GRASS: at Ultra a dense grid blankets every green grassy patch; below
     // that, the classic sparse-ish scatter (so "High = what we had before")
-    if (fm >= 2.4 || qVegDeco) this._grassFill(deco, group, cxw, czw, fm, qVegDeco);
+    let grassField = null;
+    if (fm >= 2.4 || qVegDeco) grassField = this._grassFill(deco, group, cxw, czw, fm, qVegDeco);
     else scatter(Math.round((22 + rng() * 12) * fm), `grass:${biome.grass}`,
       (r) => makeGrassTuft(biome.grass, r), SW_GRASS);
     if (biome.jungleFlora) {
@@ -2460,7 +2495,11 @@ export class World {
     }
 
     this.scene.add(group);
-    this.chunks.set(key, { group, tile, trees, rocks, webs: chunkWebs, bushes, props, hives });
+    // grass/deco are the non-rigid ground vegetation; update() flips their
+    // visibility per the vegetation draw-distance setting
+    this.chunks.set(key, { group, tile, trees, rocks, webs: chunkWebs, bushes, props, hives,
+      grass: grassField, deco: decoMesh });
+    this._applyVegVisibility(cx, cz, this.chunks.get(key)); // correct on first frame
   }
 
   // ---- far-LOD tier: the world out to the fog wall ----
@@ -2601,6 +2640,10 @@ export class World {
       }
     }
 
+    // cache for the vegetation draw-distance test below (+ gen-time first paint)
+    this._vegPX = playerPos.x; this._vegPZ = playerPos.z;
+    this._vegDrawSq = this.vegDrawDist === Infinity ? Infinity
+      : this.vegDrawDist * this.vegDrawDist;
     for (const [key, chunk] of this.chunks) {
       const [cx, cz] = key.split(',').map(Number);
       const d = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
@@ -2610,6 +2653,8 @@ export class World {
         this.chunks.delete(key);
         // no hole while walking away: swap the evicted chunk for a far tile
         if (d <= fr) this._genFarChunk(cx, cz);
+      } else {
+        this._applyVegVisibility(cx, cz, chunk); // grass draw-distance culling
       }
     }
     for (const [key, fc] of this.farChunks) {
