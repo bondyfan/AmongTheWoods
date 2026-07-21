@@ -198,7 +198,11 @@ export class WorldEditor {
   updateView(dt, camera, input) {
     const v = this.view;
     const ae = document.activeElement;
-    const typing = ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName);
+    // only TEXT entry should swallow WASD — a focused range slider / checkbox
+    // must NOT block camera panning (that was the "keys dead until I click" bug)
+    const typing = ae && (ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT'
+      || (ae.tagName === 'INPUT'
+          && !['range', 'checkbox', 'radio', 'button', 'submit', 'color'].includes(ae.type)));
     const k = typing ? new Set() : (input.keys ?? new Set());
     const spd = (k.has('ShiftLeft') || k.has('ShiftRight') ? 2.4 : 1) * v.dist * 1.15 * dt;
     if (k.has('KeyW') || k.has('ArrowUp')) v.z -= spd;
@@ -206,7 +210,9 @@ export class WorldEditor {
     if (k.has('KeyA') || k.has('ArrowLeft')) v.x -= spd;
     if (k.has('KeyD') || k.has('ArrowRight')) v.x += spd;
     if (this._wheel) {
-      v.dist = Math.max(35, Math.min(1500, v.dist * (1 + this._wheel * 0.001)));
+      // cap the zoom-out where the streamed terrain still fills the view — past
+      // that you just fall into the pale void with no map to see
+      v.dist = Math.max(35, Math.min(1000, v.dist * (1 + this._wheel * 0.001)));
       this._wheel = 0;
     }
     camera.position.set(v.x, v.dist, v.z + v.dist * 0.55);
@@ -535,6 +541,12 @@ export class WorldEditor {
     window.addEventListener('mousedown', (ev) => {
       if (!this.active || overUI(ev)) return;
       ev.stopImmediatePropagation(); ev.preventDefault();
+      // painting on the canvas keeps keyboard focus on the god view — without
+      // this a slider (radius/strength) you last touched stays focused and
+      // eats WASD until you click elsewhere
+      if (document.activeElement && document.activeElement !== document.body) {
+        document.activeElement.blur?.();
+      }
       if (ev.button === 0) { this.painting = true; this._strokePlaced = 0; this._clickStroke(); }
       if (ev.button === 2) this._rightClick();
     }, true);
@@ -592,16 +604,23 @@ export class WorldEditor {
     if (this.grabbed) { this._dragTo(aim); return; }
     if (!this.painting) return;
     if (this.tab === 'terrain') {
+      // big brushes touch many cells/tiles — space the apply + repaint ticks
+      // out with radius so huge strokes stay smooth instead of thrashing
       this._accum += dt;
-      if (this._accum >= 0.033) {
+      const applyEvery = 0.033 + Math.min(0.05, this.radius * 0.00015);
+      if (this._accum >= applyEvery) {
         const step = this._accum; this._accum = 0;
         this._applyBrush(aim, step);
       }
-      // REALTIME repaint of the tiles under the brush — no timers involved
+      // REALTIME repaint of the tiles under the brush. Height-only sculpt tools
+      // get the fast heights+normals repaint (no color recompute) for max FPS.
       this._groundT -= dt;
       if (this._groundT <= 0 && this._groundStroked) {
-        this._groundT = 0.12;
-        this.o.onDirty('ground', { area: { x: aim.x, z: aim.z, r: this.radius + 26 } });
+        this._groundT = 0.09 + Math.min(0.16, this.radius * 0.0006);
+        const heightsOnly = this.tool === 'raise' || this.tool === 'lower'
+          || this.tool === 'smooth' || this.tool === 'hclear';
+        this.o.onDirty('ground', {
+          area: { x: aim.x, z: aim.z, r: this.radius + 26 }, heightsOnly });
       }
     } else if (PLACE_TABS.has(this.tab) && this.scatter) {
       this._scatterAcc += dt * this.scatterDensity;
