@@ -19,7 +19,7 @@ import { makeTree, makeRock, makeGrassTuft, makeFlower, makeMushroom, makeBush,
          makeTemple, makeLianaPole, makeBonfire, makeSummitCairn, makeCactus,
          makeLairEntrance, makeCage, makeFern, makeTownHouse, makeChurch,
          makeFountain, makeWheatTuft, makeJunglePlant, makeReeds, makePebbles,
-         makePalm, makeGroundLeaves, makeFarTree } from './models.js';
+         makePalm, makeGroundLeaves, impostorTemplate } from './models.js';
 import { makePier } from './ship.js';
 import { bakeGroup, bakeAccumulator, buildBakedMesh, bakeAt, BAKED_MAT,
          isSharedMaterial, waterMaterial, bakeTemplate, stampTemplate,
@@ -1645,6 +1645,89 @@ export class World {
     return false;
   }
 
+  // can vegetation stand here? (shared by chunk gen and the far-LOD tier)
+  _sitFree(x, z, lakes) {
+    const r = radiusOf(x, z);
+    if (r < 14 || coastDistAt(x, z) < 8) return false;              // cave + beach/sea
+    if (this.isWater(x, z)) return false;                           // nothing grows in water
+    if (worldPatch.buildingGroundAt?.(x, z)) return false;          // town squares stay clear
+    if (x > -13 && x < 16 && z > 8 && z < 24) return false;         // camp building spots
+    if (this._hasBorders && zoneInfoAt(x, z).borderDist < 6) return false; // border bands
+    if (this.pathDistance(x, z) < 4.5) return false;                // keep trails clear
+    if (lakes.some(l => {
+      const d = Math.hypot(x - l.x, z - l.z);
+      return d < l.r + 1.2 && !(l.island && d < l.island.r);
+    })) return false;
+    return true;
+  }
+
+  // THE tree layout of a chunk, from its own dedicated rng stream — the
+  // full-detail chunk and its far-LOD stand-in both read this, so a tree
+  // seen from afar stands EXACTLY where the real one grows when you arrive
+  // (same spot, size, variant and rotation — the swap is invisible).
+  _treeSpots(cx, cz, biome) {
+    const cxw = cx * CHUNK, czw = cz * CHUNK;
+    const rng = mulberry32((this.seed ^ 0x7ee5a) ^ (cx * 73856093) ^ (cz * 19349663));
+    let count = Math.round((8 + rng() * 8) * biome.treeDensity);
+    let denseWood = false;
+    if (biome.denseForests) {
+      // high threshold → thick woods are OCCASIONAL landmarks, not the norm
+      const f = valueNoise(cxw + CHUNK / 2, czw + CHUNK / 2, 240, this.seed + 133);
+      if (f > 0.68) {
+        const k = Math.min(1, (f - 0.68) / 0.1);
+        count = Math.min(70, Math.round(count * (3 + k * k * 4)));
+        denseWood = true; // thick woods grow TALL trees, not saplings
+      }
+    }
+    const lakes = this.lakesNear(cxw + CHUNK / 2, czw + CHUNK / 2);
+    const spots = [];
+    for (let i = 0; i < count; i++) {
+      // draw EVERYTHING before any checks, so the stream never diverges
+      const x = cxw + rng() * CHUNK, z = czw + rng() * CHUNK;
+      const roll = rng(), v = (rng() * 6) | 0, rotY = rng() * Math.PI * 2;
+      if (!this._sitFree(x, z, lakes)) continue;
+      if (radiusOf(x, z) < 100) continue; // open meadow around the base
+      const size = denseWood
+        ? (roll < 0.08 ? 0 : roll < 0.30 ? 1 : roll < 0.60 ? 2 : roll < 0.85 ? 3 : 4)
+        : (roll < 0.30 ? 0 : roll < 0.60 ? 1 : roll < 0.82 ? 2 : roll < 0.95 ? 3 : 4);
+      spots.push({ x, z, size, v, rotY });
+    }
+    return { spots, denseWood };
+  }
+
+  // tall landmark decorations (palms, cacti) get the same treatment: one
+  // dedicated stream, stamped identically by both detail tiers
+  _bigDecoSpots(cx, cz, biome) {
+    const out = [];
+    const jungle = !!biome.jungleFlora;
+    const dry = biome.name === 'Highlands' || biome.name === 'Scorched Desert';
+    if (!jungle && !dry) return out;
+    const cxw = cx * CHUNK, czw = cz * CHUNK;
+    const rng = mulberry32((this.seed ^ 0xb16de) ^ (cx * 73856093) ^ (cz * 19349663));
+    const lakes = this.lakesNear(cxw + CHUNK / 2, czw + CHUNK / 2);
+    if (jungle) {
+      const n = Math.round((3 + rng() * 3) * Math.min(this.foliageMult ?? 1, 2));
+      for (let i = 0; i < n; i++) {
+        const x = cxw + rng() * CHUNK, z = czw + rng() * CHUNK;
+        const v = (rng() * 6) | 0, rotY = rng() * Math.PI * 2;
+        if (!this._sitFree(x, z, lakes)) continue;
+        out.push({ key: 'palm:' + v, kind: 'palm', x, z, rotY });
+      }
+    }
+    if (dry) {
+      const n = biome.name === 'Scorched Desert' ? 3 : 2;
+      for (let i = 0; i < n; i++) {
+        const gate = rng();
+        const x = cxw + 4 + rng() * (CHUNK - 8), z = czw + 4 + rng() * (CHUNK - 8);
+        const v = (rng() * 6) | 0, rotY = rng() * Math.PI * 2;
+        if (gate > 0.5) continue;
+        if (!this._sitFree(x, z, lakes)) continue;
+        out.push({ key: 'cactus:' + v, kind: 'cactus', x, z, rotY });
+      }
+    }
+    return out;
+  }
+
   _genChunk(cx, cz) {
     if (!Number.isFinite(cx) || !Number.isFinite(cz)) return;
     const key = this._chunkKey(cx, cz);
@@ -1693,64 +1776,30 @@ export class World {
       }
     }
 
-    const inBounds = (x, z) => {
-      const r = radiusOf(x, z);
-      if (r < 14 || coastDistAt(x, z) < 8) return false;              // cave + beach/sea
-      if (this.isWater(x, z)) return false;                           // nothing grows in water
-      if (worldPatch.buildingGroundAt?.(x, z)) return false;          // town squares stay clear
-      if (x > -13 && x < 16 && z > 8 && z < 24) return false;         // camp building spots
-      if (this._hasBorders && zoneInfoAt(x, z).borderDist < 6) return false; // border bands
-      if (this.pathDistance(x, z) < 4.5) return false;                // keep trails clear
-      if (chunkLakes.some(l => {
-        const d = Math.hypot(x - l.x, z - l.z);
-        return d < l.r + 1.2 && !(l.island && d < l.island.r);
-      })) return false;
-      return true;
-    };
+    const inBounds = (x, z) => this._sitFree(x, z, chunkLakes);
 
-    // -- trees -- (low-frequency noise carves occasional DENSE forest patches:
-    // full-strength patches pack ~4x the trees, wall-to-wall woods)
-    let count = Math.round((8 + rng() * 8) * biome.treeDensity);
-    let denseWood = false;
-    if (biome.denseForests) {
-      // high threshold → thick woods are OCCASIONAL landmarks, not the norm
-      const f = valueNoise(cxw + CHUNK / 2, czw + CHUNK / 2, 240, this.seed + 133);
-      if (f > 0.68) {
-        const k = Math.min(1, (f - 0.68) / 0.1);
-        count = Math.min(70, Math.round(count * (3 + k * k * 4)));
-        denseWood = true; // thick woods grow TALL trees, not saplings
-      }
-    }
-    for (let i = 0; i < count; i++) {
-      const x = cxw + rng() * CHUNK;
-      const z = czw + rng() * CHUNK;
-      if (!inBounds(x, z)) continue;
-      if (radiusOf(x, z) < 100) continue; // open meadow around the base
-      // five tree sizes: sapling → forest giant. Deep woods grow the big ones.
-      const roll = rng();
-      const size = denseWood
-        ? (roll < 0.08 ? 0 : roll < 0.30 ? 1 : roll < 0.60 ? 2 : roll < 0.85 ? 3 : 4)
-        : (roll < 0.30 ? 0 : roll < 0.60 ? 1 : roll < 0.82 ? 2 : roll < 0.95 ? 3 : 4);
-      // trees come from a SHARED template pool (6 variants per biome+size):
-      // building + baking each tree from scratch was the chunk-gen hitch.
-      // Canopy sway band {amp, y0, y1} is baked into the shared geometry.
-      const tv = (rng() * 6) | 0;
-      const tkey = `tree:${biome.name}:${size}:${tv}`;
+    // -- trees -- laid out by the shared spot stream (_treeSpots), so the
+    // far-LOD tier shows every tree exactly where it will really stand.
+    // Meshes come from a SHARED template pool (6 variants per biome+size):
+    // building + baking each tree from scratch was the chunk-gen hitch.
+    const { spots: treeSpots, denseWood } = this._treeSpots(cx, cz, biome);
+    for (const s of treeSpots) {
+      const tkey = `tree:${biome.name}:${s.size}:${s.v}`;
       let mesh, radius;
-      const shared = templateMesh(tkey, () => makeTree(size, biome, tplRng(tkey)),
+      const shared = templateMesh(tkey, () => makeTree(s.size, biome, tplRng(tkey)),
         { amp: 0.35, y0: 1.6, y1: 6 });
       if (shared) ({ mesh, radius } = shared);
       else { // maker produced un-bakeable extras — bake this one live
-        const made = makeTree(size, biome, rng);
+        const made = makeTree(s.size, biome, rng);
         mesh = bakeGroup(made.mesh, true, { amp: 0.35, y0: 1.6, y1: 6 });
         radius = made.radius;
       }
-      this._place(mesh, x, z);
-      mesh.rotation.y = rng() * Math.PI * 2;
+      this._place(mesh, s.x, s.z);
+      mesh.rotation.y = s.rotY;
       group.add(mesh);
       trees.push({
-        id: this.nextTreeId++, mesh, x, z, radius, size,
-        hp: TREE_HP[size], wood: TREE_WOOD[size], alive: true, kind: 'tree',
+        id: this.nextTreeId++, mesh, x: s.x, z: s.z, radius, size: s.size,
+        hp: TREE_HP[s.size], wood: TREE_WOOD[s.size], alive: true, kind: 'tree',
       });
     }
 
@@ -1815,17 +1864,13 @@ export class World {
         }
       }
     }
-    if (biome.name === 'Highlands' || biome.name === 'Scorched Desert') {
-      // scattered saguaro cacti — a couple per chunk in the dry country
-      const n = biome.name === 'Scorched Desert' ? 3 : 2;
-      for (let i = 0; i < n; i++) {
-        if (rng() > 0.5) continue;
-        const x = cxw + 4 + rng() * (CHUNK - 8), z = czw + 4 + rng() * (CHUNK - 8);
-        if (!inBounds(x, z)) continue;
-        const ckey = 'cactus:' + ((rng() * 6) | 0);
-        stampTemplate(deco, bakeTemplate(ckey, () => makeCactus(tplRng(ckey))),
-          x, this.heightAt(x, z), z, rng() * Math.PI * 2);
-      }
+    // tall landmark deco (palms, cacti) from the shared spot stream — the
+    // far tier stamps the very same silhouettes at the very same places
+    for (const b of this._bigDecoSpots(cx, cz, biome)) {
+      const tpl = bakeTemplate(b.key, () => (b.kind === 'palm'
+        ? makePalm(tplRng(b.key)) : makeCactus(tplRng(b.key))));
+      stampTemplate(deco, tpl, b.x, this.heightAt(b.x, b.z), b.z, b.rotY,
+        b.kind === 'palm' ? { amp: 0.5, h: 3.2 } : null);
     }
     if (biome.name === 'Dark Forest') {
       if (rng() < 0.18) {
@@ -1887,14 +1932,13 @@ export class World {
     const SW_GRASS = { amp: 1, h: 0.6 }, SW_FERN = { amp: 0.8, h: 0.7 };
     const SW_PLANT = { amp: 0.7, h: 1.2 }, SW_BUSH = { amp: 0.45, h: 0.8 };
     const SW_FLOWER = { amp: 0.9, h: 0.35 }, SW_REED = { amp: 1, h: 1.5 };
-    const SW_LEAF = { amp: 0.6, h: 0.4 }, SW_PALM = { amp: 0.5, h: 3.2 };
+    const SW_LEAF = { amp: 0.6, h: 0.4 };
     const bn = biome.name;
     scatter(Math.round((22 + rng() * 12) * fm), `grass:${biome.grass}`,
       (r) => makeGrassTuft(biome.grass, r), SW_GRASS);
     if (biome.jungleFlora) {
-      // RAINFOREST layers: understory palms above banana plants above a
-      // floor of ferns, broad leaves and grass — wall-to-wall green
-      scatter(Math.round((3 + rng() * 3) * Math.min(fm, 2)), 'palm', makePalm, SW_PALM);
+      // RAINFOREST floor: banana plants over ferns, broad leaves and grass
+      // (understory palms come from _bigDecoSpots — shared with the far tier)
       scatter(Math.round((7 + rng() * 5) * fm), 'jplant', makeJunglePlant, SW_PLANT);
       scatter(Math.round((14 + rng() * 8) * fm), 'fern', makeFern, SW_FERN);
       scatter(Math.round((10 + rng() * 6) * fm), 'gleaf', makeGroundLeaves, SW_LEAF);
@@ -2188,30 +2232,21 @@ export class World {
       group.add(mesh);
     }
 
-    // impostor forest: same density/size logic as the real chunk (its own rng
-    // stream — exact positions differ, but through 150+ m of fog the swap to
-    // real trees on approach is imperceptible)
-    const rng = mulberry32((this.seed ^ 0xFA7) ^ (cx * 73856093) ^ (cz * 19349663));
-    let count = Math.round((8 + rng() * 8) * biome.treeDensity);
-    if (biome.denseForests) {
-      const f = valueNoise(cxw + CHUNK / 2, czw + CHUNK / 2, 240, this.seed + 133);
-      if (f > 0.68) {
-        const k = Math.min(1, (f - 0.68) / 0.1);
-        count = Math.min(70, Math.round(count * (3 + k * k * 4)));
-      }
-    }
+    // the forest, EXACTLY as the real chunk will grow it: same spots, sizes,
+    // variants and rotations from the shared _treeSpots stream — only the
+    // meshes are derived low-poly impostors, so approaching swaps detail
+    // without a single tree moving. Palms and cacti ride the same contract.
     const acc = bakeAccumulator();
-    for (let i = 0; i < count; i++) {
-      const x = cxw + rng() * CHUNK;
-      const z = czw + rng() * CHUNK;
-      if (radiusOf(x, z) < 100) continue;      // base meadow stays open
-      if (this.isWater(x, z)) continue;
-      if (this.pathDistance(x, z) < 4.5) continue;
-      const roll = rng();
-      const size = roll < 0.30 ? 0 : roll < 0.60 ? 1 : roll < 0.82 ? 2 : roll < 0.95 ? 3 : 4;
-      const fkey = `fartree:${biome.name}:${size}:${(rng() * 4) | 0}`;
-      stampTemplate(acc, bakeTemplate(fkey, () => makeFarTree(size, biome, tplRng(fkey))),
-        x, this.heightAt(x, z), z, rng() * Math.PI * 2);
+    const { spots } = this._treeSpots(cx, cz, biome);
+    for (const s of spots) {
+      const tkey = `tree:${biome.name}:${s.size}:${s.v}`;
+      const itpl = impostorTemplate(tkey, () => makeTree(s.size, biome, tplRng(tkey)));
+      stampTemplate(acc, itpl, s.x, this.heightAt(s.x, s.z), s.z, s.rotY);
+    }
+    for (const b of this._bigDecoSpots(cx, cz, biome)) {
+      const tpl = bakeTemplate(b.key, () => (b.kind === 'palm'
+        ? makePalm(tplRng(b.key)) : makeCactus(tplRng(b.key))));
+      stampTemplate(acc, tpl, b.x, this.heightAt(b.x, b.z), b.z, b.rotY);
     }
     const forest = buildBakedMesh(acc, false);
     if (forest) {

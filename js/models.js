@@ -246,6 +246,59 @@ export function stampTemplate(out, tpl, x, y, z, rotY, sway = null, scale = 1, s
   for (let i = 0; i < idx.length; i++) out.idx.push(base + idx[i]);
 }
 
+// a far-LOD impostor DERIVED from the real template: measure the real
+// tree's height, girth, trunk/canopy colors and top taper, then build a
+// ~40-vertex stand-in with the same proportions. Because the far tier also
+// places it at the real tree's exact spot and rotation, the near/far swap
+// reads as a detail refinement — never as the forest rearranging itself.
+export function impostorTemplate(key, build) {
+  const k = 'imp:' + key;
+  const cached = _tplCache.get(k);
+  if (cached) return cached;
+  const src = bakeTemplate(key, build); // full template (shared with near tier)
+  const P = src.pos, C = src.col;
+  let H = 0.1, W = 0.1;
+  for (let i = 0; i < P.length; i += 3) {
+    H = Math.max(H, P[i + 1]);
+    W = Math.max(W, Math.abs(P[i]), Math.abs(P[i + 2]));
+  }
+  const yc = H * 0.3; // trunk / canopy split
+  let tr = 0, tg = 0, tb = 0, tn = 0, cr = 0, cg = 0, cb = 0, cn = 0;
+  let topW = 0.01, midW = 0.01;
+  for (let i = 0; i < P.length; i += 3) {
+    const y = P[i + 1], rad = Math.max(Math.abs(P[i]), Math.abs(P[i + 2]));
+    if (y < yc) { tr += C[i]; tg += C[i + 1]; tb += C[i + 2]; tn++; }
+    else {
+      cr += C[i]; cg += C[i + 1]; cb += C[i + 2]; cn++;
+      if (y > H * 0.78) topW = Math.max(topW, rad);
+      else midW = Math.max(midW, rad);
+    }
+  }
+  const trunkC = tn ? new THREE.Color(tr / tn, tg / tn, tb / tn).getHex() : 0x6b4a2d;
+  const canopyC = cn ? new THREE.Color(cr / cn, cg / cn, cb / cn).getHex() : 0x3c7f37;
+  return bakeTemplate(k, () => {
+    const g = new THREE.Group();
+    const trunk = box(Math.max(0.2, W * 0.12), yc + 0.4, Math.max(0.2, W * 0.12), trunkC);
+    trunk.castShadow = false;
+    trunk.position.y = (yc + 0.4) / 2;
+    g.add(trunk);
+    const ch = H - yc;
+    if (topW < midW * 0.45) { // conical crown (pines)
+      const c = cone(midW, ch, canopyC, 6);
+      c.castShadow = false;
+      c.position.y = yc + ch / 2;
+      g.add(c);
+    } else {                  // rounded crown (leafy / jungle)
+      const s = sphere(midW, canopyC, 6);
+      s.castShadow = false;
+      s.scale.y = ch / (2 * midW);
+      s.position.y = yc + ch / 2;
+      g.add(s);
+    }
+    return g;
+  });
+}
+
 // shared-geometry template mesh (trees): every "oak, size 3, variant 2" in
 // the world is ONE GPU geometry — chunk gen just wraps it in a new Mesh.
 // The geometry is flagged shared so chunk disposal leaves it alone.
