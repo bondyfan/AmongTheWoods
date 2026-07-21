@@ -17,6 +17,7 @@ import { worldPatch, TERRAIN_PAINTS, applyTweaks, tweakOriginal,
          ENEMY_TWEAK_FIELDS, ITEM_TWEAK_FIELDS, BIOME_TWEAK_FIELDS,
          BIOME_COLOR_FIELDS } from './worldpatch.js';
 import { ENEMY_TYPES, ITEMS, BIOMES } from './config.js';
+import { saveVersion, listVersions, makeCurrent, fetchCurrent } from './worldsync.js';
 import { makeTree, makeBoulder, makeEnemyMesh, makeTownHouse, makeChurch,
          makeFountain, makeShrine, makeMonolith, makeCrypt, makeFarm,
          makeTrader, makeVillage, makeTemple, makeRaceFlag, makeNest,
@@ -127,6 +128,7 @@ export class WorldEditor {
     this.optNames = true;
     this.optElev = false;
     this.gfx = 'high'; // editor render quality: low | medium | high (draw distance is NEVER touched)
+    this._undo = [];   // Ctrl/Cmd+Z stack of serialized patch snapshots
     this._nameSprites = new Map();
     this._nameT = 0;
     this.grabbed = null;
@@ -549,7 +551,11 @@ export class WorldEditor {
       if (document.activeElement && document.activeElement !== document.body) {
         document.activeElement.blur?.();
       }
-      if (ev.button === 0) { this.painting = true; this._strokePlaced = 0; this._clickStroke(); }
+      if (ev.button === 0) {
+        // one undo entry per stroke/placement (mutating contexts only)
+        if (!this._testPick && (this.tab === 'terrain' || PLACE_TABS.has(this.tab))) this._snapshot();
+        this.painting = true; this._strokePlaced = 0; this._clickStroke();
+      }
       if (ev.button === 2) this._rightClick();
     }, true);
     window.addEventListener('mouseup', (ev) => {
@@ -576,8 +582,18 @@ export class WorldEditor {
       this._wheel += ev.deltaY;
     }, { capture: true, passive: false });
     const inField = (el) => el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName);
+    const textField = (el) => el && (el.tagName === 'TEXTAREA'
+      || (el.tagName === 'INPUT' && !['range', 'checkbox', 'radio', 'button'].includes(el.type)));
     window.addEventListener('keydown', (ev) => {
-      if (!this.active || inField(ev.target)) return;
+      if (!this.active) return;
+      // Ctrl/Cmd+Z — undo the last edit (unless a TEXT field wants its own undo)
+      if ((ev.metaKey || ev.ctrlKey) && !ev.shiftKey && (ev.code === 'KeyZ' || ev.key === 'z')) {
+        if (textField(document.activeElement)) return;
+        ev.preventDefault(); ev.stopImmediatePropagation();
+        this._undoStep();
+        return;
+      }
+      if (inField(ev.target)) return;
       // proportional step so the now-huge radius range is fast to drag
       const rstep = Math.max(2, Math.round(this.radius * 0.15));
       if (ev.code === 'BracketLeft') this._setRadius(this.radius - rstep);
@@ -606,19 +622,21 @@ export class WorldEditor {
     if (this.grabbed) { this._dragTo(aim); return; }
     if (!this.painting) return;
     if (this.tab === 'terrain') {
-      // big brushes touch many cells/tiles — space the apply + repaint ticks
-      // out with radius so huge strokes stay smooth instead of thrashing
+      // SMOOTH sculpting: apply + repaint essentially every frame for small /
+      // medium brushes (fluid, follows the cursor), and only space the ticks
+      // out for HUGE brushes so they don't thrash. Height change is dt-based,
+      // so a wider tick just means a bigger step — the result is identical.
       this._accum += dt;
-      const applyEvery = 0.033 + Math.min(0.05, this.radius * 0.00015);
+      const applyEvery = Math.min(0.05, this.radius * 0.0001);
       if (this._accum >= applyEvery) {
         const step = this._accum; this._accum = 0;
         this._applyBrush(aim, step);
       }
-      // REALTIME repaint of the tiles under the brush. Height-only sculpt tools
-      // get the fast heights+normals repaint (no color recompute) for max FPS.
+      // height-only sculpt tools get the fast heights+normals repaint (no color
+      // recompute) so it stays buttery; paint/water tools do the full pass.
       this._groundT -= dt;
       if (this._groundT <= 0 && this._groundStroked) {
-        this._groundT = 0.09 + Math.min(0.16, this.radius * 0.0006);
+        this._groundT = Math.min(0.14, 0.012 + this.radius * 0.0004);
         const heightsOnly = this.tool === 'raise' || this.tool === 'lower'
           || this.tool === 'smooth' || this.tool === 'hclear';
         this.o.onDirty('ground', {
@@ -771,7 +789,7 @@ export class WorldEditor {
     this._scatterAcc = 0;
     this._groundStroked = false;
     this._dropGrab();
-    if (wasTerrain) this._markDirty('chunks');
+    if (wasTerrain) this._markDirty('sculpt'); // in-place repaint + reground, NO flash
     if (this._strokePlaced > 0) {
       const n = this._strokePlaced;
       const packs = this._strokePacks;
@@ -786,6 +804,7 @@ export class WorldEditor {
     if (!PLACE_TABS.has(this.tab)) return;
     const hit = this._entityAt(this._viewAim, Math.max(4, this.radius * 0.4));
     if (!hit) return;
+    this._snapshot();
     if (hit.patchId) worldPatch.removeEntity(hit.patchId);
     else worldPatch.removeGenerated(hit.genKey);
     this._areaGrow(this._viewAim.x, this._viewAim.z, 40);
@@ -842,7 +861,7 @@ export class WorldEditor {
   }
 
   _markDirty(kind, info = {}) {
-    const RANK = { ground: 0, chunks: 1, entities: 2 };
+    const RANK = { ground: 0, sculpt: 1, chunks: 1, entities: 2 };
     if ((RANK[kind] ?? 0) > (RANK[this._dirtyKind] ?? -1)) this._dirtyKind = kind;
     this._dirtyInfo = { ...(this._dirtyInfo ?? {}), ...info };
     const fire = () => {
@@ -856,34 +875,42 @@ export class WorldEditor {
       this._rebuildMarkers();
       this._refreshStats();
     };
-    if (kind === 'entities') {
+    if (kind === 'entities' || kind === 'sculpt') {
       clearTimeout(this._dirtyT);
-      this._dirtyT = setTimeout(fire, 40);
+      this._dirtyT = setTimeout(fire, 40); // land the color/reground pass promptly
     } else if (!this._dirtyT) {
       this._dirtyT = setTimeout(fire, 120);
     }
   }
 
   // ---------- persistence ----------
+  // CLOUD save: writes to Firebase, so the edit is LIVE for every player on
+  // their next load — no git dance — and every save is kept as a browsable
+  // version (📜). Works on the deployed static site. In dev it ALSO refreshes
+  // the local assets/world-patch.json so the shipped baseline can be committed.
   async save() {
-    // the /__worldpatch write-to-disk endpoint only exists under `vite dev`.
-    // The deployed build has no server, so a POST there just 405s and spams
-    // the console — download the patch instead (drop it into assets/ + commit).
-    if (!import.meta.env.DEV) {
-      this.export();
-      this.o.toast('💾 Deployed build — downloaded world-patch.json. Replace assets/world-patch.json and commit to ship it.');
-      return;
-    }
-    const body = JSON.stringify(worldPatch.serialize());
+    const btn = this._$?.('save');
+    if (btn) { btn.disabled = true; btn.textContent = '☁️ Saving…'; }
+    const patch = worldPatch.serialize();
+    let ok = false;
     try {
-      const res = await fetch('/__worldpatch', { method: 'POST', body,
-        headers: { 'content-type': 'application/json' } });
-      if (!res.ok) throw new Error(await res.text());
+      const v = await saveVersion(patch, `edit ${new Date().toLocaleString()}`,
+        (typeof localStorage !== 'undefined' && localStorage.getItem('atw-uid')) || 'admin');
+      ok = true;
       worldPatch.dirty = false;
       this._refreshStats();
-      this.o.toast('💾 Saved to assets/world-patch.json — commit & push to ship it.');
+      this.o.toast(`☁️ Saved & LIVE for all players — version ${v.id}. Open 📜 to browse/restore.`);
     } catch (e) {
-      this.o.toast('💾 Dev server not reachable — use Export instead. (' + (e?.message ?? e) + ')');
+      this.o.toast('⚠ Cloud save failed (' + (e?.message ?? e) + ') — downloading a backup instead.');
+      this.export();
+    }
+    if (btn) { btn.disabled = false; btn.textContent = '💾 Save'; }
+    // dev: keep the git-shipped baseline in sync too (best effort, non-blocking)
+    if (import.meta.env.DEV) {
+      try {
+        await fetch('/__worldpatch', { method: 'POST', body: JSON.stringify(patch),
+          headers: { 'content-type': 'application/json' } });
+      } catch { /* no dev server — cloud already has it */ }
     }
   }
 
@@ -904,7 +931,10 @@ export class WorldEditor {
       const f = inp.files?.[0];
       if (!f) return;
       try {
-        if (!worldPatch.load(JSON.parse(await f.text()))) {
+        const parsed = JSON.parse(await f.text());
+        this._snapshot(); // importing over the current patch is undoable
+        if (!worldPatch.load(parsed)) {
+          this._undo.pop(); // nothing loaded → drop the snapshot
           this.o.toast('⚠ Not a v1 world-patch.json — nothing imported.');
           return;
         }
@@ -918,6 +948,75 @@ export class WorldEditor {
       this.o.toast('⬆ Patch imported (not saved yet).');
     };
     inp.click();
+  }
+
+  // ---------- cloud version history ----------
+  _showVersions() {
+    let ov = this._verEl;
+    if (!ov) {
+      ov = this._verEl = document.createElement('div');
+      ov.id = 'we-versions';
+      ov.style.cssText = 'position:fixed; inset:0; z-index:120; display:flex;'
+        + 'align-items:center; justify-content:center; background:rgba(0,0,0,0.55);';
+      ov.onclick = (e) => { if (e.target === ov) ov.style.display = 'none'; };
+      ov.innerHTML = `<div style="width:min(560px,92vw); max-height:80vh; overflow:auto;
+          background:var(--bg); border:1px solid var(--line); border-radius:14px;
+          padding:16px 18px; box-shadow:0 16px 50px rgba(0,0,0,0.7)">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px">
+            <b style="font-size:15px; color:var(--gold)">📜 Map versions <span style="color:var(--dim); font-weight:400">— cloud history</span></b>
+            <button data-vclose style="background:#20281a; color:var(--ink); border:1px solid var(--line);
+              border-radius:7px; padding:5px 10px; cursor:pointer">✖</button>
+          </div>
+          <div data-vlist style="font-size:12px; color:var(--dim)">Loading…</div>
+        </div>`;
+      document.body.appendChild(ov);
+      ov.querySelector('[data-vclose]').onclick = () => { ov.style.display = 'none'; };
+    }
+    ov.style.display = 'flex';
+    const list = ov.querySelector('[data-vlist]');
+    list.textContent = 'Loading…';
+    Promise.all([listVersions(), fetchCurrent()]).then(([vers, cur]) => {
+      if (!vers.length) { list.innerHTML = '<i>No cloud saves yet. Hit 💾 Save to create the first version.</i>'; return; }
+      const curId = cur?.id;
+      list.innerHTML = '';
+      for (const v of vers) {
+        const when = new Date(v.at || 0).toLocaleString();
+        const live = v.id === curId;
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex; justify-content:space-between; align-items:center; gap:10px;'
+          + 'padding:8px 4px; border-top:1px solid var(--line)';
+        row.innerHTML = `<span style="color:var(--ink)">${when}
+            ${live ? '<b style="color:#6fd36f"> · LIVE</b>' : ''}
+            <br><span style="color:var(--dim); font-size:11px">${v.note || v.id}</span></span>`;
+        const btn = document.createElement('button');
+        btn.textContent = live ? 'Current' : 'Restore';
+        btn.disabled = live;
+        btn.style.cssText = 'background:#4c6a34; color:#ffe9bd; border:1px solid var(--gold);'
+          + 'border-radius:7px; padding:6px 12px; cursor:pointer; white-space:nowrap'
+          + (live ? '; opacity:0.5; cursor:default' : '');
+        btn.onclick = () => this._restoreVersion(v.id, when);
+        row.appendChild(btn);
+        list.appendChild(row);
+      }
+    });
+  }
+
+  async _restoreVersion(id, when) {
+    if (!confirm(`Restore the map from ${when}? This becomes the LIVE map for all players. (Undo with Ctrl/Cmd+Z.)`)) return;
+    try {
+      this._snapshot(); // restoring is undoable locally
+      const patch = await makeCurrent(id); // also re-points cloud "current" here
+      if (!patch || !worldPatch.load(patch)) throw new Error('bad version data');
+      applyTweaks();
+      worldPatch.dirty = false;
+      this._markDirty('entities', { packs: true });
+      this._refreshGhost();
+      if (this._verEl) this._verEl.style.display = 'none';
+      this.o.toast(`♻️ Restored version from ${when} — now LIVE for all players.`);
+    } catch (e) {
+      this._undo.pop();
+      this.o.toast('⚠ Restore failed: ' + (e?.message ?? e));
+    }
   }
 
   // ---------- the UI ----------
@@ -1053,6 +1152,7 @@ export class WorldEditor {
           </div>
         </div>
         <button class="we-act gold" data-we="save">💾 Save</button>
+        <button class="we-act" data-we="versions" title="Cloud save history — browse & restore versions">📜</button>
         <button class="we-act" data-we="rebuild" title="Re-apply the whole patch">↺</button>
         <button class="we-act" data-we="export" title="Download world-patch.json">⬇</button>
         <button class="we-act" data-we="import" title="Load a world-patch.json">⬆</button>
@@ -1300,6 +1400,7 @@ export class WorldEditor {
                  value="${cur !== undefined ? show(cur) : ''}" style="width:72px"></span>`
           : `${f} <input type="number" step="any" placeholder="${orig}" value="${cur ?? ''}">`;
         row.querySelector('input').onchange = (ev) => {
+          this._snapshot();
           let v = null;
           if (ev.target.value !== '') {
             v = isColor ? parseInt(ev.target.value.replace(/^#|^0x/i, ''), 16) : +ev.target.value;
@@ -1353,6 +1454,7 @@ export class WorldEditor {
         const row = document.createElement('label');
         row.innerHTML = `${f} <input type="number" step="any" placeholder="${orig}" value="${cur ?? ''}">`;
         row.querySelector('input').onchange = (ev) => {
+          this._snapshot();
           const v = ev.target.value === '' ? null : +ev.target.value;
           store[id] ??= {};
           if (v === null || !Number.isFinite(v) || v === orig) delete store[id][f];
@@ -1426,12 +1528,14 @@ export class WorldEditor {
         : 'Test cancelled.');
     };
     $('save').onclick = () => this.save();
+    $('versions').onclick = () => this._showVersions();
     $('export').onclick = () => this.export();
     $('import').onclick = () => this.import();
     $('rebuild').onclick = () => { this._markDirty('entities', { packs: true }); this.o.toast('↺ World rebuilt from patch.'); };
     $('exit').onclick = () => this.toggle(false);
     $('clear').onclick = () => {
       if (!confirm('Wipe ALL World-Editor edits?')) return;
+      this._snapshot(); // wipe is undoable
       worldPatch.clear();
       applyTweaks();
       this._markDirty('entities', { packs: true });
@@ -1461,6 +1565,29 @@ export class WorldEditor {
     }
     this.o.onGfx?.(level);
     this.o.toast(`⚙️ Editor graphics: ${level.toUpperCase()} — view distance unchanged`);
+  }
+
+  // ---------- undo (Ctrl/Cmd+Z) ----------
+  // snapshot the WHOLE patch BEFORE a mutating gesture. One entry per stroke /
+  // placement / deletion, so a single undo reverts a whole brush stroke.
+  _snapshot() {
+    this._undo.push(JSON.stringify(worldPatch.serialize()));
+    if (this._undo.length > 60) this._undo.shift();
+  }
+
+  _undoStep() {
+    if (!this.active) return;
+    const snap = this._undo.pop();
+    if (!snap) { this.o.toast('↩︎ Nothing to undo.'); return; }
+    if (this.grabbed) this._dropGrab();
+    worldPatch.load(JSON.parse(snap));
+    applyTweaks();
+    worldPatch.dirty = true;
+    // 'entities' fires applyPatchEntities + a full regenChunks → ground, water,
+    // props, POIs and biome colors all snap back to the restored state
+    this._markDirty('entities', { packs: true });
+    this._refreshGhost();
+    this.o.toast(`↩︎ Undo (${this._undo.length} left)`);
   }
 
   _refreshStats() {

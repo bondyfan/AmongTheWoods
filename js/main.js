@@ -18,7 +18,8 @@ import { input } from './input.js';
 import { initTouch } from './touch.js';
 import { World, latticeHash } from './world.js';
 import { ShipLine } from './ship.js';
-import { loadWorldPatch, applyTweaks } from './worldpatch.js';
+import { loadWorldPatch, applyTweaks, worldPatch } from './worldpatch.js';
+import { fetchCurrent } from './worldsync.js';
 import { WorldEditor } from './editor.js';
 import { MobaWorld } from './mobaworld.js';
 import { DungeonWorld } from './dungeon.js';
@@ -321,7 +322,14 @@ const panels = new Panels({
   },
 });
 
-await loadWorldPatch(); // admin World-Editor overrides (assets/world-patch.json)
+// the LIVE map: the admin's latest cloud Save (Firebase) wins over the shipped
+// assets/world-patch.json baseline; a missing/slow cloud just falls back to it
+const _cloudMap = await fetchCurrent();
+if (_cloudMap?.patch && worldPatch.load(_cloudMap.patch)) {
+  console.log('[worldpatch] live cloud version', _cloudMap.id, 'loaded');
+} else {
+  await loadWorldPatch(); // static baseline (assets/world-patch.json)
+}
 applyTweaks();          // …including enemy/item stat tweaks from the object editor
 if (humanModelEnabled()) { // experimental rigged-human avatar (Graphics settings)
   try { await preloadHumanModel(); } catch (e) { console.warn('[human] model load failed, using box man', e); }
@@ -3936,6 +3944,14 @@ function toggleWorldEditor() {
         // pass so they stay at high FPS; paint/water strokes do the full pass.
         if (info.heightsOnly) world.refreshGroundHeights(info.area.x, info.area.z, info.area.r);
         else world.refreshGroundNear(info.area.x, info.area.z, info.area.r);
+      } else if (kind === 'sculpt' && info.area) {
+        // sculpt stroke FINISHED: a full-color in-place repaint (no dispose →
+        // no rebuild flash / no holes showing the underlay) + drop trees/rocks
+        // and mobs back onto the new ground. Replaces the old regen "reload".
+        const { x, z, r } = info.area;
+        world.refreshGroundNear(x, z, r);
+        world.regroundProps(x, z, r);
+        enemyMgr.regroundMobs(x, z, r + 30);
       } else if (info.area) {
         world.regenChunksNear(info.area.x, info.area.z, info.area.r);
         if (kind === 'chunks') { // sculpt stroke finished: mobs follow the ground
