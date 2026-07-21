@@ -2336,9 +2336,9 @@ export class Player {
       s.t += dt;
       const k = Math.min(1, s.t / s.life);
       if (s.forward) {
-        // …and cut across to the other side while thrusting out to full reach
+        // full length from the first frame (no forward thrust — that read as
+        // a poke); it just sweeps across the diagonal and fades like a cut
         s.mesh.rotation.y = s.baseRy + (0.42 - k * 0.72) * s.side;
-        s.mesh.scale.set(1, 1, 0.5 + k * 0.55);             // blade thrusts forward
         s.mesh.material.opacity = 0.78 * (1 - k);
       } else {
         s.mesh.rotation.y = s.baseRy - 0.5 + k * 1.1;       // sweep across the arc
@@ -2564,10 +2564,12 @@ export class Player {
         leftArm.rotation.x = -1.5;
         rightArm.rotation.x = -0.4 - k * 0.85; // drawing the string back
       } else {
-        // (+x rotation lifts the hanging arm up BEHIND the head — the classic
-        // axe-over-the-shoulder pose the strike then chops down from)
-        rightArm.rotation.x = 2.3 * k;                    // raising OVERHEAD
-        rightArm.rotation.z = -0.5 * k * this.swingSide;  // …and out to this swing's side
+        // raise the weapon straight OVERHEAD (θ≈3.05 points the hanging arm
+        // almost vertically up). Eased so the arm shoots up early and then
+        // hovers high — the player clearly sees the axe held above the head.
+        const raise = Math.pow(k, 0.6);
+        rightArm.rotation.x = 3.05 * raise;                   // up over the shoulder
+        rightArm.rotation.z = -0.4 * raise * this.swingSide;  // tilted to this swing's side
       }
     } else if (this.attackT > 0) {
       this.attackT -= dt;
@@ -2576,15 +2578,16 @@ export class Player {
         leftArm.rotation.x = -1.5;
         rightArm.rotation.x = -1.2 * Math.sin(k * Math.PI);
       } else {
-        // the windup raised the arm OVERHEAD to one side — now whip it DOWN
-        // in front and across to the other side: a true top-to-bottom chop.
-        // Starts exactly at the windup's end pose (+2.3 overhead) and ends
-        // forward-low (-1.1), so the two phases blend seamlessly.
+        // the windup parked the arm straight overhead (+3.05). The chop must
+        // CONTINUE FORWARD over the top — θ increasing 3.05 → 5.78 carries the
+        // hand over the crown and down the FRONT, ending buried forward-low
+        // (5.78 ≡ -0.5). Decreasing θ instead would swing down the BACK and
+        // scoop up from below — the exact underhand poke this replaces.
         const side = this.attackSide || 1;
         const whip = k * k * (3 - 2 * k); // smoothstep over the whole swing
-        rightArm.rotation.x = 2.3 - 3.4 * whip;            // overhead → forward-low
-        rightArm.rotation.z = (-0.5 + 0.8 * whip) * side;  // sweep across the body
-        rightSocket.rotation.x = -1.1 * whip * (1 - k * 0.4); // wrist flick
+        rightArm.rotation.x = 3.05 + 2.73 * whip;          // over the top → down the front
+        rightArm.rotation.z = (-0.4 + 0.7 * whip) * side;  // sweep across the body
+        rightSocket.rotation.x = -0.6 * whip * (1 - k * 0.4); // blade bites forward-down
       }
     } else {
       rightArm.rotation.x = -swing * 0.6;

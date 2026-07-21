@@ -181,6 +181,98 @@ export function bakeAt(out, root, x, y, z, rotY = 0, scale = 1, sway = null) {
   _bakeInto(root, _bakeRootM, out);
   _swayCtx = null;
 }
+
+// ---- bake templates ----
+// Chunk generation used to BUILD every plant from scratch (dozens of
+// BoxGeometry/ConeGeometry allocations per grass tuft, hundreds of makers
+// per chunk) just to copy their vertices into the baked mesh and throw the
+// objects away — the main cause of the chunk-crossing hitch. A template
+// bakes ONE maker result into flat local-space arrays once; stamping it is
+// pure array math (rotate + translate + push), zero allocations.
+const _tplCache = new Map();
+function _strSeed(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+// deterministic per-key rng — the same template key always builds the same
+// geometry, so the seed-1 world stays identical across sessions
+export function tplRng(key) {
+  let s = _strSeed(key);
+  return () => {
+    s |= 0; s = (s + 0x6D2B79F5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+export function bakeTemplate(key, build, sway = null) {
+  let t = _tplCache.get(key);
+  if (t) return t;
+  const out = bakeAccumulator();
+  const built = build();
+  const root = built?.mesh ?? built;
+  _swayCtx = sway; // local-space {amp, y0, y1} (trees); stamps may re-derive
+  _bakeInto(root, _identity, out);
+  _swayCtx = null;
+  t = {
+    pos: new Float32Array(out.pos), nrm: new Float32Array(out.nrm),
+    col: new Float32Array(out.col), sway: new Float32Array(out.sway),
+    idx: out.idx.slice(), radius: built?.radius ?? null,
+    extras: out.extras.length, // >0 → caller must fall back to a live bake
+  };
+  _tplCache.set(key, t);
+  return t;
+}
+
+// stamp a template into an accumulator at a world spot. Sway forms:
+// {amp, h} (bend from the base) or {amp, y0, y1} (local band, like trees).
+export function stampTemplate(out, tpl, x, y, z, rotY, sway = null, scale = 1, scaleY = scale) {
+  const base = out.pos.length / 3;
+  const cos = Math.cos(rotY), sin = Math.sin(rotY);
+  const P = tpl.pos, N = tpl.nrm, C = tpl.col;
+  const amp = sway ? sway.amp : 0;
+  const y0 = sway ? (sway.y1 !== undefined ? sway.y0 : 0.02) : 0;
+  const y1 = sway ? (sway.y1 !== undefined ? sway.y1 : (sway.h ?? 0.55)) : 1;
+  const span = y1 - y0 || 1;
+  for (let i = 0; i < P.length; i += 3) {
+    const lx = P[i] * scale, ly = P[i + 1] * scaleY, lz = P[i + 2] * scale;
+    out.pos.push(x + lx * cos + lz * sin, y + ly, z + lz * cos - lx * sin);
+    out.nrm.push(N[i] * cos + N[i + 2] * sin, N[i + 1], N[i + 2] * cos - N[i] * sin);
+    out.col.push(C[i], C[i + 1], C[i + 2]);
+    out.sway.push(amp ? amp * Math.min(1, Math.max(0, (ly - y0) / span)) : 0);
+  }
+  const idx = tpl.idx;
+  for (let i = 0; i < idx.length; i++) out.idx.push(base + idx[i]);
+}
+
+// shared-geometry template mesh (trees): every "oak, size 3, variant 2" in
+// the world is ONE GPU geometry — chunk gen just wraps it in a new Mesh.
+// The geometry is flagged shared so chunk disposal leaves it alone.
+const _tplMeshCache = new Map();
+export function templateMesh(key, build, sway = null) {
+  let e = _tplMeshCache.get(key);
+  if (!e) {
+    const out = bakeAccumulator();
+    const built = build();
+    const root = built?.mesh ?? built;
+    _swayCtx = sway;
+    _bakeInto(root, _identity, out);
+    _swayCtx = null;
+    if (out.extras.length || !out.pos.length) {
+      e = { fallback: true };
+    } else {
+      const mesh = buildBakedMesh(out, true);
+      mesh.geometry.userData.shared = true;
+      e = { geo: mesh.geometry, radius: built?.radius ?? null };
+    }
+    _tplMeshCache.set(key, e);
+  }
+  if (e.fallback) return null;
+  const m = new THREE.Mesh(e.geo, BAKED_MAT);
+  m.castShadow = true;
+  return { mesh: m, radius: e.radius };
+}
 // identity check for the shared color-keyed materials — anything else
 // (clones, sprites, custom mats) is safe to dispose
 export const isSharedMaterial = (mat) =>
