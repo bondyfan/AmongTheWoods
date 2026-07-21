@@ -1968,6 +1968,12 @@ export class Player {
         this._buffMax[field] = 0;
       }
     }
+    // Not an ability, but a real state: WoW-style fast recovery while calm.
+    // Shows once out-of-combat regen kicks in and vanishes at full health.
+    if (this.fastRegenActive) {
+      out.push({ id: 'fastRegen', icon: '💚', name: 'Recovering', t: null, dur: null,
+        kind: 'hot', value: '+' + Math.round(this.fastRegenRate || 0) });
+    }
     // Absorb shield (Ice Barrier / Power Word: Shield / Avatar) — a value, no timer
     if (this.classShield > 0.5) {
       out.push({ id: 'classShield', icon: '🛡️', name: 'Shield', t: null,
@@ -2333,13 +2339,17 @@ export class Player {
     // it. While fighting, only the small hpRegen trickle applies. Rest gear
     // (bedroll, stormcloak…) multiplies the out-of-combat rate.
     this.combatNoiseT += dt;
+    const outOfCombat = this.hurtT > OOC_DELAY && this.combatNoiseT > OOC_DELAY;
+    // fast out-of-combat recovery is surfaced as a buff (see activeBuffs); it
+    // shows while it's actively knitting HP back and vanishes at full health.
+    this.fastRegenActive = outOfCombat && this.hp < this.maxHp;
     if (this.hp < this.maxHp) {
-      const outOfCombat = this.hurtT > OOC_DELAY && this.combatNoiseT > OOC_DELAY;
       let rate = this.hpRegen;
       if (outOfCombat) {
         const restBonus = this.restMult > 1 && this.idleT > 1 ? 1 + this.restMult / 10 : 1;
         rate = (this.oocRegen + this.hpRegen) * restBonus;
       }
+      this.fastRegenRate = rate;
       this.hp = Math.min(this.maxHp, this.hp + rate * dt);
     }
     for (const id in this.spellCds) this.spellCds[id] = Math.max(0, this.spellCds[id] - dt);
