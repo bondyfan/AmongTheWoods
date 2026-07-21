@@ -16,4 +16,4 @@
 // for local testing.
 // ==========================================================================
 
-export const SERVER_URL = '';
+export const SERVER_URL = 'https://woods.91-99-52-127.sslip.io';

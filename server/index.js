@@ -15,6 +15,7 @@ import { MSG, PROTOCOL_VERSION, decode, encode, genCode } from './protocol.js';
 import { Room } from './room.js';
 
 const PORT = Number(process.env.PORT || 8080);
+const HOST = process.env.HOST || '0.0.0.0'; // set 127.0.0.1 behind a reverse proxy
 const TICK_HZ = Number(process.env.TICK_HZ || 15);
 const EMPTY_ROOM_TTL_MS = Number(process.env.EMPTY_ROOM_TTL_MS || 120000); // keep briefly for reconnects
 const HEARTBEAT_MS = 30000;
@@ -166,8 +167,8 @@ setInterval(() => {
   }
 }, HEARTBEAT_MS);
 
-server.listen(PORT, () => {
-  console.log(`[woods-server] listening on :${PORT}  (health /health, ws /ws, tick ${TICK_HZ}Hz)`);
+server.listen(PORT, HOST, () => {
+  console.log(`[woods-server] listening on ${HOST}:${PORT}  (health /health, ws /ws, tick ${TICK_HZ}Hz)`);
 });
 
 // graceful shutdown so systemd restarts are clean
