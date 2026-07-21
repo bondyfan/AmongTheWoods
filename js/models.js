@@ -501,69 +501,69 @@ export function waterMaterial(color, opacity = 0.9) {
     shader.uniforms.uTime = { value: 0 };
     shader.uniforms.uSunDir = { value: new THREE.Vector3(0.7, 0.55, 0.44) };
     shader.uniforms.uFx = { value: 1 }; // 0 = still water (setting off)
-    // ---- vertex: sum of directional GERSTNER-ish waves → real 3D chop,
-    // with the surface normal derived analytically so glints ride the crests
+    // ---- vertex: a GENTLE swell only (tiny amplitude, biased positive so
+    // wave troughs never dip below the lake bed and let the ground poke
+    // through). The real ripple detail is done PER-PIXEL in the fragment.
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>
 attribute float wedge;
 varying vec3 vWaterWP;
-varying vec3 vWaterN;
 varying float vWedge;
 uniform float uTime;
-uniform float uFx;
-// one wave: advances h and the xz slope (for the normal)
-void _wave(vec2 p, vec2 dir, float freq, float amp, float spd, float t, inout float h, inout vec2 slope){
-  float ph = dot(dir, p) * freq + t * spd;
-  h += sin(ph) * amp;
-  slope += dir * (cos(ph) * amp * freq);
-}`)
+uniform float uFx;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
 vec3 wpW = (modelMatrix * vec4(transformed, 1.0)).xyz;
-float hW = 0.0; vec2 slW = vec2(0.0);
-float A = uFx;
-_wave(wpW.xz, normalize(vec2( 0.85, 0.35)), 0.11, 0.30 * A, 1.05, uTime, hW, slW);
-_wave(wpW.xz, normalize(vec2(-0.45, 0.9 )), 0.22, 0.15 * A, 1.6 , uTime, hW, slW);
-_wave(wpW.xz, normalize(vec2( 0.2 ,-0.75)), 0.4 , 0.06 * A, 2.4 , uTime, hW, slW);
-transformed.y += hW;
-vWaterWP = wpW + vec3(0.0, hW, 0.0);
-vWaterN = normalize(vec3(-slW.x, 1.0, -slW.y));
+float swell = (sin(dot(vec2(0.13, 0.09), wpW.xz) + uTime * 0.9)
+  + 0.5 * sin(dot(vec2(-0.07, 0.15), wpW.xz) + uTime * 1.3)) * 0.045 * uFx;
+transformed.y += swell;                 // <= 0.07 — always above the bed
+vWaterWP = wpW + vec3(0.0, swell, 0.0);
 vWedge = wedge;`);
-    // ---- fragment: a translucent glossy mass of water — you see the bed
-    // through it (deeper = darker), the sky reflects off a shimmering
-    // rippled surface, sun sparkles dance, and it fades softly at the shore
+    // ---- fragment: a translucent glossy mass of water. The rippled surface
+    // normal is built PER-PIXEL from many octaves of directional waves (with
+    // an analytic gradient) so the shimmer is fine and high-res regardless of
+    // how low-poly the water mesh is — no more coarse blobby highlights.
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>
 varying vec3 vWaterWP;
-varying vec3 vWaterN;
 varying float vWedge;
 uniform float uTime;
 uniform float uFx;
-uniform vec3 uSunDir;`)
+uniform vec3 uSunDir;
+// one directional ripple's contribution to the surface slope
+vec2 _rip(vec2 p, vec2 d, float fr, float am, float sp, float t){
+  return d * (-sin(dot(d, p) * fr + t * sp) * am * fr);
+}
+// per-pixel water normal: sum of directional ripples; returns the analytic
+// surface normal (fine detail, independent of the mesh resolution)
+vec3 waterNormal(vec2 p, float t){
+  vec2 g = vec2(0.0);
+  g += _rip(p, vec2( 0.80, 0.30), 1.4 , 0.16 , 1.3, t);
+  g += _rip(p, vec2(-0.50, 0.90), 2.6 , 0.10 , 1.9, t);
+  g += _rip(p, vec2( 0.30,-0.70), 4.7 , 0.06 , 2.5, t);
+  g += _rip(p, vec2( 0.90, 0.40), 8.5 , 0.035, 3.1, t);
+  g += _rip(p, vec2(-0.20, 0.98), 15.0, 0.02 , 3.8, t);
+  return normalize(vec3(-g.x, 1.0, -g.y));
+}`)
       .replace('#include <opaque_fragment>', `
 vec2 rp = vWaterWP.xz;
-// animated micro-ripples perturb the surface normal so highlights DANCE
-vec3 Nr = normalize(vWaterN + vec3(
-  (sin(rp.x * 1.6 + uTime * 1.3) * 0.13 + sin(rp.y * 0.9 - uTime * 0.8) * 0.08) * uFx, 0.0,
-  (sin(rp.y * 1.4 - uTime * 1.1) * 0.13 + cos(rp.x * 0.8 + uTime * 0.6) * 0.08) * uFx));
+vec3 Nr = mix(vec3(0.0, 1.0, 0.0), waterNormal(rp, uTime), uFx);
 vec3 Vw = normalize(cameraPosition - vWaterWP);
 float facing = clamp(dot(Vw, Nr), 0.0, 1.0);
 float fres = pow(1.0 - facing, 3.0);
 // body tint: rich deep blue looking down, lighter teal where shallower
-vec3 deepC = diffuse * 0.45;
-vec3 shallowC = diffuse * 1.2 + vec3(0.0, 0.05, 0.07);
-vec3 body = mix(deepC, shallowC, facing * 0.7);
-outgoingLight = mix(outgoingLight, body, 0.72);
+vec3 deepC = diffuse * 0.42;
+vec3 shallowC = diffuse * 1.25 + vec3(0.0, 0.05, 0.08);
+vec3 body = mix(deepC, shallowC, facing * 0.65);
+outgoingLight = mix(outgoingLight, body, 0.74);
 // sky reflection brightens the grazing angles (the far side of the water)
-outgoingLight += vec3(0.6, 0.78, 0.92) * fres * 0.7 * uFx;
-// sparkling sun glints riding the rippled normal
+outgoingLight += vec3(0.62, 0.8, 0.95) * fres * 0.75 * uFx;
+// TIGHT sun sparkles riding the fine per-pixel normal (small, not blobby)
 vec3 Hn = normalize(Vw + normalize(uSunDir));
-float spec = pow(max(dot(Nr, Hn), 0.0), 90.0);
-float shim = sin(rp.x * 3.0 + uTime * 2.0) * sin(rp.y * 2.6 - uTime * 1.7);
-spec *= smoothstep(0.1, 1.0, shim * 0.5 + 0.6);
-outgoingLight += vec3(1.0, 0.98, 0.9) * spec * 3.2 * uFx;
+float spec = pow(max(dot(Nr, Hn), 0.0), 200.0);
+outgoingLight += vec3(1.0, 0.98, 0.9) * spec * 5.0 * uFx;
 // TRANSLUCENT: see the bed straight down, reflective/opaque at a graze, and
 // fade to nothing at the shoreline (vWedge) so the disc has no hard edge
-diffuseColor.a = clamp(mix(opacity, 0.95, fres) * vWedge, 0.02, 1.0);
+diffuseColor.a = clamp(mix(opacity, 0.96, fres) * vWedge, 0.02, 1.0);
 #include <opaque_fragment>`);
     WATER_SHADERS.push(shader);
   };

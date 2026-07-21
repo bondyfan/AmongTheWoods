@@ -1968,7 +1968,7 @@ export class World {
     for (const lake of chunkLakes) {
       if (lake.x < cxw || lake.x >= cxw + CHUNK || lake.z < czw || lake.z >= czw + CHUNK) continue;
       const mesh = makeWaterDisc(lake.r, 0x2d6a9a, 0.72);
-      mesh.position.set(lake.x, this.heightAt(lake.x, lake.z) + 0.22, lake.z);
+      mesh.position.set(lake.x, this.heightAt(lake.x, lake.z) + 0.3, lake.z);
       group.add(mesh);
       if (lake.island) {
         const sand = new THREE.Mesh(new THREE.CircleGeometry(lake.island.r + 0.8, 14),
@@ -2438,7 +2438,7 @@ export class World {
     for (const lake of this.lakesNear(cxw + CHUNK / 2, czw + CHUNK / 2)) {
       if (lake.x < cxw || lake.x >= cxw + CHUNK || lake.z < czw || lake.z >= czw + CHUNK) continue;
       const mesh = makeWaterDisc(lake.r, 0x2d6a9a, 0.72);
-      mesh.position.set(lake.x, this.heightAt(lake.x, lake.z) + 0.22, lake.z);
+      mesh.position.set(lake.x, this.heightAt(lake.x, lake.z) + 0.3, lake.z);
       group.add(mesh);
     }
 
