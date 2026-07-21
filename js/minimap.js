@@ -390,8 +390,9 @@ export class Minimap {
     }
 
     // placed griffin roosts — the flight network is always shown
-    // harbors are landmarks sailors steer by — always on the map
+    // harbors show once a sailor has actually FOUND them
     for (const h of this.world.harbors ?? []) {
+      if (!this._isDiscovered(h.x, h.z)) continue;
       const p = toC(h.x, h.z);
       if (!inView(p)) continue;
       ctx.fillStyle = '#2e5f8e';
@@ -401,8 +402,8 @@ export class Minimap {
       ctx.fillStyle = '#eaf4fb';
       text('⚓', p.x, p.y + 3);
     }
-    // the ship, wherever she sails
-    if (this.world.shipPos) {
+    // the ship — only over charted water
+    if (this.world.shipPos && this._isDiscovered(this.world.shipPos.x, this.world.shipPos.z)) {
       const sp = toC(this.world.shipPos.x, this.world.shipPos.z);
       if (inView(sp)) {
         ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
@@ -662,9 +663,9 @@ export class Minimap {
       ctx.font = '11px sans-serif';
     }
     // placed griffin roosts
-    // harbors + the ship line
+    // harbors + the ship line — only once discovered
     for (const h of this.world.harbors ?? []) {
-      if (!inView(h.x, h.z)) continue;
+      if (!this._isDiscovered(h.x, h.z) || !inView(h.x, h.z)) continue;
       const bx = toX(h.x), by = toY(h.z);
       ctx.fillStyle = '#2e5f8e';
       ctx.beginPath(); ctx.arc(bx, by, 8, 0, Math.PI * 2); ctx.fill();
@@ -673,7 +674,8 @@ export class Minimap {
       ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
       ctx.fillText('⚓', bx, by + 3.5);
     }
-    if (this.world.shipPos && inView(this.world.shipPos.x, this.world.shipPos.z)) {
+    if (this.world.shipPos && inView(this.world.shipPos.x, this.world.shipPos.z)
+        && this._isDiscovered(this.world.shipPos.x, this.world.shipPos.z)) {
       ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
       ctx.fillText('⛵', toX(this.world.shipPos.x), toY(this.world.shipPos.z) + 3.5);
     }

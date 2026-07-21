@@ -95,7 +95,9 @@ export const HARBOR_SPECS = [
   { id: 'jungle', name: 'Cape Harbor',    a: 0.10, zone: 2 },
   { id: 'frozen', name: 'Frost Landing',  a: -2.52, zone: 7 },
 ];
-export const SHIP = { DOCK_T: 120, SAIL_T: 60, SPEED: 9 };
+// SPEED × SAIL_T = how far out the she sails before the mid-ocean teleport —
+// kept short enough that she stays a visible part of the harbor scenery
+export const SHIP = { DOCK_T: 120, SAIL_T: 60, SPEED: 5 };
 
 // Everything about the zone under (x,z): its index, how far the nearest
 // zone border is, and (near borders) which zone lies across it.

@@ -1606,7 +1606,11 @@ export class Player {
   // Vertical motion: glide smoothly over hills; walking off a cliff means
   // free fall — and a long enough drop costs health on landing.
   _updateVertical(dt, world, devFly = false) {
-    const ground = world.heightAt(this.pos.x, this.pos.z);
+    // surfaceAt includes walkable structures (harbor pier decks) on top of
+    // the raw terrain; worlds without it (dungeons) just use the ground
+    const ground = world.surfaceAt
+      ? world.surfaceAt(this.pos.x, this.pos.z)
+      : world.heightAt(this.pos.x, this.pos.z);
     if (devFly) {
       if (!Number.isFinite(this.y)) this.y = ground;
       this.y = Math.max(ground, this.y);

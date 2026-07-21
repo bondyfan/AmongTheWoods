@@ -750,6 +750,16 @@ const flightNests = [];
 
 // A roost is PLACED with the cursor: using the item arms a translucent ghost
 // that follows the ground under the mouse; left-click drops it where you aim.
+// placeable ghosts never wander off: the aim point is CLAMPED to a short
+// leash around the player, so you always plant things right beside you
+const PLACE_RANGE = 6;
+function clampPlacePoint(max = PLACE_RANGE) {
+  const dx = aimPoint.x - player.pos.x, dz = aimPoint.z - player.pos.z;
+  const d = Math.hypot(dx, dz);
+  if (d <= max) return { x: aimPoint.x, z: aimPoint.z };
+  return { x: player.pos.x + (dx / d) * max, z: player.pos.z + (dz / d) * max };
+}
+
 let pendingNest = null; // { id, ghost }
 function placeNest(id) {
   if (game.kind !== 'survival' || !inPlay()) return;
@@ -769,24 +779,22 @@ function cancelNestPlacement() {
   scene.remove(pendingNest.ghost);
   pendingNest = null;
 }
-// each frame: slide the ghost to the aim point and tint it by validity
+// each frame: slide the ghost to the (leash-clamped) aim point
 function updateNestGhost() {
   if (!pendingNest) return;
-  const x = aimPoint.x, z = aimPoint.z;
+  const { x, z } = clampPlacePoint();
   pendingNest.ghost.position.set(x, world.heightAt(x, z), z);
   pendingNest.valid = !world.isWater(x, z)
-    && biomeIndexAt(x, z) <= itemById(pendingNest.id).nest.biomeMax
-    && Math.hypot(x - player.pos.x, z - player.pos.z) < 40;
+    && biomeIndexAt(x, z) <= itemById(pendingNest.id).nest.biomeMax;
 }
 function confirmNestPlacement() {
   if (!pendingNest) return true;
   const id = pendingNest.id, item = itemById(id);
-  const x = aimPoint.x, z = aimPoint.z;
+  const { x, z } = clampPlacePoint();
   if (world.isWater(x, z)) { ui.toast('🪺 Not on water — the twigs would drift apart.', ''); audio.sfx('error', 0.5); return true; }
   if (biomeIndexAt(x, z) > item.nest.biomeMax) {
     ui.toast(`🪺 The ${item.name} only settles in the ${BIOMES[item.nest.biomeMax].name} or an earlier zone.`, ''); audio.sfx('error', 0.5); return true;
   }
-  if (Math.hypot(x - player.pos.x, z - player.pos.z) > 40) { ui.toast('🪺 Too far — pick a spot closer to you.', ''); audio.sfx('error', 0.5); return true; }
   const ix = player.invItems.indexOf(id);
   if (ix < 0) { cancelNestPlacement(); return true; }
   player.invItems.splice(ix, 1);
@@ -839,24 +847,18 @@ function cancelCampItemPlacement() {
 
 function updateCampItemGhost() {
   if (!pendingCampItem) return;
-  const x = aimPoint.x, z = aimPoint.z;
+  const { x, z } = clampPlacePoint();
   pendingCampItem.ghost.position.set(x, world.heightAt(x, z) + (pendingCampItem.kind === 'boat' ? 0.16 : 0), z);
-  pendingCampItem.valid = !world.isWater(x, z)
-    && Math.hypot(x - player.pos.x, z - player.pos.z) < 40;
+  pendingCampItem.valid = !world.isWater(x, z);
 }
 
 function confirmCampItemPlacement() {
   if (!pendingCampItem) return true;
   const { id, kind } = pendingCampItem;
   const item = itemById(id);
-  const x = aimPoint.x, z = aimPoint.z;
+  const { x, z } = clampPlacePoint();
   if (world.isWater(x, z)) {
     ui.toast(`${item.icon} Place ${item.name} on solid ground.`, '');
-    audio.sfx('error', 0.5);
-    return true;
-  }
-  if (Math.hypot(x - player.pos.x, z - player.pos.z) >= 40) {
-    ui.toast(`${item.icon} Too far — choose a spot closer to you.`, '');
     audio.sfx('error', 0.5);
     return true;
   }
@@ -882,26 +884,37 @@ function nearFlightNest() {
 // ---- the flight map: the world map with wing icons on every roost ----
 let flightmapOpen = false;
 let flightNodes = []; // canvas-space hit targets rebuilt on every draw
+let flightZoom = 0;   // 0 = auto-fit the flight network; wheel overrides
 
 function drawFlightMap() {
   const canvas = $id('flightmap-canvas');
-  // borrow the discovered-world rendering, forced to the whole-world view
-  const saveZoom = minimap.bigZoom, savePX = minimap.bigPanX, savePZ = minimap.bigPanZ;
-  minimap.bigZoom = 1;
-  minimap.drawBig(canvas, player, mp?.mode === 'coop' ? mp.remote : null);
-  minimap.bigZoom = saveZoom; minimap.bigPanX = savePX; minimap.bigPanZ = savePZ;
-  const ctx = canvas.getContext('2d');
-  const W = canvas.width;
-  const toPx = (wx, wz) => ({
-    x: ((wx + WORLD.radius) / (WORLD.radius * 2)) * W,
-    y: ((wz + WORLD.radius) / (WORLD.radius * 2)) * W,
-  });
-  flightNodes = [];
   const here = nearFlightNest();
   const nodes = [
     { wx: 0, wz: 0, label: 'Home Camp', icon: '🏠' },
     ...flightNests.map(n => ({ wx: n.x, wz: n.z, label: n.name, icon: '🪽', isHere: n === here })),
   ];
+  // frame the view around the flight NETWORK (plus the player), not the
+  // whole world — the map opens usefully zoomed-in, and the wheel zooms on
+  let minX = player.pos.x, maxX = player.pos.x, minZ = player.pos.z, maxZ = player.pos.z;
+  for (const n of nodes) {
+    minX = Math.min(minX, n.wx); maxX = Math.max(maxX, n.wx);
+    minZ = Math.min(minZ, n.wz); maxZ = Math.max(maxZ, n.wz);
+  }
+  const span = Math.max(maxX - minX, maxZ - minZ) + 800; // breathing room
+  const autoZoom = Math.max(1, Math.min(8, (WORLD.radius * 2) / span));
+  drawFlightMap._autoZoom = autoZoom;
+  const zoom = flightZoom || autoZoom;
+  // borrow the discovered-world rendering, aimed at the network's center
+  const saveZoom = minimap.bigZoom, savePX = minimap.bigPanX, savePZ = minimap.bigPanZ;
+  minimap.bigZoom = zoom;
+  minimap.bigPanX = (minX + maxX) / 2 - player.pos.x;
+  minimap.bigPanZ = (minZ + maxZ) / 2 - player.pos.z;
+  minimap.drawBig(canvas, player, mp?.mode === 'coop' ? mp.remote : null);
+  const ox = minimap._bigOx, oz = minimap._bigOz, scale = minimap.bigScale;
+  minimap.bigZoom = saveZoom; minimap.bigPanX = savePX; minimap.bigPanZ = savePZ;
+  const ctx = canvas.getContext('2d');
+  const toPx = (wx, wz) => ({ x: (wx - ox) * scale, y: (wz - oz) * scale });
+  flightNodes = [];
   ctx.textAlign = 'center';
   for (const n of nodes) {
     const p = toPx(n.wx, n.wz);
@@ -925,8 +938,17 @@ function toggleFlightMap(force) {
   flightmapOpen = force !== undefined ? force : !flightmapOpen;
   if (flight) flightmapOpen = false; // already in the air
   $id('flightmap').classList.toggle('hidden', !flightmapOpen);
-  if (flightmapOpen) { audio.sfx('click', 0.4); drawFlightMap(); }
+  if (flightmapOpen) { flightZoom = 0; audio.sfx('click', 0.4); drawFlightMap(); }
 }
+
+// mouse wheel zooms the flight map (starts from the auto-fit level)
+$id('flightmap-canvas').addEventListener('wheel', (e) => {
+  if (!flightmapOpen) return;
+  e.preventDefault();
+  const cur = flightZoom || drawFlightMap._autoZoom || 1;
+  flightZoom = Math.max(1, Math.min(8, cur * (e.deltaY < 0 ? 1.4 : 1 / 1.4)));
+  drawFlightMap();
+}, { passive: false });
 
 // ---- the flight itself: 5 s arrival, then the griffin carries you ----
 let flight = null; // { phase: 'arrive'|'ride', t, mesh, to, from, y, walkT }
@@ -1027,6 +1049,7 @@ function tickDrowning(dt) {
 
 // ---------- the pirate ship line (see ship.js for the timetable) ----------
 let shipLine = null;
+let pierHintAt = -99; // last time the "next ship in Xs" sign was shown
 const shipRiding = () => shipLine?.rider === player;
 
 function tickShip() {
@@ -1054,6 +1077,21 @@ function tickShip() {
   if (ev === 'arrived') {
     ui.toast(`⚓ ${shipLine.state.harbor?.name ?? 'Harbor'} — you step off onto the pier.`, 'level');
     audio.sfx('kill_gold', 0.4);
+  }
+  // pier signboard: standing on the pier while the ship is elsewhere tells
+  // you when she docks here next (repeats every ~20 s while you wait)
+  if (!shipRiding() && game.time - pierHintAt > 20) {
+    for (const h of world.harbors) {
+      const head = { x: h.x + h.outX * 16, z: h.z + h.outZ * 16 };
+      if (Math.hypot(player.pos.x - head.x, player.pos.z - head.z) > 14) continue;
+      const wait = shipLine.nextDockIn(h, game.time);
+      if (wait > 3) {
+        pierHintAt = game.time;
+        const m = Math.floor(wait / 60), s = Math.ceil(wait % 60);
+        ui.toast(`⛵ The ship docks at ${h.name} in ${m ? `${m} min ` : ''}${s} s.`, 'level');
+      }
+      break;
+    }
   }
 }
 
@@ -4418,10 +4456,10 @@ function hintLair(idx) {
   const poi = world.pois?.find(p => p.type === 'lair' && p.ring === idx && !p.claimed);
   if (!poi || poi.rumored) return;
   poi.rumored = true;
-  minimap.revealArea(poi.x, poi.z, 45);
-  minimap.redrawT = 0;
+  // a rumor is just words — the lair only appears on the map once you have
+  // actually walked its ground and discovered it yourself
   const lair = BIOME_LAIRS[idx];
-  if (lair) ui.toast(`💀 Rumors speak of ${lair.name} — the lair is marked on your map (M).`, 'boss');
+  if (lair) ui.toast(`💀 Rumors speak of ${lair.name} lurking somewhere in this land…`, 'boss');
 }
 
 function updateAtmosphere(dt) {

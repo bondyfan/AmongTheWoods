@@ -1561,6 +1561,29 @@ export class World {
     return false;
   }
 
+  // the pier DECK as a walkable surface: plank height along the pier capsule,
+  // or null off it. Kept separate from heightAt so the terrain tiles don't
+  // grow a sand causeway under the planks.
+  _pierDeckAt(x, z) {
+    for (const h of this.harbors ?? []) {
+      // cheap reject: piers only reach 26 m out from the harbor point
+      if (Math.abs(x - h.x) > 30 || Math.abs(z - h.z) > 30) continue;
+      const ex = h.outX * 26, ez = h.outZ * 26;
+      let t = ((x - h.x) * ex + (z - h.z) * ez) / (26 * 26);
+      if (t < -0.02 || t > 1.02) continue;
+      t = Math.max(0, Math.min(1, t));
+      if (Math.hypot(x - (h.x + ex * t), z - (h.z + ez * t)) < 2.2) return 0.87;
+    }
+    return null;
+  }
+
+  // what a WALKING character stands on: the terrain, or a pier deck over it
+  surfaceAt(x, z) {
+    const h = this.heightAt(x, z);
+    const deck = this._pierDeckAt(x, z);
+    return deck !== null && deck > h ? deck : h;
+  }
+
   isWater(x, z) { return this.waterKindAt(x, z) > 0; }
 
   // 0 = dry land · 1 = SHALLOW water (wadeable by anyone, slow) ·

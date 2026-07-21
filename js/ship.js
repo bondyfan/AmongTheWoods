@@ -184,6 +184,17 @@ export class ShipLine {
     return null;
   }
 
+  // seconds until the ship next lies moored at THIS harbor (0 while docked
+  // there) — the pier signboard countdown
+  nextDockIn(harbor, time) {
+    const [A] = this.world.harbors;
+    const t = ((time % CYCLE) + CYCLE) % CYCLE;
+    const start = harbor === A ? 0 : SHIP.DOCK_T + LEG_T;
+    const end = start + SHIP.DOCK_T;
+    if (t >= start && t < end) return 0;
+    return ((start - t) % CYCLE + CYCLE) % CYCLE;
+  }
+
   board(player) { this.rider = player; }
 
   // Move the ship (and its rider). Returns 'arrived' the moment a carried
