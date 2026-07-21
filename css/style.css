@@ -234,6 +234,11 @@ kbd {
 #reticle.locked { animation: retLock 0.9s ease-in-out infinite; }
 #reticle.locked .ret-b { border-color: #ff6b52; box-shadow: 0 0 6px rgba(255, 107, 82, 0.8); }
 #reticle.locked .ret-dot { background: #ff6b52; }
+/* multi-mark mode (a marks-ability is slotted): reticle reads teal + wider */
+#reticle.multi .ret-b { border-color: rgba(127, 224, 255, 0.9); }
+#reticle.multi.locked .ret-b { border-color: #7fe0ff; box-shadow: 0 0 6px rgba(127, 224, 255, 0.85); }
+#reticle.multi.locked .ret-dot { background: #7fe0ff; }
+#reticle.multi { width: 62px; height: 62px; }
 @keyframes retLock { 0%,100% { transform: translate(-50%,-50%) scale(1); } 50% { transform: translate(-50%,-50%) scale(0.82); } }
 /* the action bar + drag hint sit in their OWN top layer, above open modals
    (z-index 30), so abilities can be dragged from the Class tab down onto it */

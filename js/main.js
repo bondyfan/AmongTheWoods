@@ -251,6 +251,7 @@ const panels = new Panels({
     player.toggleSpellSlot(id);
     if (player.spellSlots.includes(id)) localStorage.setItem('woods_slot_hint_done', '1');
     panels.refresh();
+    ui.updateSpellbar(player); // repaint the 1–6 bar NOW — the loop is paused
   },
   onBuild: (id, lane) => buildBase(id, lane),
   onCampBuild: (id) => campBuild(id),
@@ -258,9 +259,13 @@ const panels = new Panels({
   onChestChange: () => mp?.sendCampSync?.(),
   onAssignSlot: (i, id) => {
     while (player.spellSlots.length <= i) player.spellSlots.push(undefined);
+    // an ability lives in ONE slot: clear any earlier slot holding it
+    const prev = player.spellSlots.indexOf(id);
+    if (prev >= 0 && prev !== i) player.spellSlots[prev] = undefined;
     player.spellSlots[i] = id;
     localStorage.setItem('woods_slot_hint_done', '1'); // the drag lesson is learned
     audio.sfx('click', 0.4);
+    ui.updateSpellbar(player); // repaint the 1–6 bar NOW — the loop is paused while the modal is open
   },
   onDropRes: (key) => dropResource(key),
   onDropItem: (id) => dropItem(id),

@@ -966,6 +966,16 @@ export const CLASS_TREES = [
         { cd: 40, worldAction: 'trapField', count: [3, 4, 5], power: [1.6, 2.2, 2.8], trapDmgPct: 0.55, trapStun: 3.5 }),
       A('beast_stampede', '🐗', 'Stampede', 50, 'Your living companion calls a stampede through every nearby enemy.', 'petAoe',
         { cd: 70, radius: [7, 8.5, 10], petMult: [4, 6, 9], stun: [1.2, 1.8, 2.5] }),
+      // ---- marked shots: designate one (or several) units with Shift-lock, then
+      // loose arrows into each. `marks` on a multi ability unlocks multi-select. ----
+      A('beast_aimed_shot', '🎯', 'Aimed Shot', 15, 'Loose a precise heavy arrow into your Shift-marked target (bow) for massive damage + a short stagger.', 'markedShot',
+        { cd: 9, range: 24, weaponMult: [2.2, 3.0, 4.0], stun: [0.6, 1.0, 1.5] }),
+      A('beast_wyvern_sting', '🐍', 'Wyvern Sting', 28, 'Sink a venom-tipped arrow into one Shift-marked target (bow): a hit plus a vicious 8 s poison.', 'markedShot',
+        { cd: 14, range: 24, weaponMult: [1.0, 1.4, 1.9], poison: [10, 16, 24] }),
+      A('beast_multi_shot', '🏹', 'Multi-Shot', 22, 'Shift-mark up to several enemies at once, then fire an arrow into every one of them (bow).', 'markedVolley',
+        { cd: 13, range: 24, marks: [2, 3, 4], weaponMult: [1.0, 1.3, 1.7] }),
+      A('beast_barbed_volley', '🩸', 'Barbed Volley', 40, 'Fire barbed arrows into EVERY Shift-marked enemy (bow), each tearing a deep bleed over 6 s.', 'markedVolley',
+        { cd: 22, range: 24, marks: [2, 3, 4], weaponMult: [1.1, 1.5, 2.0], bleed: [0.05, 0.09, 0.14] }),
     ] },
 
   { id: 'rogue', icon: '🗡️', name: 'Rogue', color: '#8ec6c9',

@@ -123,6 +123,10 @@ const SOUNDS = [
   ['beast_hunt_command', 'A hunting command signal: a sharp commanding whistle with a quick aggressive beast growl responding, urgent and short, no music, no voice', 0.8],
   ['beast_trap_field', 'Multiple traps deploying at once: a rapid series of metallic snapping jaw-traps latching into place with clicking springs, short, no music, no voice', 0.9],
   ['beast_stampede', 'A thundering beast stampede: a rumbling herd of heavy hooves pounding the earth in a growing thunder with wild bestial snorts, powerful, short, no music, no voice', 1.2],
+  ['beast_aimed_shot', 'A precise heavy aimed arrow shot: a slow taut bowstring drawing to full tension then a powerful deep THWUMP release with a fast heavy whoosh and a solid piercing thunk, crisp and forceful, short, no music, no voice', 0.9],
+  ['beast_wyvern_sting', 'A venom-tipped arrow shot: a bow release with a slicing whoosh and a wet embedding thunk followed by a soft toxic bubbling hiss of spreading venom, sinister, short, no music, no voice', 0.9],
+  ['beast_multi_shot', 'Several arrows loosed at once at multiple targets: a big multi-stringed bow release with a spread of arrows whooshing out in unison and a cluster of piercing thunks, short, no music, no voice', 0.9],
+  ['beast_barbed_volley', 'A volley of barbed arrows: a strong bowstring release with several jagged arrows whooshing out and sinking in with wet tearing barbed thunks, vicious, short, no music, no voice', 1.0],
   // Rogue
   ['rogue_fleet', 'A swift agile sprint burst: a quick light whooshing dash with soft rapid footfalls and a nimble air-swipe, brisk and short, no music, no voice', 0.7],
   ['rogue_stealth', 'Vanishing into stealth: a soft dark whooshing shadow-implosion with a subtle muffled shimmer fading to silence, sneaky and short, no music, no voice', 0.8],

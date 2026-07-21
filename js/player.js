@@ -29,7 +29,7 @@ const rankValue = (skill, key, rank, fallback = 0) => {
 // fired at nothing, so casting them with no valid target is refused (see
 // castSpell) instead of whiffing into the air. Pet-command Hunt Command is
 // gated the same way in main.js.
-const NEEDS_TARGET = new Set(['target', 'execute', 'magicTarget', 'shadowstep']);
+const NEEDS_TARGET = new Set(['target', 'execute', 'magicTarget', 'shadowstep', 'markedShot', 'markedVolley']);
 
 export class Player {
   constructor(scene, hooks) {
@@ -119,6 +119,7 @@ export class Player {
     this.guardianSpiritHeal = 0;
     this.orbSummons = [];            // Mage sphere summons: [{ id, t, orb }] — Companions renders these
     this._selectedTarget = null;     // hold-Shift target lock (set by Targeting each frame)
+    this._selectedTargets = [];      // multi-lock set (only when a `marks` ability is slotted)
     this.combatDots = {};            // PvP bleed/burn/poison/Rend received over the network
     this.combatDotTickT = 0;
     this.escapeRushT = 0;
@@ -339,7 +340,7 @@ export class Player {
   _abilityWeaponError(skill) {
     const BOW = new Set(['beast_arrow_haste', 'beast_ten_arrows', 'beast_arrow_rain',
       'beast_piercing_shot', 'beast_explosive_arrow']);
-    if (BOW.has(skill.id) || skill.action === 'multishot') {
+    if (BOW.has(skill.id) || ['multishot', 'markedShot', 'markedVolley'].includes(skill.action)) {
       return this.weapon.kind === 'bow' ? null : 'Equip a bow or crossbow first';
     }
     const needsMelee = !!skill.weaponMult && (skill.classId === 'warrior' || skill.classId === 'rogue');
@@ -478,6 +479,19 @@ export class Player {
       return rankValue(skill, 'maxStep', rank, 0) || (15 + (rank - 1) * 7.5);
     }
     return rankValue(skill, 'range', rank, 12) + 1.5;
+  }
+
+  // How many units Shift-lock may mark at once: > 1 only while a slotted
+  // ability supports multi-marking (its `marks` count), otherwise 1. This is
+  // what makes multi-select opt-in — no multi ability on the bar → single lock.
+  multiSelectCap() {
+    let cap = 1;
+    for (const id of this.spellSlots || []) {
+      if (!id || !this.hasClassSkill(id)) continue;
+      const s = classSkillById(id);
+      if (s?.marks) cap = Math.max(cap, rankValue(s, 'marks', this.classRank(id), 2));
+    }
+    return cap;
   }
 
   // Whether a designation ability would find a valid enemy right now — used to
@@ -913,6 +927,59 @@ export class Player {
       }
       audio.sfx('attack_ranged', 0.7, 0);
       if (count > 3) audio.sfx('special', 0.4, 0);
+      this.breakStealth();
+      return true;
+    }
+
+    // ---- Marked shots (Beastmaster): fire real arrows into Shift-locked units.
+    // Damage lands instantly on the designated target(s) — the arrow is visual —
+    // so a marked shot can never miss the unit you picked. ----
+    if (skill.action === 'markedShot') {
+      const enemy = target();
+      if (!enemy) return false; // the cast gate normally prevents this
+      const crit = Math.random() < this.critChance + (this.bowCritBonus || 0);
+      const dmg = this._classWeaponDamage(enemy, rv('weaponMult', 1)) * (crit ? CRIT_MULT : 1);
+      const opts = {
+        ...(crit ? { crit: true } : {}),
+        ...(skill.poison ? { poison: { dps: rv('poison') * (1 + (this.classEffects.poisonPower || 0)), dur: 8 } } : {}),
+        ...(this.classEffects.arrowBleed ? { bleed: { dps: this.weapon.dmg * this.classEffects.arrowBleed, dur: 5 } } : {}),
+      };
+      damageTarget(enemy, dmg, Object.keys(opts).length ? opts : null);
+      if (skill.stun) enemyMgr.stun?.(enemy, rv('stun'));
+      const tint = skill.poison ? 0x9bd94a : 0xffe08a;
+      this._spawnMarkedArrow(ctx, enemy, tint);
+      this.attackDur = 0.28; this.attackT = 0.28;
+      this._fxBurst(enemy.pos, tint, 12, 5, 0.5);
+      this._spawnClassRing(enemy.pos, 1.6, tint, 0.4);
+      audio.sfx('attack_ranged', 0.5, 0);
+      this.breakStealth();
+      return true;
+    }
+
+    if (skill.action === 'markedVolley') {
+      const alive = enemyMgr?.alive?.() || [];
+      let targets = (this._selectedTargets || [])
+        .filter(e => e && !e.dying && !e.dead && alive.includes(e));
+      if (!targets.length) { const t = target(); if (t) targets = [t]; }
+      targets = targets.slice(0, rv('marks', 3));
+      if (!targets.length) return false;
+      const tint = skill.bleed ? 0xd23b2f : 0xffe08a;
+      for (const enemy of targets) {
+        const crit = Math.random() < this.critChance + (this.bowCritBonus || 0);
+        const dmg = this._classWeaponDamage(enemy, rv('weaponMult', 1)) * (crit ? CRIT_MULT : 1);
+        const bleedOpt = skill.bleed
+          ? { bleed: { dps: enemy.maxHp * rv('bleed') / 6, dur: 6 } }
+          : (this.classEffects.arrowBleed ? { bleed: { dps: this.weapon.dmg * this.classEffects.arrowBleed, dur: 5 } } : {});
+        const opts = { ...(crit ? { crit: true } : {}), ...bleedOpt };
+        damageTarget(enemy, dmg, Object.keys(opts).length ? opts : null);
+        this._spawnMarkedArrow(ctx, enemy, tint);
+        this._fxBurst(enemy.pos, tint, 8, 4, 0.45);
+      }
+      this.attackDur = 0.28; this.attackT = 0.28;
+      const origin = this.pos.clone().addScaledVector(this.facing, 0.6).setY(this.mesh.position.y + 1.1);
+      this._fxBurst(origin, 0xf0da8a, 8, 5, 0.35, 0.12);
+      audio.sfx('attack_ranged', 0.7, 0);
+      if (targets.length > 1) audio.sfx('special', 0.35, 0);
       this.breakStealth();
       return true;
     }
@@ -1603,6 +1670,20 @@ export class Player {
           new THREE.Vector3(0, 1.4 + Math.random(), 0), 0.6, 0.14, 0.7);
       }
     }
+  }
+
+  // a purely-visual arrow flying from the archer's hand to a marked enemy
+  // (damage is already applied by the marked-shot handler)
+  _spawnMarkedArrow(ctx, enemy, color) {
+    if (!ctx.projectiles) return;
+    const origin = this.pos.clone().addScaledVector(this.facing, 0.6).setY(this.mesh.position.y + 1.1);
+    const aim = new THREE.Vector3(enemy.pos.x, enemy.mesh.position.y + 0.9, enemy.pos.z);
+    const to = new THREE.Vector3().subVectors(aim, origin);
+    const dist = to.length() || 1;
+    const speed = 44;
+    ctx.projectiles.spawnArrow(origin, to.normalize(), {
+      dmg: 0, cosmetic: true, color, speed, life: dist / speed + 0.15,
+    });
   }
 
   // a stretched additive streak (speed lines, shadow trails) that just fades

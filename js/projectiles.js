@@ -11,17 +11,20 @@ export class Projectiles {
     this.list = [];
   }
 
-  spawnArrow(origin, dir, { dmg, pierce, speed, life, crit, weakPoint = false, effects = null }) {
+  // cosmetic:true — a purely visual arrow (damage already applied by the caller,
+  // e.g. beastmaster marked shots): it flies and expires, hurting nothing.
+  // color — optional flat tint (marked shots: green venom / red barbs).
+  spawnArrow(origin, dir, { dmg, pierce, speed, life, crit, weakPoint = false, effects = null, cosmetic = false, color = null }) {
     const mesh = makeArrow();
     let customMaterials = false;
-    if (effects?.burn || effects?.bleed) {
+    const tint = color ?? (effects?.burn ? 0xff7a24 : effects?.bleed ? 0xbfd5df : null);
+    if (tint != null) {
       customMaterials = true;
-      const color = effects.burn ? 0xff7a24 : 0xbfd5df;
       mesh.traverse(part => {
         if (!part.material) return;
         part.material = part.material.clone();
-        part.material.color?.setHex(color);
-        if (effects.burn && 'emissive' in part.material) part.material.emissive.setHex(0x662000);
+        part.material.color?.setHex(tint);
+        if (effects?.burn && 'emissive' in part.material) part.material.emissive.setHex(0x662000);
       });
     }
     mesh.position.copy(origin);
@@ -30,7 +33,7 @@ export class Projectiles {
     this.list.push({
       id: nextProjectileId++, kind: 'arrow', mesh,
       vel: dir.clone().multiplyScalar(speed),
-      dmg, pierce, life, crit, weakPoint, effects, customMaterials, hit: new Set(),
+      dmg, pierce, life, crit, weakPoint, effects, customMaterials, cosmetic, hit: new Set(),
     });
   }
 
@@ -107,8 +110,8 @@ export class Projectiles {
             break;
           }
         }
-      } else {
-        // player/sphere projectiles hurt enemies
+      } else if (!p.cosmetic) {
+        // player/sphere projectiles hurt enemies (cosmetic arrows hurt nothing)
         for (const e of enemyMgr.alive()) {
           if (p.hit.has(e.id)) continue;
           const dx = e.pos.x - p.mesh.position.x, dz = e.pos.z - p.mesh.position.z;
