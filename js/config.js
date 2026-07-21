@@ -173,7 +173,7 @@ export const BIOMES = [
     critters: [], night: { remove: ['boar'], add: 'venomspider' } },
   { name: 'Dark Forest',    ground: 0x2c4a24, ground2: 0x24401f, dirt: 0x4a3a24,
     // fogCap = the fog wall never opens past this (meters) — darkness ahead
-    fog: 0x18211a, sky: 0x141b1e, darkness: 0.68, light: 0.5, fogCap: 90,
+    fog: 0x10160f, sky: 0x141b1e, darkness: 0.68, light: 0.5, fogCap: 90,
     foliage: [0x1e4a22, 0x27552a, 0x1a3f2e], trunk: 0x4c3520,
     trees: { pine: 0.55, leafy: 0.25, birch: 0, dead: 0.2 }, snowy: false,
     grass: 0x44663a, flowers: false, mushrooms: true,
@@ -181,7 +181,7 @@ export const BIOMES = [
     spiderHaunt: true, webField: true, critters: ['rabbit'], night: { remove: ['rabbit', 'snake'], add: 'venomspider' } },
   { name: 'Haunted Forest', ground: 0x3a3a44, ground2: 0x32323c, dirt: 0x4c4258,
     // pitch-black past a dozen meters — the haunted wood is a tunnel of dark
-    fog: 0x0e0b15, sky: 0x0c0a12, darkness: 0.84, light: 0.4, fogCap: 42,
+    fog: 0x080711, sky: 0x0c0a12, darkness: 0.84, light: 0.4, fogCap: 42,
     foliage: [0x2a3a28, 0x1e2e20, 0x3a3448], trunk: 0x3a3230,
     trees: { pine: 0.3, leafy: 0.1, birch: 0, dead: 0.6 }, snowy: false,
     grass: 0x5c6650, flowers: false, mushrooms: true,

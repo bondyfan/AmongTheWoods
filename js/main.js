@@ -535,26 +535,158 @@ function setRain(on, dt) {
 }
 
 // ---------- whiteout weather: blizzards, sandstorms, downpours, mists ----------
-// blizzard.k is the SMOOTHED storm intensity (0..1) that updateAtmosphere
-// blends the fog toward spec.fog/fogC with — the old code nudged scene.fog
-// AFTER the atmosphere reset it each frame, so storms barely registered.
+// blizzard.k is the SMOOTHED storm intensity (0..1). Storms are VOLUMETRIC:
+// the draw distance never changes — visibility dies under a blowing wall of
+// particles (snow flakes / sand streaks / mist banks), an air tint and a
+// screen wash, all scaled by k. Foliage wind surges with the same k.
 let blizzard = { on: false, t: 0, cd: 45, k: 0, spec: null };
+
+// a soft radial dot texture shared by the snow flakes and mist banks
+let _softDot = null;
+function softDotTex() {
+  if (_softDot) return _softDot;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(32, 32, 2, 32, 32, 31);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.55, 'rgba(255,255,255,0.5)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  _softDot = new THREE.CanvasTexture(c);
+  return _softDot;
+}
+
+const STORM_DIR = { x: 0.83, z: 0.55 }; // matches the foliage shader's wind
+let stormFx = null; // { kind, mesh, spd, baseOp }
+
+function buildStormFx(kind, tintC) {
+  if (kind === 'snow') {
+    // a horizontal BLAST of flakes around the camera
+    const N = 3000;
+    const pos = new Float32Array(N * 3);
+    const spd = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      pos[i * 3] = (Math.random() - 0.5) * 80;
+      pos[i * 3 + 1] = Math.random() * 26;
+      pos[i * 3 + 2] = (Math.random() - 0.5) * 80;
+      spd[i] = 0.7 + Math.random() * 0.9;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const mesh = new THREE.Points(geo, new THREE.PointsMaterial({
+      color: 0xffffff, size: 0.34, map: softDotTex(), transparent: true,
+      opacity: 0, depthWrite: false }));
+    mesh.frustumCulled = false;
+    return { kind, mesh, spd, baseOp: 0.95 };
+  }
+  if (kind === 'sand') {
+    // fast low streaks racing across the dunes
+    const N = 1500;
+    const pos = new Float32Array(N * 2 * 3);
+    const spd = new Float32Array(N);
+    const dl = Math.hypot(STORM_DIR.x, STORM_DIR.z);
+    const sx = STORM_DIR.x / dl, sz = STORM_DIR.z / dl;
+    for (let i = 0; i < N; i++) {
+      const x = (Math.random() - 0.5) * 90, y = 0.3 + Math.random() * 11, z = (Math.random() - 0.5) * 90;
+      const len = 1.1 + Math.random() * 1.2;
+      pos.set([x, y, z, x + sx * len, y + Math.random() * 0.12, z + sz * len], i * 6);
+      spd[i] = 0.75 + Math.random() * 0.6;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const mesh = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({
+      color: 0xd8b878, transparent: true, opacity: 0, depthWrite: false }));
+    mesh.frustumCulled = false;
+    return { kind, mesh, spd, baseOp: 0.5 };
+  }
+  // mist: a few dozen huge soft banks drifting between the trees
+  const N = 34;
+  const pos = new Float32Array(N * 3);
+  const spd = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    pos[i * 3] = (Math.random() - 0.5) * 100;
+    pos[i * 3 + 1] = 1 + Math.random() * 7;
+    pos[i * 3 + 2] = (Math.random() - 0.5) * 100;
+    spd[i] = 0.5 + Math.random() * 0.9;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const mesh = new THREE.Points(geo, new THREE.PointsMaterial({
+    color: tintC ?? 0xaab5a5, size: 30, map: softDotTex(), transparent: true,
+    opacity: 0, depthWrite: false }));
+  mesh.frustumCulled = false;
+  return { kind, mesh, spd, baseOp: 0.42 };
+}
+
+function tickStormFx(dt) {
+  const want = blizzard.k > 0.02 && blizzard.spec?.fx ? blizzard.spec.fx : null;
+  if (!want || stormFx?.kind !== want) {
+    if (stormFx) {
+      scene.remove(stormFx.mesh);
+      stormFx.mesh.geometry.dispose();
+      stormFx.mesh.material.dispose();
+      stormFx = null;
+    }
+    if (!want) return;
+    stormFx = buildStormFx(want, blizzard.spec?.mistC);
+    scene.add(stormFx.mesh);
+  }
+  const m = stormFx.mesh;
+  m.position.set(camera.position.x, 0, camera.position.z);
+  m.material.opacity = stormFx.baseOp * blizzard.k;
+  const arr = m.geometry.attributes.position.array;
+  const gust = 1 + 0.4 * Math.sin(game.time * 1.6) + 0.2 * Math.sin(game.time * 4.3);
+  if (stormFx.kind === 'snow') {
+    const w = 15 * gust * dt;
+    for (let i = 0; i < arr.length; i += 3) {
+      const s = stormFx.spd[i / 3];
+      arr[i] += STORM_DIR.x * w * s;
+      arr[i + 1] -= (2.6 + 2.4 * s) * dt;
+      arr[i + 2] += STORM_DIR.z * w * s;
+      if (arr[i + 1] < 0) arr[i + 1] += 26;
+      if (arr[i] > 40) arr[i] -= 80; else if (arr[i] < -40) arr[i] += 80;
+      if (arr[i + 2] > 40) arr[i + 2] -= 80; else if (arr[i + 2] < -40) arr[i + 2] += 80;
+    }
+  } else if (stormFx.kind === 'sand') {
+    for (let seg = 0; seg < stormFx.spd.length; seg++) {
+      const i = seg * 6;
+      const v = 26 * stormFx.spd[seg] * gust * dt;
+      const dx = STORM_DIR.x * v, dz = STORM_DIR.z * v;
+      arr[i] += dx; arr[i + 2] += dz; arr[i + 3] += dx; arr[i + 5] += dz;
+      if (arr[i] > 45) { arr[i] -= 90; arr[i + 3] -= 90; }
+      else if (arr[i] < -45) { arr[i] += 90; arr[i + 3] += 90; }
+      if (arr[i + 2] > 45) { arr[i + 2] -= 90; arr[i + 5] -= 90; }
+      else if (arr[i + 2] < -45) { arr[i + 2] += 90; arr[i + 5] += 90; }
+    }
+  } else { // mist banks crawl
+    for (let i = 0; i < arr.length; i += 3) {
+      const s = stormFx.spd[i / 3];
+      arr[i] += STORM_DIR.x * 1.4 * s * dt;
+      arr[i + 2] += STORM_DIR.z * 1.4 * s * dt;
+      if (arr[i] > 50) arr[i] -= 100; else if (arr[i] < -50) arr[i] += 100;
+      if (arr[i + 2] > 50) arr[i + 2] -= 100; else if (arr[i + 2] < -50) arr[i + 2] += 100;
+    }
+  }
+  m.geometry.attributes.position.needsUpdate = true;
+}
 function tickBlizzard(dt) {
   const name = BIOMES[game.biomeIndex]?.name;
   const spec = name === 'Frozen Peak'
-      ? { fog: 13, fogC: 0xdfe7ee, tint: 'rgba(230,238,245,0.85)', dur: 22, cdMin: 70, cdRng: 50,
+      ? { fx: 'snow', fogC: 0xdfe7ee, tint: 'rgba(230,238,245,0.85)', dur: 22, cdMin: 70, cdRng: 50,
           on: '🌨️ A BLIZZARD swallows the world — stay close to the bonfires!', off: '🌨️ The blizzard passes…' }
     : name === 'Scorched Desert'
-      ? { fog: 15, fogC: 0xd8bc86, tint: 'rgba(224,196,130,0.82)', dur: 15, cdMin: 55, cdRng: 45,
+      ? { fx: 'sand', fogC: 0xd8bc86, tint: 'rgba(224,196,130,0.82)', dur: 15, cdMin: 55, cdRng: 45,
           on: '🏜️ A SANDSTORM rolls in — you can barely see your hands!', off: '🏜️ The sandstorm settles…' }
     : name === 'Jungle'
-      ? { fog: 55, fogC: 0x7b98a8, tint: 'rgba(120,150,170,0.32)', dur: 26, cdMin: 45, cdRng: 40, rain: true,
+      ? { fogC: 0x7b98a8, tint: 'rgba(120,150,170,0.32)', dur: 26, cdMin: 45, cdRng: 40, rain: true,
           on: '🌧️ A jungle downpour opens up!', off: '🌧️ The rain eases off…' }
     : name === 'Murky Swamp'
-      ? { fog: 30, fogC: 0x99a495, tint: 'rgba(150,160,150,0.5)', dur: 30, cdMin: 40, cdRng: 45,
+      ? { fx: 'mist', mistC: 0xaab5a5, fogC: 0x99a495, tint: 'rgba(150,160,150,0.5)', dur: 30, cdMin: 40, cdRng: 45,
           on: '🌫️ A thick fog rolls across the mire — you can barely see.', off: '🌫️ The fog thins…' }
     : name === 'Dark Forest'
-      ? { fog: 26, fogC: 0x2c342c, tint: 'rgba(120,130,120,0.42)', dur: 24, cdMin: 50, cdRng: 55,
+      ? { fx: 'mist', mistC: 0x525a52, fogC: 0x1c231c, tint: 'rgba(120,130,120,0.42)', dur: 24, cdMin: 50, cdRng: 55,
           on: '🌫️ A cold mist creeps between the trees…', off: '🌫️ The mist lifts…' }
     : null;
   const el = $id('blizzard');
@@ -588,6 +720,7 @@ function tickBlizzard(dt) {
   if (!blizzard.on && blizzard.k < 0.01) blizzard.spec = null;
   el.style.opacity = blizzard.spec
     ? ((blizzard.spec.rain ? 0.3 : 0.85) * blizzard.k).toFixed(3) : 0;
+  tickStormFx(dt); // the volumetric half: particle walls riding the wind
 }
 
 // ---------- swamp sulfur bubbles: telegraphed geysers on a hash grid ----------
@@ -4588,28 +4721,28 @@ function updateAtmosphere(dt) {
     fogFar = _fogCap;
     fogNear = Math.min(fogNear, _fogCap * 0.3);
   }
-  // far tier sized from the CALM weather fog — storms are temporary and must
-  // not evict/rebuild hundreds of far tiles on every gust
   world.farRadius = (game.kind === 'survival' && farLod)
     ? Math.min(14, Math.ceil((fogFar * 1.05) / 40) + 1)
     : 0; // MOBA / arena maps are small and walled — no far tier
-  // STORMS crush visibility toward the spec as their intensity ramps
-  if (blizzard.k > 0.01 && blizzard.spec) {
-    fogFar += (blizzard.spec.fog - fogFar) * blizzard.k;
-    fogNear = Math.min(fogNear, fogFar * 0.25);
-  }
+  // storms are VOLUMETRIC (particles + air tint + gale-force foliage wind in
+  // tickStormFx) — the fog wall stays where it is, per feedback: shrinking
+  // the draw distance read as fake
   scene.fog.near = fogNear;
   scene.fog.far = fogFar;
   syncFarToFog(); // the camera stops rendering what the fog already hides
 
   // caveK already fades smoothly with distance, so apply it directly; the
-  // slow time-lerp is only for biome-to-biome transitions out in the open
-  const fogTarget = _atmoA.set(biome.fog).lerp(NIGHT_FOG, nightK * 0.8).lerp(caveFog, caveK);
-  const skyTarget = _atmoB.set(biome.sky).lerp(NIGHT_SKY, nightK * 0.85).lerp(caveFog, caveK);
+  // slow time-lerp is only for biome-to-biome transitions out in the open.
+  // Gloomy biomes (fogCap) barely take the night tint — their air is already
+  // BLACKER than the navy night fog, and lerping toward it LIGHTENED them.
+  const nightBlend = biome.fogCap ? nightK * 0.15 : nightK;
+  const fogTarget = _atmoA.set(biome.fog).lerp(NIGHT_FOG, nightBlend * 0.8).lerp(caveFog, caveK);
+  const skyTarget = _atmoB.set(biome.sky).lerp(NIGHT_SKY, nightBlend * 0.85).lerp(caveFog, caveK);
   if (blizzard.k > 0.01 && blizzard.spec?.fogC) {
-    // the storm has its own air color (white blizzard, ochre sand wall…)
-    fogTarget.lerp(_stormC.set(blizzard.spec.fogC), blizzard.k * 0.9);
-    skyTarget.lerp(_stormC, blizzard.k * 0.9);
+    // the storm colors the AIR (white blizzard, ochre sand wall…) without
+    // moving the fog wall — distant terrain drowns in the storm's hue
+    fogTarget.lerp(_stormC.set(blizzard.spec.fogC), blizzard.k * 0.75);
+    skyTarget.lerp(_stormC, blizzard.k * 0.75);
   }
   if (caveK > 0.01) {
     fogColor.copy(fogTarget);
@@ -4856,9 +4989,11 @@ function step() {
   const folShaders = BAKED_MAT.userData.shaders;
   if (folShaders.length) {
     const folOn = settings.foliageMove !== false ? 1 : 0;
+    // storms whip the vegetation — wind amplitude surges with intensity
+    const folWind = folOn * (1 + (blizzard.k ?? 0) * 2.2);
     for (const sh of folShaders) {
       sh.uniforms.uTime.value = _windT;
-      sh.uniforms.uWind.value = folOn;
+      sh.uniforms.uWind.value = folWind;
       sh.uniforms.uPush.value = folOn;
       sh.uniforms.uPlayer.value.set(player.pos.x, player.mesh.position.y, player.pos.z);
       const dst = sh.uniforms.uDist.value;
@@ -4892,7 +5027,9 @@ function step() {
   skyU.uSunColor.value.copy(sun.color);
   skyU.uTime.value = _windT;
   // sun + clouds fade at night, in the home cave and underground (the dome
-  // then collapses to the plain fog/sky gradient — no sun in a dungeon)
+  // then collapses to the plain fog/sky gradient — no sun in a dungeon).
+  // Gloomy biomes deliberately KEEP their sky — clouds glowing above a
+  // pitch-dark tree line is the look.
   const dayK = game.dungeon ? 0 : (1 - (game.nightK || 0) * 0.92) * (1 - atmoCaveK);
   skyU.uDay.value = dayK;
   skyU.uCloudAmt.value = (game.dungeon || settings.clouds === false)
