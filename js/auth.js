@@ -9,6 +9,10 @@
 // is only offered inside a co-op survival game; loading restores YOUR
 // character (level / inventory / camp) into the current co-op session.
 //
+// The co-op AUTOSAVE uses one fixed key  saves/<uid>/autosave  (auto:true), so
+// it always overwrites itself — a single rolling slot the game writes whenever
+// you level up, buy something, or pick up a new item/resource.
+//
 // NOTE for the Firebase console: enable the Google provider under
 // Authentication, add this site to Authentication → Settings → Authorized
 // domains, and allow  saves/$uid  in the Realtime Database rules. Without the
@@ -78,13 +82,23 @@ export const Auth = {
     await push(ref(db, `saves/${this.user.uid}`), rec);
   },
 
+  // co-op autosave: a SINGLE slot at a fixed key, so every autosave overwrites
+  // the previous one (set, not push). It lives alongside the manual saves under
+  // saves/<uid> and shows up in listSaves like any other, tagged auto:true.
+  async autoSave(meta, data) {
+    ensure();
+    if (!this.user) throw new Error('Not signed in');
+    const rec = { name: this.user.name, at: Date.now(), auto: true, ...meta, data };
+    await set(ref(db, `saves/${this.user.uid}/autosave`), rec);
+  },
+
   // newest-first list of { id, at, biome, level, name }
   async listSaves() {
     ensure();
     if (!this.user) return [];
     const snap = await get(query(ref(db, `saves/${this.user.uid}`), orderByChild('at'), limitToLast(20)));
     const out = [];
-    snap.forEach((c) => { const v = c.val(); out.push({ id: c.key, at: v.at, biome: v.biome, level: v.level }); });
+    snap.forEach((c) => { const v = c.val(); out.push({ id: c.key, at: v.at, biome: v.biome, level: v.level, auto: !!v.auto }); });
     return out.reverse();
   },
 

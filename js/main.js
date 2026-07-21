@@ -208,8 +208,8 @@ const panels = new Panels({
       document.exitPointerLock?.(); // panels need the cursor back
     }
   },
-  onBuyItem: buyItem,
-  onBuySpell: buySpell,
+  onBuyItem: (id) => { buyItem(id); requestAutosave(); },
+  onBuySpell: (id) => { buySpell(id); requestAutosave(); },
   onBuyStat: buyStat,
   onChooseClass: chooseClass,
   onTrainClassSkill: trainClassSkill,
@@ -240,7 +240,7 @@ const panels = new Panels({
   },
   onBuild: (id, lane) => buildBase(id, lane),
   onCampBuild: (id) => campBuild(id),
-  onBuyConsumable: (id) => buyConsumable(id),
+  onBuyConsumable: (id) => { buyConsumable(id); requestAutosave(); },
   onChestChange: () => mp?.sendCampSync?.(),
   onAssignSlot: (i, id) => {
     while (player.spellSlots.length <= i) player.spellSlots.push(undefined);
@@ -264,6 +264,7 @@ const panels = new Panels({
     for (const [k, v] of Object.entries(cost)) player[k] = roundResource(player[k] - v);
     player.invSlots = Math.min(26, player.invSlots + 4);
     audio.sfx('upgrade', 0.5);
+    requestAutosave();
     panels.refresh();
   },
   mobaTeam: () => mobaSide,
@@ -366,6 +367,7 @@ const player = new Player(scene, {
     panels.refresh();
   },
   onLevelUp: (level) => {
+    requestAutosave(); // a new level is worth saving promptly
     audio.sfx('evolve', 0.55);
     player.spawnLevelUpEffect();
     ui.banner('⭐ LEVEL UP!');
@@ -2915,6 +2917,61 @@ function serializeState() {
   return JSON.parse(JSON.stringify(data)); // strip undefined for Firebase
 }
 
+// ---------- co-op autosave (single rolling slot) ----------
+// One mechanism catches everything the player asked for — level-ups, purchases
+// and picked-up items/resources — by watching a cheap "progression signature".
+// When it changes we write serializeState() to the ONE autosave slot (auth.js
+// overwrites it each time). Writes are rate-limited so grinding resources can't
+// spam Firebase; level-ups and purchases flag an "urgent" save so they land
+// almost immediately instead of waiting out the full interval.
+const AS_INTERVAL = 20;   // s — normal minimum gap between autosaves
+const AS_URGENT_GAP = 3;  // s — shortened gap after a level-up / purchase
+let _asSig = '', _asPrimed = false, _asBusy = false, _asUrgent = false, _asAccum = 0;
+
+function autosaveEligible() {
+  return !!(authUser && mp?.active && mp.mode === 'coop' && game.kind === 'survival'
+    && game.mode === 'play' && !player.dead);
+}
+
+// a compact string that changes whenever the player gains a level, buys/loots
+// an item, or a resource count moves — the trigger for an autosave
+function autosaveSignature() {
+  const p = player;
+  let res = 0; for (const k of RESOURCES) res += Math.round(p[k] || 0);
+  const eq = Object.values(p.equipment).filter(Boolean).length;
+  const con = (p.consumables?.salve || 0) + (p.consumables?.roast || 0) + (p.consumables?.honey || 0);
+  return `${p.level}|${res}|${p.invItems.length}|${eq}|${p.spellsOwned.size}|${con}|${p.invSlots}`;
+}
+
+// milestones (level-up, purchase) ask for a prompt save rather than waiting the
+// whole interval; harmless if nothing actually changed (the signature gate wins)
+function requestAutosave() { _asUrgent = true; }
+
+// re-baseline so a fresh cloud LOAD doesn't immediately re-save over itself
+function resetAutosaveBaseline() { _asPrimed = false; }
+
+function tickAutosave(dt) {
+  if (!autosaveEligible()) { _asPrimed = false; _asUrgent = false; return; }
+  _asAccum += dt;
+  if (!_asPrimed) { _asSig = autosaveSignature(); _asPrimed = true; _asAccum = 0; return; }
+  if (_asBusy) return;
+  const sig = autosaveSignature();
+  if (sig === _asSig) { _asUrgent = false; return; }        // nothing changed
+  if (_asAccum < (_asUrgent ? AS_URGENT_GAP : AS_INTERVAL)) return; // rate-limit
+  _asSig = sig; _asAccum = 0; _asUrgent = false;
+  doAutosave();
+}
+
+async function doAutosave() {
+  _asBusy = true;
+  try {
+    await (await ensureAuth()).autoSave(
+      { biome: BIOMES[game.biomeIndex]?.name, level: player.level }, serializeState());
+    ui.toast('💾 Autosaved', 'info');
+  } catch (e) { /* autosave stays quiet on failure — the manual save still nags */ }
+  finally { _asBusy = false; }
+}
+
 async function saveGameCloud() {
   if (!authUser) { ui.toast('Sign in first (on the menu).', 'boss'); return; }
   if (!(mp?.active && mp.mode === 'coop' && game.kind === 'survival')) {
@@ -2941,7 +2998,8 @@ async function openLoadGame() {
       const row = document.createElement('div');
       row.className = 'save-row';
       const when = new Date(sv.at).toLocaleString();
-      row.innerHTML = `<div class="save-meta"><b>${sv.biome ?? '?'} · Lv ${sv.level ?? '?'}</b>
+      const tag = sv.auto ? '🔄 Autosave · ' : '';
+      row.innerHTML = `<div class="save-meta"><b>${tag}${sv.biome ?? '?'} · Lv ${sv.level ?? '?'}</b>
         <div class="save-when">${when}</div></div>
         <button class="mini-btn" data-load="${sv.id}">📂 Load</button>
         <button class="mini-btn" data-del="${sv.id}">🗑</button>`;
@@ -3034,6 +3092,7 @@ function applyLoadedState(d) {
   p.hp = Math.min(p.maxHp, d.hp ?? p.maxHp);
   companions.sync(player);
   syncQuestResidents();
+  resetAutosaveBaseline(); // don't let the loaded state trigger an instant re-save
   panels.refresh();
   ui.banner('☁️ Save loaded');
   ui.toast('☁️ Your character has been restored into this game.', 'level');
@@ -5267,6 +5326,7 @@ function tick(nowMs) {
 function step() {
   const dt = Math.min(clock.getDelta(), 0.05);
   if (!document.hidden) autoQuality.tick(dt);
+  tickAutosave(dt); // co-op single-slot autosave (self-gates on eligibility)
 
   // foliage wind + player-trample shader uniforms (shared by every baked
   // mesh; wrapping the clock keeps sin() precise on mobile GPUs — the
