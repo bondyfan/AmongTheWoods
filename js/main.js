@@ -129,6 +129,10 @@ const _waterSunDir = new THREE.Vector3();
 const autoQuality = {
   stage: 0, t: 0, frames: 0, low: 0,
   tick(dt) {
+    // NEVER auto-downgrade while the World Editor is open: its wide god view is
+    // meant to run heavy, and a downgrade (esp. stage 3 → camera.far 200 + a
+    // short fog wall) leaves the zoomed-out map as bare blue void
+    if (game.editorView) { this.t = 0; this.frames = 0; this.low = 0; return; }
     this.frames++; this.t += dt;
     if (this.t < 4) return;               // judge in 4 s windows
     const fps = this.frames / this.t;
