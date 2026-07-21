@@ -105,6 +105,16 @@ let _fpsSmooth = 60, _fpsMeterT = 0;
 // foliage-density graphics setting → scatter-count multiplier in _genChunk
 // high = "lush" (the classic look); ultra switches on the dense grass-fill
 const FOLIAGE_MULT = { low: 0.35, normal: 1, high: 1.7, ultra: 3.2 };
+const TREE_DETAIL = { low: 0, medium: 1, high: 2 };
+// shadow-distance rigs: {b = ortho half-extent m, s = map px}. The far plane
+// and the sun's stand-off distance are derived from b so the whole frustum is
+// always covered (updateCamera parks the sun at b*2 along the fixed sun dir).
+const SHADOW_DIST = {
+  low: { b: 40, s: 2048 },
+  medium: { b: 85, s: 3072 },
+  high: { b: 135, s: 4096 },
+};
+let _shadowB = 40; // active half-extent (updateCamera positions the sun by it)
 let _windT = 0; // wind-shader clock (keeps blowing across pauses/menus)
 // disturbance trail: the player's recent path, fed to the foliage shader so
 // brushed vegetation keeps ringing (damped spring) after you pass through
@@ -2566,6 +2576,8 @@ const settings = Object.assign(
   settings.shadows ??= true;
   settings.resScale ??= 'auto';
   settings.drawDist ??= onMobile ? 'short' : 'far';
+  settings.treeDetail ??= 'low';
+  settings.shadowDist ??= 'low';
   settings.showFps ??= false;
   settings.fpsCap ??= 0; // 0 = unlimited
   settings.humanModel ??= false; // experimental rigged-human avatar
@@ -2573,6 +2585,8 @@ const settings = Object.assign(
   $id('set-shadows').checked = settings.shadows !== false;
   $id('set-resscale').value = String(settings.resScale);
   $id('set-drawdist').value = String(settings.drawDist);
+  $id('set-treedetail').value = String(settings.treeDetail);
+  $id('set-shadowdist').value = String(settings.shadowDist);
   applyGraphics();
 
   // FPS meter toggle
@@ -2635,6 +2649,18 @@ const settings = Object.assign(
     settings.drawDist = $id('set-drawdist').value;
     saveGfx();
     applyViewMode(); // fog baseline shifts with the new distance
+  });
+  $id('set-treedetail').addEventListener('change', () => {
+    settings.treeDetail = $id('set-treedetail').value;
+    saveGfx(); // sets world.treeDetail
+    // trees are baked per-detail templates → rebuild the near ring NOW
+    // (the sim is paused while Settings is open)
+    world.regenChunks();
+    for (let i = 0; i < 24 && world.warmUp(player.pos, 30) > 0; i++) { /* fill */ }
+  });
+  $id('set-shadowdist').addEventListener('change', () => {
+    settings.shadowDist = $id('set-shadowdist').value;
+    saveGfx(); // applyGraphics resizes the shadow frustum + map
   });
 
   // foliage: density regenerates the world's decoration meshes; motion just
@@ -4160,7 +4186,9 @@ function handleClassWorldAction(action, skill, rank, ctx = {}) {
         .map(e => ({ e, d: Math.hypot(e.pos.x - commandAim.x, e.pos.z - commandAim.z) }))
         .sort((a, b) => a.d - b.d)[0]?.e;
     if (!target) {
-      ui.toast('📣 Aim near an enemy to issue Hunt Command.', 'error');
+      ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2.2),
+        'Select an enemy first (hold Shift)', '#ffcc66');
+      ui.toast('📣 Select an enemy first (hold Shift).', 'error');
       return false;
     }
     player.petCommandTargetId = target.id;
@@ -4985,6 +5013,7 @@ function applyViewMode() {
 // graphics options: bloom pipeline, ground detail, shadow res, tone mapping
 function applyGraphics() {
   world.groundDetail = settings.texDetail ?? 0;
+  world.treeDetail = TREE_DETAIL[settings.treeDetail ?? 'low'] ?? 0;
   // shadows: user toggle (autoQuality stage 2 can still force them off)
   const shadowsOn = settings.shadows !== false && autoQuality.stage < 2;
   if (renderer.shadowMap.enabled !== shadowsOn) {
@@ -4998,10 +5027,21 @@ function applyGraphics() {
     : Math.min(window.devicePixelRatio, 2);
   renderer.setPixelRatio(pr);
   if (settings.bloom && !postfx) postfx = new PostFX(renderer);
-  // high shadows: sharper map over a wider area
-  const size = settings.hiShadows ? 4096 : 2048;
-  if (sun.shadow.mapSize.x !== size) {
-    sun.shadow.mapSize.set(size, size);
+  // shadow DISTANCE: how far the sun's shadow frustum reaches around the
+  // player (High casts shadows across ~270 m). Bigger area → bigger map so
+  // it doesn't go blurry, hence "heavier".
+  const sd = SHADOW_DIST[settings.shadowDist ?? 'low'] ?? SHADOW_DIST.low;
+  _shadowB = sd.b;
+  if (sun.shadow.camera.right !== sd.b) {
+    sun.shadow.camera.left = -sd.b; sun.shadow.camera.right = sd.b;
+    sun.shadow.camera.top = sd.b; sun.shadow.camera.bottom = -sd.b;
+    // sun sits at b*2 from the player; the frustum must reach the far edge
+    sun.shadow.camera.near = 1;
+    sun.shadow.camera.far = sd.b * 3.4;
+    sun.shadow.camera.updateProjectionMatrix();
+  }
+  if (sun.shadow.mapSize.x !== sd.s) {
+    sun.shadow.mapSize.set(sd.s, sd.s);
     sun.shadow.map?.dispose();
     sun.shadow.map = null;
   }
@@ -5113,8 +5153,11 @@ function updateCamera(dt = 0) {
     camera.lookAt(player.pos.x - fx * 2 + sx, py, player.pos.z - fz * 2 + sz);
   }
   // lower sun = longer, more dramatic shadows AND a disc you actually see
-  // in the sky when looking toward it (elevation ~34°)
-  sun.position.set(player.pos.x + 24, 19, player.pos.z + 15);
+  // in the sky when looking toward it (elevation ~34°). Stand-off scales with
+  // the shadow distance so the whole ortho frustum stays inside near/far.
+  const sdist = Math.max(35, _shadowB * 2);
+  // unit of (24,19,15) — matches _waterSunDir so shadows agree with the sky
+  sun.position.set(player.pos.x + 0.704 * sdist, 0.557 * sdist, player.pos.z + 0.440 * sdist);
   sun.target.position.set(player.pos.x, 0, player.pos.z);
 }
 

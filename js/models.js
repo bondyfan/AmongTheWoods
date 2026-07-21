@@ -3141,7 +3141,57 @@ function pickTreeType(weights, rng) {
 
 // size: 0 sapling … 4 forest giant (five tiers — bigger tree, more wood and
 // far more hidden trunk health). Returns { mesh, radius } — radius = collision.
-export function makeTree(size, biome, rng) {
+// --- tree-detail helpers (detail 0 = low / 1 = medium / 2 = high) ---
+// scatter small shade-varied LEAF CLUMPS over a canopy blob so the crown
+// reads as thousands of leaves instead of one smooth ball
+function _canopyLeaves(g, cx, cy, cz, r, color, detail, rng) {
+  const n = detail >= 2 ? 9 : 5;
+  const base = new THREE.Color(color);
+  for (let i = 0; i < n; i++) {
+    const a = rng() * Math.PI * 2, e = rng() * Math.PI - Math.PI / 2;
+    const rr = r * (0.72 + rng() * 0.42);
+    const lx = cx + Math.cos(a) * Math.cos(e) * rr;
+    const ly = cy + Math.sin(e) * rr * 0.72;
+    const lz = cz + Math.sin(a) * Math.cos(e) * rr;
+    const shade = base.clone().multiplyScalar(0.8 + rng() * 0.4).getHex();
+    let s;
+    if (detail >= 2 && rng() < 0.5) {      // a flat leaf plate for texture
+      s = box(0.14 + rng() * 0.06, 0.035, 0.14 + rng() * 0.06, shade);
+      s.rotation.set(rng() * 3, rng() * 3, rng() * 3);
+    } else {                               // a small leaf clump
+      s = sphere(0.09 + rng() * 0.11, shade, 5);
+    }
+    s.castShadow = false;
+    s.position.set(lx, ly, lz);
+    g.add(s);
+  }
+}
+
+// a few branches angling up-and-out from the upper trunk, leaf-tufted at
+// their tips on high detail
+function _treeBranches(g, trunkH, scale, trunkColor, foliageColor, detail, rng) {
+  const n = detail >= 2 ? 3 + Math.floor(rng() * 3) : 2;
+  for (let i = 0; i < n; i++) {
+    const len = (0.45 + rng() * 0.5) * scale;
+    const b = cyl(0.025 * scale, 0.05 * scale, len, trunkColor, 5);
+    const a = (i / n) * Math.PI * 2 + rng() * 0.6;
+    const y = trunkH * (0.5 + rng() * 0.38);
+    const tilt = 0.7 + rng() * 0.4;
+    b.position.set(Math.cos(a) * 0.1 * scale, y, Math.sin(a) * 0.1 * scale);
+    b.rotation.set(Math.sin(a) * tilt, 0, -Math.cos(a) * tilt);
+    b.castShadow = false;
+    g.add(b);
+    if (detail >= 2) {                     // leaf tuft at the branch tip
+      const t = sphere(0.18 * scale + 0.05, foliageColor, 5);
+      t.castShadow = false;
+      const rr = (0.1 + len * 0.55) * scale;
+      t.position.set(Math.cos(a) * rr, y + len * 0.34, Math.sin(a) * rr);
+      g.add(t);
+    }
+  }
+}
+
+export function makeTree(size, biome, rng, detail = 0) {
   const g = new THREE.Group();
   g.scale.y = 2; // trees tower — double height, same footprint
   const scale = [0.9, 1.3, 1.8, 2.4, 3.1][Math.min(4, size)] * (0.8 + rng() * 0.45);
@@ -3166,11 +3216,14 @@ export function makeTree(size, biome, rng) {
       g.add(b);
     }
     const crownR = (1.1 + rng() * 0.5) * scale;
-    for (let i = 0; i < 2 + size; i++) { // flat umbrella crown pads
-      const c = sphere(crownR * (1 - i * 0.22), foliageColor, 7);
+    const pads = 2 + size + (detail >= 2 ? 2 : detail);
+    for (let i = 0; i < pads; i++) { // flat umbrella crown pads
+      const c = sphere(crownR * (1 - i * 0.18), foliageColor, 7);
       c.scale.y = 0.32;
-      c.position.set((rng() - 0.5) * 0.7 * scale, trunkH + i * 0.3 * scale, (rng() - 0.5) * 0.7 * scale);
+      const cy = trunkH + i * 0.3 * scale;
+      c.position.set((rng() - 0.5) * 0.7 * scale, cy, (rng() - 0.5) * 0.7 * scale);
       g.add(c);
+      if (detail >= 1) _canopyLeaves(g, c.position.x, cy, c.position.z, crownR * (1 - i * 0.18), foliageColor, detail, rng);
     }
     const lianas = 4 + Math.floor(rng() * 4);
     for (let i = 0; i < lianas; i++) { // hanging lianas off the crown rim
@@ -3218,12 +3271,15 @@ export function makeTree(size, biome, rng) {
       f.rotation.y = rng() * Math.PI;
       g.add(f);
     }
-    const blobs = 1 + size;
+    const blobs = 1 + size + (detail >= 2 ? 1 : 0);
     for (let i = 0; i < blobs; i++) {
-      const s = sphere((0.62 - i * 0.1) * scale, 0x8fb75e, 7);
-      s.position.set((rng() - 0.5) * 0.5 * scale, trunkH + i * 0.45 * scale, (rng() - 0.5) * 0.5 * scale);
+      const r = (0.62 - i * 0.1) * scale;
+      const s = sphere(r, 0x8fb75e, 7);
+      const cy = trunkH + i * 0.45 * scale;
+      s.position.set((rng() - 0.5) * 0.5 * scale, cy, (rng() - 0.5) * 0.5 * scale);
       s.scale.y = 0.8;
       g.add(s);
+      if (detail >= 1) _canopyLeaves(g, s.position.x, cy, s.position.z, r, 0x8fb75e, detail, rng);
     }
     return { mesh: g, radius: 0.28 * scale + 0.13 };
   }
@@ -3234,26 +3290,33 @@ export function makeTree(size, biome, rng) {
   g.add(trunk);
 
   if (type === 'pine') {
-    const layers = 2 + size;
+    const layers = 2 + size + (detail >= 2 ? 1 : 0);
     for (let i = 0; i < layers; i++) {
-      const r = (1.1 - i * 0.22) * scale;
-      const c = cone(r, 1.1 * scale, foliageColor, 7);
-      c.position.y = trunkH + i * 0.72 * scale;
+      const r = (1.1 - i * 0.2) * scale;
+      const c = cone(r, 1.1 * scale, foliageColor, detail >= 1 ? 8 : 7);
+      const cy = trunkH + i * 0.72 * scale;
+      c.position.y = cy;
       g.add(c);
+      // needle clumps break up the smooth cone into a bushy silhouette
+      if (detail >= 1) _canopyLeaves(g, 0, cy + 0.3 * scale, 0, r * 0.9, foliageColor, detail, rng);
     }
     if (biome.snowy) {
-      const cap = cone((1.1 - (layers - 1) * 0.22) * scale * 0.9, 0.5 * scale, 0xf0f5f9, 7);
+      const cap = cone((1.1 - (layers - 1) * 0.2) * scale * 0.9, 0.5 * scale, 0xf0f5f9, 7);
       cap.position.y = trunkH + (layers - 1) * 0.72 * scale + 0.45 * scale;
       g.add(cap);
     }
   } else {
-    // leafy: blobs
-    const blobs = 1 + size;
+    // leafy: blobs, branches and scattered leaves at higher detail
+    if (detail >= 1) _treeBranches(g, trunkH, scale, biome.trunk, foliageColor, detail, rng);
+    const blobs = 1 + size + (detail >= 2 ? 1 : 0);
     for (let i = 0; i < blobs; i++) {
-      const s = sphere((0.8 - i * 0.12) * scale, foliageColor, 7);
-      s.position.set((rng() - 0.5) * 0.5 * scale, trunkH + 0.5 * scale + i * 0.55 * scale, (rng() - 0.5) * 0.5 * scale);
+      const r = (0.8 - i * 0.12) * scale;
+      const s = sphere(r, foliageColor, 7);
+      const cy = trunkH + 0.5 * scale + i * 0.55 * scale;
+      s.position.set((rng() - 0.5) * 0.5 * scale, cy, (rng() - 0.5) * 0.5 * scale);
       s.scale.y = 0.85;
       g.add(s);
+      if (detail >= 1) _canopyLeaves(g, s.position.x, cy, s.position.z, r, foliageColor, detail, rng);
     }
   }
   return { mesh: g, radius: 0.35 * scale + 0.15 };

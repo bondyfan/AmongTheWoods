@@ -1357,3 +1357,7 @@ html.standalone, html.standalone body { height: 100%; }
 /* the guest button's loading state */
 #gate-guest.loading { opacity: 0.6; pointer-events: none; }
 #gate-guest.loading::after { content: ' …'; }
+
+/* heavy graphics options flagged red in the dropdown */
+.opt-warn { color: #e0605a; }
+select:has(> option.opt-warn:checked) { color: #e0605a; border-color: rgba(224,96,90,0.6); }

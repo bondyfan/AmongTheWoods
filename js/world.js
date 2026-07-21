@@ -172,6 +172,7 @@ export class World {
     this._woodLogDrops = new Set();
     this.time = 0;               // world clock (drives berry regrowth)
     this.foliageMult = 1;        // graphics setting: scatter-density multiplier
+    this.treeDetail = 0;         // graphics setting: 0 low / 1 med / 2 high canopies
     this.farChunks = new Map();  // cheap far-LOD tiles (terrain + tree impostors)
     this.farRadius = 0;          // chunks of far tier past viewRadius (main sets it)
     this._berryEaten = new Map(); // bush key -> world time it was harvested
@@ -1929,14 +1930,15 @@ export class World {
     // Meshes come from a SHARED template pool (6 variants per biome+size):
     // building + baking each tree from scratch was the chunk-gen hitch.
     const { spots: treeSpots, denseWood } = this._treeSpots(cx, cz, biome);
+    const td = this.treeDetail ?? 0;
     for (const s of treeSpots) {
-      const tkey = `tree:${biome.name}:${s.size}:${s.v}`;
+      const tkey = `tree:${td}:${biome.name}:${s.size}:${s.v}`;
       let mesh, radius;
-      const shared = templateMesh(tkey, () => makeTree(s.size, biome, tplRng(tkey)),
+      const shared = templateMesh(tkey, () => makeTree(s.size, biome, tplRng(tkey), td),
         { amp: 0.35, y0: 1.6, y1: 6 });
       if (shared) ({ mesh, radius } = shared);
       else { // maker produced un-bakeable extras — bake this one live
-        const made = makeTree(s.size, biome, rng);
+        const made = makeTree(s.size, biome, rng, td);
         mesh = bakeGroup(made.mesh, true, { amp: 0.35, y0: 1.6, y1: 6 });
         radius = made.radius;
       }
