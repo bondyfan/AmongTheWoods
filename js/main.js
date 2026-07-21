@@ -1895,7 +1895,15 @@ function startPlaying() {
   if (game.dungeon) { try { exitLair(false); } catch {} game.dungeon = null; enemyMgr.suspend = false; $id('minimap').style.display = ''; }
   game.mode = 'play';
   game.tod = START_TOD; // every run opens at 08:00 (co-op then syncs to the room epoch)
-  audio.playMusic('level1');
+  // survival always wakes in the Verdant camp — start ITS biome track straight
+  // away. (updateAtmosphere only swaps music on a biome CHANGE, and you begin
+  // in biome 0, so the first track has to be set here or it never plays.)
+  if (game.kind === 'survival') {
+    game.biomeIndex = 0;
+    audio.playMusic(BIOME_MUSIC[0]);
+  } else {
+    audio.playMusic('level1');
+  }
   if (game.kind === 'survival') {
     // everyone gets their own camp at the cave mouth
     camp = new Camp(scene, world, player, {
