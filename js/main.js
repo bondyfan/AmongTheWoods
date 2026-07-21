@@ -46,6 +46,18 @@ if (window.matchMedia?.('(display-mode: standalone)').matches || window.navigato
   document.documentElement.classList.add('standalone');
 }
 
+// NEVER let the page zoom — a zoomed viewport pushes the HUD/controls off
+// screen. Blocks pinch (Safari gesture events + ctrl-wheel trackpad pinch)
+// and the ctrl/cmd +/-/0 keyboard shortcuts, on desktop and mobile alike.
+// (CSS touch-action: manipulation already kills double-tap-to-zoom.)
+for (const t of ['gesturestart', 'gesturechange', 'gestureend']) {
+  document.addEventListener(t, (e) => e.preventDefault(), { passive: false });
+}
+window.addEventListener('wheel', (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+window.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && ['+', '-', '=', '_', '0'].includes(e.key)) e.preventDefault();
+});
+
 // ---------- renderer / scene ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -4991,6 +5003,7 @@ const camSmooth = new THREE.Vector3();
 let camInit = false;
 let rpgPitch = 0.34; // radians above the horizontal; negative looks UP
 let rpgDist = 8.6;   // wheel-zoomed camera distance
+let _camZoomK = 1;   // top-down rig scale (pulled IN on landscape phones)
 
 // ---- auto camera rotate (Settings): hold ONE direction for 5 s and the
 // camera turns so that direction reads as "up" (top-down: an orbit yaw that
@@ -5075,7 +5088,13 @@ function updateCamera(dt = 0) {
     const diff = camYawTarget - camYaw;
     camYaw += Math.atan2(Math.sin(diff), Math.cos(diff)) * Math.min(1, dt * 3);
     const fx = Math.sin(camYaw), fz = Math.cos(camYaw);
-    camera.position.set(player.pos.x + fx * 14 + sx, py + 26, player.pos.z + fz * 14 + sz);
+    // landscape phones are wide but short, so the fixed rig reads as
+    // zoomed-OUT — pull the camera in (lower + closer, same tilt)
+    const landscapePhone = game.touch && window.innerWidth > window.innerHeight
+      && window.innerHeight < 560;
+    _camZoomK += ((landscapePhone ? 0.64 : 1) - _camZoomK) * Math.min(1, dt * 6);
+    const H = 26 * _camZoomK, OFF = 14 * _camZoomK;
+    camera.position.set(player.pos.x + fx * OFF + sx, py + H, player.pos.z + fz * OFF + sz);
     camera.lookAt(player.pos.x - fx * 2 + sx, py, player.pos.z - fz * 2 + sz);
   }
   // lower sun = longer, more dramatic shadows AND a disc you actually see

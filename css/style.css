@@ -1,11 +1,20 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+html {
+  /* never let the page itself zoom — manipulation kills double-tap-to-zoom
+     without breaking taps; text-size-adjust stops mobile font auto-zoom */
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%; text-size-adjust: 100%;
+  overscroll-behavior: none;
+}
+
 body {
   overflow: hidden;
   font-family: 'Trebuchet MS', 'Segoe UI', sans-serif;
   background: #16210f;
-  user-select: none;
+  user-select: none; -webkit-user-select: none;
   color: #e8e4d8;
+  touch-action: manipulation;
 }
 
 #game canvas { display: block; cursor: crosshair; }
