@@ -941,15 +941,6 @@ function toggleFlightMap(force) {
   if (flightmapOpen) { flightZoom = 0; audio.sfx('click', 0.4); drawFlightMap(); }
 }
 
-// mouse wheel zooms the flight map (starts from the auto-fit level)
-$id('flightmap-canvas').addEventListener('wheel', (e) => {
-  if (!flightmapOpen) return;
-  e.preventDefault();
-  const cur = flightZoom || drawFlightMap._autoZoom || 1;
-  flightZoom = Math.max(1, Math.min(8, cur * (e.deltaY < 0 ? 1.4 : 1 / 1.4)));
-  drawFlightMap();
-}, { passive: false });
-
 // ---- the flight itself: 5 s arrival, then the griffin carries you ----
 let flight = null; // { phase: 'arrive'|'ride', t, mesh, to, from, y, walkT }
 
@@ -4021,6 +4012,14 @@ $id('flightmap-canvas').addEventListener('click', (e) => {
   toggleFlightMap(false);
   startFlight(node.wx, node.wz);
 });
+// mouse wheel zooms the flight map (starts from the auto-fit level)
+$id('flightmap-canvas').addEventListener('wheel', (e) => {
+  if (!flightmapOpen) return;
+  e.preventDefault();
+  const cur = flightZoom || drawFlightMap._autoZoom || 1;
+  flightZoom = Math.max(1, Math.min(8, cur * (e.deltaY < 0 ? 1.4 : 1 / 1.4)));
+  drawFlightMap();
+}, { passive: false });
 for (const [btnId, d] of [['bigmap-zoomin', 1], ['bigmap-zoomout', -1]]) {
   $id(btnId).addEventListener('click', () => {
     minimap.bigZoomBy?.(d);
