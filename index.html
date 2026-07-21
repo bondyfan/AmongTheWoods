@@ -342,7 +342,7 @@
             </select>
           </label>
           <label class="opt-field opt-toggle">
-            <span class="opt-label opt-warn">🌑 Ambient occlusion <small style="opacity:.6;font-weight:normal">(subtle depth shading · heavy)</small></span>
+            <span class="opt-label opt-warn">🌑 Ambient occlusion <small style="opacity:.6;font-weight:normal">(shade under tree canopies · heavy)</small></span>
             <input type="checkbox" id="set-ssao">
           </label>
           <label class="opt-field">
@@ -456,8 +456,8 @@
             <small>Share this code so a friend can join your running game.</small></span>
         </div>
         <div class="setting-row" id="cloud-row" style="display:none">
-          <span style="flex:1"><b>☁️ Cloud save</b> <small id="cloud-who"></small><br>
-            <small>Save/Load your character to the cloud (co-op survival only).</small></span>
+          <span style="flex:1"><b id="save-title">☁️ Cloud save</b> <small id="cloud-who"></small><br>
+            <small id="save-desc">Save/Load your character to the cloud (co-op survival only).</small></span>
           <button id="set-savegame" class="mini-btn">💾 Save</button>
           <button id="set-loadgame" class="mini-btn">📂 Load</button>
         </div>
@@ -492,10 +492,10 @@
     </div>
     <div id="coopstart-body">
       <div id="coopstart-choose">
-        <p class="cs-lead">You have saved characters. Start this co-op run fresh, or bring one back?</p>
+        <p class="cs-lead" id="cs-lead-note">You have saved characters. Start this run fresh, or bring one back?</p>
         <button id="cs-new" class="cs-big">🆕 New game from scratch
           <small>Wake in the cave at level 1 with an empty camp.</small></button>
-        <button id="cs-load" class="cs-big">☁️ Load a saved game
+        <button id="cs-load" class="cs-big">📂 Load a saved game
           <small>Restore your character, gear and camp into this world.</small></button>
       </div>
       <div id="coopstart-load" class="hidden">

@@ -12,6 +12,7 @@ import { makeAimArc, updateAimArc, makeRaft, makeBlacksmith, makeHorse, makeWisp
          makeGriffin, makeGriffinRoost, makeTumbleweed, BAKED_MAT, WATER_SHADERS,
          makeSkyDome } from './models.js';
 import { PostFX } from './postfx.js';
+import { CanopyShade } from './canopy.js';
 import { Camp } from './camp.js';
 import { audio } from './audio.js';
 import { input } from './input.js';
@@ -36,6 +37,7 @@ import { Minimap, MobaMinimap } from './minimap.js';
 import { UI, MOB_INFO_RADIUS, mobLevelBadge } from './ui.js';
 import { Panels } from './panels.js';
 import { DevDistanceRadius } from './dev-distance-radius.js';
+import { LocalSaves } from './localsaves.js';
 
 // ---------- PWA: installable + full-screen on the home screen ----------
 if ('serviceWorker' in navigator) {
@@ -69,6 +71,7 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.getElementById('game').appendChild(renderer.domElement);
 
 let postfx = null; // created on demand by applyGraphics (bloom)
+let canopyShade = null; // world-space crown-shade map (the visible half of AO)
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(BIOMES[0].fog, 35, 110);
@@ -2119,6 +2122,18 @@ function startPlaying() {
   const ov = $id('enter-overlay');
   if (ov) { ov.classList.remove('hidden', 'fade'); } // cover the menu→game cut at once
   hideJoinCodeHud(); // solo runs show nothing; a co-op host re-shows it after host()
+  // ?devmode is a SINGLEPLAYER sandbox only: in any multiplayer session strip
+  // admin mode and its stat overrides so everyone plays on equal footing. Solo
+  // devmode keeps admin mode on.
+  if (mp?.active) {
+    if (game.adminMode || player.adminOverrides) {
+      game.adminMode = false;
+      player.adminOverrides = null;
+      player.recompute();
+    }
+  } else if (DEVMODE) {
+    game.adminMode = true;
+  }
   if (game.kind === 'survival') clearHunterTraps();
   // safety: never carry a half-open lair dungeon into a fresh run
   if (game.dungeon) { try { exitLair(false); } catch {} game.dungeon = null; enemyMgr.suspend = false; $id('minimap').style.display = ''; }
@@ -2224,13 +2239,14 @@ function startPlaying() {
     // the co-op guest renders the HOST's enemies
     if (!(mp?.active && mp.mode === 'coop' && !mp.isHost)) enemyMgr.spawnInitialWave();
   }
-  // ?devmode boots at max level so class trees and late-game gear are testable
-  if (DEVMODE) player.setLevel(MAX_LEVEL);
+  // ?devmode boots at max level so class trees and late-game gear are testable —
+  // SINGLEPLAYER only (no free levels handed out in a multiplayer session)
+  if (DEVMODE && !mp?.active) player.setLevel(MAX_LEVEL);
   // build the world around the spawn behind the overlay, then reveal
   warmUpAndReveal();
-  // co-op survival: once the world is revealed, offer New-vs-Load — but only if
-  // you're signed in and actually have cloud saves worth bringing back
-  maybeOfferCoopStart();
+  // survival: once the world is revealed, offer New-vs-Load — but only if there
+  // are saves worth bringing back (co-op → cloud, solo → this device)
+  maybeOfferStartChoice();
 }
 
 function startGame() {
@@ -2785,15 +2801,23 @@ const settings = Object.assign(
     $id('set-mpcode').textContent = (mp?.active && mpCode) ? mpCode : '— (not in a multiplayer game)';
     $id('admin-row').style.display = (DEVMODE && game.kind === 'survival' && !mp?.active) ? '' : 'none';
     $id('set-admin').checked = !!game.adminMode;
-    // cloud save/load is only offered inside a co-op survival game while signed in
-    const canCloud = mp?.active && mp.mode === 'coop' && game.kind === 'survival';
-    const cloudRow = $id('cloud-row');
-    cloudRow.style.display = canCloud ? '' : 'none';
-    $id('cloud-who').textContent = authUser ? `— ${authUser.name}` : '— sign in on the menu first';
-    $id('set-savegame').disabled = !authUser;
-    $id('set-loadgame').disabled = !authUser;
+    // save/load: co-op survival → cloud (needs sign-in); solo survival → THIS
+    // device. Not offered in pvp/moba (saveAvailable gates that).
+    const cloud = saveIsCloud();
+    const row = $id('cloud-row');
+    row.style.display = saveAvailable() ? '' : 'none';
+    $id('save-title').textContent = cloud ? '☁️ Cloud save' : '💾 Save game';
+    $id('save-desc').textContent = cloud
+      ? 'Save/Load your character to the cloud (shared co-op account).'
+      : 'Save/Load your character on this device — separate from multiplayer.';
+    $id('cloud-who').textContent = cloud
+      ? (authUser ? `— ${authUser.name}` : '— sign in on the menu first')
+      : '';
+    const needAuth = cloud && !authUser;   // solo local save never needs sign-in
+    $id('set-savegame').disabled = needAuth;
+    $id('set-loadgame').disabled = needAuth;
   });
-  $id('set-savegame').addEventListener('click', saveGameCloud);
+  $id('set-savegame').addEventListener('click', saveGameNow);
   $id('set-loadgame').addEventListener('click', openLoadGame);
   $id('set-admin').addEventListener('change', () => {
     game.adminMode = $id('set-admin').checked;
@@ -2921,7 +2945,22 @@ function serializeState() {
   return JSON.parse(JSON.stringify(data)); // strip undefined for Firebase
 }
 
-// ---------- co-op autosave (single rolling slot) ----------
+// ---------- save backend seam: cloud (co-op) vs local (solo) ----------
+// Co-op survival shares one Firebase account, so it saves to the CLOUD. Solo
+// survival saves to THIS device's localStorage — no sign-in, works offline,
+// and kept entirely separate from the multiplayer saves. Both stores expose the
+// same tiny API (saveGame / autoSave / listSaves / loadSave / deleteSave).
+async function saveBackend() {
+  if (mp?.active && mp.mode === 'coop') return await ensureAuth();
+  return LocalSaves;
+}
+function saveIsCloud() { return !!(mp?.active && mp.mode === 'coop'); }
+// saving/loading is offered in any survival game EXCEPT pvp (own throwaway world)
+function saveAvailable() {
+  return game.kind === 'survival' && (!mp?.active || mp.mode === 'coop');
+}
+
+// ---------- autosave (single rolling slot) ----------
 // One mechanism catches everything the player asked for — level-ups, purchases
 // and picked-up items/resources — by watching a cheap "progression signature".
 // When it changes we write serializeState() to the ONE autosave slot (auth.js
@@ -2933,8 +2972,10 @@ const AS_URGENT_GAP = 3;  // s — shortened gap after a level-up / purchase
 let _asSig = '', _asPrimed = false, _asBusy = false, _asUrgent = false, _asAccum = 0;
 
 function autosaveEligible() {
-  return !!(authUser && mp?.active && mp.mode === 'coop' && game.kind === 'survival'
-    && game.mode === 'play' && !player.dead);
+  if (!(game.kind === 'survival' && game.mode === 'play' && !player.dead)) return false;
+  // co-op autosaves to the cloud (needs sign-in); solo autosaves locally, always
+  if (mp?.active) return !!(authUser && mp.mode === 'coop');
+  return true;
 }
 
 // a compact string that changes whenever the player gains a level, buys/loots
@@ -2969,33 +3010,33 @@ function tickAutosave(dt) {
 async function doAutosave() {
   _asBusy = true;
   try {
-    await (await ensureAuth()).autoSave(
+    await (await saveBackend()).autoSave(
       { biome: BIOMES[game.biomeIndex]?.name, level: player.level }, serializeState());
     ui.toast('💾 Autosaved', 'info');
   } catch (e) { /* autosave stays quiet on failure — the manual save still nags */ }
   finally { _asBusy = false; }
 }
 
-async function saveGameCloud() {
-  if (!authUser) { ui.toast('Sign in first (on the menu).', 'boss'); return; }
-  if (!(mp?.active && mp.mode === 'coop' && game.kind === 'survival')) {
-    ui.toast('You can only save inside a co-op survival game.', 'boss'); return;
-  }
+async function saveGameNow() {
+  if (!saveAvailable()) { ui.toast('You can only save inside a survival game.', 'boss'); return; }
+  if (saveIsCloud() && !authUser) { ui.toast('Sign in first (on the menu).', 'boss'); return; }
   try {
-    await (await ensureAuth()).saveGame(
+    await (await saveBackend()).saveGame(
       { biome: BIOMES[game.biomeIndex].name, level: player.level }, serializeState());
-    ui.toast('💾 Game saved to the cloud!', 'level');
+    ui.toast(saveIsCloud() ? '💾 Game saved to the cloud!' : '💾 Game saved (this device)!', 'level');
     audio.sfx('upgrade', 0.5);
   } catch (e) { ui.toast('Save failed: ' + (e?.message || e), 'boss'); }
 }
 
 async function openLoadGame() {
-  if (!authUser) { ui.toast('Sign in first (on the menu).', 'boss'); return; }
+  if (!saveAvailable()) { ui.toast('You can only load inside a survival game.', 'boss'); return; }
+  if (saveIsCloud() && !authUser) { ui.toast('Sign in first (on the menu).', 'boss'); return; }
   $id('loadgame').classList.remove('hidden');
+  $id('loadgame').querySelector('h2').textContent = saveIsCloud() ? '☁️ Load Game' : '📂 Load Game (this device)';
   const list = $id('loadgame-list'), empty = $id('loadgame-empty');
   list.innerHTML = ''; empty.textContent = 'Loading your saves…'; empty.style.display = '';
   try {
-    const saves = await (await ensureAuth()).listSaves();
+    const saves = await (await saveBackend()).listSaves();
     if (!saves.length) { empty.textContent = 'No saves yet — hit Save first.'; return; }
     empty.style.display = 'none';
     for (const sv of saves) {
@@ -3009,7 +3050,7 @@ async function openLoadGame() {
         <button class="mini-btn" data-del="${sv.id}">🗑</button>`;
       row.querySelector('[data-load]').addEventListener('click', () => doLoad(sv.id));
       row.querySelector('[data-del]').addEventListener('click', async () => {
-        try { await (await ensureAuth()).deleteSave(sv.id); row.remove(); } catch {}
+        try { await (await saveBackend()).deleteSave(sv.id); row.remove(); } catch {}
       });
       list.appendChild(row);
     }
@@ -3018,7 +3059,7 @@ async function openLoadGame() {
 
 async function doLoad(id) {
   try {
-    const data = await (await ensureAuth()).loadSave(id);
+    const data = await (await saveBackend()).loadSave(id);
     if (!data) { ui.toast('That save is empty.', 'boss'); return; }
     applyLoadedState(data);
     $id('loadgame').classList.add('hidden');
@@ -3104,36 +3145,40 @@ function applyLoadedState(d) {
 }
 $id('loadgame').querySelector('.panel-close').addEventListener('click', () => $id('loadgame').classList.add('hidden'));
 
-// ---------- co-op survival: "New game vs Load" prompt on entering ----------
-// When you drop into a co-op survival world while signed in AND you have cloud
-// saves, offer to bring a character back instead of always starting fresh.
-// Guests and first-time players (no saves) skip the prompt and just play new.
-let _coopStartNewestId = null;
-async function maybeOfferCoopStart() {
-  if (!authUser) return;                     // no account → no cloud saves
-  if (!(mp?.active && mp.mode === 'coop' && game.kind === 'survival')) return;
+// ---------- survival: "New game vs Load" prompt on entering ----------
+// Whenever you drop into a survival world that HAS saves, offer to bring a
+// character back instead of always starting fresh. Co-op reads the shared cloud
+// (needs sign-in); solo reads this device. No saves (or pvp/moba) → skip the
+// prompt and just play new, exactly as before.
+let _startChoiceNewestId = null;
+async function maybeOfferStartChoice() {
+  if (!saveAvailable()) return;                 // pvp/moba have no saves
+  if (saveIsCloud() && !authUser) return;       // co-op cloud needs sign-in
   let saves = [];
-  try { saves = await (await ensureAuth()).listSaves(); } catch { return; }
-  if (!saves.length) return;                 // nothing to load — start fresh silently
-  const newest = saves[0];                   // listSaves is newest-first
-  _coopStartNewestId = newest.id;
+  try { saves = await (await saveBackend()).listSaves(); } catch { return; }
+  if (!saves.length) return;                    // nothing to load — start fresh silently
+  const newest = saves[0];                      // listSaves is newest-first
+  _startChoiceNewestId = newest.id;
   const when = new Date(newest.at).toLocaleString();
   const tag = newest.auto ? '🔄 Autosave · ' : '';
   $id('cs-last-meta').textContent = `${tag}${newest.biome ?? '?'} · Lv ${newest.level ?? '?'} · ${when}`;
+  $id('cs-lead-note').textContent = saveIsCloud()
+    ? 'You have cloud-saved characters. Start this run fresh, or bring one back?'
+    : 'You have saved characters on this device. Start fresh, or bring one back?';
   // always open on the first (New/Load) step
   $id('coopstart-choose').classList.remove('hidden');
   $id('coopstart-load').classList.add('hidden');
   // wait out the "entering the woods" overlay so the prompt lands on the world,
   // not on the loading spinner
-  showCoopStartWhenRevealed();
+  showStartChoiceWhenRevealed();
 }
-function showCoopStartWhenRevealed() {
+function showStartChoiceWhenRevealed() {
   const ov = $id('enter-overlay');
-  if (ov && !ov.classList.contains('hidden')) { setTimeout(showCoopStartWhenRevealed, 150); return; }
+  if (ov && !ov.classList.contains('hidden')) { setTimeout(showStartChoiceWhenRevealed, 150); return; }
   $id('coopstart').classList.remove('hidden');
 }
-function closeCoopStart() { $id('coopstart').classList.add('hidden'); }
-$id('cs-new').addEventListener('click', () => { audio.sfx('click', 0.4); closeCoopStart(); });
+function closeStartChoice() { $id('coopstart').classList.add('hidden'); }
+$id('cs-new').addEventListener('click', () => { audio.sfx('click', 0.4); closeStartChoice(); });
 $id('cs-load').addEventListener('click', () => {
   audio.sfx('click', 0.4);
   $id('coopstart-choose').classList.add('hidden');
@@ -3146,12 +3191,12 @@ $id('cs-back').addEventListener('click', () => {
 });
 $id('cs-last').addEventListener('click', async () => {
   audio.sfx('click', 0.4);
-  closeCoopStart();
-  if (_coopStartNewestId) await doLoad(_coopStartNewestId);
+  closeStartChoice();
+  if (_startChoiceNewestId) await doLoad(_startChoiceNewestId);
 });
 $id('cs-choose').addEventListener('click', () => {
   audio.sfx('click', 0.4);
-  closeCoopStart();
+  closeStartChoice();
   openLoadGame();
 });
 
@@ -5549,7 +5594,7 @@ function step() {
       mounted: player.mounted,
       onShip: shipRiding(), // riding the ferry over the sea isn't swimming
       mouseLook: game.rpgView && settings.mouseLook && !!input.locked,
-      devFly: DEVMODE && game.devFly && game.rpgView && !player.flying,
+      devFly: DEVMODE && !mp?.active && game.devFly && game.rpgView && !player.flying,
       devFlyPitch: rpgPitch,
       envSpeedMult,
     });
@@ -5797,9 +5842,25 @@ function step() {
   // the World Editor renders CLEAN — no bloom / AO / vignette
   const usePost = (settings.bloom || settings.ssao) && postfx && !game.editorView;
   if (usePost) {
+    // "Ambient occlusion" = canopy shade (the visible part: pools of shade
+    // under tree crowns, deeper where the wood is thick) + a MILD screen-space
+    // contact term. The old strong SSAO read as global darkness/contrast.
+    let canopy = null;
+    if (settings.ssao) {
+      canopyShade ??= new CanopyShade();
+      canopyShade.update(world, player.pos.x, player.pos.z);
+      if (canopyShade.ready) {
+        canopy = {
+          densTex: canopyShade.densTex, metaTex: canopyShade.metaTex,
+          cx: canopyShade.cx, cz: canopyShade.cz, size: canopyShade.size,
+          strength: 0.9,
+        };
+      }
+    }
     postfx.render(scene, camera, {
       ssao: !!settings.ssao, bloom: !!settings.bloom,
-      aoRadius: 1.8, aoStrength: 0.25, aoFloor: 0.30,
+      aoRadius: 1.8, aoStrength: 0.10, aoFloor: 0.55,
+      canopy,
     });
   } else { renderer.setRenderTarget(null); renderer.render(scene, camera); }
 }
