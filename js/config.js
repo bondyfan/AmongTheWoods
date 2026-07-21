@@ -393,10 +393,10 @@ export const xpKillFor = (level) => Math.round(14 + 5.2 * level);
 // huge pool needs ~40 s. The bigger you get, the longer a breather takes.
 // Gear regen adds on top and rest gear (bedroll etc.) multiplies it.
 export const OOC_DELAY = 5;
-// flat hp/s, not a %. The ×0.5 is a deliberate global nerf: the rest-heal buff
-// (player AND mobs both use this) knits health back half as fast as it used to,
-// so a breather takes twice as long — full-heal timings roughly double.
-export const oocRegenFor = (level) => (7 + 1.5 * level) * 0.5;
+// flat hp/s, not a %. The ×0.25 is a deliberate global nerf: the rest-heal buff
+// (player AND mobs both use this) knits health back a QUARTER as fast as it once
+// did, so a breather takes ~4× as long — full-heal timings roughly quadruple.
+export const oocRegenFor = (level) => (7 + 1.5 * level) * 0.25;
 
 // Each zone covers a WoW-style level band (index = difficulty tier). The gap
 // between Verdant and the Desert is intentional — the first border bites.
