@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { worldPatch } from './worldpatch.js';
 import { WORLD, ENEMY_TYPES, BOSS_RANKS, BIOMES, biomeAt, biomeIndexAt, progressAt,
          meatForLevel, bossNameFor, enemyLevelFor, biomeIndexForDifficulty,
-         ENEMY_HP, ENEMY_DMG, xpKillFor } from './config.js';
+         ENEMY_HP, ENEMY_DMG, xpKillFor, OOC_DELAY, oocRegenFor } from './config.js';
 import { makeEnemyMesh, makeCobweb, makeHumanCamp, makeCage } from './models.js';
 import { audio } from './audio.js';
 
@@ -682,6 +682,7 @@ export class EnemyManager {
     enemy.chaseT = 0;
     enemy.flashT = 0.12;     // brief white-hot scale pop so hits READ
     enemy.threatLog.push({ src: srcId, dmg, t: this.world.time });
+    enemy.lastCombatAt = this.world.time; // resets its out-of-combat rest-heal timer
     if (srcId === 'local') this.onLocalHit?.(); // flags the player "in combat"
     const applyDot = (kind, spec) => {
       if (!spec) return;
@@ -1367,6 +1368,18 @@ export class EnemyManager {
         );
       } else {
         e.mesh.position.set(e.pos.x, groundY, e.pos.z);
+      }
+
+      // Out-of-combat rest-heal — mobs now recover the same way the player does.
+      // While a creature is engaged (aggroed on a target) or has just dealt/taken
+      // damage, its combat timer stays hot; once nothing has been fighting it for
+      // OOC_DELAY seconds, health knits back at a FLAT oocRegen hp/s (the shared
+      // level-scaled rate, so the global 50% nerf hits players and mobs alike).
+      // A boss whose target flees resets and heals up, classic WoW evade-heal.
+      if (e.aggroed && target) e.lastCombatAt = this.world.time;
+      if (!e.escaping && e.hp < e.maxHp
+          && this.world.time - (e.lastCombatAt ?? -Infinity) > OOC_DELAY) {
+        e.hp = Math.min(e.maxHp, e.hp + oocRegenFor(e.level) * dt);
       }
     }
   }
