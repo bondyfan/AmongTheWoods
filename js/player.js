@@ -30,6 +30,12 @@ const rankValue = (skill, key, rank, fallback = 0) => {
 // castSpell) instead of whiffing into the air. Pet-command Hunt Command is
 // gated the same way in main.js.
 const NEEDS_TARGET = new Set(['target', 'execute', 'magicTarget', 'shadowstep', 'markedShot', 'markedVolley']);
+// Targeted SPELLS (Fireball, Frostbolt, Pyroblast…) that fire ONLY at a
+// Shift-locked unit — they never auto-pick the nearest enemy the way the melee
+// designation abilities do. No lock ⇒ the cast is refused outright. For a
+// windup spell the lock is captured when the cast begins (see castWindup) so
+// it survives the player releasing Shift during the channel.
+const SHIFT_LOCK_ONLY = new Set(['magicTarget']);
 
 export class Player {
   constructor(scene, hooks) {
@@ -381,7 +387,10 @@ export class Player {
       // fires from update() once the timer runs out. Cooldown starts on impact.
       if (classSkill.windup) {
         this.castWindup = { skill: classSkill, rank, id,
-          t: classSkill.windup, dur: classSkill.windup };
+          t: classSkill.windup, dur: classSkill.windup,
+          // lock the Shift-selected enemy in now so a long channel (Pyroblast)
+          // still lands even after Shift is released mid-cast
+          lockedTarget: NEEDS_TARGET.has(classSkill.action) ? this._selectedTarget : null };
         this._spawnTelegraph(classSkill.windup);
         audio.sfx('special', 0.3, 0);
         return true;
@@ -502,6 +511,8 @@ export class Player {
     const sel = this._selectedTarget;
     if (sel && !sel.dying && !sel.dead && ctx.enemyMgr?.alive?.().includes(sel)
       && sel.pos.distanceTo(this.pos) <= this._targetMaxRange(skill, rank)) return true;
+    // Shift-lock-only spells NEVER fall back to the nearest enemy — no lock, no cast.
+    if (SHIFT_LOCK_ONLY.has(skill.action)) return false;
     const aim = ctx.rpgView ? this.pos.clone().addScaledVector(this.facing, range) : ctx.aimPoint;
     return !!this._findClassTarget(ctx.enemyMgr, aim, range);
   }
@@ -675,7 +686,7 @@ export class Player {
     return Math.round(amount);
   }
 
-  _castClassAbility(skill, rank, ctx) {
+  _castClassAbility(skill, rank, ctx, lockedTarget = null) {
     const enemyMgr = ctx.enemyMgr;
     const rv = (key, fallback = 0) => rankValue(skill, key, rank, fallback);
     const werr = this._abilityWeaponError(skill);
@@ -685,6 +696,10 @@ export class Player {
     }
     const target = () => {
       const range = rv('range', 12);
+      // A target captured when a windup spell began stays locked for the whole
+      // channel, even if the player has since let go of Shift.
+      if (lockedTarget && !lockedTarget.dying && !lockedTarget.dead
+        && enemyMgr?.alive?.().includes(lockedTarget)) return lockedTarget;
       // A Shift-locked unit wins outright, as long as it's alive and within
       // this ability's reach — so aiming with the reticle beats facing/mouse.
       const sel = this._selectedTarget;
@@ -692,6 +707,9 @@ export class Player {
         && sel.pos.distanceTo(this.pos) <= this._targetMaxRange(skill, rank)) {
         return sel;
       }
+      // Shift-lock-only spells never auto-pick the nearest enemy — if the lock
+      // is gone they fizzle into the air rather than snapping to whoever's close.
+      if (SHIFT_LOCK_ONLY.has(skill.action)) return null;
       const targetAim = ctx.rpgView
         ? this.pos.clone().addScaledVector(this.facing, range) : ctx.aimPoint;
       return this._findClassTarget(enemyMgr, targetAim, range);
@@ -2469,9 +2487,9 @@ export class Player {
       } else {
         this.castWindup.t -= dt;
         if (this.castWindup.t <= 0) {
-          const { skill, rank, id } = this.castWindup;
+          const { skill, rank, id, lockedTarget } = this.castWindup;
           this.castWindup = null;
-          if (this._castClassAbility(skill, rank, ctx)) {
+          if (this._castClassAbility(skill, rank, ctx, lockedTarget)) {
             this.spellCds[id] = this.classAbilityCooldown(id);
             audio.sfx(id, 0.55); // windup abilities land on their own signature sound
           } else audio.sfx('error', 0.3, 300);
