@@ -107,6 +107,10 @@ let _fpsSmooth = 60, _fpsMeterT = 0;
 // high = "lush" (the classic look); ultra switches on the dense grass-fill
 const FOLIAGE_MULT = { low: 0.35, normal: 1, high: 1.7, ultra: 3.2 };
 const TREE_DETAIL = { low: 0, medium: 1, high: 2 };
+// SSAO sample radius (world-ish units) per quality — bigger = softer, broader
+const SSAO_RADIUS = { low: 1.1, medium: 1.8, high: 2.6 };
+// auto-exposure (eye adaptation) state: smoothed toneMappingExposure
+let _expCur = 1, _expTarget = 1;
 // shadow-distance rigs: {b = ortho half-extent m, s = map px}. The far plane
 // and the sun's stand-off distance are derived from b so the whole frustum is
 // always covered (updateCamera parks the sun at b*2 along the fixed sun dir).
@@ -3981,28 +3985,32 @@ function toggleWorldEditor() {
         worldEditor.centerView(player.pos.x, player.pos.z);
         world.viewRadius = 5;              // stream a wide apron of chunks
         scene.fog.near = 400; scene.fog.far = 4000; // see the map, not the fog
+        // the god view is ALWAYS forced to fast graphics — sparse vegetation,
+        // low-detail trees, no shadows — so a whole biome stays fast & readable
+        // (restored from the player's settings on exit). The Options → Graphics
+        // tier only trades resolution + ground-tile density on top of this.
+        world.foliageMult = FOLIAGE_MULT.low;
+        world.treeDetail = TREE_DETAIL.low;
+        renderer.shadowMap.enabled = false;
+        sun.castShadow = false;
+        scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
+        world.regenChunks();               // rebuild loaded chunks at the forced settings
       } else {
         world.viewRadius = null;
-        if (world.groundOnly) { world.groundOnly = false; world.regenChunks(); }
-        applyGraphics(); // restore the player's resolution / shadows / tile detail
+        world.groundOnly = false;
+        world.foliageMult = FOLIAGE_MULT[settings.foliage] ?? 1;
+        applyGraphics(); // restore the player's tree detail / shadows / tile detail / resolution
         applyViewMode(); // restores fog / camera.far / view radius for the CURRENT mode
+        world.regenChunks(); // rebuild with the player's real foliage / trees
       }
     },
-    // editor-only render quality — cheaper fill-rate + geometry WITHOUT ever
-    // shrinking the streamed chunk radius (draw distance stays put)
+    // editor-only render quality — resolution + ground-tile density ONLY (foliage,
+    // trees and shadows are already forced fast on enter; view distance / chunk
+    // radius is never touched, so the map stays as far-reaching at every tier)
     onGfx: (level) => {
-      if (level === 'high') { applyGraphics(); return; } // = the game's own settings
       const dpr = window.devicePixelRatio;
-      renderer.setPixelRatio(level === 'low' ? 1 : Math.min(dpr, 1.35));
-      const shadows = false; // low + medium both drop shadows
-      if (renderer.shadowMap.enabled !== shadows) {
-        renderer.shadowMap.enabled = shadows;
-        sun.castShadow = shadows;
-        scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
-      }
-      // coarser ground tiles (fewer verts per chunk) — a big win across the
-      // hundreds of far-LOD tiles a zoomed-out view streams
-      const detail = level === 'low' ? 0 : Math.min(settings.texDetail ?? 0, 1);
+      renderer.setPixelRatio(level === 'low' ? 1 : level === 'medium' ? Math.min(dpr, 1.35) : Math.min(dpr, 2));
+      const detail = level === 'low' ? 0 : level === 'medium' ? Math.min(settings.texDetail ?? 0, 1) : (settings.texDetail ?? 0);
       if (world.groundDetail !== detail) { world.groundDetail = detail; world.regenChunks(); }
     },
   });
@@ -5075,7 +5083,11 @@ function applyGraphics() {
     : settings.resScale === '1.5' ? Math.min(window.devicePixelRatio, 1.5)
     : Math.min(window.devicePixelRatio, 2);
   renderer.setPixelRatio(pr);
-  if (settings.bloom && !postfx) postfx = new PostFX(renderer);
+  // the post stack is needed for bloom OR ambient occlusion
+  if ((settings.bloom || settings.ssao) && !postfx) {
+    postfx = new PostFX(renderer);
+    postfx.setSize(renderer.domElement.width, renderer.domElement.height);
+  }
   // shadow DISTANCE: how far the sun's shadow frustum reaches around the
   // player (High casts shadows across ~270 m). Bigger area → bigger map so
   // it doesn't go blurry, hence "heavier".
@@ -5094,8 +5106,16 @@ function applyGraphics() {
     sun.shadow.map?.dispose();
     sun.shadow.map = null;
   }
-  renderer.toneMapping = settings.filmic ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
-  renderer.toneMappingExposure = settings.filmic ? 1.12 : 1;
+  // tone mapping: auto-exposure (eye adaptation) needs a tone-mapped output so
+  // toneMappingExposure actually scales the image — a neutral Linear curve,
+  // driven per-frame in step(). Without auto-exposure, keep the raw look.
+  if (settings.autoExp) {
+    renderer.toneMapping = settings.filmic ? THREE.ACESFilmicToneMapping : THREE.LinearToneMapping;
+  } else {
+    renderer.toneMapping = settings.filmic ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
+    renderer.toneMappingExposure = settings.filmic ? 1.12 : 1;
+    _expCur = renderer.toneMappingExposure;
+  }
   // vivid grading: a free GPU-composited CSS filter on the canvas — richer
   // saturation and a touch of contrast, no render cost at all
   renderer.domElement.style.filter = settings.vivid !== false
@@ -5606,9 +5626,15 @@ function step() {
   ui.updateOverlays(dt, camera, player.pos);
   renderCharPreview(dt);
   renderSmithPreview(dt);
-  // the World Editor renders CLEAN — no bloom, no vignette shader
-  if (settings.bloom && postfx && !game.editorView) postfx.render(scene, camera);
-  else { renderer.setRenderTarget(null); renderer.render(scene, camera); }
+  tickAutoExposure(dt);
+  // the World Editor renders CLEAN — no bloom / AO / vignette
+  const usePost = (settings.bloom || settings.ssao) && postfx && !game.editorView;
+  if (usePost) {
+    postfx.render(scene, camera, {
+      ssao: !!settings.ssao, bloom: !!settings.bloom,
+      aoRadius: SSAO_RADIUS[settings.ssao] ?? 1.8, aoStrength: 0.9,
+    });
+  } else { renderer.setRenderTarget(null); renderer.render(scene, camera); }
 }
 
 // ---- armory paper-doll: a second small camera orbiting the actual player ----
