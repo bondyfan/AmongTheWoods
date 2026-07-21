@@ -2619,7 +2619,10 @@ export class Player {
         const guardSlow = this.blocking ? 0.48 : 1;
         const mountBonus = ctx.mounted ? 9 : ctx.boatMount ? 6 : 0;
         const terrainMult = ctx.boatMount ? (wk > 0 ? 0.65 : 0.45)
-          : wk === 2 ? 0.6     // deep water: swimming at 60% speed
+          : (wk === 2 && this.swimming) ? 0.6  // deep water: 60% — but ONLY once he's
+                                               // actually swimming (the stroke animation
+                                               // is playing), never the instant he steps in
+          : wk === 2 ? 1       // just entered deep water: full speed until the stroke starts
           : wk === 1 ? 0.62    // shallow water: wading
           : 1;
         const speed = (this.speed + this.moveSpeedBonus + mountBonus) * terrainMult
@@ -2679,9 +2682,17 @@ export class Player {
       const wy = world.waterYAt?.(this.pos.x, this.pos.z) ?? this.mesh.position.y;
       // float horizontal, chest just under the surface, gentle bob
       this.mesh.position.y = wy - 0.55 + Math.sin(this.swimT * 1.6) * 0.06;
-      this.mesh.rotation.x = -1.32;              // lie face-down, head forward
+      // The heading (Y) MUST be applied before the forward pitch (X); with the
+      // default XYZ order the pitch happens first, so the yaw then rolls the
+      // already-tilted body onto its side whenever he swims any non-default
+      // direction (that's the "lying sideways" look). YXZ = yaw first, then
+      // pitch about the body's OWN lateral axis => a clean prone float on his
+      // belly, head pointing the way he swims.
+      this.mesh.rotation.order = 'YXZ';
+      this.mesh.rotation.x = 1.45;               // ~83°: prone, head raised a touch to look ahead
     } else if (this.mesh.rotation.x !== 0) {
       this.mesh.rotation.x = 0;                  // stand back up on land
+      this.mesh.rotation.order = 'XYZ';          // restore the default Euler order ashore
     }
     // local +z toward the aim point, so arm swings (toward +z) punch forward
     // Whirlwind: spin the whole body two full turns on top of the facing
