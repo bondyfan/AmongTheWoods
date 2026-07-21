@@ -35,6 +35,17 @@ import { UI, MOB_INFO_RADIUS, mobLevelBadge } from './ui.js';
 import { Panels } from './panels.js';
 import { DevDistanceRadius } from './dev-distance-radius.js';
 
+// ---------- PWA: installable + full-screen on the home screen ----------
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {}); // fine if it fails
+  });
+}
+// tag standalone launches (iOS/Android) so CSS can add safe-area padding
+if (window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone) {
+  document.documentElement.classList.add('standalone');
+}
+
 // ---------- renderer / scene ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -136,6 +147,7 @@ const game = {
   nightK: 0,      // 0 = full day, 1 = deep night (drives lights/spawns/fireflies)
   biomeIndex: 0,
   touch: false,   // set once the player uses the on-screen touch controls
+  guest: false,   // playing without a Google account (no cloud save)
   seed: 1, // THE world seed — one canonical world everywhere (solo + multiplayer)
   editorView: false, // admin World-Editor top-down mode (freezes the sim)
   devFly: false,
@@ -2709,6 +2721,14 @@ if (DEVMODE) {
       $id('gate-msg').textContent = 'Could not reach Google sign-in: ' + (e?.message || e);
     }
   })();
+  // play without an account: drop the gate but leave authUser null, so cloud
+  // save stays unavailable (the Settings panel already gates on authUser)
+  $id('gate-guest').addEventListener('click', () => {
+    game.guest = true;
+    authUser = null;
+    renderUserBadge(null);
+    passGate();
+  });
   $id('gate-signin').addEventListener('click', async () => {
     const msg = $id('gate-msg');
     msg.textContent = 'Opening Google…';

@@ -1196,68 +1196,126 @@ body.slotting .spell-slot.empty {
   background: linear-gradient(90deg, #d8c27a, #ffe9a8);
 }
 
-/* ---------- on-screen touch controls (phones / tablets) ---------- */
-/* the whole layer ignores pointer events; only the controls capture them */
+
+/* ================= on-screen touch controls (phones / tablets) ================= */
+/* safe-area vars: 0 on desktop, the notch/home-indicator insets in standalone */
+:root { --sa-l: env(safe-area-inset-left, 0px); --sa-r: env(safe-area-inset-right, 0px);
+        --sa-t: env(safe-area-inset-top, 0px); --sa-b: env(safe-area-inset-bottom, 0px); }
+
 #touch-ui { position: fixed; inset: 0; z-index: 16; pointer-events: none; }
 #touch-ui.hidden { display: none; }
 
+/* move stick — bottom-left */
 #tc-stick {
-  position: absolute; left: 26px; bottom: 26px;
-  width: 132px; height: 132px; border-radius: 50%;
-  background: radial-gradient(circle, rgba(20,30,16,0.42), rgba(20,30,16,0.22));
-  border: 2px solid rgba(230,240,210,0.35);
+  position: absolute; left: calc(20px + var(--sa-l)); bottom: calc(20px + var(--sa-b));
+  width: 108px; height: 108px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(20,30,16,0.4), rgba(20,30,16,0.18));
+  border: 2px solid rgba(230,240,210,0.32);
   pointer-events: auto; touch-action: none;
 }
 #tc-knob {
-  position: absolute; left: 50%; top: 50%; width: 58px; height: 58px;
-  margin: -29px 0 0 -29px; border-radius: 50%;
+  position: absolute; left: 50%; top: 50%; width: 46px; height: 46px;
+  margin: -23px 0 0 -23px; border-radius: 50%;
   background: radial-gradient(circle at 40% 35%, #7fa04e, #4c6b35);
   border: 2px solid rgba(240,240,220,0.7); box-shadow: 0 2px 8px rgba(0,0,0,0.5);
   transition: transform 0.04s linear;
 }
 
+/* action buttons — bottom-right */
 #tc-actions {
-  position: absolute; right: 24px; bottom: 30px;
-  display: flex; align-items: flex-end; gap: 16px;
+  position: absolute; right: calc(18px + var(--sa-r)); bottom: calc(20px + var(--sa-b));
+  display: flex; align-items: flex-end; gap: 12px;
 }
 #tc-actions button {
   pointer-events: auto; touch-action: none; -webkit-tap-highlight-color: transparent;
-  border-radius: 50%; border: 2px solid rgba(240,240,220,0.55);
+  border-radius: 50%; border: 2px solid rgba(240,240,220,0.5);
   color: #f6f0e0; display: flex; align-items: center; justify-content: center;
   padding: 0; user-select: none;
 }
 #tc-attack {
-  width: 96px; height: 96px; font-size: 40px;
+  width: 76px; height: 76px; font-size: 32px;
   background: radial-gradient(circle at 40% 35%, #b5563e, #7a2f24);
   box-shadow: 0 3px 12px rgba(0,0,0,0.5);
 }
 #tc-block {
-  width: 66px; height: 66px; font-size: 26px; margin-bottom: 8px;
+  width: 54px; height: 54px; font-size: 22px; margin-bottom: 6px;
   background: radial-gradient(circle at 40% 35%, #43678f, #29405f);
 }
-#tc-actions button.held { filter: brightness(1.35); transform: scale(0.93); }
+#tc-actions button.held { filter: brightness(1.35); transform: scale(0.92); }
 
-/* burger button: hidden on desktop, shown in touch mode */
+/* burger — top-left in touch mode (clear of the bottom controls) */
 #burger-btn {
-  display: none; position: absolute; bottom: 18px; right: 18px;
-  width: 52px; height: 52px; border-radius: 12px; font-size: 24px;
+  display: none; position: absolute;
+  top: calc(12px + var(--sa-t)); left: calc(12px + var(--sa-l)); bottom: auto; right: auto;
+  width: 46px; height: 46px; border-radius: 12px; font-size: 22px;
   background: linear-gradient(#4c6b35, #34491f); color: #f0ead8;
   border: 2px solid #6d8f4c; pointer-events: auto; z-index: 12;
   -webkit-tap-highlight-color: transparent;
 }
 body.touch #burger-btn { display: block; }
 
-/* in touch mode the menu column is tucked behind the burger */
+/* the menu column drops down from the burger */
 body.touch #hud-buttons {
-  bottom: 80px; right: 18px; display: none;
-  background: rgba(12,18,8,0.85); padding: 8px; border-radius: 14px;
-  border: 1px solid rgba(255,255,255,0.12);
+  top: calc(66px + var(--sa-t)); left: calc(12px + var(--sa-l));
+  bottom: auto; right: auto; display: none;
+  background: rgba(12,18,8,0.92); padding: 8px; border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.14); z-index: 12;
 }
 body.touch.menu-open #hud-buttons { display: flex; }
-body.touch #hud-buttons button { font-size: 17px; padding: 13px 18px; }
-/* hotkey hints are meaningless on a phone */
-body.touch kbd { display: none; }
+body.touch #hud-buttons button { font-size: 16px; padding: 12px 16px; }
+body.touch kbd { display: none; } /* hotkeys are meaningless on a phone */
 
-/* keep the sticks clear of the spellbar & minimap on small screens */
-body.touch #minimap { bottom: 172px; }
-body.touch #minimap-zoom { bottom: 172px; }
+/* minimap: small, top-right, out of the sticks' way */
+body.touch #minimap {
+  left: auto; bottom: auto;
+  top: calc(10px + var(--sa-t)); right: calc(10px + var(--sa-r));
+  width: 74px; height: auto;
+}
+body.touch #minimap-zoom {
+  left: auto; bottom: auto;
+  top: calc(10px + var(--sa-t)); right: calc(90px + var(--sa-r));
+  flex-direction: column;
+}
+body.touch #minimap-zoom button { width: 30px; height: 30px; }
+
+/* the 1–6 spell bar sits centred, lifted above the thumbs */
+body.touch #spellbar { bottom: calc(20px + var(--sa-b)); gap: 5px; }
+body.touch .spell-slot { width: 42px; height: 42px; }
+/* keep the weapon read-out from colliding with the spell bar */
+body.touch #weapon-display { bottom: 74px; font-size: 13px; padding: 4px 10px; }
+body.touch #buff-bar { bottom: 108px; }
+
+/* biome banner / toasts stay clear of the top-left burger */
+body.touch #top-center { top: calc(8px + var(--sa-t)); }
+
+/* ---- PORTRAIT: stack the spell bar higher so thumbs don't cover it ---- */
+@media (orientation: portrait) {
+  body.touch #spellbar { bottom: calc(118px + var(--sa-b)); }
+  body.touch #weapon-display { bottom: calc(170px + var(--sa-b)); }
+  body.touch #buff-bar { bottom: calc(204px + var(--sa-b)); }
+}
+
+/* ---- LANDSCAPE: short screens — compact everything, spell bar centred low ---- */
+@media (orientation: landscape) and (max-height: 560px) {
+  #tc-stick { width: 92px; height: 92px; left: calc(14px + var(--sa-l)); bottom: calc(12px + var(--sa-b)); }
+  #tc-knob { width: 40px; height: 40px; margin: -20px 0 0 -20px; }
+  #tc-attack { width: 66px; height: 66px; font-size: 28px; }
+  #tc-block { width: 48px; height: 48px; font-size: 20px; }
+  #tc-actions { right: calc(14px + var(--sa-r)); bottom: calc(12px + var(--sa-b)); }
+  body.touch #spellbar { bottom: calc(14px + var(--sa-b)); }
+  body.touch .spell-slot { width: 38px; height: 38px; }
+  body.touch #weapon-display { bottom: 62px; }
+  body.touch #minimap { width: 64px; }
+}
+
+/* standalone (home-screen) launch: let the canvas fill under the status bar */
+html.standalone, html.standalone body { height: 100%; }
+
+/* the auth gate's guest button */
+#gate-guest {
+  margin-top: 14px; background: none; border: 1px solid rgba(255,255,255,0.28);
+  color: #d8e4c8; border-radius: 12px; padding: 10px 18px; cursor: pointer;
+  font-size: 15px; display: flex; flex-direction: column; align-items: center; gap: 2px;
+}
+#gate-guest:hover { background: rgba(255,255,255,0.06); }
+#gate-guest small { opacity: 0.6; font-size: 11px; }
