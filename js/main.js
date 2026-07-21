@@ -2052,8 +2052,34 @@ function endStats() {
 }
 
 // Shared entry into play mode (solo start button + multiplayer session begin).
+// cover the spawn while the surrounding chunks build, then reveal once the
+// near view radius is fully generated (no more first-seconds hitch). Runs on
+// desktop and mobile alike; a 3 s safety cap guarantees it always lifts.
+function warmUpAndReveal() {
+  const ov = $id('enter-overlay');
+  if (!ov) return;
+  ov.classList.remove('hidden', 'fade');
+  let frames = 0;
+  const step = () => {
+    frames++;
+    const missing = world.warmUp(player.pos, 14);
+    if (missing === 0 || frames > 180) {
+      // let this frame's fresh meshes upload to the GPU, then fade out
+      requestAnimationFrame(() => {
+        ov.classList.add('fade');
+        setTimeout(() => ov.classList.add('hidden'), 500);
+      });
+      return;
+    }
+    requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
 function startPlaying() {
   ui.hideMenu();
+  const ov = $id('enter-overlay');
+  if (ov) { ov.classList.remove('hidden', 'fade'); } // cover the menu→game cut at once
   hideJoinCodeHud(); // solo runs show nothing; a co-op host re-shows it after host()
   if (game.kind === 'survival') clearHunterTraps();
   // safety: never carry a half-open lair dungeon into a fresh run
@@ -2162,6 +2188,8 @@ function startPlaying() {
   }
   // ?devmode boots at max level so class trees and late-game gear are testable
   if (DEVMODE) player.setLevel(MAX_LEVEL);
+  // build the world around the spawn behind the overlay, then reveal
+  warmUpAndReveal();
 }
 
 function startGame() {
@@ -2692,7 +2720,11 @@ async function ensureAuth() {
   if (!AuthMod) AuthMod = (await import('./auth.js')).Auth;
   return AuthMod;
 }
-function openGate() { $id('auth-gate').classList.remove('gone'); }
+function openGate() {
+  $id('auth-gate').classList.remove('gone');
+  const g = $id('gate-guest');
+  if (g) { g.disabled = false; g.classList.remove('loading'); }
+}
 function passGate() { $id('auth-gate').classList.add('gone'); }
 
 // reflect the signed-in identity in the menu (top-right badge) so you can
@@ -2719,7 +2751,10 @@ if (DEVMODE) {
       (await ensureAuth()).watch((u) => {
         authUser = (u && u.uid) ? u : null;
         renderUserBadge(authUser);
-        if (authUser) passGate(); else openGate();
+        // a guest has deliberately dismissed the gate — a late-firing auth
+        // callback (Firebase fires onAuthStateChanged async, sometimes AFTER
+        // the guest click) must not slam it back open
+        if (authUser) passGate(); else if (!game.guest) openGate();
       });
     } catch (e) {
       $id('gate-msg').textContent = 'Could not reach Google sign-in: ' + (e?.message || e);
@@ -2731,7 +2766,11 @@ if (DEVMODE) {
     game.guest = true;
     authUser = null;
     renderUserBadge(null);
-    passGate();
+    const g = $id('gate-guest');
+    g.disabled = true;
+    g.classList.add('loading');
+    // let the button paint its loading state, then drop the gate
+    requestAnimationFrame(() => requestAnimationFrame(passGate));
   });
   $id('gate-signin').addEventListener('click', async () => {
     const msg = $id('gate-msg');

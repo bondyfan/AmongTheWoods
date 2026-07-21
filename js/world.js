@@ -1529,6 +1529,39 @@ export class World {
 
   _chunkKey(cx, cz) { return cx + ',' + cz; }
 
+  // how many full-detail chunks in the near view radius are still missing —
+  // 0 means the world around `pos` is fully built (used by the enter-world
+  // loading screen so gameplay only reveals once it won't hitch)
+  nearMissing(pos) {
+    const pcx = Math.floor(pos.x / CHUNK), pcz = Math.floor(pos.z / CHUNK);
+    const vr = this.viewRadius ?? VIEW_RADIUS;
+    let missing = 0;
+    for (let dz = -vr; dz <= vr; dz++)
+      for (let dx = -vr; dx <= vr; dx++)
+        if (!this.chunks.has(this._chunkKey(pcx + dx, pcz + dz))) missing++;
+    return missing;
+  }
+
+  // generate near chunks nearest-first, up to `maxMs`, then return how many
+  // still remain — the loading screen calls this each frame until it hits 0
+  warmUp(pos, maxMs = 14) {
+    const pcx = Math.floor(pos.x / CHUNK), pcz = Math.floor(pos.z / CHUNK);
+    const vr = this.viewRadius ?? VIEW_RADIUS;
+    const t0 = performance.now();
+    let stop = false;
+    for (let ring = 0; ring <= vr; ring++) {
+      for (let dx = -ring; dx <= ring; dx++) {
+        for (let dz = -ring; dz <= ring; dz++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== ring) continue;
+          if (this.chunks.has(this._chunkKey(pcx + dx, pcz + dz))) continue;
+          if (stop || performance.now() - t0 > maxMs) { stop = true; continue; }
+          this._genChunk(pcx + dx, pcz + dz);
+        }
+      }
+    }
+    return this.nearMissing(pos);
+  }
+
   // free the GPU buffers of an evicted chunk (shared cache materials and the
   // shared ground-detail texture are left alone; geometries are per-chunk)
   _disposeGroup(root) {
