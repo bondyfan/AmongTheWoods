@@ -1500,6 +1500,7 @@ export class World {
       const nz = Math.max(cz * 40, Math.min(z, cz * 40 + 40));
       if (Math.hypot(nx - x, nz - z) > r) continue;
       this._fillGroundGeo(chunk.tile.geometry);
+      this._updateChunkDots(chunk);
     }
   }
 
@@ -1515,7 +1516,20 @@ export class World {
       const nz = Math.max(cz * 40, Math.min(z, cz * 40 + 40));
       if (Math.hypot(nx - x, nz - z) > r) continue;
       this._fillGroundGeoFast(chunk.tile.geometry);
+      this._updateChunkDots(chunk);
     }
+  }
+
+  // the far god-view tree DOTS ride heightAt+1.5; re-drop them onto the new
+  // terrain when it's sculpted (else they float where the trees USED to sit)
+  _updateChunkDots(chunk) {
+    const pts = chunk.dots;
+    if (!pts) return;
+    const pos = pts.geometry.attributes.position, a = pos.array;
+    for (let i = 0; i < pos.count; i++) {
+      a[i * 3 + 1] = this.heightAt(a[i * 3], a[i * 3 + 2]) + 1.5;
+    }
+    pos.needsUpdate = true;
   }
 
   // after a sculpt stroke, drop every tree/rock in the area back onto the new
@@ -1959,7 +1973,7 @@ export class World {
       const dots = this._treeDots(cx, cz, biome);
       if (dots) group.add(dots);
       this.scene.add(group);
-      this.chunks.set(key, { group, tile, trees: [], rocks: [], webs: [], bushes: [], props: [], hives: [] });
+      this.chunks.set(key, { group, tile, dots, trees: [], rocks: [], webs: [], bushes: [], props: [], hives: [] });
       return;
     }
 

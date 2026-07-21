@@ -541,7 +541,10 @@ export class WorldEditor {
   }
 
   _installPointerHooks() {
-    const overUI = (ev) => this._ui && this._ui.contains(ev.target);
+    // clicks on the editor chrome OR any editor-spawned overlay (the Versions
+    // modal) must NOT be eaten by the capture-phase canvas hooks below
+    const overUI = (ev) => (this._ui && this._ui.contains(ev.target))
+      || (this._verEl && this._verEl.contains(ev.target));
     window.addEventListener('mousedown', (ev) => {
       if (!this.active || overUI(ev)) return;
       ev.stopImmediatePropagation(); ev.preventDefault();
