@@ -11,7 +11,7 @@ import * as THREE from 'three';
 import { WORLD, BIOMES, biomeAt, biomeIndexAt, radiusOf, zoneInfoAt,
          ZONE_LINES, wobX, wobZ, hubEdgeR, coastRAt, coastDistAt,
          HARBOR_SPECS } from './config.js';
-import { makeTree, makeRock, makeGrassTuft, makeFlower, makeMushroom, makeBush,
+import { makeTree, makeRock, makeGrassTuft, makeGrassBlades, makeFlower, makeMushroom, makeBush,
          makeLog, makeBoulder, makeBridge, makeCampfire, makeStalagmite,
          makeBerryBush, makeShrine, makeMonolith, makeCrypt, makeBlacksmith, makeCobweb,
          makeFarm, makeTrader, makeBeehive, makeBeehiveBig, makeCocoon, makeGlade, makeGraveyardRuin,
@@ -1483,6 +1483,49 @@ export class World {
     }
   }
 
+  // live raise/lower/smooth: refresh ONLY vertex heights + normals, skipping
+  // the costly per-vertex biome-color recompute — this is what keeps sculpting
+  // at high FPS. Colors (and cliff-rock tint) are restored by the full rebuild
+  // when the stroke ends.
+  refreshGroundHeights(x, z, r = 60) {
+    for (const [key, chunk] of this.chunks) {
+      if (!chunk.tile) continue;
+      const [cx, cz] = key.split(',').map(Number);
+      const nx = Math.max(cx * 40, Math.min(x, cx * 40 + 40));
+      const nz = Math.max(cz * 40, Math.min(z, cz * 40 + 40));
+      if (Math.hypot(nx - x, nz - z) > r) continue;
+      this._fillGroundGeoFast(chunk.tile.geometry);
+    }
+  }
+
+  // heights + normals only (no color pass) — see refreshGroundHeights
+  _fillGroundGeoFast(geo) {
+    const pos = geo.attributes.position;
+    const n = Math.round(Math.sqrt(pos.count));
+    const x0 = pos.getX(0), z0 = pos.getZ(0);
+    const step = pos.getX(1) - x0;
+    const G = n + 2;
+    const H = this._hGrid?.length === G * G ? this._hGrid : (this._hGrid = new Float32Array(G * G));
+    for (let j = -1; j <= n; j++) {
+      const wz = z0 + j * step;
+      for (let i = -1; i <= n; i++) H[(j + 1) * G + (i + 1)] = this.heightAt(x0 + i * step, wz);
+    }
+    const inv2 = 0.4 / (2 * step);
+    const nrm = geo.attributes.normal ?? (geo.computeVertexNormals(), geo.attributes.normal);
+    for (let k = 0; k < pos.count; k++) {
+      const x = pos.getX(k), z = pos.getZ(k);
+      const i = Math.round((x - x0) / step) + 1, j = Math.round((z - z0) / step) + 1;
+      pos.setY(k, H[j * G + i]);
+      const nx = (H[j * G + i - 1] - H[j * G + i + 1]) * inv2;
+      const nz = (H[(j - 1) * G + i] - H[(j + 1) * G + i]) * inv2;
+      const l = Math.hypot(nx, 1, nz);
+      nrm.setXYZ(k, nx / l, 1 / l, nz / l);
+    }
+    pos.needsUpdate = true;
+    nrm.needsUpdate = true;
+    geo.computeBoundingSphere();
+  }
+
   // World-Editor entity edits changed → regenerate landmarks, smiths and
   // trails (all deterministic, so this just re-applies the patch) and let
   // the chunks rebuild around the player. Landmark obstacles are tagged and
@@ -1676,6 +1719,45 @@ export class World {
       }
     }
     return false;
+  }
+
+  // is the ground here green GRASSY turf? (Ultra grass-fill only grows on it)
+  // — cheap: the biome's grass tone must be green-dominant, so sand/snow are
+  // skipped; water and swamp bog are handled by _sitFree / the caller.
+  _grassyGreen(x, z) {
+    const gc = biomeAt(x, z).grass;
+    const r = (gc >> 16) & 255, g = (gc >> 8) & 255, b = gc & 255;
+    return g > r && g > b;
+  }
+
+  // Ultra grass: a jittered grid tuft on every green grassy cell — dense turf
+  // everywhere, one baked mesh, its own rng so other decos don't shift.
+  _grassFill(deco, cxw, czw, fm) {
+    const step = Math.max(1.8, Math.min(4.0, 4.0 / Math.sqrt(fm)));
+    const cx = (cxw / CHUNK) | 0, cz = (czw / CHUNK) | 0;
+    const rng = mulberry32((this.seed ^ 0x6a55f1) ^ (cx * 73856093) ^ (cz * 19349663));
+    const SW = { amp: 1, h: 0.6 };
+    for (let gz = 0; gz < CHUNK; gz += step) {
+      for (let gx = 0; gx < CHUNK; gx += step) {
+        const x = cxw + gx + (rng() - 0.5) * step;
+        const z = czw + gz + (rng() - 0.5) * step;
+        const v = (rng() * 8) | 0, rot = rng() * Math.PI * 2, sc = 0.8 + rng() * 0.7;
+        // cheapest cullers first (this runs for every cell of every chunk):
+        // biome greenness, then the cave/water/path gate, then the slope test
+        const b = biomeAt(x, z);
+        const gc = b.grass;
+        if (!(((gc >> 8) & 255) > ((gc >> 16) & 255) && ((gc >> 8) & 255) > (gc & 255))) continue;
+        if (radiusOf(x, z) < 14) continue;               // starting cave
+        if (this.isWater(x, z)) continue;                // water / lakes / bog
+        if (this.pathDistance(x, z) < 3) continue;       // keep trails clear
+        if (worldPatch.buildingGroundAt?.(x, z)) continue; // town squares
+        // grass tolerates gentle slopes; only one heightAt per cell (the
+        // slope test's extra samples were the main generation cost)
+        const key = `gf:${gc}:${v}`;
+        stampTemplate(deco, bakeTemplate(key, () => makeGrassBlades(gc, tplRng(key))),
+          x, this.heightAt(x, z), z, rot, SW, sc);
+      }
+    }
   }
 
   // can vegetation stand here? (shared by chunk gen and the far-LOD tier)
@@ -1998,7 +2080,10 @@ export class World {
     const SW_FLOWER = { amp: 0.9, h: 0.35 }, SW_REED = { amp: 1, h: 1.5 };
     const SW_LEAF = { amp: 0.6, h: 0.4 };
     const bn = biome.name;
-    scatter(Math.round((22 + rng() * 12) * fm), `grass:${biome.grass}`,
+    // GRASS: at Ultra a dense grid blankets every green grassy patch; below
+    // that, the classic sparse-ish scatter (so "High = what we had before")
+    if (fm >= 2.4) this._grassFill(deco, cxw, czw, fm);
+    else scatter(Math.round((22 + rng() * 12) * fm), `grass:${biome.grass}`,
       (r) => makeGrassTuft(biome.grass, r), SW_GRASS);
     if (biome.jungleFlora) {
       // RAINFOREST floor: banana plants over ferns, broad leaves and grass
@@ -2006,7 +2091,7 @@ export class World {
       scatter(Math.round((7 + rng() * 5) * fm), 'jplant', makeJunglePlant, SW_PLANT);
       scatter(Math.round((14 + rng() * 8) * fm), 'fern', makeFern, SW_FERN);
       scatter(Math.round((10 + rng() * 6) * fm), 'gleaf', makeGroundLeaves, SW_LEAF);
-      scatter(Math.round((12 + rng() * 8) * fm), 'grass:jungle',
+      if (fm < 2.4) scatter(Math.round((12 + rng() * 8) * fm), 'grass:jungle',
         (r) => makeGrassTuft(0x3f8a30, r), SW_GRASS);
       scatter(Math.round((3 + rng() * 3) * fm), `jbush:${biome.foliage[1]}`,
         (r) => makeBush(biome.foliage[1 + Math.floor(r() * 2)], r), SW_BUSH,

@@ -103,13 +103,17 @@ let fpsFrameCap = 0;
 let _fpsSmooth = 60, _fpsMeterT = 0;
 
 // foliage-density graphics setting → scatter-count multiplier in _genChunk
-const FOLIAGE_MULT = { low: 0.35, normal: 1, high: 1.7, ultra: 2.8 };
+// high = "lush" (the classic look); ultra switches on the dense grass-fill
+const FOLIAGE_MULT = { low: 0.35, normal: 1, high: 1.7, ultra: 3.2 };
 let _windT = 0; // wind-shader clock (keeps blowing across pauses/menus)
 // disturbance trail: the player's recent path, fed to the foliage shader so
 // brushed vegetation keeps ringing (damped spring) after you pass through
-const _folTrail = []; // ring buffer of {x, z, t, s}
+const _folTrail = []; // ring buffer of {x, z, t, s, dx, dz}
 let _folTrailIdx = 0;
-const _folLastPos = { x: 0, z: 0 };
+const _folLastPos = { x: 0, z: 0 };  // last frame's pos (for velocity)
+const _folStepPos = { x: 0, z: 0 };  // last footfall drop (every ~0.35 m)
+const _folDir = { x: 0, z: -1 };     // smoothed walk direction
+let _folMoveK = 0;                    // 0 idle → 1 moving (lay-over strength)
 const _waterSunDir = new THREE.Vector3();
 
 const autoQuality = {
@@ -1959,11 +1963,15 @@ const enemyMgr = new EnemyManager(scene, world, {
   },
   onDiscover: discoverType,
   onLairBrood: (enemy) => {
+    if (game.editorView) return; // no combat theatrics while sculpting the map
     ui.toast(`💀 ${enemy.bossName} calls the brood — cut them down fast!`, 'boss');
     ui.hurtFlash();
     audio.sfx('lane_unlock', 0.5);
   },
   onBossSpawn: (enemy) => {
+    // the editor previews spawns silently — no boss toast, screen flash,
+    // camera shake or health tracker leaking over the god view
+    if (game.editorView) return;
     const skulls = '💀'.repeat(enemy.bossRank);
     ui.addTracker('boss' + enemy.id,
       () => enemy.mesh.parent ? enemy.mesh.position.clone().setY(enemy.mesh.position.y + 2.6 * enemy.sizeMult) : null,
@@ -2630,8 +2638,9 @@ const settings = Object.assign(
   });
 
   // foliage: density regenerates the world's decoration meshes; motion just
-  // flips the wind/trample shader uniforms (free, no rebuild)
-  settings.foliage ??= 'high';
+  // flips the wind/trample shader uniforms (free, no rebuild). Desktops get
+  // the lush "Ultra" grass by default; phones stay lighter.
+  settings.foliage ??= onMobile ? 'high' : 'ultra';
   settings.foliageMove ??= true;
   $id('set-foliage').value = String(settings.foliage);
   $id('set-foliagemove').checked = settings.foliageMove !== false;
@@ -2640,8 +2649,11 @@ const settings = Object.assign(
     settings.foliage = $id('set-foliage').value;
     world.foliageMult = FOLIAGE_MULT[settings.foliage] ?? 1;
     saveGfx();
-    world.regenChunks(); // scatter counts changed — rebuild decoration meshes
-    world.update(0, player.pos);
+    // rebuild decoration meshes NOW — the sim is paused while Settings is
+    // open, so pumping world.update wouldn't fill anything; regen + a bounded
+    // synchronous warm-up refills the near ring immediately
+    world.regenChunks();
+    for (let i = 0; i < 24 && world.warmUp(player.pos, 30) > 0; i++) { /* fill */ }
   });
   $id('set-foliagemove').addEventListener('change', () => {
     settings.foliageMove = $id('set-foliagemove').checked;
@@ -3878,8 +3890,11 @@ function toggleWorldEditor() {
     onDirty: (kind, info = {}) => {
       if (kind === 'entities') world.applyPatchEntities(true);
       if (kind === 'ground' && info.area) {
-        // live brushing: repaint tiles in place — zero flicker
-        world.refreshGroundNear(info.area.x, info.area.z, info.area.r);
+        // live brushing: repaint tiles in place — zero flicker. Height-only
+        // sculpt strokes (raise/lower/smooth/restore) skip the costly color
+        // pass so they stay at high FPS; paint/water strokes do the full pass.
+        if (info.heightsOnly) world.refreshGroundHeights(info.area.x, info.area.z, info.area.r);
+        else world.refreshGroundNear(info.area.x, info.area.z, info.area.r);
       } else if (info.area) {
         world.regenChunksNear(info.area.x, info.area.z, info.area.r);
         if (kind === 'chunks') { // sculpt stroke finished: mobs follow the ground
@@ -5138,35 +5153,52 @@ function step() {
   // mesh; wrapping the clock keeps sin() precise on mobile GPUs — the
   // once-per-15-min phase jump is invisible)
   _windT = (_windT + dt) % 900;
-  // lay a trail disturbance every ~0.35 m of movement — brushed foliage
-  // rings down (damped spring) behind the runner instead of snapping back
+  // track the player's smoothed walk direction — the grass lays over the way
+  // you move (fed to the shader as uPlayerVel) and every trail footfall
+  // remembers the direction it was laid, so it rises back up cleanly
   if (game.mode === 'play' && !game.paused) {
     const mvx = player.pos.x - _folLastPos.x, mvz = player.pos.z - _folLastPos.z;
     const moved = Math.hypot(mvx, mvz);
-    if (moved > 0.35) {
-      const speed = Math.min(moved / Math.max(dt, 0.001), 14);
+    if (moved > 1e-4) {
+      const k = Math.min(1, dt * 10);
+      _folDir.x += (mvx / moved - _folDir.x) * k;
+      _folDir.z += (mvz / moved - _folDir.z) * k;
+    }
+    // "am I moving?" ramps the lay-over strength up/down smoothly
+    _folMoveK += ((moved / Math.max(dt, 0.001) > 0.6 ? 1 : 0) - _folMoveK) * Math.min(1, dt * 8);
+    // drop a footfall every ~0.35 m, carrying the current walk direction
+    const md = Math.hypot(player.pos.x - _folStepPos.x, player.pos.z - _folStepPos.z);
+    if (md > 0.35) {
+      const dl = Math.hypot(_folDir.x, _folDir.z) || 1;
       _folTrail[_folTrailIdx % 8] = {
-        x: player.pos.x, z: player.pos.z, t: _windT,
-        s: Math.min(1.2, 0.55 + speed * 0.06),
+        x: player.pos.x, z: player.pos.z, t: _windT, s: 1,
+        dx: _folDir.x / dl, dz: _folDir.z / dl,
       };
       _folTrailIdx++;
-      _folLastPos.x = player.pos.x; _folLastPos.z = player.pos.z;
+      _folStepPos.x = player.pos.x; _folStepPos.z = player.pos.z;
     }
+    _folLastPos.x = player.pos.x; _folLastPos.z = player.pos.z; // velocity ref
+  } else {
+    _folMoveK += (0 - _folMoveK) * Math.min(1, dt * 8);
+    _folLastPos.x = player.pos.x; _folLastPos.z = player.pos.z;
   }
   const folShaders = BAKED_MAT.userData.shaders;
   if (folShaders.length) {
     const folOn = settings.foliageMove !== false ? 1 : 0;
     // storms whip the vegetation — wind amplitude surges with intensity
     const folWind = folOn * (1 + (blizzard.k ?? 0) * 2.2);
+    const vl = Math.hypot(_folDir.x, _folDir.z) || 1;
+    const vx = (_folDir.x / vl) * _folMoveK, vz = (_folDir.z / vl) * _folMoveK;
     for (const sh of folShaders) {
       sh.uniforms.uTime.value = _windT;
       sh.uniforms.uWind.value = folWind;
       sh.uniforms.uPush.value = folOn;
       sh.uniforms.uPlayer.value.set(player.pos.x, player.mesh.position.y, player.pos.z);
-      const dst = sh.uniforms.uDist.value;
+      sh.uniforms.uPlayerVel.value.set(vx, vz);
+      const dst = sh.uniforms.uDist.value, ddir = sh.uniforms.uDistDir.value;
       for (let i = 0; i < 8; i++) {
         const p = _folTrail[i];
-        if (p) dst[i].set(p.x, p.z, p.t, p.s);
+        if (p) { dst[i].set(p.x, p.z, p.t, p.s); ddir[i].set(p.dx, p.dz); }
       }
     }
   }
@@ -5451,7 +5483,7 @@ function step() {
       world.regenChunks();
     }
     world.viewRadius = far
-      ? Math.min(18, Math.round(worldEditor.view.dist / 70) + 6)
+      ? Math.min(24, Math.round(worldEditor.view.dist / 55) + 8)
       : Math.min(7, Math.round(worldEditor.view.dist / 60) + 3);
     world.update(dt, worldEditor.viewTarget()); // chunks follow the editor camera
     edPopT -= dt;

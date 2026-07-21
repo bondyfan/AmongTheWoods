@@ -13,14 +13,18 @@ const matCache = new Map();
 export const BAKED_MAT = new THREE.MeshLambertMaterial({ vertexColors: true });
 
 // ---- foliage animation ----
-// Every baked vertex carries a `sway` weight (0 = rigid). The shared baked
-// material gets a vertex-shader patch with three world-space effects:
+// Every baked vertex carries a `sway` weight (0 = rigid base, 1 = free tip).
+// The shared baked material gets a vertex-shader patch with three world-space
+// effects, all tip-weighted so plants bend from the ground up:
 //   1. WIND — a cheap two-sine field that ripples grass, fronds and canopies.
-//   2. CONTACT PUSH — foliage parts radially around the player's position.
-//   3. DISTURBANCE TRAIL — the player lays down up to 8 recent "footstep"
-//      disturbances; each one rings with a damped cosine (spring physics),
-//      so vegetation you brush through keeps shaking and settles back down
-//      after you have passed instead of snapping straight.
+//   2. CONTACT — the player wading through LAYS the grass over in the
+//      direction they walk (uPlayerVel) and presses the tips toward the
+//      ground; standing still it just parts outward.
+//   3. TRAIL — up to 8 recent footfalls, each carrying the walk direction at
+//      that moment (uDistDir). The grass stays laid over that way and rises
+//      back up SMOOTHLY (monotonic decay — no buzzy ringing, and no
+//      front-to-back flip as you cross a tuft, which read as "grass jerking
+//      backward" before).
 // All driven by shared uniforms updated once per frame from main.js —
 // zero per-object cost, every chunk still renders as one draw call.
 export const FOL_TRAIL = 8; // trail slots (must match the GLSL array size)
@@ -28,51 +32,65 @@ BAKED_MAT.userData.shaders = [];
 BAKED_MAT.onBeforeCompile = (shader) => {
   shader.uniforms.uTime = { value: 0 };
   shader.uniforms.uPlayer = { value: new THREE.Vector3(0, -9999, 0) };
+  shader.uniforms.uPlayerVel = { value: new THREE.Vector2(0, 0) };
   shader.uniforms.uWind = { value: 1 };
   shader.uniforms.uPush = { value: 1 };
   shader.uniforms.uDist = {
     value: Array.from({ length: FOL_TRAIL }, () => new THREE.Vector4(0, 0, -99, 0)),
+  };
+  shader.uniforms.uDistDir = {
+    value: Array.from({ length: FOL_TRAIL }, () => new THREE.Vector2(0, 0)),
   };
   shader.vertexShader = shader.vertexShader
     .replace('#include <common>', `#include <common>
 attribute float sway;
 uniform float uTime;
 uniform vec3 uPlayer;
+uniform vec2 uPlayerVel;
 uniform float uWind;
 uniform float uPush;
-uniform vec4 uDist[${FOL_TRAIL}];`)
+uniform vec4 uDist[${FOL_TRAIL}];
+uniform vec2 uDistDir[${FOL_TRAIL}];`)
     .replace('#include <begin_vertex>', `#include <begin_vertex>
 if (sway > 0.001) {
   vec3 wpFol = (modelMatrix * vec4(transformed, 1.0)).xyz;
   float phFol = wpFol.x * 0.37 + wpFol.z * 0.29;
   float gust = sin(uTime * 1.6 + phFol) + 0.55 * sin(uTime * 3.3 + phFol * 1.9);
   vec2 offFol = vec2(0.83, 0.55) * (gust * 0.5 + 0.45) * 0.2 * sway * uWind;
-  // contact: part around the player standing/walking in the foliage
+  vec2 layFol = vec2(0.0);  // horizontal lay-over from contact + trail
+  float pressFol = 0.0;     // how hard the tip is bent toward the ground
+
+  // contact: lay the grass over the way the player walks, press it down
   vec2 dpFol = wpFol.xz - uPlayer.xz;
   float dFol = length(dpFol);
-  float pkFol = (1.0 - smoothstep(0.15, 1.35, dFol))
-    * (1.0 - smoothstep(0.9, 2.0, abs(wpFol.y - uPlayer.y))) * uPush;
-  if (pkFol > 0.001 && dFol > 0.02) {
-    offFol += (dpFol / dFol) * pkFol * 0.5 * sway;
-    transformed.y -= pkFol * 0.26 * sway;
+  float pkFol = (1.0 - smoothstep(0.1, 1.25, dFol))
+    * (1.0 - smoothstep(0.8, 1.9, abs(wpFol.y - uPlayer.y))) * uPush;
+  if (pkFol > 0.001) {
+    vec2 radial = dFol > 0.02 ? dpFol / dFol : vec2(0.0);
+    vec2 dir = uPlayerVel + radial * 0.5;   // mostly along the walk direction
+    float dl = length(dir);
+    layFol += (dl > 0.001 ? dir / dl : radial) * pkFol;
+    pressFol += pkFol;
   }
-  // trail: damped spring ring-down where the player recently passed
+
+  // trail: footfalls stay laid over in their own walk direction, rising back
+  // up smoothly (exp decay — no oscillation, no reversal)
   for (int i = 0; i < ${FOL_TRAIL}; i++) {
     vec4 dFt = uDist[i];
     float age = uTime - dFt.z;
     if (age < 0.0) age += 900.0;  // uTime wraps every 900 s
-    if (age < 2.2 && dFt.w > 0.001) {
-      vec2 ddFt = wpFol.xz - dFt.xy;
-      float dlFt = length(ddFt);
-      float fallFt = (1.0 - smoothstep(0.1, 1.25, dlFt)) * dFt.w * sway * uPush;
-      if (fallFt > 0.001) {
-        float oscFt = cos(age * 9.5) * exp(-age * 2.8);
-        offFol += (ddFt / max(dlFt, 0.05)) * oscFt * 0.55 * fallFt;
-        transformed.y -= max(oscFt, 0.0) * 0.2 * fallFt;
-      }
+    if (age < 1.6 && dFt.w > 0.001) {
+      float dl = length(wpFol.xz - dFt.xy);
+      float w = (1.0 - smoothstep(0.06, 1.0, dl)) * dFt.w * uPush * exp(-age * 2.6);
+      if (w > 0.001) { layFol += uDistDir[i] * w; pressFol += w; }
     }
   }
+
+  float p = min(pressFol, 1.3);
+  offFol *= (1.0 - min(p, 1.0) * 0.7);  // laid-over grass barely catches wind
+  offFol += layFol * 0.6 * sway;        // bend the tip along the lay direction
   transformed.xz += offFol;
+  transformed.y -= p * 0.42 * sway;     // …and down toward the ground
 }`);
   BAKED_MAT.userData.shaders.push(shader);
 };
@@ -3283,6 +3301,23 @@ export function makeFern(rng) {
   young.rotation.y = rng() * Math.PI * 2;
   young.position.y = 0.03;
   g.add(young);
+  return g;
+}
+
+// a LIGHT grass clump for the dense Ultra grass-fill: 3-4 minimal 3-sided
+// blades (~10 verts each). Placed by the thousand, so every vertex counts —
+// the low poly keeps chunk generation and the vertex count in check.
+export function makeGrassBlades(color, rng) {
+  const g = new THREE.Group();
+  const blades = 3 + Math.floor(rng() * 2);
+  for (let i = 0; i < blades; i++) {
+    const h = 0.4 + rng() * 0.32;
+    const b = cone(0.045, h, color, 3);
+    b.castShadow = false;
+    b.position.set((rng() - 0.5) * 0.36, h / 2, (rng() - 0.5) * 0.36);
+    b.rotation.set((rng() - 0.5) * 0.45, rng() * Math.PI, (rng() - 0.5) * 0.45);
+    g.add(b);
+  }
   return g;
 }
 
