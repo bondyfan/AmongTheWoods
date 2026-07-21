@@ -164,7 +164,10 @@ export class Panels {
     if (w) {
       if (w.dmg) stats.push(['Damage', Math.round(w.dmg)]);
       if (w.cd) stats.push(['Attack speed', (1 / w.cd).toFixed(2) + '/s']);
+      if (w.dmg && w.cd) stats.push(['DPS', (w.dmg / w.cd).toFixed(1)]);
       if (w.range) stats.push(['Range', w.range + ' m']);
+      if (w.chop > 0) stats.push(['🪓 Cutting power', w.chop]);
+      if (w.mine > 0) stats.push(['⛏️ Mining power', w.mine]);
       stats.push(['Type', w.kind === 'bow' ? 'Ranged weapon' : 'Melee weapon']);
     }
     const st = item.stats || {};

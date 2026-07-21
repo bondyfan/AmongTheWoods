@@ -2111,6 +2111,81 @@ export function makePanther() {
   return g;
 }
 
+export function makeCheetah() {
+  const g = quadruped({
+    bodyW: 0.42, bodyH: 0.4, bodyL: 1.25, color: 0xd9a84e,
+    headSize: 0.3, snout: true, snoutColor: 0xe8c07a, legH: 0.5, tail: true, eyeColor: 0x2d1c0a,
+  });
+  // spots along the flanks + the signature tear lines under the eyes
+  for (let i = 0; i < 6; i++) {
+    const s = box(0.07, 0.07, 0.07, 0x5c3d14);
+    s.position.set((i % 2 ? 0.22 : -0.22), 0.62 + (i % 3) * 0.08, -0.4 + i * 0.16);
+    g.add(s);
+  }
+  const head = g.userData.head;
+  for (const x of [-0.09, 0.09]) {
+    const tear = box(0.03, 0.1, 0.03, 0x2d1c0a);
+    tear.position.set(x, -0.07, -0.16);
+    head.add(tear);
+  }
+  return g;
+}
+
+export function makeCrocodile() {
+  const g = new THREE.Group();
+  const scale1 = 0x4a6b2e, scale2 = 0x3a5424, belly = 0xa8a86e;
+  // long low body hugging the ground
+  const body = box(0.72, 0.4, 1.7, scale1);
+  body.position.y = 0.32;
+  g.add(body);
+  const bellyPlate = box(0.6, 0.1, 1.5, belly);
+  bellyPlate.position.y = 0.14;
+  g.add(bellyPlate);
+  // head + long toothy snout
+  const head = box(0.5, 0.32, 0.5, scale1);
+  head.position.set(0, 0.36, -1.05);
+  g.add(head);
+  const snout = box(0.36, 0.22, 0.62, scale2);
+  snout.position.set(0, -0.04, -0.5);
+  head.add(snout);
+  for (const x of [-0.13, 0.13]) { // teeth pegs along the jaw
+    const t = box(0.05, 0.1, 0.05, 0xf0ead0);
+    t.position.set(x, -0.14, -0.62);
+    head.add(t);
+  }
+  for (const x of [-0.14, 0.14]) { // raised eye bumps
+    const e = box(0.12, 0.12, 0.12, scale2);
+    e.position.set(x, 0.2, 0.1);
+    head.add(e);
+    const eye = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.03),
+      new THREE.MeshBasicMaterial({ color: 0xffd23a }));
+    eye.position.set(x, 0.24, 0.02);
+    head.add(eye);
+  }
+  // ridged back scutes
+  for (let i = 0; i < 4; i++) {
+    const r = box(0.14, 0.12, 0.2, scale2);
+    r.position.set(0, 0.56, -0.55 + i * 0.38);
+    g.add(r);
+  }
+  // thick tapering tail
+  const tail1 = box(0.4, 0.28, 0.7, scale1);
+  tail1.position.set(0, 0.3, 1.15);
+  g.add(tail1);
+  const tail2 = box(0.24, 0.18, 0.6, scale2);
+  tail2.position.set(0, 0.26, 1.7);
+  g.add(tail2);
+  // four stubby splayed legs
+  const legs = [];
+  for (const [x, z] of [[-0.42, -0.55], [0.42, -0.55], [-0.42, 0.55], [0.42, 0.55]]) {
+    const leg = box(0.16, 0.24, 0.16, scale2);
+    leg.position.set(x, 0.12, z);
+    g.add(leg); legs.push(leg);
+  }
+  g.userData = { legs, head };
+  return g;
+}
+
 // a PLACED griffin nest: twig ring on the ground with glowing eggs — the
 // flight-master roost the player can travel between
 export function makeGriffinRoost(rng = Math.random) {
@@ -2272,6 +2347,8 @@ export function makeEnemyMesh(type) {
     case 'bee': return makeBee();
     case 'ghost': return makeGhost();
     case 'panther': return makePanther();
+    case 'cheetah': return makeCheetah();
+    case 'crocodile': return makeCrocodile();
     case 'griffin': return makeGriffin(1);
     case 'griffinChick': return makeGriffin(0.45);
   }

@@ -132,6 +132,7 @@ export class Player {
     this.attackT = 0;
     this.attackDur = 0.3;
     this.swingWindup = null; // { t, dur } — the raise-before-the-strike phase
+    this.swingSide = 1;      // alternates ±1: raise left, chop; raise right, chop…
     this.charging = false;
     this.chargeT = 0;
     this.castWindup = null;   // { skill, rank, id, t, dur } — ability charging up
@@ -1382,9 +1383,9 @@ export class Player {
     // effective weapon = base weapon + training (range/power/swift tracks)
     const base = equipped('weapon')?.weapon || itemById('fists').weapon;
     const s = this.stats;
-    // A gentle attack-speed drip over 50 levels — weapons keep their identity,
-    // gear tiers (not levels) carry the damage growth.
-    this.levelAttackSpeedBonus = 0.006 * lvl;
+    // An attack-speed drip over 50 levels (+0.012 att/s per level ≈ +0.6 at
+    // the cap) — noticeable, but gear tiers still carry the damage growth.
+    this.levelAttackSpeedBonus = 0.012 * lvl;
     this.levelDamage = lvl; // flat +1 weapon damage per level (lvl = this.level - 1)
     const lvlCd = (cd) => 1 / (1 / cd + this.levelAttackSpeedBonus);
     this.weapon = {
@@ -2227,7 +2228,10 @@ export class Player {
     }
     // a slim pointed blade lying flat in front of the player, tip pointing
     // forward. Built in the shape's XY plane then laid onto the ground (XZ),
-    // so local +Z is the facing direction.
+    // so local +Z is the facing direction. Each swing starts angled to one
+    // side and cuts DOWN-AND-ACROSS to the other (sides alternate), so the
+    // strikes read as varied diagonal chops rather than one repeated stab.
+    const side = this.attackSide || 1;
     const reach = r * 1.05, halfW = 0.24;
     const shape = new THREE.Shape();
     shape.moveTo(0, 0.35);
@@ -2237,9 +2241,9 @@ export class Player {
     geo.rotateX(Math.PI / 2); // (x,y)→(x,0,y): blade lies flat, points along +z
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(this.pos.x, this.mesh.position.y + 0.35, this.pos.z);
-    mesh.rotation.y = baseRy;
+    mesh.rotation.y = baseRy + 0.42 * side; // start on the raised side…
     this.scene.add(mesh);
-    this.slashes.push({ mesh, baseRy, t: 0, life: 0.16, forward: true });
+    this.slashes.push({ mesh, baseRy, t: 0, life: 0.16, forward: true, side });
   }
 
   // ---------- level-up burst ----------
@@ -2328,7 +2332,9 @@ export class Player {
       s.t += dt;
       const k = Math.min(1, s.t / s.life);
       if (s.forward) {
-        s.mesh.scale.set(1, 1, 0.5 + k * 0.55);             // blade thrusts forward to full reach
+        // …and cut across to the other side while thrusting out to full reach
+        s.mesh.rotation.y = s.baseRy + (0.42 - k * 0.72) * s.side;
+        s.mesh.scale.set(1, 1, 0.5 + k * 0.55);             // blade thrusts forward
         s.mesh.material.opacity = 0.78 * (1 - k);
       } else {
         s.mesh.rotation.y = s.baseRy - 0.5 + k * 1.1;       // sweep across the arc
@@ -2369,6 +2375,8 @@ export class Player {
     this.attackCd = w.cd * this.cdMult * (charged ? 1.18 : 1) * (mounted ? 1.25 : 1);
     this.attackDur = Math.min(0.42, w.cd * 0.8);
     this.attackT = this.attackDur;
+    this.attackSide = this.swingSide; // this strike cuts from the raised side
+    this.swingSide = -this.swingSide; // …and the next one winds up opposite
     this._spawnSlash();
     audio.sfx('attack_melee', 0.4);
 
@@ -2544,15 +2552,16 @@ export class Player {
         rightArm.rotation.z = -0.2 - k * 0.3;
       }
     } else if (this.swingWindup) {
-      // the raise: weapon climbs behind the shoulder (bow draws) while the
-      // little windup bar fills — the strike below then just whips through
+      // the raise: the weapon climbs up and OUT TO ONE SIDE (bow draws) while
+      // the little windup bar fills — sides alternate swing to swing, so the
+      // chops that follow cut left-over-right, then right-over-left
       const k = 1 - Math.max(0, this.swingWindup.t) / this.swingWindup.dur;
       if (bowEquipped) {
         leftArm.rotation.x = -1.5;
         rightArm.rotation.x = -0.4 - k * 0.85; // drawing the string back
       } else {
-        rightArm.rotation.x = 0.9 * k;         // rising behind the shoulder
-        rightArm.rotation.z = -0.22 * k;
+        rightArm.rotation.x = 0.9 * k;                    // rising behind the shoulder
+        rightArm.rotation.z = -0.5 * k * this.swingSide;  // …and out to this swing's side
       }
     } else if (this.attackT > 0) {
       this.attackT -= dt;
@@ -2561,13 +2570,14 @@ export class Player {
         leftArm.rotation.x = -1.5;
         rightArm.rotation.x = -1.2 * Math.sin(k * Math.PI);
       } else {
-        // the windup already happened (swingWindup) — snap from the raised
-        // pose straight into the downward whip: a vertical forward chop
+        // the windup already raised the arm to one side — whip DOWN and across
+        // to the other side: a diagonal top-to-bottom chop
+        const side = this.attackSide || 1;
         const windup = 0.9 * Math.min(1, k / 0.12);
         const strike = k <= 0.12 ? 0 : (k - 0.12) / 0.88;
         const whip = strike * strike * (3 - 2 * strike); // smoothstep
         rightArm.rotation.x = windup * (1 - whip) - 2.6 * whip;
-        rightArm.rotation.z = -0.22 * (1 - whip);        // straight down, no side sweep
+        rightArm.rotation.z = (-0.5 * (1 - whip) + 0.3 * whip) * side; // sweep across the body
         rightSocket.rotation.x = -1.1 * whip * (1 - strike * 0.4); // wrist flick
       }
     } else {

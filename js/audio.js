@@ -216,7 +216,8 @@ class AudioManager {
     if (/vulture|harpy/i.test(type)) return 'bird';
     if (/ghost/i.test(type)) return 'ghost';
     if (/griffin/i.test(type)) return 'griffin';         // incl. griffinChick
-    if (/panther/i.test(type)) return 'panther';
+    if (/panther|cheetah/i.test(type)) return 'panther'; // both are big cats
+    if (/crocodile/i.test(type)) return 'snapper';       // wet snapping jaws
     if (/zombie/i.test(type)) return 'zombie';
     if (/wendigo/i.test(type)) return 'wendigo';
     if (/yeti/i.test(type)) return 'yeti';

@@ -153,22 +153,22 @@ export const BIOMES = [
     foliage: [0x8a9a5a, 0x7a8a4a, 0x9aaa6a], trunk: 0x8a6b42,
     trees: { pine: 0, leafy: 0.1, birch: 0, dead: 0.9 }, snowy: false,
     grass: 0xc9b878, flowers: false, mushrooms: false,
-    enemies: ['scorpion', 'cobra', 'vulture', 'snake'], humanoids: ['bandit', 'banditBrute'], packs: { skulls: [0.85, 0.15, 0] }, treeDensity: 0.3,
+    enemies: ['scorpion', 'cobra', 'vulture', 'snake', 'cactusman'], humanoids: ['bandit', 'banditBrute'], packs: { skulls: [0.85, 0.15, 0] }, treeDensity: 0.3,
     critters: ['rabbit', 'rabbit'], night: { remove: ['rabbit', 'vulture'], add: 'scorpion' } },
   { name: 'Jungle',         ground: 0x2f8a28, ground2: 0x3a9c32, dirt: 0x7a6030,
     fog: 0x8ac878, sky: 0x8cc8e0,
     foliage: [0x1f6b2a, 0x2d8a34, 0x39a03e], trunk: 0x5a4426,
     trees: { pine: 0.1, leafy: 0.7, birch: 0.2, dead: 0 }, snowy: false,
     grass: 0x4f8f3a, flowers: true, mushrooms: true, jungleFlora: true,
-    enemies: ['stormsnake', 'boar', 'bear', 'harpy', 'bogCrawler', 'snapper', 'panther'], humanoids: ['tribesman'], packs: { skulls: [0.7, 0.3, 0] }, treeDensity: 1.6, denseForests: true,
-    critters: ['rabbit', 'sheep', 'horse'], night: { remove: ['rabbit', 'sheep'], add: 'panther' } },
+    enemies: ['stormsnake', 'cheetah', 'crocodile', 'harpy', 'bogCrawler', 'snapper', 'panther'], humanoids: ['tribesman'], packs: { skulls: [0.7, 0.3, 0] }, treeDensity: 1.6, denseForests: true,
+    critters: ['rabbit', 'horse'], night: { remove: ['rabbit'], add: 'panther' } },
   { name: 'Murky Swamp',    ground: 0x565c30, ground2: 0x4a5230, dirt: 0x3a3c28,
     fog: 0x3c4a44, sky: 0x3a4650, darkness: 0.4, light: 0.62,
     foliage: [0x3a5a30, 0x2e4a2a, 0x4a6438], trunk: 0x453a28,
     trees: { pine: 0.2, leafy: 0.5, birch: 0, dead: 0.3 }, snowy: false,
     grass: 0x60704a, flowers: false, mushrooms: true,
-    enemies: ['snake', 'venomspider', 'stormsnake', 'boar', 'bogCrawler'], humanoids: ['tribesman', 'shaman'], packs: { skulls: [0.5, 0.4, 0.1] }, treeDensity: 0.9, denseForests: true,
-    critters: ['horse'], night: { remove: ['horse', 'boar'], add: 'venomspider' } },
+    enemies: ['snake', 'venomspider', 'stormsnake', 'boar', 'bogCrawler', 'crocodile'], humanoids: ['tribesman', 'shaman'], packs: { skulls: [0.5, 0.4, 0.1] }, treeDensity: 0.9, denseForests: true,
+    critters: [], night: { remove: ['boar'], add: 'venomspider' } },
   { name: 'Dark Forest',    ground: 0x2c4a24, ground2: 0x24401f, dirt: 0x4a3a24,
     fog: 0x2e3c2c, sky: 0x2c3a44, darkness: 0.62, light: 0.5,
     foliage: [0x1e4a22, 0x27552a, 0x1a3f2e], trunk: 0x4c3520,
@@ -188,7 +188,7 @@ export const BIOMES = [
     foliage: [0x5c6e33, 0x6d7d3a, 0x4e5e2c], trunk: 0x5c4a33,
     trees: { pine: 0.5, leafy: 0.1, birch: 0.1, dead: 0.3 }, snowy: false,
     grass: 0x8f9060, flowers: false, mushrooms: false,
-    enemies: ['wolf', 'boar', 'elk', 'venomspider', 'stormsnake', 'harpy', 'cactusman'], humanoids: ['poacher'], packs: { skulls: [0.2, 0.5, 0.3] }, treeDensity: 0.7,
+    enemies: ['wolf', 'boar', 'elk', 'venomspider', 'stormsnake', 'harpy', 'bear'], humanoids: ['poacher'], packs: { skulls: [0.2, 0.5, 0.3] }, treeDensity: 0.7,
     critters: ['rabbit', 'rabbit', 'sheep', 'horse'], night: { remove: ['rabbit', 'sheep'], add: 'wolf' } },
   { name: 'Frozen Peak',    ground: 0xf2f6fa, ground2: 0xe4ecf3, dirt: 0xc9d6e1,
     fog: 0xf4f8fc, sky: 0xdfe9f2,
@@ -232,7 +232,8 @@ export const fmtResource = (value) => {
 };
 
 // hide drops only from animals that realistically have one
-export const HIDE_BEARING = new Set(['wolf', 'boar', 'elk', 'bear', 'icewolf', 'wendigo', 'yeti']);
+export const HIDE_BEARING = new Set(['wolf', 'boar', 'elk', 'bear', 'icewolf', 'wendigo', 'yeti',
+  'cheetah', 'crocodile']);
 // hides scale with the creature's LEVEL (mob HP is level-driven now)
 export const hideForLevel = (level) => Math.max(1, Math.round(level / 8));
 export const VERDANT_HIDE_DROP = 0.1;
@@ -352,6 +353,12 @@ export const ENEMY_TYPES = {
   // -- Jungle: the canopy hides ambush predators --
   panther: { name: 'Shadow Panther', icon: '🐆',
              hpMult: 1.25, dmgMult: 1.5, speed: 11.5, range: 1.6, attackCd: 0.9, xpMult: 1.3, hitR: 0.8, aggro: 24 },
+  cheetah: { name: 'Cheetah', icon: '🐆',
+             hpMult: 0.85, dmgMult: 1.25, speed: 12.5, range: 1.5, attackCd: 0.8, xpMult: 1.1, hitR: 0.7, aggro: 20,
+             behavior: 'pack' },
+  crocodile: { name: 'River Crocodile', icon: '🐊',
+             hpMult: 1.7, dmgMult: 1.4, speed: 5.5, range: 1.8, attackCd: 1.4, xpMult: 1.2, hitR: 1.0, aggro: 13,
+             behavior: 'heavy' },
   // -- Griffins: flight-master bosses of the open rings. They never truly
   // die — beaten, they drop their nest and fly beyond the horizon --
   griffin: { name: 'Griffin', icon: '🦅',
@@ -474,6 +481,8 @@ export const BOSS_NAMES = {
   griffin: ['Skyrend', 'The Dune Talon', 'Stormfeather'],
   ghost: ['The Weeping Shade', 'Hollow Whisper'],
   panther: ['Nightpelt', 'The Silent Death'],
+  cheetah: ['Swiftclaw', 'The Golden Blur'],
+  crocodile: ['Old Deathroll', 'The Mire King'],
   golem: ['The Frozen Warden', 'Shatterheart'],
 };
 export function bossNameFor(type, id) {
@@ -519,9 +528,9 @@ export const SLOT_LABELS = { weapon: 'Weapon', offhand: 'Off-hand', head: 'Head'
 export const ITEMS = [
   // -- weapons: melee (chop = tree felling & rock mining power) --
   { id: 'fists',      slot: 'weapon', level: 1, icon: '🖐️', name: 'Bare Hands',   cost: null, free: true,
-    weapon: { kind: 'melee', style: 'fists', dmg: 24, cd: 1.28, range: 1.5, chop: 0, mine: 0, tier: 0,
+    weapon: { kind: 'melee', style: 'fists', dmg: 24, cd: 1.28, range: 1.5, chop: 0.1, mine: 0, tier: 0,
       combo: [1, 1.08, 1.2] },
-    desc: 'Fast three-hit combo. Bare hands can\'t fell trees or mine — craft tools!' },
+    desc: 'Fast three-hit combo. Can batter a tree down with your bare fists — ten times slower than any axe. Rocks need a pickaxe.' },
   { id: 'club',       slot: 'weapon', level: 3, icon: '🦴', name: 'Bone Club',   cost: { meat: 10 },
     weapon: { kind: 'melee', style: 'club', dmg: 44, cd: 1.64, range: 1.7, chop: 0, mine: 0, tier: 1,
       combo: [1, 1.25], stun: 0.35, armorBreak: 0.16 },
@@ -1139,7 +1148,8 @@ export function requiredClassForItem(item) {
 // wings. Two-legged humanoids, legless snakes, and constructs/undead are not
 // beasts. (Bosses are excluded separately, at the tame site.)
 const TAMEABLE_BEASTS = new Set(['rabbit', 'sheep', 'horse', 'rat', 'spider', 'scorpion',
-  'wolf', 'venomspider', 'boar', 'elk', 'icewolf', 'icespider', 'bear', 'vulture', 'bee', 'bat']);
+  'wolf', 'venomspider', 'boar', 'elk', 'icewolf', 'icespider', 'bear', 'vulture', 'bee', 'bat',
+  'cheetah', 'crocodile']);
 export const isTameableBeast = (type) => TAMEABLE_BEASTS.has(type);
 
 // ---- Concrete per-rank numbers for the class UI. Every skill can spell out

@@ -4182,13 +4182,14 @@ function updateAim() {
     raycaster.ray.intersectPlane(groundPlane, aimPoint);
   }
 
-  // range arc: a short, ground-hugging slice of the weapon's reach circle in
-  // the facing dir. The bow gets a narrower, thinner slice (its range is huge).
+  // aim marker matches the REAL attack: melee is a forward chop now, so it
+  // shows a slim ground-hugging blade line out to the weapon's reach (no more
+  // circular wedge). Bows keep a narrow slice at their (huge) range circle.
   const dx = aimPoint.x - player.pos.x, dz = aimPoint.z - player.pos.z;
   const range = player.attackRange;
   const bow = player.weapon.kind === 'bow';
-  const halfAngle = bow ? 0.22 : 0.55;
-  const thickness = bow ? 0.35 : Math.min(0.5, range * 0.22);
+  const halfAngle = bow ? 0.22 : 0.09;
+  const thickness = bow ? 0.35 : Math.max(0.6, range - 0.55);
   aimArc.visible = true;
   updateAimArc(aimArc, player.pos.x, player.pos.z, Math.atan2(dx, dz),
     range, halfAngle, thickness, (x, z) => world.heightAt(x, z));

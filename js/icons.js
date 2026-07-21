@@ -351,7 +351,148 @@ export const ITEM_ICONS = {
     <circle cx="21" cy="20" r="7" fill="#b48cff" stroke="#6e4fa8" stroke-width="1.5"/>
     <circle cx="18.8" cy="17.8" r="2" fill="#ffffff" opacity="0.7"/>
     <ellipse cx="16" cy="16.5" rx="14" ry="4.5" fill="none" stroke="#7fd1ff" stroke-width="1.6" opacity="0.8" transform="rotate(-18 16 16.5)"/>`),
+  // ===== late additions: every shop item gets a hand-drawn vector =====
+  boneAxe: S(`${HAFT}
+    <path d="M14 4c3.5-2 8-2.2 12 .4-.8 3.8-2.6 6.8-5.5 8.8l-7-7z"
+      fill="#e8e0cc" stroke="#a89f88" stroke-width="1.5" stroke-linejoin="round"/>
+    <path d="M18 10.5l4-4M15.5 6.5l1.5 1.5" stroke="#a89f88" stroke-width="1.2" opacity="0.7"/>
+    <path d="M20 12.5l2.5 1" stroke="#8a5f33" stroke-width="1.8" stroke-linecap="round"/>`),
+  highlandSpear: S(`
+    <line x1="6" y1="28" x2="24" y2="6" stroke="${WOOD}" stroke-width="2.6" stroke-linecap="round"/>
+    <path d="M22 3c2.8-1 5.6-1 7.8.4-.3 2.6-1.6 5-3.8 6.8L21.5 9z"
+      fill="${IRON}" stroke="${IRON_D}" stroke-width="1.4" stroke-linejoin="round"/>
+    <path d="M27 2l-2 4h2.6l-3.2 5" fill="none" stroke="#ffe94a" stroke-width="1.5" stroke-linecap="round"/>
+    <path d="M19 12.5l-2.4 2.4M17 11l-1 1" stroke="${LEATHER_D}" stroke-width="2" stroke-linecap="round"/>`),
+  serpentBow: bow('#4a8a3a', '#2d5c22', ARROW,
+    `<path d="M9 3c1.8-.4 3.4.4 4 2M9 29c1.8.4 3.4-.4 4-2" fill="none" stroke="#2d5c22" stroke-width="2" stroke-linecap="round"/>
+     <circle cx="10.5" cy="5" r="1" fill="#c9e05a"/>`),
+  frostAxe: S(`
+    <circle cx="19" cy="10" r="10" fill="#7fd1ff" opacity="0.16"/>${HAFT}
+    <path d="M14 4c4-2 9-2 13 1-1 4-3 7-6 9l-7-7z" fill="#bfe6f5" stroke="#5a8ea6" stroke-width="1.5" stroke-linejoin="round"/>
+    <path d="M19 11l4-4" stroke="#eaf8ff" stroke-width="1.4" opacity="0.9"/>
+    <path d="M24 3l.8 1.9 1.9.8-1.9.8-.8 1.9-.8-1.9-1.9-.8 1.9-.8z" fill="#ffffff" opacity="0.9"/>`),
+  sunfangBlade: S(`
+    <circle cx="16" cy="12" r="10" fill="#ffb036" opacity="0.15"/>
+    <path d="M16 2l3 3v15l-3 3-3-3V5z" fill="${GOLD}" stroke="${GOLD_D}" stroke-width="1.5" stroke-linejoin="round"/>
+    <line x1="16" y1="4.5" x2="16" y2="20" stroke="#fff2b0" stroke-width="1.1" opacity="0.9"/>
+    <path d="M11 6c-1.5 2-1.5 4 0 6M21 6c1.5 2 1.5 4 0 6" fill="none" stroke="#ff8a2a" stroke-width="1.4" stroke-linecap="round"/>
+    <rect x="8.5" y="22" width="15" height="3" rx="1.5" fill="#b8452e" stroke="#6e2317" stroke-width="1.3"/>
+    <rect x="14.4" y="25" width="3.2" height="5" rx="1.4" fill="${LEATHER}" stroke="${LEATHER_D}" stroke-width="1.2"/>`),
+  snapjawMaul: S(`${HAFT}
+    <rect x="13" y="2.5" width="14" height="10" rx="3.5" transform="rotate(10 20 7.5)"
+      fill="#4a7a3a" stroke="#2d5222" stroke-width="1.6"/>
+    <path d="M15 11l2-2.6 2 2.2 2-2.6 2 2.2 2-2.6" fill="none" stroke="#f0ead0" stroke-width="1.6" stroke-linejoin="round"/>
+    <circle cx="24" cy="5.5" r="1.2" fill="#c9e05a"/>`),
+  woodShield: S(`
+    <path d="M16 3l10 3v9c0 7-4 11-10 14C10 26 6 22 6 15V6z"
+      fill="${WOOD}" stroke="${WOOD_D}" stroke-width="1.6" stroke-linejoin="round"/>
+    <path d="M11 4.5v21M16 3v26M21 4.5v21" stroke="${WOOD_D}" stroke-width="1.1" opacity="0.55"/>
+    <circle cx="16" cy="14" r="3.2" fill="${IRON}" stroke="${IRON_D}" stroke-width="1.3"/>`),
+  ironShield: S(`
+    <path d="M16 3l10 3v9c0 7-4 11-10 14C10 26 6 22 6 15V6z"
+      fill="${IRON}" stroke="${IRON_D}" stroke-width="1.6" stroke-linejoin="round"/>
+    <path d="M16 3v26M7.5 13h17" stroke="${IRON_D}" stroke-width="1.2" opacity="0.7"/>
+    <circle cx="16" cy="13" r="2.6" fill="${GOLD}" stroke="${GOLD_D}" stroke-width="1.2"/>`),
+  graveplate: S(`
+    <path d="M10 5l6 2 6-2 5 5-3 4v13H8V14L5 10z"
+      fill="#4c4258" stroke="#2a2434" stroke-width="1.6" stroke-linejoin="round"/>
+    <path d="M16 7v20" stroke="#2a2434" stroke-width="1.3" opacity="0.7"/>
+    <path d="M12 13h3v3h-3zM17 13h3v3h-3z" fill="none" stroke="#8a7fa8" stroke-width="1.1" opacity="0.8"/>
+    <circle cx="16" cy="20" r="2" fill="#bfc8ff" opacity="0.8"/>`),
+  iceplate: S(`
+    <path d="M10 5l6 2 6-2 5 5-3 4v13H8V14L5 10z"
+      fill="#bfe6f5" stroke="#5a8ea6" stroke-width="1.6" stroke-linejoin="round"/>
+    <path d="M16 7v20M10 15l6 3 6-3" fill="none" stroke="#5a8ea6" stroke-width="1.2" opacity="0.7"/>
+    <path d="M16 12l1 2.4 2.4 1-2.4 1-1 2.4-1-2.4-2.4-1 2.4-1z" fill="#ffffff" opacity="0.9"/>`),
+  widowShroud: S(`
+    <path d="M10 5l6 2 6-2 5 5-3 4v13H8V14L5 10z"
+      fill="#2e3428" stroke="#161a12" stroke-width="1.6" stroke-linejoin="round"/>
+    <path d="M8 12h16M9 18h14M10 24h12M16 7v20M11 8c2 6 2 12 0 18M21 8c-2 6-2 12 0 18"
+      fill="none" stroke="#aab4a0" stroke-width="0.9" opacity="0.65"/>
+    <circle cx="16" cy="15" r="1.6" fill="#8aff3a" opacity="0.9"/>`),
+  pantherBoots: boot('#22222c', '#0e0e14',
+    `<circle cx="13" cy="9" r="1.1" fill="#7fff4a"/><circle cx="17" cy="9" r="1.1" fill="#7fff4a"/>`),
+  mireBoots: boot('#5a6b3a', '#37421f',
+    `<path d="M12 27c0 1.6-2.4 1.6-2.4 0 0-1 1.2-2.4 1.2-2.4s1.2 1.4 1.2 2.4z" fill="#8aa04f"/>`),
+  ironhornCrown: S(`
+    <path d="M6 22l2-11 5 5 3-8 3 8 5-5 2 11z" fill="${GOLD}" stroke="${GOLD_D}" stroke-width="1.6" stroke-linejoin="round"/>
+    <path d="M7 22h18v4H7z" fill="${GOLD}" stroke="${GOLD_D}" stroke-width="1.4"/>
+    <path d="M5 10C3 7 3 4.5 4.5 2.5c2 .8 3.4 2.6 4 5M27 10c2-3 2-5.5.5-7.5-2 .8-3.4 2.6-4 5"
+      fill="#e8e0cc" stroke="#a89f88" stroke-width="1.4" stroke-linejoin="round"/>
+    <circle cx="16" cy="24" r="1.3" fill="#b8452e"/>`),
+  shadeAmulet: S(`
+    <path d="M9 4c2 3 4 4.5 7 4.5S21 7 23 4" fill="none" stroke="${LEATHER_D}" stroke-width="1.8"/>
+    <circle cx="16" cy="17" r="8" fill="#3a3448" stroke="#1e1a28" stroke-width="1.6"/>
+    <path d="M12.5 15c1-2.6 2.2-4 3.5-4s2.5 1.4 3.5 4c0 3-1 5.5-3.5 7-2.5-1.5-3.5-4-3.5-7z" fill="#bfc8ff" opacity="0.85"/>
+    <circle cx="14.6" cy="15.5" r="0.9" fill="#1e1a28"/><circle cx="17.4" cy="15.5" r="0.9" fill="#1e1a28"/>`),
+  stormcloak: S(`
+    <path d="M16 3C9 6 6 12 6 20c0 4 1.5 7 3 9 2-4 4.5-6 7-6s5 2 7 6c1.5-2 3-5 3-9 0-8-3-14-10-17z"
+      fill="#5c6a8a" stroke="#333d54" stroke-width="1.6" stroke-linejoin="round"/>
+    <path d="M16 3v20" stroke="#333d54" stroke-width="1.2" opacity="0.6"/>
+    <path d="M19 10l-3 5h3l-4 7 1-5h-3l3-7z" fill="#ffe94a" stroke="#b8960a" stroke-width="0.8"/>`),
+  frostMantle: S(`
+    <path d="M16 3C9 6 6 12 6 20c0 4 1.5 7 3 9 2-4 4.5-6 7-6s5 2 7 6c1.5-2 3-5 3-9 0-8-3-14-10-17z"
+      fill="#dfeef7" stroke="#8fb0c4" stroke-width="1.6" stroke-linejoin="round"/>
+    <path d="M8 10c2.5 1.6 5.3 2.4 8 2.4s5.5-.8 8-2.4" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round"/>
+    <path d="M16 16l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9z" fill="#8fd8ff"/>`),
+  bedroll: S(`
+    <rect x="4" y="12" width="24" height="10" rx="5" fill="#8a9a5a" stroke="#5c6a38" stroke-width="1.6"/>
+    <path d="M24 12c2.8 0 4 2.2 4 5s-1.2 5-4 5z" fill="#a8b872" stroke="#5c6a38" stroke-width="1.4"/>
+    <path d="M24 13.5c1.6 1 1.6 6 0 7M21 12v10" stroke="#5c6a38" stroke-width="1.2" opacity="0.7"/>
+    <path d="M9 12v10M9 24v2M9 8v4" stroke="${LEATHER_D}" stroke-width="1.8" stroke-linecap="round"/>`),
+  lining: S(`
+    <path d="M10 6l6 2 6-2 4 4-2 3v13H8V13l-2-3z"
+      fill="#d9cba8" stroke="#a8955f" stroke-width="1.6" stroke-linejoin="round"/>
+    <path d="M8 12l16 8M8 20l16-8M8 16h16M16 8v18" stroke="#a8955f" stroke-width="1" opacity="0.6"/>`),
+  bogscaleLining: S(`
+    <path d="M10 6l6 2 6-2 4 4-2 3v13H8V13l-2-3z"
+      fill="#5a6b3a" stroke="#37421f" stroke-width="1.6" stroke-linejoin="round"/>
+    <path d="M9 13c2 2.4 4.6 2.4 7 0 2.4 2.4 5 2.4 7 0M9 18c2 2.4 4.6 2.4 7 0 2.4 2.4 5 2.4 7 0M9 23c2 2.4 4.6 2.4 7 0 2.4 2.4 5 2.4 7 0"
+      fill="none" stroke="#8aa04f" stroke-width="1.2" opacity="0.85"/>`),
+  socks: S(`
+    <path d="M7 4h7v10c3 .8 5.2 2.4 6 5.2.6 2-.6 3.3-2.6 3.3H9.6C8 22.5 7 21.5 7 20z"
+      fill="#d9cba8" stroke="#a8955f" stroke-width="1.5" stroke-linejoin="round"/>
+    <path d="M7 8h7" stroke="#a8955f" stroke-width="1.6"/>
+    <path d="M15 11h7v10c3 .8 5.2 2.4 6 5.2.6 2-.6 3.3-2.6 3.3H17.6c-1.6 0-2.6-1-2.6-2.5z"
+      fill="#c9b88a" stroke="#8f7c46" stroke-width="1.5" stroke-linejoin="round"/>
+    <path d="M15 15h7" stroke="#8f7c46" stroke-width="1.6"/>`),
+  spiritLantern: S(`
+    <circle cx="16" cy="17" r="11" fill="#bfc8ff" opacity="0.15"/>
+    <path d="M13 5h6M16 2.5V5" stroke="${IRON_D}" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M10 8h12l-1.6 14c-.2 1.4-1 2-2.4 2h-4c-1.4 0-2.2-.6-2.4-2z"
+      fill="#2e3440" stroke="#171b22" stroke-width="1.5" stroke-linejoin="round"/>
+    <path d="M12 9.5h8l-1.2 12h-5.6z" fill="#bfc8ff" opacity="0.9"/>
+    <circle cx="16" cy="15.5" r="2.2" fill="#ffffff"/>`),
+  saddle: S(`
+    <path d="M5 14c3-5 8-7.5 11-7.5S24 9 27 14c1 1.8.4 3-1.4 3.4-2.6.6-4.6 2.2-5.6 4.6h-8c-1-2.4-3-4-5.6-4.6C4.6 17 4 15.8 5 14z"
+      fill="${LEATHER}" stroke="${LEATHER_D}" stroke-width="1.6" stroke-linejoin="round"/>
+    <path d="M16 6.5V22" stroke="${LEATHER_D}" stroke-width="1.2" opacity="0.6"/>
+    <path d="M12 22v4.5M20 22v4.5" stroke="${LEATHER_D}" stroke-width="2" stroke-linecap="round"/>
+    <rect x="10.6" y="26" width="3" height="2.4" rx="0.8" fill="${IRON}" stroke="${IRON_D}" stroke-width="1"/>
+    <rect x="18.6" y="26" width="3" height="2.4" rx="0.8" fill="${IRON}" stroke="${IRON_D}" stroke-width="1"/>`),
+  swimming: S(`
+    <circle cx="21" cy="8" r="3" fill="${SKIN}" stroke="${SKIN_D}" stroke-width="1.3"/>
+    <path d="M8 13c4-3.5 9-3.5 12-1" fill="none" stroke="${SKIN}" stroke-width="3" stroke-linecap="round"/>
+    <path d="M4 20c3 2.4 6 2.4 9 0s6-2.4 9 0 5 2.2 6 1.6M4 26c3 2.4 6 2.4 9 0s6-2.4 9 0 5 2.2 6 1.6"
+      fill="none" stroke="#5fa8e0" stroke-width="2.2" stroke-linecap="round"/>`),
 };
+
+// nests: the same twig-ring roost with an egg tinted per home biome
+const nestIcon = (egg, eggD) => S(`
+  <ellipse cx="16" cy="21" rx="12" ry="7" fill="${WOOD}" stroke="${WOOD_D}" stroke-width="1.6"/>
+  <ellipse cx="16" cy="19" rx="8.5" ry="4.5" fill="#5f3d1c"/>
+  <path d="M5 17c3-2 5-2 8-1M27 17c-3-2-5-2-8-1M8 25c2 1.4 4 2 8 2s6-.6 8-2"
+    fill="none" stroke="#7c5426" stroke-width="1.4" stroke-linecap="round"/>
+  <ellipse cx="16" cy="16" rx="4" ry="5" fill="${egg}" stroke="${eggD}" stroke-width="1.3"/>
+  <circle cx="14.6" cy="14" r="1.1" fill="#ffffff" opacity="0.7"/>`);
+ITEM_ICONS.desertNest = nestIcon('#f2dfa8', '#c0a860');
+ITEM_ICONS.highlandNest = nestIcon('#cfe0c0', '#8fa878');
+ITEM_ICONS.frozenNest = nestIcon('#d8ecf7', '#8fb0c4');
+// placeable camp items reuse their building icons
+ITEM_ICONS.storageChest = ITEM_ICONS.chest;
+ITEM_ICONS.logBoat = ITEM_ICONS.boat;
+ITEM_ICONS.guardTower = ITEM_ICONS.tower;
+ITEM_ICONS.graveyardItem = ITEM_ICONS.grave;
 
 // ===== resource icons (drawn, not emoji) =====
 export const RES_SVG = {
