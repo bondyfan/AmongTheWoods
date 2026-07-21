@@ -1,4 +1,4 @@
-// ---- Post-processing stack (SSAO + bloom + composite + frame metering) ----
+// ---- Post-processing stack (SSAO + bloom + composite) ----
 // The scene renders to an offscreen colour target that ALSO captures depth.
 // From the depth we do screen-space ambient occlusion (SSAO): crevices,
 // contact points and clustered geometry darken while OPEN, flat surfaces stay
@@ -6,9 +6,6 @@
 // hand-rolled bloom rides on top. The composite applies AO in LINEAR light on
 // the ambient term (so it adds depth without crushing contrast), resolves the
 // non-MSAA target with a light FXAA, adds bloom and writes to the canvas.
-// Separately, for auto-exposure, a tiny 64->1 log-luminance reduction meters
-// the ACTUAL rendered frame each frame; main.js reads back one pixel and drives
-// the eye-adaptation servo from it (so exposure follows where you look).
 
 import * as THREE from 'three';
 
@@ -109,35 +106,6 @@ const AO_BLUR_FRAG = /* glsl */`
       for (int y = -2; y <= 2; y++)
         s += texture2D(tAO, vUv + vec2(float(x), float(y)) * texel).r;
     gl_FragColor = vec4(vec3(s / 25.0), 1.0);
-  }`;
-
-// ---- luminance metering for auto-exposure: encode a LOG luma so the chain's
-// plain averaging yields the GEOMETRIC MEAN (a bright sky patch can't dominate
-// and grey the whole frame out) ----
-const LUMA_FRAG = /* glsl */`
-  uniform sampler2D tScene; uniform vec2 texel; varying vec2 vUv;
-  const float LOG_MIN = -8.0, LOG_MAX = 0.5;
-  void main() {
-    // 4-tap box on a 64x64 grid => an even, unbiased sample of the whole frame
-    vec3 c = texture2D(tScene, vUv + texel * vec2(-1.0, -1.0)).rgb
-           + texture2D(tScene, vUv + texel * vec2( 1.0, -1.0)).rgb
-           + texture2D(tScene, vUv + texel * vec2(-1.0,  1.0)).rgb
-           + texture2D(tScene, vUv + texel * vec2( 1.0,  1.0)).rgb;
-    c *= 0.25;
-    float luma = dot(c, vec3(0.2126, 0.7152, 0.0722)); // rtScene is sRGB = display space
-    float ll = clamp(log(luma + 1e-4), LOG_MIN, LOG_MAX);
-    float v = (ll - LOG_MIN) / (LOG_MAX - LOG_MIN);
-    gl_FragColor = vec4(v, v, v, 1.0);
-  }`;
-
-const DOWN_FRAG = /* glsl */`
-  uniform sampler2D tSrc; uniform vec2 texel; varying vec2 vUv;
-  void main() {
-    float s = texture2D(tSrc, vUv + texel * vec2(-0.5, -0.5)).r
-            + texture2D(tSrc, vUv + texel * vec2( 0.5, -0.5)).r
-            + texture2D(tSrc, vUv + texel * vec2(-0.5,  0.5)).r
-            + texture2D(tSrc, vUv + texel * vec2( 0.5,  0.5)).r;
-    gl_FragColor = vec4(s * 0.25);
   }`;
 
 const COMPOSITE_FRAG = /* glsl */`
@@ -245,22 +213,9 @@ export class PostFX {
     this.compositeMat = mat(COMPOSITE_FRAG, {
       tScene: { value: null }, tAO: { value: null }, tBloom: { value: null },
       texel: { value: new THREE.Vector2() },
-      aoStrength: { value: 0.85 }, aoFloor: { value: 0.30 }, bloomStrength: { value: 0.55 },
+      aoStrength: { value: 0.25 }, aoFloor: { value: 0.30 }, bloomStrength: { value: 0.55 },
       useAO: { value: false }, useBloom: { value: false }, useFXAA: { value: false },
     });
-
-    // ---- auto-exposure metering: a fixed 64->1 log-luminance pyramid (screen
-    // size independent, so no per-resize work) + a 1-pixel readback buffer ----
-    const mkLum = (s) => {
-      const rt = new THREE.WebGLRenderTarget(s, s, { depthBuffer: false, stencilBuffer: false });
-      rt.texture.minFilter = THREE.LinearFilter; rt.texture.magFilter = THREE.LinearFilter;
-      rt.texture.generateMipmaps = false; return rt;   // colorSpace stays default (raw values)
-    };
-    this.rtLum = [64, 32, 16, 8, 4, 2, 1].map(mkLum);
-    this.lumaMat = mat(LUMA_FRAG, { tScene: { value: null }, texel: { value: new THREE.Vector2() } });
-    this.downMat = mat(DOWN_FRAG, { tSrc: { value: null }, texel: { value: new THREE.Vector2() } });
-    this._lumPix = new Uint8Array(4);
-    this._haveLum = false;
   }
 
   setSize(w, h) {
@@ -269,7 +224,6 @@ export class PostFX {
     this.rtAOb.setSize(Math.max(1, w >> 1), Math.max(1, h >> 1));
     this.rtA.setSize(Math.max(1, w >> 2), Math.max(1, h >> 2));
     this.rtB.setSize(Math.max(1, w >> 2), Math.max(1, h >> 2));
-    // rtLum is a fixed 64->1 chain — deliberately not resized with the screen
   }
 
   _pass(material, target) {
@@ -278,30 +232,7 @@ export class PostFX {
     this.renderer.render(this.quadScene, this.quadCam);
   }
 
-  // reduce the current scene frame to a single log-average-luminance pixel
-  _reduceLuma(sceneRT) {
-    this.lumaMat.uniforms.tScene.value = sceneRT.texture;
-    this.lumaMat.uniforms.texel.value.set(1 / sceneRT.width, 1 / sceneRT.height);
-    this._pass(this.lumaMat, this.rtLum[0]);
-    for (let i = 1; i < this.rtLum.length; i++) {
-      const src = this.rtLum[i - 1];
-      this.downMat.uniforms.tSrc.value = src.texture;
-      this.downMat.uniforms.texel.value.set(1 / src.width, 1 / src.height);
-      this._pass(this.downMat, this.rtLum[i]);
-    }
-    this._haveLum = true;
-  }
-
-  // read LAST frame's 1x1 luma back (its GPU fence is resolved -> no stall).
-  // returns the geometric-mean display luminance in ~[0.0003, 1.65], or null.
-  readLuma() {
-    if (!this._haveLum) return null;
-    this.renderer.readRenderTargetPixels(this.rtLum[6], 0, 0, 1, 1, this._lumPix);
-    const v = this._lumPix[0] / 255, LOG_MIN = -8.0, LOG_MAX = 0.5;
-    return Math.exp(LOG_MIN + v * (LOG_MAX - LOG_MIN));
-  }
-
-  // opts: { ssao, bloom, aoRadius, aoStrength, aoFloor, meter }
+  // opts: { ssao, bloom, aoRadius, aoStrength, aoFloor }
   render(scene, camera, opts = {}) {
     const r = this.renderer;
     r.setRenderTarget(this.rtScene);
@@ -339,16 +270,13 @@ export class PostFX {
     c.useAO.value = !!opts.ssao;
     c.useBloom.value = !!opts.bloom;
     c.useFXAA.value = true;
-    c.aoStrength.value = opts.aoStrength ?? 0.85;
+    c.aoStrength.value = opts.aoStrength ?? 0.25;
     c.aoFloor.value = opts.aoFloor ?? 0.30;
     this._pass(this.compositeMat, null);
-
-    if (opts.meter) this._reduceLuma(this.rtScene);
   }
 
   dispose() {
     for (const rt of [this.rtScene, this.rtAO, this.rtAOb, this.rtA, this.rtB]) rt.dispose();
-    for (const rt of this.rtLum) rt.dispose();
     this.rtScene.depthTexture?.dispose();
   }
 }

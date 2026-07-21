@@ -108,12 +108,6 @@ let _fpsSmooth = 60, _fpsMeterT = 0;
 // high = "lush" (the classic look); ultra switches on the dense grass-fill
 const FOLIAGE_MULT = { low: 0.35, normal: 1, high: 1.7, ultra: 3.2 };
 const TREE_DETAIL = { low: 0, medium: 1, high: 2 };
-// auto-exposure (eye adaptation) state: smoothed toneMappingExposure, driven by
-// a servo that meters the ACTUAL rendered frame (postfx.readLuma). TARGET is the
-// geometric-mean display luma we drive toward; the EXP clamps stop the sky from
-// greying out (floor) or deep shade from blowing to white (ceiling).
-let _expCur = 1, _expTarget = 1;
-const AE_TARGET = 0.45, AE_EXP_MIN = 0.62, AE_EXP_MAX = 2.2;
 // shadow-distance rigs: {b = ortho half-extent m, s = map px}. The far plane
 // and the sun's stand-off distance are derived from b so the whole frustum is
 // always covered (updateCamera parks the sun at b*2 along the fixed sun dir).
@@ -134,35 +128,14 @@ const _folDir = { x: 0, z: -1 };     // smoothed walk direction
 let _folMoveK = 0;                    // 0 idle → 1 moving (lay-over strength)
 const _waterSunDir = new THREE.Vector3();
 
+// Automatic graphics downgrade REMOVED (user request): the game never lowers
+// quality on its own any more — shadows, resolution and view distance stay
+// exactly where the player set them, even if the FPS dips. `stage` is frozen at
+// 0 so the `autoQuality.stage` checks scattered through the code always resolve
+// to full quality, and tick() is a no-op.
 const autoQuality = {
-  stage: 0, t: 0, frames: 0, low: 0,
-  tick(dt) {
-    // NEVER auto-downgrade while the World Editor is open: its wide god view is
-    // meant to run heavy, and a downgrade (esp. stage 3 → camera.far 200 + a
-    // short fog wall) leaves the zoomed-out map as bare blue void
-    if (game.editorView) { this.t = 0; this.frames = 0; this.low = 0; return; }
-    this.frames++; this.t += dt;
-    if (this.t < 4) return;               // judge in 4 s windows
-    const fps = this.frames / this.t;
-    this.t = 0; this.frames = 0;
-    if (fps >= 38) { this.low = 0; return; }
-    if (++this.low < 2 || this.stage >= 3) return; // two bad windows in a row
-    this.low = 0;
-    this.stage++;
-    if (this.stage === 1) {
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
-    } else if (this.stage === 2) {
-      renderer.setPixelRatio(1);
-      renderer.shadowMap.enabled = false;
-      sun.castShadow = false;
-      scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
-    } else if (this.stage === 3) {
-      applyViewMode(); // stage-aware: shorter fog + view radius for the mode
-      camera.far = game.rpgView ? 260 : 200;
-      camera.updateProjectionMatrix();
-    }
-    ui.toast('⚙️ Graphics lowered automatically for smoother FPS', 'info');
-  },
+  stage: 0,
+  tick() {},
 };
 
 window.addEventListener('resize', () => {
@@ -2611,7 +2584,6 @@ const settings = Object.assign(
   settings.drawDist ??= onMobile ? 'short' : 'far';
   settings.treeDetail ??= 'low';
   settings.shadowDist ??= 'low';
-  settings.autoExp ??= false;
   settings.ssao ??= false;
   settings.showFps ??= false;
   settings.fpsCap ??= 0; // 0 = unlimited
@@ -2623,7 +2595,6 @@ const settings = Object.assign(
   $id('set-drawdist').value = String(settings.drawDist);
   $id('set-treedetail').value = String(settings.treeDetail);
   $id('set-shadowdist').value = String(settings.shadowDist);
-  $id('set-autoexp').checked = !!settings.autoExp;
   $id('set-ssao').checked = !!settings.ssao;
   applyGraphics();
 
@@ -2722,10 +2693,6 @@ const settings = Object.assign(
   $id('set-shadowdist').addEventListener('change', () => {
     settings.shadowDist = $id('set-shadowdist').value;
     saveGfx(); // applyGraphics resizes the shadow frustum + map
-  });
-  $id('set-autoexp').addEventListener('change', () => {
-    settings.autoExp = $id('set-autoexp').checked;
-    saveGfx(); // applyGraphics swaps the tone-mapping curve
   });
   $id('set-ssao').addEventListener('change', () => {
     settings.ssao = $id('set-ssao').checked;
@@ -5090,34 +5057,6 @@ renderer.domElement.addEventListener('click', () => {
   }
 });
 
-// AUTO EXPOSURE (eye adaptation): drive toneMappingExposure toward a target
-// derived from the CURRENT scene lighting (sun + ambient + sky brightness —
-// already dimmed by dark biomes / cave / night / dungeon). Dark scenes raise
-// exposure so detail comes back; bright scenes lower it. The lag does the
-// "over-bright, then settle" (and "too dark, then brighten") like real eyes:
-// adapting TO darkness is slower than adapting to light.
-function tickAutoExposure(dt) {
-  if (!settings.autoExp) return;
-  if (game.mode !== 'play' || game.editorView) { // ease to neutral off-play
-    _expCur += (1 - _expCur) * Math.min(1, dt * 2);
-    renderer.toneMappingExposure = _expCur;
-    return;
-  }
-  // meter the ACTUAL rendered frame (last frame's 1x1 log-avg luma) — THIS is
-  // what makes exposure view-dependent: point at bright sky -> M rises ->
-  // exposure drops; look into shade -> M falls -> exposure rises.
-  const M = postfx ? postfx.readLuma() : null;
-  if (M == null) { renderer.toneMappingExposure = _expCur; return; } // no frame yet: hold
-  const m = Math.min(1.2, Math.max(0.004, M));
-  let want = _expCur * (AE_TARGET / m);          // proportional; fixed point at M == TARGET
-  want = Math.max(AE_EXP_MIN, Math.min(AE_EXP_MAX, want));
-  // human asymmetric lag: fast to stop down in light, slow to dark-adapt. Uses
-  // 1-exp(-dt/tau) so the rate is frame-rate INDEPENDENT.
-  const tau = (want < _expCur) ? 0.25 : 1.6;
-  _expCur += (want - _expCur) * (1 - Math.exp(-dt / tau));
-  renderer.toneMappingExposure = _expCur;
-}
-
 function applyViewMode() {
   const rpg = !!settings.rpgView;
   game.rpgView = rpg;
@@ -5142,7 +5081,8 @@ function applyGraphics() {
   world.groundDetail = settings.texDetail ?? 0;
   world.treeDetail = TREE_DETAIL[settings.treeDetail ?? 'low'] ?? 0;
   world.qualityVeg = !!settings.vegQuality && vegKit.ready();
-  // shadows: user toggle (autoQuality stage 2 can still force them off)
+  // shadows: purely the user's toggle now (auto-downgrade removed, so the
+  // stage < 2 guard is always true — kept only so the expression is explicit)
   const shadowsOn = settings.shadows !== false && autoQuality.stage < 2;
   if (renderer.shadowMap.enabled !== shadowsOn) {
     renderer.shadowMap.enabled = shadowsOn;
@@ -5156,7 +5096,7 @@ function applyGraphics() {
   renderer.setPixelRatio(pr);
   // the post stack is needed for bloom, ambient occlusion, OR auto-exposure
   // (which meters the offscreen frame)
-  if ((settings.bloom || settings.ssao || settings.autoExp) && !postfx) {
+  if ((settings.bloom || settings.ssao) && !postfx) {
     postfx = new PostFX(renderer);
     postfx.setSize(renderer.domElement.width, renderer.domElement.height);
   }
@@ -5178,21 +5118,13 @@ function applyGraphics() {
     sun.shadow.map?.dispose();
     sun.shadow.map = null;
   }
-  // tone mapping: auto-exposure (eye adaptation) needs a tone-mapped output so
-  // toneMappingExposure actually scales the image — a neutral Linear curve,
-  // driven per-frame in step(). Without auto-exposure, keep the raw look.
-  if (settings.autoExp) {
-    renderer.toneMapping = settings.filmic ? THREE.ACESFilmicToneMapping : THREE.LinearToneMapping;
-  } else {
-    renderer.toneMapping = settings.filmic ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
-    renderer.toneMappingExposure = settings.filmic ? 1.12 : 1;
-    _expCur = renderer.toneMappingExposure;
-  }
-  // vivid grading: a free GPU-composited CSS filter on the canvas. It is now the
-  // SAME whether or not the post path runs, so toggling AO / auto-exposure no
-  // longer causes an incidental brightness/contrast jump — you see ONLY the AO
-  // or exposure effect. (AO is localized by the SSAO above-plane guard, so a
-  // mild global contrast here doesn't stack into a crush.)
+  // tone mapping: filmic (ACES) if the player picked it, otherwise the raw look
+  renderer.toneMapping = settings.filmic ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
+  renderer.toneMappingExposure = settings.filmic ? 1.12 : 1;
+  // vivid grading: a free GPU-composited CSS filter on the canvas. It is the SAME
+  // whether or not the post path runs, so toggling AO doesn't cause an incidental
+  // brightness/contrast jump — you see ONLY the AO effect. (AO is localized by
+  // the SSAO above-plane guard, so a mild global contrast here doesn't crush it.)
   renderer.domElement.style.filter = settings.vivid === false
     ? '' : 'contrast(1.06) brightness(1.03)';
   scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
@@ -5702,16 +5634,12 @@ function step() {
   ui.updateOverlays(dt, camera, player.pos);
   renderCharPreview(dt);
   renderSmithPreview(dt);
-  tickAutoExposure(dt);
-  // the World Editor renders CLEAN — no bloom / AO / vignette. Auto-exposure
-  // also needs the post path so it has a frame to meter (composite passes the
-  // scene straight through when AO/bloom are off).
-  const usePost = (settings.bloom || settings.ssao || settings.autoExp) && postfx && !game.editorView;
+  // the World Editor renders CLEAN — no bloom / AO / vignette
+  const usePost = (settings.bloom || settings.ssao) && postfx && !game.editorView;
   if (usePost) {
     postfx.render(scene, camera, {
       ssao: !!settings.ssao, bloom: !!settings.bloom,
-      aoRadius: 1.8, aoStrength: 0.85, aoFloor: 0.30,
-      meter: !!settings.autoExp && game.mode === 'play',
+      aoRadius: 1.8, aoStrength: 0.25, aoFloor: 0.30,
     });
   } else { renderer.setRenderTarget(null); renderer.render(scene, camera); }
 }
