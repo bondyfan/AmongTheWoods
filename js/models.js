@@ -3373,14 +3373,68 @@ export function makeFern(rng) {
 export function makeGrassBlades(color, rng) {
   const g = new THREE.Group();
   const blades = 3 + Math.floor(rng() * 2);
+  // small by default — the Ultra fill scales UP the occasional taller clump,
+  // so the base carpet reads as short fresh turf
   for (let i = 0; i < blades; i++) {
-    const h = 0.4 + rng() * 0.32;
-    const b = cone(0.045, h, color, 3);
+    const h = 0.26 + rng() * 0.22;
+    const b = cone(0.04, h, color, 3);
     b.castShadow = false;
-    b.position.set((rng() - 0.5) * 0.36, h / 2, (rng() - 0.5) * 0.36);
-    b.rotation.set((rng() - 0.5) * 0.45, rng() * Math.PI, (rng() - 0.5) * 0.45);
+    b.position.set((rng() - 0.5) * 0.3, h / 2, (rng() - 0.5) * 0.3);
+    b.rotation.set((rng() - 0.5) * 0.5, rng() * Math.PI, (rng() - 0.5) * 0.5);
     g.add(b);
   }
+  return g;
+}
+
+// a light grain/oat stalk cluster — a few thin tan stems tipped with a small
+// seed head. Sprinkled sparsely through the Ultra grass for meadow variety.
+export function makeGrainStalk(rng) {
+  const g = new THREE.Group();
+  const stalks = 2 + Math.floor(rng() * 2);
+  const stemC = rng() < 0.5 ? 0xbfae5e : 0xa8b060;
+  const headC = rng() < 0.5 ? 0xd8c46a : 0xc9b24e;
+  for (let i = 0; i < stalks; i++) {
+    const h = 0.6 + rng() * 0.4;
+    const s = box(0.028, h, 0.028, stemC);
+    s.castShadow = false;
+    const a = rng() * Math.PI * 2, r = rng() * 0.14;
+    const lean = (rng() - 0.5) * 0.2;
+    s.position.set(Math.cos(a) * r, h / 2, Math.sin(a) * r);
+    s.rotation.z = lean;
+    g.add(s);
+    const head = box(0.06, 0.16, 0.06, headC);
+    head.castShadow = false;
+    head.position.set(s.position.x + lean * -h * 0.5, h + 0.06, s.position.z);
+    head.rotation.z = lean;
+    g.add(head);
+  }
+  return g;
+}
+
+// a dainty wildflower: a slim stem, a couple of leaves and a bright little
+// bloom (soft meadow palette). Rare — a splash of colour in the turf.
+export function makeMeadowFlower(rng) {
+  const g = new THREE.Group();
+  const h = 0.24 + rng() * 0.22;
+  const stem = box(0.025, h, 0.025, 0x5a8a3c);
+  stem.castShadow = false;
+  stem.position.y = h / 2;
+  g.add(stem);
+  const colors = [0xf4e04a, 0xef8fb8, 0xe8624c, 0xf5f2ea, 0xb58cf0, 0x7fb8ef];
+  const c = colors[Math.floor(rng() * colors.length)];
+  const petals = 5;
+  for (let i = 0; i < petals; i++) {
+    const a = (i / petals) * Math.PI * 2;
+    const p = box(0.07, 0.02, 0.035, c);
+    p.castShadow = false;
+    p.position.set(Math.cos(a) * 0.055, h + 0.02, Math.sin(a) * 0.055);
+    p.rotation.y = -a;
+    g.add(p);
+  }
+  const core = box(0.045, 0.03, 0.045, 0xf3d34a);
+  core.castShadow = false;
+  core.position.y = h + 0.03;
+  g.add(core);
   return g;
 }
 

@@ -11,7 +11,8 @@ import * as THREE from 'three';
 import { WORLD, BIOMES, biomeAt, biomeIndexAt, radiusOf, zoneInfoAt,
          ZONE_LINES, wobX, wobZ, hubEdgeR, coastRAt, coastDistAt,
          HARBOR_SPECS } from './config.js';
-import { makeTree, makeRock, makeGrassTuft, makeGrassBlades, makeFlower, makeMushroom, makeBush,
+import { makeTree, makeRock, makeGrassTuft, makeGrassBlades, makeGrainStalk, makeMeadowFlower,
+         makeFlower, makeMushroom, makeBush,
          makeLog, makeBoulder, makeBridge, makeCampfire, makeStalagmite,
          makeBerryBush, makeShrine, makeMonolith, makeCrypt, makeBlacksmith, makeCobweb,
          makeFarm, makeTrader, makeBeehive, makeBeehiveBig, makeCocoon, makeGlade, makeGraveyardRuin,
@@ -1734,29 +1735,46 @@ export class World {
   // Ultra grass: a jittered grid tuft on every green grassy cell — dense turf
   // everywhere, one baked mesh, its own rng so other decos don't shift.
   _grassFill(deco, cxw, czw, fm) {
-    const step = Math.max(1.8, Math.min(4.0, 4.0 / Math.sqrt(fm)));
+    const step = Math.max(1.6, Math.min(3.6, 3.5 / Math.sqrt(fm)));
     const cx = (cxw / CHUNK) | 0, cz = (czw / CHUNK) | 0;
     const rng = mulberry32((this.seed ^ 0x6a55f1) ^ (cx * 73856093) ^ (cz * 19349663));
-    const SW = { amp: 1, h: 0.6 };
+    // sway profiles per look
+    const SW_LO = { amp: 1, h: 0.42 }, SW_HI = { amp: 1, h: 0.95 };
+    const SW_GR = { amp: 1, h: 1.0 }, SW_FL = { amp: 0.9, h: 0.32 };
     for (let gz = 0; gz < CHUNK; gz += step) {
       for (let gx = 0; gx < CHUNK; gx += step) {
         const x = cxw + gx + (rng() - 0.5) * step;
         const z = czw + gz + (rng() - 0.5) * step;
-        const v = (rng() * 8) | 0, rot = rng() * Math.PI * 2, sc = 0.8 + rng() * 0.7;
+        const v = (rng() * 8) | 0, rot = rng() * Math.PI * 2, roll = rng();
         // cheapest cullers first (this runs for every cell of every chunk):
-        // biome greenness, then the cave/water/path gate, then the slope test
-        const b = biomeAt(x, z);
-        const gc = b.grass;
+        // biome greenness, then the cave/water/path gate
+        const gc = biomeAt(x, z).grass;
         if (!(((gc >> 8) & 255) > ((gc >> 16) & 255) && ((gc >> 8) & 255) > (gc & 255))) continue;
         if (radiusOf(x, z) < 14) continue;               // starting cave
         if (this.isWater(x, z)) continue;                // water / lakes / bog
         if (this.pathDistance(x, z) < 3) continue;       // keep trails clear
         if (worldPatch.buildingGroundAt?.(x, z)) continue; // town squares
-        // grass tolerates gentle slopes; only one heightAt per cell (the
-        // slope test's extra samples were the main generation cost)
-        const key = `gf:${gc}:${v}`;
-        stampTemplate(deco, bakeTemplate(key, () => makeGrassBlades(gc, tplRng(key))),
-          x, this.heightAt(x, z), z, rot, SW, sc);
+        const y = this.heightAt(x, z);
+        // MEADOW MIX — small blades dominate, with occasional taller grass,
+        // a bushier grass type, a grain stalk and the rare wildflower
+        let key, build, sw, sc;
+        if (roll < 0.60) {                 // short base turf (small)
+          key = `gf:${gc}:${v}`; build = () => makeGrassBlades(gc, tplRng(key));
+          sw = SW_LO; sc = 0.7 + rng() * 0.5;
+        } else if (roll < 0.78) {          // a taller grass clump
+          key = `gt:${gc}:${v}`; build = () => makeGrassBlades(gc, tplRng(key));
+          sw = SW_HI; sc = 1.5 + rng() * 0.8;
+        } else if (roll < 0.90) {          // a bushier fan-grass type
+          key = `gb:${gc}:${v}`; build = () => makeGrassTuft(gc, tplRng(key));
+          sw = SW_LO; sc = 0.6 + rng() * 0.4;
+        } else if (roll < 0.965) {         // a grain / oat stalk
+          key = `grn:${v}`; build = () => makeGrainStalk(tplRng(key));
+          sw = SW_GR; sc = 0.8 + rng() * 0.5;
+        } else {                           // a wildflower
+          key = `flw:${v}`; build = () => makeMeadowFlower(tplRng(key));
+          sw = SW_FL; sc = 0.85 + rng() * 0.5;
+        }
+        stampTemplate(deco, bakeTemplate(key, build), x, y, z, rot, sw, sc);
       }
     }
   }
