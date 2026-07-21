@@ -28,21 +28,9 @@ export const BAKED_MAT = new THREE.MeshLambertMaterial({ vertexColors: true });
 // All driven by shared uniforms updated once per frame from main.js —
 // zero per-object cost, every chunk still renders as one draw call.
 export const FOL_TRAIL = 8; // trail slots (must match the GLSL array size)
-BAKED_MAT.userData.shaders = [];
-BAKED_MAT.onBeforeCompile = (shader) => {
-  shader.uniforms.uTime = { value: 0 };
-  shader.uniforms.uPlayer = { value: new THREE.Vector3(0, -9999, 0) };
-  shader.uniforms.uPlayerVel = { value: new THREE.Vector2(0, 0) };
-  shader.uniforms.uWind = { value: 1 };
-  shader.uniforms.uPush = { value: 1 };
-  shader.uniforms.uDist = {
-    value: Array.from({ length: FOL_TRAIL }, () => new THREE.Vector4(0, 0, -99, 0)),
-  };
-  shader.uniforms.uDistDir = {
-    value: Array.from({ length: FOL_TRAIL }, () => new THREE.Vector2(0, 0)),
-  };
-  shader.vertexShader = shader.vertexShader
-    .replace('#include <common>', `#include <common>
+BAKED_MAT.userData.shaders = []; // all foliage shaders (baked + instanced grass)
+
+const _FOL_UNIFORMS = `
 attribute float sway;
 uniform float uTime;
 uniform vec3 uPlayer;
@@ -50,49 +38,76 @@ uniform vec2 uPlayerVel;
 uniform float uWind;
 uniform float uPush;
 uniform vec4 uDist[${FOL_TRAIL}];
-uniform vec2 uDistDir[${FOL_TRAIL}];`)
-    .replace('#include <begin_vertex>', `#include <begin_vertex>
+uniform vec2 uDistDir[${FOL_TRAIL}];`;
+
+// the wind + player-trample sway, given an expression for this vertex's world
+// position (baked meshes: modelMatrix*pos; instanced grass: also *instanceMatrix)
+const _folBody = (wpExpr) => `#include <begin_vertex>
 if (sway > 0.001) {
-  vec3 wpFol = (modelMatrix * vec4(transformed, 1.0)).xyz;
+  vec3 wpFol = ${wpExpr};
   float phFol = wpFol.x * 0.37 + wpFol.z * 0.29;
   float gust = sin(uTime * 1.6 + phFol) + 0.55 * sin(uTime * 3.3 + phFol * 1.9);
   vec2 offFol = vec2(0.83, 0.55) * (gust * 0.5 + 0.45) * 0.2 * sway * uWind;
-  vec2 layFol = vec2(0.0);  // horizontal lay-over from contact + trail
-  float pressFol = 0.0;     // how hard the tip is bent toward the ground
-
-  // contact: lay the grass over the way the player walks, press it down
+  vec2 layFol = vec2(0.0);
+  float pressFol = 0.0;
   vec2 dpFol = wpFol.xz - uPlayer.xz;
   float dFol = length(dpFol);
   float pkFol = (1.0 - smoothstep(0.1, 1.25, dFol))
     * (1.0 - smoothstep(0.8, 1.9, abs(wpFol.y - uPlayer.y))) * uPush;
   if (pkFol > 0.001) {
     vec2 radial = dFol > 0.02 ? dpFol / dFol : vec2(0.0);
-    vec2 dir = uPlayerVel + radial * 0.5;   // mostly along the walk direction
+    vec2 dir = uPlayerVel + radial * 0.5;
     float dl = length(dir);
     layFol += (dl > 0.001 ? dir / dl : radial) * pkFol;
     pressFol += pkFol;
   }
-
-  // trail: footfalls stay laid over in their own walk direction, rising back
-  // up smoothly (exp decay — no oscillation, no reversal)
   for (int i = 0; i < ${FOL_TRAIL}; i++) {
     vec4 dFt = uDist[i];
     float age = uTime - dFt.z;
-    if (age < 0.0) age += 900.0;  // uTime wraps every 900 s
+    if (age < 0.0) age += 900.0;
     if (age < 1.6 && dFt.w > 0.001) {
       float dl = length(wpFol.xz - dFt.xy);
       float w = (1.0 - smoothstep(0.06, 1.0, dl)) * dFt.w * uPush * exp(-age * 2.6);
       if (w > 0.001) { layFol += uDistDir[i] * w; pressFol += w; }
     }
   }
-
   float p = min(pressFol, 1.3);
-  offFol *= (1.0 - min(p, 1.0) * 0.7);  // laid-over grass barely catches wind
-  offFol += layFol * 0.6 * sway;        // bend the tip along the lay direction
+  offFol *= (1.0 - min(p, 1.0) * 0.7);
+  offFol += layFol * 0.6 * sway;
   transformed.xz += offFol;
-  transformed.y -= p * 0.42 * sway;     // …and down toward the ground
-}`);
+  transformed.y -= p * 0.42 * sway;
+}`;
+
+function _initFolUniforms(shader) {
+  shader.uniforms.uTime = { value: 0 };
+  shader.uniforms.uPlayer = { value: new THREE.Vector3(0, -9999, 0) };
+  shader.uniforms.uPlayerVel = { value: new THREE.Vector2(0, 0) };
+  shader.uniforms.uWind = { value: 1 };
+  shader.uniforms.uPush = { value: 1 };
+  shader.uniforms.uDist = { value: Array.from({ length: FOL_TRAIL }, () => new THREE.Vector4(0, 0, -99, 0)) };
+  shader.uniforms.uDistDir = { value: Array.from({ length: FOL_TRAIL }, () => new THREE.Vector2(0, 0)) };
+}
+
+BAKED_MAT.onBeforeCompile = (shader) => {
+  _initFolUniforms(shader);
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', '#include <common>' + _FOL_UNIFORMS)
+    .replace('#include <begin_vertex>', _folBody('(modelMatrix * vec4(transformed, 1.0)).xyz'));
   BAKED_MAT.userData.shaders.push(shader);
+};
+
+// ---- INSTANCED grass: one tiny tuft geometry drawn thousands of times per
+// chunk (one draw call) so Ultra can carpet the ground far denser than baking
+// ever could. Same wind/trample sway, but the world position also folds in
+// the per-instance matrix. Per-instance colour rides instanceColor.
+export const GRASS_INST_MAT = new THREE.MeshLambertMaterial({ vertexColors: true });
+GRASS_INST_MAT.userData.shared = true;
+GRASS_INST_MAT.onBeforeCompile = (shader) => {
+  _initFolUniforms(shader);
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', '#include <common>' + _FOL_UNIFORMS)
+    .replace('#include <begin_vertex>', _folBody('(modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz'));
+  BAKED_MAT.userData.shaders.push(shader); // main.js updates them all together
 };
 
 const _bakeMat4 = new THREE.Matrix4();
@@ -3229,6 +3244,66 @@ function _treeBranches(g, trunkH, scale, trunkColor, foliageColor, detail, rng) 
 // a DENSE patch of many TINY grass blades spread over a small area — the
 // Ultra grass-fill stamps these overlapping so the ground reads as a thick
 // continuous lawn of countless little blades
+// ---- instanced grass tuft: ONE shared geometry drawn thousands of times ----
+// a tiny mixed tuft (spiky cones + simpler flat blades), WHITE so the colour
+// comes from each instance; carries the sway attribute for the wind shader
+let _grassTuftGeo = null;
+export function grassTuftGeometry() {
+  if (_grassTuftGeo) return _grassTuftGeo;
+  const rng = tplRng('grass-inst-geo');
+  const g = new THREE.Group();
+  for (let i = 0; i < 3; i++) {                 // spiky blades
+    const h = 0.16 + rng() * 0.14;
+    const b = cone(0.028, h, 0xffffff, 3);
+    const a = rng() * Math.PI * 2, r = rng() * 0.12;
+    b.position.set(Math.cos(a) * r, h / 2, Math.sin(a) * r);
+    b.rotation.set((rng() - 0.5) * 0.5, rng() * Math.PI, (rng() - 0.5) * 0.5);
+    g.add(b);
+  }
+  for (let i = 0; i < 2; i++) {                 // simpler FLAT blades
+    const h = 0.18 + rng() * 0.16;
+    const b = box(0.055, h, 0.012, 0xffffff);
+    const a = rng() * Math.PI * 2, r = rng() * 0.1;
+    b.position.set(Math.cos(a) * r, h / 2, Math.sin(a) * r);
+    b.rotation.set((rng() - 0.5) * 0.4, rng() * Math.PI, (rng() - 0.5) * 0.4);
+    g.add(b);
+  }
+  const out = bakeAccumulator();
+  _swayCtx = { amp: 1, y0: 0.02, y1: 0.26 };
+  _bakeInto(g, _identity, out);
+  _swayCtx = null;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(out.pos), 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(out.nrm), 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(out.col), 3));
+  geo.setAttribute('sway', new THREE.BufferAttribute(new Float32Array(out.sway), 1));
+  geo.setIndex(out.idx);
+  geo.userData.shared = true; // one geometry for the whole world — never dispose
+  _grassTuftGeo = geo;
+  return geo;
+}
+
+const _gfM = new THREE.Matrix4(), _gfQ = new THREE.Quaternion();
+const _gfE = new THREE.Euler(), _gfP = new THREE.Vector3(), _gfS = new THREE.Vector3();
+const _gfC = new THREE.Color();
+// build one InstancedMesh from a list of {x,y,z,rot,s,c} tufts
+export function makeGrassField(list) {
+  if (!list.length) return null;
+  const im = new THREE.InstancedMesh(grassTuftGeometry(), GRASS_INST_MAT, list.length);
+  im.castShadow = false; im.receiveShadow = false;
+  for (let i = 0; i < list.length; i++) {
+    const it = list[i];
+    _gfE.set(0, it.rot, 0); _gfQ.setFromEuler(_gfE);
+    _gfP.set(it.x, it.y, it.z); _gfS.setScalar(it.s);
+    im.setMatrixAt(i, _gfM.compose(_gfP, _gfQ, _gfS));
+    im.setColorAt(i, _gfC.setHex(it.c));
+  }
+  im.instanceMatrix.needsUpdate = true;
+  if (im.instanceColor) im.instanceColor.needsUpdate = true;
+  im.computeBoundingSphere();
+  return im;
+}
+
 export function makeGrassPatch(color, rng) {
   const g = new THREE.Group();
   const n = 6 + Math.floor(rng() * 3);         // 6-8 tiny blades per patch

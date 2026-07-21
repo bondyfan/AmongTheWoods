@@ -11,7 +11,7 @@ import * as THREE from 'three';
 import { WORLD, BIOMES, biomeAt, biomeIndexAt, radiusOf, zoneInfoAt,
          ZONE_LINES, wobX, wobZ, hubEdgeR, coastRAt, coastDistAt,
          HARBOR_SPECS } from './config.js';
-import { makeTree, makeRock, makeGrassTuft, makeGrassBlades, makeGrassPatch,
+import { makeTree, makeRock, makeGrassTuft, makeGrassBlades, makeGrassField,
          makeGrainStalk, makeMeadowFlower, makeFlower, makeMushroom, makeBush,
          makeLog, makeBoulder, makeBridge, makeCampfire, makeStalagmite,
          makeBerryBush, makeShrine, makeMonolith, makeCrypt, makeBlacksmith, makeCobweb,
@@ -1620,8 +1620,12 @@ export class World {
   // shared ground-detail texture are left alone; geometries are per-chunk)
   _disposeGroup(root) {
     root.traverse((o) => {
-      // template-shared geometries (one per tree variant) outlive every chunk
-      if (!o.geometry?.userData?.shared) o.geometry?.dispose?.();
+      // instanced grass owns per-chunk instance buffers → free them (its
+      // shared geometry/material are skipped below and outlive the chunk)
+      if (o.isInstancedMesh) o.dispose();
+      // template-shared geometries (one per tree variant, the grass tuft)
+      // outlive every chunk
+      else if (!o.geometry?.userData?.shared) o.geometry?.dispose?.();
       const mats = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
       for (const m of mats) {
         if (m === BAKED_MAT || isSharedMaterial(m)) continue;
@@ -1743,54 +1747,54 @@ export class World {
 
   // Ultra grass: a jittered grid tuft on every green grassy cell — dense turf
   // everywhere, one baked mesh, its own rng so other decos don't shift.
-  _grassFill(deco, cxw, czw, fm) {
-    // The expensive terrain checks (water / path / biome) run on a COARSE
-    // grid; each valid cell then stamps SEVERAL dense tiny-blade patches at
-    // jittered offsets. That gives a thick continuous lawn without paying a
-    // water/path query for every little clump.
-    const cell = Math.max(2.2, Math.min(4.2, 4.7 / Math.sqrt(fm)));
-    const perCell = fm >= 3 ? 3 : fm >= 2 ? 2 : 1;
+  _grassFill(deco, group, cxw, czw, fm) {
+    // Ultra grass is INSTANCED: one shared tuft geometry stamped thousands of
+    // times per chunk in ONE draw call, so the ground can be carpeted far
+    // denser than baking allowed. Expensive terrain checks run on a coarse
+    // grid; each valid cell spawns many tuft instances at jittered offsets.
+    // Taller grass, grain and flowers stay baked into `deco` (sparse, on top).
+    const cell = Math.max(1.7, Math.min(3.2, 3.6 / Math.sqrt(fm)));
+    const perCell = 7 + Math.round(fm * 2.4);           // ~15 tufts/cell at ultra
     const cx = (cxw / CHUNK) | 0, cz = (czw / CHUNK) | 0;
     const rng = mulberry32((this.seed ^ 0x6a55f1) ^ (cx * 73856093) ^ (cz * 19349663));
-    const SW_LO = { amp: 1, h: 0.3 }, SW_HI = { amp: 1, h: 0.95 };
+    const inst = [];
+    const SW_HI = { amp: 1, h: 0.95 }, SW_LO = { amp: 1, h: 0.3 };
     const SW_GR = { amp: 1, h: 1.0 }, SW_FL = { amp: 0.9, h: 0.32 };
+    const gcol = new THREE.Color();
     for (let gz = 0; gz < CHUNK; gz += cell) {
       for (let gx = 0; gx < CHUNK; gx += cell) {
         const ccx = cxw + gx + cell * 0.5, ccz = czw + gz + cell * 0.5;
-        // one set of checks for the whole cell (cheapest cullers first)
         const gc = biomeAt(ccx, ccz).grass;
         if (!(((gc >> 8) & 255) > ((gc >> 16) & 255) && ((gc >> 8) & 255) > (gc & 255))) continue;
         if (radiusOf(ccx, ccz) < 14) continue;              // starting cave
         if (this.isWater(ccx, ccz)) continue;               // water / lakes / bog
         if (this.pathDistance(ccx, ccz) < 3.5) continue;    // keep trails clear
         if (worldPatch.buildingGroundAt?.(ccx, ccz)) continue; // town squares
+        // ONE height sample per cell (short grass; a flat cell disc is fine) —
+        // per-blade heightAt was the whole cost of the dense fill
+        const cy = this.heightAt(ccx, ccz);
         for (let k = 0; k < perCell; k++) {
           const x = ccx + (rng() - 0.5) * cell, z = ccz + (rng() - 0.5) * cell;
+          // slight per-instance shade so the carpet isn't a flat colour
+          const shade = gcol.setHex(gc).multiplyScalar(0.8 + rng() * 0.4).getHex();
+          inst.push({ x, y: cy + (rng() - 0.5) * 0.05, z, rot: rng() * Math.PI * 2, s: 0.85 + rng() * 0.9, c: shade });
+        }
+        // sparse baked variety on top of the instanced carpet
+        if (rng() < 0.5) {
+          const x = ccx + (rng() - 0.5) * cell, z = czw + gz + (rng() - 0.5) * cell + cell * 0.5;
           const v = (rng() * 8) | 0, rot = rng() * Math.PI * 2, roll = rng();
           const y = this.heightAt(x, z);
-          // MEADOW MIX — dense tiny-blade patches dominate; occasional taller
-          // grass, a bushier tuft, a grain stalk and the rare wildflower
           let key, build, sw, sc;
-          if (roll < 0.76) {                 // dense patch of tiny blades (base)
-            key = `gp:${gc}:${v}`; build = () => makeGrassPatch(gc, tplRng(key));
-            sw = SW_LO; sc = 1.0 + rng() * 0.5;
-          } else if (roll < 0.87) {          // a taller grass clump
-            key = `gt:${gc}:${v}`; build = () => makeGrassBlades(gc, tplRng(key));
-            sw = SW_HI; sc = 1.5 + rng() * 0.9;
-          } else if (roll < 0.94) {          // a bushier fan-grass type
-            key = `gb:${gc}:${v}`; build = () => makeGrassTuft(gc, tplRng(key));
-            sw = SW_LO; sc = 0.6 + rng() * 0.4;
-          } else if (roll < 0.98) {          // a grain / oat stalk
-            key = `grn:${v}`; build = () => makeGrainStalk(tplRng(key));
-            sw = SW_GR; sc = 0.8 + rng() * 0.5;
-          } else {                           // a wildflower
-            key = `flw:${v}`; build = () => makeMeadowFlower(tplRng(key));
-            sw = SW_FL; sc = 0.85 + rng() * 0.5;
-          }
+          if (roll < 0.5) { key = `gt:${gc}:${v}`; build = () => makeGrassBlades(gc, tplRng(key)); sw = SW_HI; sc = 1.5 + rng() * 0.9; }
+          else if (roll < 0.8) { key = `gb:${gc}:${v}`; build = () => makeGrassTuft(gc, tplRng(key)); sw = SW_LO; sc = 0.7 + rng() * 0.5; }
+          else if (roll < 0.93) { key = `grn:${v}`; build = () => makeGrainStalk(tplRng(key)); sw = SW_GR; sc = 0.8 + rng() * 0.5; }
+          else { key = `flw:${v}`; build = () => makeMeadowFlower(tplRng(key)); sw = SW_FL; sc = 0.85 + rng() * 0.5; }
           stampTemplate(deco, bakeTemplate(key, build), x, y, z, rot, sw, sc);
         }
       }
     }
+    const field = makeGrassField(inst);
+    if (field) group.add(field);
   }
 
   // can vegetation stand here? (shared by chunk gen and the far-LOD tier)
@@ -2115,7 +2119,7 @@ export class World {
     const bn = biome.name;
     // GRASS: at Ultra a dense grid blankets every green grassy patch; below
     // that, the classic sparse-ish scatter (so "High = what we had before")
-    if (fm >= 2.4) this._grassFill(deco, cxw, czw, fm);
+    if (fm >= 2.4) this._grassFill(deco, group, cxw, czw, fm);
     else scatter(Math.round((22 + rng() * 12) * fm), `grass:${biome.grass}`,
       (r) => makeGrassTuft(biome.grass, r), SW_GRASS);
     if (biome.jungleFlora) {
