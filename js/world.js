@@ -22,7 +22,8 @@ import { makeTree, makeRock, makeGrassTuft, makeFlower, makeMushroom, makeBush,
          makePalm, makeGroundLeaves, makeFarTree } from './models.js';
 import { makePier } from './ship.js';
 import { bakeGroup, bakeAccumulator, buildBakedMesh, bakeAt, BAKED_MAT,
-         isSharedMaterial, waterMaterial } from './models.js';
+         isSharedMaterial, waterMaterial, bakeTemplate, stampTemplate,
+         templateMesh, tplRng } from './models.js';
 import { worldPatch } from './worldpatch.js';
 import { audio } from './audio.js';
 
@@ -1359,33 +1360,43 @@ export class World {
     const col = new THREE.Color();
     const void_ = new THREE.Color(0x11170e);
     const rock = new THREE.Color(0x7a766b);
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i), z = pos.getZ(i);
-      const h = this.heightAt(x, z);
-      pos.setY(i, h);
+    // heights come from ONE grid pass (with a 1-cell margin ring) — heightAt
+    // is the expensive call here, and slopes + normals can all read the grid
+    // instead of re-sampling it 6 more times per vertex. Grid points sit on
+    // the same world positions for neighbouring tiles, so lighting stays
+    // continuous across chunk borders exactly like before.
+    const n = Math.round(Math.sqrt(pos.count));      // vertices per row
+    const x0 = pos.getX(0), z0 = pos.getZ(0);
+    const step = pos.getX(1) - x0;                    // uniform grid spacing
+    const G = n + 2;                                  // grid incl. margins
+    const H = this._hGrid?.length === G * G ? this._hGrid : (this._hGrid = new Float32Array(G * G));
+    for (let j = -1; j <= n; j++) {
+      const wz = z0 + j * step;
+      for (let i = -1; i <= n; i++) H[(j + 1) * G + (i + 1)] = this.heightAt(x0 + i * step, wz);
+    }
+    const inv2 = 0.4 / (2 * step), invS = 1 / step;
+    const nrm = geo.attributes.normal ?? (geo.computeVertexNormals(), geo.attributes.normal);
+    for (let k = 0; k < pos.count; k++) {
+      const x = pos.getX(k), z = pos.getZ(k);
+      const i = Math.round((x - x0) / step) + 1, j = Math.round((z - z0) / step) + 1;
+      const h = H[j * G + i];
+      pos.setY(k, h);
       if (radiusOf(x, z) > WORLD.radius + 6) col.copy(void_);
       else {
         this._groundColor(x, z, col);
         if (this.debugElevation) col.lerp(elevationColor(h), 0.68);
         // steep ground reads as bare rock, so cliff faces stand out
         const slope = Math.max(
-          Math.abs(this.heightAt(x + 1.4, z) - h),
-          Math.abs(this.heightAt(x, z + 1.4) - h)) / 1.4;
+          Math.abs(H[j * G + i + 1] - h),
+          Math.abs(H[(j + 1) * G + i] - h)) * invS;
         if (slope > 0.55) col.lerp(rock, Math.min(1, (slope - 0.55) / 0.7));
       }
-      colors[i * 3] = col.r; colors[i * 3 + 1] = col.g; colors[i * 3 + 2] = col.b;
-    }
-    // ANALYTIC normals from heightAt (central differences): the same height
-    // function on both sides of a chunk border gives continuous lighting.
-    if (!geo.attributes.normal) geo.computeVertexNormals();
-    const nrm = geo.attributes.normal;
-    const E = 1.2;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i), z = pos.getZ(i);
-      const nx = (this.heightAt(x - E, z) - this.heightAt(x + E, z)) / (2 * E) * 0.4;
-      const nz = (this.heightAt(x, z - E) - this.heightAt(x, z + E)) / (2 * E) * 0.4;
+      colors[k * 3] = col.r; colors[k * 3 + 1] = col.g; colors[k * 3 + 2] = col.b;
+      // analytic normal from grid central differences (continuous across tiles)
+      const nx = (H[j * G + i - 1] - H[j * G + i + 1]) * inv2;
+      const nz = (H[(j - 1) * G + i] - H[(j + 1) * G + i]) * inv2;
       const l = Math.hypot(nx, 1, nz);
-      nrm.setXYZ(i, nx / l, 1 / l, nz / l);
+      nrm.setXYZ(k, nx / l, 1 / l, nz / l);
     }
     pos.needsUpdate = true;
     colAttr.needsUpdate = true;
@@ -1522,7 +1533,8 @@ export class World {
   // shared ground-detail texture are left alone; geometries are per-chunk)
   _disposeGroup(root) {
     root.traverse((o) => {
-      o.geometry?.dispose?.();
+      // template-shared geometries (one per tree variant) outlive every chunk
+      if (!o.geometry?.userData?.shared) o.geometry?.dispose?.();
       const mats = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
       for (const m of mats) {
         if (m === BAKED_MAT || isSharedMaterial(m)) continue;
@@ -1719,15 +1731,25 @@ export class World {
       const size = denseWood
         ? (roll < 0.08 ? 0 : roll < 0.30 ? 1 : roll < 0.60 ? 2 : roll < 0.85 ? 3 : 4)
         : (roll < 0.30 ? 0 : roll < 0.60 ? 1 : roll < 0.82 ? 2 : roll < 0.95 ? 3 : 4);
-      const made = makeTree(size, biome, rng);
-      // one draw call per tree; the canopy gets a subtle wind ripple
-      // (trunk anchored below y0, leaves at full amplitude by y1)
-      const mesh = bakeGroup(made.mesh, true, { amp: 0.35, y0: 1.6, y1: 6 });
+      // trees come from a SHARED template pool (6 variants per biome+size):
+      // building + baking each tree from scratch was the chunk-gen hitch.
+      // Canopy sway band {amp, y0, y1} is baked into the shared geometry.
+      const tv = (rng() * 6) | 0;
+      const tkey = `tree:${biome.name}:${size}:${tv}`;
+      let mesh, radius;
+      const shared = templateMesh(tkey, () => makeTree(size, biome, tplRng(tkey)),
+        { amp: 0.35, y0: 1.6, y1: 6 });
+      if (shared) ({ mesh, radius } = shared);
+      else { // maker produced un-bakeable extras — bake this one live
+        const made = makeTree(size, biome, rng);
+        mesh = bakeGroup(made.mesh, true, { amp: 0.35, y0: 1.6, y1: 6 });
+        radius = made.radius;
+      }
       this._place(mesh, x, z);
       mesh.rotation.y = rng() * Math.PI * 2;
       group.add(mesh);
       trees.push({
-        id: this.nextTreeId++, mesh, x, z, radius: made.radius, size,
+        id: this.nextTreeId++, mesh, x, z, radius, size,
         hp: TREE_HP[size], wood: TREE_WOOD[size], alive: true, kind: 'tree',
       });
     }
@@ -1754,12 +1776,22 @@ export class World {
     // plants ride the wind shader and part around the walking player --
     const fm = this.foliageMult ?? 1;
     const deco = bakeAccumulator();
-    const scatter = (n, maker, sway = null, filter = null) => {
+    // scatter STAMPS pre-baked templates (6 variants per look) instead of
+    // building every plant's geometry from scratch — pure array math now
+    const scatter = (n, keyBase, build, sway = null, opts = {}) => {
       for (let i = 0; i < n; i++) {
         const x = cxw + rng() * CHUNK, z = czw + rng() * CHUNK;
         if (!inBounds(x, z)) continue;
-        if (filter && !filter(x, z)) continue;
-        bakeAt(deco, maker(), x, this.heightAt(x, z), z, rng() * Math.PI * 2, 1, sway);
+        if (opts.filter && !opts.filter(x, z)) continue;
+        const key = keyBase + ':' + ((rng() * 6) | 0);
+        const tpl = bakeTemplate(key, () => build(tplRng(key)));
+        const sc = opts.sMin !== undefined ? opts.sMin + rng() * (opts.sMax - opts.sMin) : 1;
+        const sy = opts.syMin !== undefined ? opts.syMin + rng() * (opts.syMax - opts.syMin) : sc;
+        if (tpl.extras) { // un-bakeable parts → live bake (none of ours do)
+          bakeAt(deco, build(rng), x, this.heightAt(x, z), z, rng() * Math.PI * 2, sc, sway);
+          continue;
+        }
+        stampTemplate(deco, tpl, x, this.heightAt(x, z), z, rng() * Math.PI * 2, sway, sc, sy);
       }
     };
     // biome-signature chunk props: silk cocoons & firefly glades (Dark Forest)
@@ -1790,7 +1822,9 @@ export class World {
         if (rng() > 0.5) continue;
         const x = cxw + 4 + rng() * (CHUNK - 8), z = czw + 4 + rng() * (CHUNK - 8);
         if (!inBounds(x, z)) continue;
-        bakeAt(deco, makeCactus(rng), x, this.heightAt(x, z), z, rng() * Math.PI * 2);
+        const ckey = 'cactus:' + ((rng() * 6) | 0);
+        stampTemplate(deco, bakeTemplate(ckey, () => makeCactus(tplRng(ckey))),
+          x, this.heightAt(x, z), z, rng() * Math.PI * 2);
       }
     }
     if (biome.name === 'Dark Forest') {
@@ -1854,44 +1888,46 @@ export class World {
     const SW_PLANT = { amp: 0.7, h: 1.2 }, SW_BUSH = { amp: 0.45, h: 0.8 };
     const SW_FLOWER = { amp: 0.9, h: 0.35 }, SW_REED = { amp: 1, h: 1.5 };
     const SW_LEAF = { amp: 0.6, h: 0.4 }, SW_PALM = { amp: 0.5, h: 3.2 };
-    scatter(Math.round((22 + rng() * 12) * fm), () => makeGrassTuft(biome.grass, rng), SW_GRASS);
+    const bn = biome.name;
+    scatter(Math.round((22 + rng() * 12) * fm), `grass:${biome.grass}`,
+      (r) => makeGrassTuft(biome.grass, r), SW_GRASS);
     if (biome.jungleFlora) {
       // RAINFOREST layers: understory palms above banana plants above a
       // floor of ferns, broad leaves and grass — wall-to-wall green
-      scatter(Math.round((3 + rng() * 3) * Math.min(fm, 2)), () => makePalm(rng), SW_PALM);
-      scatter(Math.round((7 + rng() * 5) * fm), () => makeJunglePlant(rng), SW_PLANT);
-      scatter(Math.round((14 + rng() * 8) * fm), () => makeFern(rng), SW_FERN);
-      scatter(Math.round((10 + rng() * 6) * fm), () => makeGroundLeaves(rng), SW_LEAF);
-      scatter(Math.round((12 + rng() * 8) * fm), () => makeGrassTuft(0x3f8a30, rng), SW_GRASS);
-      scatter(Math.round((3 + rng() * 3) * fm), () => {
-        const b = makeBush(biome.foliage[1 + Math.floor(rng() * 2)], rng);
-        b.scale.setScalar(1.2 + rng() * 0.4);
-        return b;
-      }, SW_BUSH);
+      scatter(Math.round((3 + rng() * 3) * Math.min(fm, 2)), 'palm', makePalm, SW_PALM);
+      scatter(Math.round((7 + rng() * 5) * fm), 'jplant', makeJunglePlant, SW_PLANT);
+      scatter(Math.round((14 + rng() * 8) * fm), 'fern', makeFern, SW_FERN);
+      scatter(Math.round((10 + rng() * 6) * fm), 'gleaf', makeGroundLeaves, SW_LEAF);
+      scatter(Math.round((12 + rng() * 8) * fm), 'grass:jungle',
+        (r) => makeGrassTuft(0x3f8a30, r), SW_GRASS);
+      scatter(Math.round((3 + rng() * 3) * fm), `jbush:${biome.foliage[1]}`,
+        (r) => makeBush(biome.foliage[1 + Math.floor(r() * 2)], r), SW_BUSH,
+        { sMin: 1.2, sMax: 1.6 });
     } else if (denseWood) {
       // thick woods grow a forest floor: ferns, low leaves, mushroom rings
-      scatter(Math.round((6 + rng() * 4) * fm), () => makeFern(rng), SW_FERN);
-      scatter(Math.round((4 + rng() * 3) * fm), () => makeGroundLeaves(rng), SW_LEAF);
-      scatter(Math.round((2 + rng() * 3) * fm), () => makeMushroom(rng));
+      scatter(Math.round((6 + rng() * 4) * fm), 'fern', makeFern, SW_FERN);
+      scatter(Math.round((4 + rng() * 3) * fm), 'gleaf', makeGroundLeaves, SW_LEAF);
+      scatter(Math.round((2 + rng() * 3) * fm), 'shroom', makeMushroom);
     }
-    if (biome.name === 'Murky Swamp') {
-      scatter(Math.round((5 + rng() * 4) * fm), () => makeGroundLeaves(rng), SW_LEAF);
+    if (bn === 'Murky Swamp') {
+      scatter(Math.round((5 + rng() * 4) * fm), 'gleaf', makeGroundLeaves, SW_LEAF);
     }
-    scatter(Math.round((2 + rng() * 3) * Math.min(fm, 2)), () => makeBush(biome.foliage[0], rng), SW_BUSH);
-    scatter(1 + Math.floor(rng() * 2), () => makeRock(rng));
-    scatter(Math.round((2 + rng() * 3) * Math.min(fm, 2)),
-      () => makePebbles(rng, rng() < 0.5 ? 0x8a8a84 : biome.trunk));
-    if (biome.flowers) scatter(Math.round((3 + rng() * 5) * fm), () => makeFlower(rng), SW_FLOWER);
-    if (biome.mushrooms) scatter(Math.round((1 + rng() * 3) * fm), () => makeMushroom(rng));
+    scatter(Math.round((2 + rng() * 3) * Math.min(fm, 2)), `bush:${biome.foliage[0]}`,
+      (r) => makeBush(biome.foliage[0], r), SW_BUSH);
+    scatter(1 + Math.floor(rng() * 2), 'rock', makeRock);
+    scatter(Math.round((2 + rng() * 3) * Math.min(fm, 2)), `pebbles:${biome.trunk}`,
+      (r) => makePebbles(r, r() < 0.5 ? 0x8a8a84 : biome.trunk));
+    if (biome.flowers) scatter(Math.round((3 + rng() * 5) * fm), 'flower', makeFlower, SW_FLOWER);
+    if (biome.mushrooms) scatter(Math.round((1 + rng() * 3) * fm), 'shroom', makeMushroom);
     // waterside reeds hug the banks of bog pools, lakes and rivers (not the
     // open ocean beach — coastDist keeps them inland, except in the swamp)
-    if (biome.name !== 'Scorched Desert' && biome.name !== 'Frozen Peak') {
+    if (bn !== 'Scorched Desert' && bn !== 'Frozen Peak') {
       const nearWater = (x, z) =>
-        (biome.name === 'Murky Swamp' || coastDistAt(x, z) > 30)
+        (bn === 'Murky Swamp' || coastDistAt(x, z) > 30)
         && (this.isWater(x + 1.6, z) || this.isWater(x - 1.6, z)
          || this.isWater(x, z + 1.6) || this.isWater(x, z - 1.6));
-      scatter(Math.round((biome.name === 'Murky Swamp' ? 10 : 5) * fm),
-        () => makeReeds(rng), SW_REED, nearWater);
+      scatter(Math.round((bn === 'Murky Swamp' ? 10 : 5) * fm), 'reeds', makeReeds,
+        SW_REED, { filter: nearWater });
     }
     if (rng() < 0.175) {
       const x = cxw + rng() * CHUNK, z = czw + rng() * CHUNK;
@@ -2036,14 +2072,13 @@ export class World {
           const fx = e.x + Math.cos(a) * rr, fz = e.z + Math.sin(a) * rr;
           if (fx < cxw || fx >= cxw + CHUNK || fz < czw || fz >= czw + CHUNK) continue;
           if (this.isWater(fx, fz)) continue;
-          let obj, fsway;
-          if (e.type === 'wheat') { obj = makeWheatTuft(drng); fsway = { amp: 1, h: 1.1 }; }
-          else {
-            obj = makeGrassTuft(0x7fa04e, drng);
-            obj.scale.y = 1.9 + drng() * 0.5;
-            fsway = { amp: 1, h: 1.4 };
-          }
-          bakeAt(deco, obj, fx, this.heightAt(fx, fz), fz, drng() * Math.PI * 2, 1, fsway);
+          const wheat = e.type === 'wheat';
+          const fkey = (wheat ? 'wheat:' : 'tallgrass:') + ((drng() * 6) | 0);
+          const ftpl = bakeTemplate(fkey, () => (wheat
+            ? makeWheatTuft(tplRng(fkey)) : makeGrassTuft(0x7fa04e, tplRng(fkey))));
+          stampTemplate(deco, ftpl, fx, this.heightAt(fx, fz), fz, drng() * Math.PI * 2,
+            wheat ? { amp: 1, h: 1.1 } : { amp: 1, h: 1.4 },
+            1, wheat ? 1 : 1.9 + drng() * 0.5);
         }
       } else if (e.kind === 'meadow') {
         // a flower meadow: the same flowers every visit, only the ones
@@ -2056,8 +2091,10 @@ export class World {
           if (fx < cxw || fx >= cxw + CHUNK || fz < czw || fz >= czw + CHUNK) continue;
           if (this.isWater(fx, fz)) continue;
           const flower = drng() < 0.8;
-          const f = flower ? makeFlower(drng) : makeGrassTuft(0x6fa04c, drng);
-          bakeAt(deco, f, fx, this.heightAt(fx, fz), fz, drng() * Math.PI * 2, 1,
+          const mkey = (flower ? 'flower:' : 'mgrass:') + ((drng() * 6) | 0);
+          const mtpl = bakeTemplate(mkey, () => (flower
+            ? makeFlower(tplRng(mkey)) : makeGrassTuft(0x6fa04c, tplRng(mkey))));
+          stampTemplate(deco, mtpl, fx, this.heightAt(fx, fz), fz, drng() * Math.PI * 2,
             flower ? { amp: 0.9, h: 0.35 } : { amp: 1, h: 0.6 });
         }
       }
@@ -2172,7 +2209,9 @@ export class World {
       if (this.pathDistance(x, z) < 4.5) continue;
       const roll = rng();
       const size = roll < 0.30 ? 0 : roll < 0.60 ? 1 : roll < 0.82 ? 2 : roll < 0.95 ? 3 : 4;
-      bakeAt(acc, makeFarTree(size, biome, rng), x, this.heightAt(x, z), z, rng() * Math.PI * 2);
+      const fkey = `fartree:${biome.name}:${size}:${(rng() * 4) | 0}`;
+      stampTemplate(acc, bakeTemplate(fkey, () => makeFarTree(size, biome, tplRng(fkey))),
+        x, this.heightAt(x, z), z, rng() * Math.PI * 2);
     }
     const forest = buildBakedMesh(acc, false);
     if (forest) {
@@ -2225,31 +2264,39 @@ export class World {
 
     const pcx = Math.floor(playerPos.x / CHUNK), pcz = Math.floor(playerPos.z / CHUNK);
     const vr = this.viewRadius ?? VIEW_RADIUS; // adaptive quality can shrink it
-    // nearest-first, a handful per frame — no hitches when crossing into
-    // fresh country (or flying the editor camera)
-    let budget = this.groundOnly ? 26 : 6;
-    for (let ring = 0; ring <= vr && budget > 0; ring++) {
-      for (let dx = -ring; dx <= ring && budget > 0; dx++) {
-        for (let dz = -ring; dz <= ring && budget > 0; dz++) {
+    // nearest-first, on a TIME budget: chunk cost varies 10× between biomes,
+    // so a fixed chunks-per-frame count meant one frame could eat 60+ ms and
+    // hitch. Now we always make progress (first chunk is unconditional) and
+    // stop the moment the frame's generation allowance is spent.
+    const genT0 = performance.now();
+    const GEN_MS = this.groundOnly ? 12 : 3.5;
+    let made = 0;
+    outer:
+    for (let ring = 0; ring <= vr; ring++) {
+      for (let dx = -ring; dx <= ring; dx++) {
+        for (let dz = -ring; dz <= ring; dz++) {
           if (Math.max(Math.abs(dx), Math.abs(dz)) !== ring) continue;
           if (this.chunks.has(this._chunkKey(pcx + dx, pcz + dz))) continue;
+          if (made > 0 && performance.now() - genT0 > GEN_MS) break outer;
           this._genChunk(pcx + dx, pcz + dz);
-          budget--;
+          made++;
         }
       }
     }
 
     // far-LOD tier: cheap terrain+forest tiles from the full-detail edge out
-    // to the fog wall, so the world never visibly runs out
+    // to the fog wall — shares the same frame allowance (they're ~2 ms each)
     const fr = this.groundOnly ? 0 : Math.min(this.farRadius ?? 0, 14);
-    if (fr > vr) {
+    if (fr > vr && performance.now() - genT0 < GEN_MS) {
       let fbudget = 2;
+      farLoop:
       for (let ring = vr + 1; ring <= fr && fbudget > 0; ring++) {
         for (let dx = -ring; dx <= ring && fbudget > 0; dx++) {
           for (let dz = -ring; dz <= ring && fbudget > 0; dz++) {
             if (Math.max(Math.abs(dx), Math.abs(dz)) !== ring) continue;
             const k = this._chunkKey(pcx + dx, pcz + dz);
             if (this.chunks.has(k) || this.farChunks.has(k)) continue;
+            if (performance.now() - genT0 > GEN_MS + 2) break farLoop;
             this._genFarChunk(pcx + dx, pcz + dz);
             fbudget--;
           }
