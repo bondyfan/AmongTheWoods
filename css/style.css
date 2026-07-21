@@ -1288,6 +1288,12 @@ body.touch #buff-bar { bottom: 108px; }
 /* biome banner / toasts stay clear of the top-left burger */
 body.touch #top-center { top: calc(8px + var(--sa-t)); }
 
+/* HP / XP bars: clear the notch (safe-area top) AND the top-left burger */
+body.touch #top-left {
+  top: calc(12px + var(--sa-t)); left: calc(66px + var(--sa-l));
+  width: min(230px, calc(100vw - 160px));
+}
+
 /* ---- PORTRAIT: stack the spell bar higher so thumbs don't cover it ---- */
 @media (orientation: portrait) {
   body.touch #spellbar { bottom: calc(118px + var(--sa-b)); }
@@ -1311,11 +1317,12 @@ body.touch #top-center { top: calc(8px + var(--sa-t)); }
 /* standalone (home-screen) launch: let the canvas fill under the status bar */
 html.standalone, html.standalone body { height: 100%; }
 
-/* the auth gate's guest button */
+/* the auth gate's guest button — centred (inline-flex respects the parent's
+   text-align:center) and smaller than the primary Google button */
 #gate-guest {
-  margin-top: 14px; background: none; border: 1px solid rgba(255,255,255,0.28);
-  color: #d8e4c8; border-radius: 12px; padding: 10px 18px; cursor: pointer;
-  font-size: 15px; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  margin-top: 12px; background: none; border: 1px solid rgba(255,255,255,0.24);
+  color: #cdddbc; border-radius: 10px; padding: 7px 16px; cursor: pointer;
+  font-size: 13px; display: inline-flex; flex-direction: column; align-items: center; gap: 1px;
 }
 #gate-guest:hover { background: rgba(255,255,255,0.06); }
-#gate-guest small { opacity: 0.6; font-size: 11px; }
+#gate-guest small { opacity: 0.55; font-size: 10px; }

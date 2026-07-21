@@ -2510,10 +2510,14 @@ const settings = Object.assign(
   settings.bloom = false;
   settings.hiShadows = false;
   settings.filmic = false;
+  // phones/tablets default to lighter graphics (short draw distance) — they
+  // can raise it in Settings; desktops keep the generous default
+  const onMobile = window.matchMedia?.('(pointer: coarse)').matches
+    || navigator.maxTouchPoints > 0;
   settings.texDetail ??= 1; // Medium ground detail by default — richer terrain
   settings.shadows ??= true;
   settings.resScale ??= 'auto';
-  settings.drawDist ??= 'far'; // default to a generous view distance
+  settings.drawDist ??= onMobile ? 'short' : 'far';
   settings.showFps ??= false;
   settings.fpsCap ??= 0; // 0 = unlimited
   settings.humanModel ??= false; // experimental rigged-human avatar
