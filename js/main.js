@@ -107,8 +107,6 @@ let _fpsSmooth = 60, _fpsMeterT = 0;
 // high = "lush" (the classic look); ultra switches on the dense grass-fill
 const FOLIAGE_MULT = { low: 0.35, normal: 1, high: 1.7, ultra: 3.2 };
 const TREE_DETAIL = { low: 0, medium: 1, high: 2 };
-// SSAO sample radius (world-ish units) per quality — bigger = softer, broader
-const SSAO_RADIUS = { low: 1.1, medium: 1.8, high: 2.6 };
 // auto-exposure (eye adaptation) state: smoothed toneMappingExposure
 let _expCur = 1, _expTarget = 1;
 // shadow-distance rigs: {b = ortho half-extent m, s = map px}. The far plane
@@ -2605,6 +2603,8 @@ const settings = Object.assign(
   settings.drawDist ??= onMobile ? 'short' : 'far';
   settings.treeDetail ??= 'low';
   settings.shadowDist ??= 'low';
+  settings.autoExp ??= false;
+  settings.ssao ??= false;
   settings.showFps ??= false;
   settings.fpsCap ??= 0; // 0 = unlimited
   settings.humanModel ??= false; // experimental rigged-human avatar
@@ -2614,6 +2614,8 @@ const settings = Object.assign(
   $id('set-drawdist').value = String(settings.drawDist);
   $id('set-treedetail').value = String(settings.treeDetail);
   $id('set-shadowdist').value = String(settings.shadowDist);
+  $id('set-autoexp').checked = !!settings.autoExp;
+  $id('set-ssao').checked = !!settings.ssao;
   applyGraphics();
 
   // FPS meter toggle
@@ -2688,6 +2690,14 @@ const settings = Object.assign(
   $id('set-shadowdist').addEventListener('change', () => {
     settings.shadowDist = $id('set-shadowdist').value;
     saveGfx(); // applyGraphics resizes the shadow frustum + map
+  });
+  $id('set-autoexp').addEventListener('change', () => {
+    settings.autoExp = $id('set-autoexp').checked;
+    saveGfx(); // applyGraphics swaps the tone-mapping curve
+  });
+  $id('set-ssao').addEventListener('change', () => {
+    settings.ssao = $id('set-ssao').checked;
+    saveGfx(); // applyGraphics builds the post stack on demand
   });
 
   // foliage: density regenerates the world's decoration meshes; motion just
@@ -5048,6 +5058,29 @@ renderer.domElement.addEventListener('click', () => {
   }
 });
 
+// AUTO EXPOSURE (eye adaptation): drive toneMappingExposure toward a target
+// derived from the CURRENT scene lighting (sun + ambient + sky brightness —
+// already dimmed by dark biomes / cave / night / dungeon). Dark scenes raise
+// exposure so detail comes back; bright scenes lower it. The lag does the
+// "over-bright, then settle" (and "too dark, then brighten") like real eyes:
+// adapting TO darkness is slower than adapting to light.
+function tickAutoExposure(dt) {
+  if (!settings.autoExp) return;
+  if (game.mode !== 'play' || game.editorView) { // ease to neutral off-play
+    _expCur += (1 - _expCur) * Math.min(1, dt * 2);
+    renderer.toneMappingExposure = _expCur;
+    return;
+  }
+  const bg = scene.background;
+  const skyLuma = bg.r * 0.3 + bg.g * 0.5 + bg.b * 0.2;
+  const luma = sun.intensity * 0.62 + hemi.intensity * 0.95 + skyLuma * 0.2;
+  _expTarget = Math.max(0.85, Math.min(1.6, 1.9 / Math.max(0.25, luma)));
+  // slow to brighten (adapting into the dark), quicker to darken (into light)
+  const rate = _expTarget > _expCur ? 0.6 : 1.4;
+  _expCur += (_expTarget - _expCur) * Math.min(1, dt * rate);
+  renderer.toneMappingExposure = _expCur;
+}
+
 function applyViewMode() {
   const rpg = !!settings.rpgView;
   game.rpgView = rpg;
@@ -5632,7 +5665,7 @@ function step() {
   if (usePost) {
     postfx.render(scene, camera, {
       ssao: !!settings.ssao, bloom: !!settings.bloom,
-      aoRadius: SSAO_RADIUS[settings.ssao] ?? 1.8, aoStrength: 0.9,
+      aoRadius: 1.8, aoStrength: 0.9,
     });
   } else { renderer.setRenderTarget(null); renderer.render(scene, camera); }
 }
