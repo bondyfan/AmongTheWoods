@@ -4271,7 +4271,7 @@ let atmoCaveK = 0;   // how deep in the home cave we are (sky dome fades out)
 
 // per-biome music: the big hour-long tracks stream lazily on first entry
 const BIOME_MUSIC = [
-  'level1',            // 0 Verdant Forest
+  'biome_verdant',     // 0 Verdant Forest — Elwynn-style forest theme (15-min loop)
   'biome_desert',      // 1 Scorched Desert
   'biome_jungle',      // 2 Jungle
   'biome_swamp',       // 3 Murky Swamp
