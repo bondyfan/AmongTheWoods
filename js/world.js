@@ -1843,9 +1843,13 @@ export class World {
     // clump, so density & scale drop hard to keep the triangle budget sane.
     const cell = Math.max(1.7, Math.min(3.2, 3.6 / Math.sqrt(fm)));
     const perCell = q ? (2 + Math.round(fm * 0.6)) : (7 + Math.round(fm * 2.4)); // ~15/cell ultra
+    // quality: a DENSE short-blade lawn carpets the ground (so the eye reads
+    // continuous turf like the reference art) with sparser tall tufts on top.
+    const lawnPerCell = 4 + Math.round(fm * 1.4);
     const cx = (cxw / CHUNK) | 0, cz = (czw / CHUNK) | 0;
     const rng = mulberry32((this.seed ^ 0x6a55f1) ^ (cx * 73856093) ^ (cz * 19349663));
-    const inst = [];
+    const inst = [];    // tall accent tufts (q) / all tufts (procedural)
+    const lawn = [];    // dense short lawn carpet (quality only)
     const SW_HI = { amp: 1, h: 0.95 }, SW_LO = { amp: 1, h: 0.3 };
     const SW_GR = { amp: 1, h: 1.0 }, SW_FL = { amp: 0.9, h: 0.32 };
     const gcol = new THREE.Color();
@@ -1861,12 +1865,21 @@ export class World {
         // ONE height sample per cell (short grass; a flat cell disc is fine) —
         // per-blade heightAt was the whole cost of the dense fill
         const cy = this.heightAt(ccx, ccz);
+        // quality lawn: many short blades per cell for full ground coverage
+        if (q) {
+          for (let k = 0; k < lawnPerCell; k++) {
+            const x = ccx + (rng() - 0.5) * cell, z = ccz + (rng() - 0.5) * cell;
+            const shade = gcol.setHex(gc).multiplyScalar(0.9 + rng() * 0.3).getHex();
+            lawn.push({ x, y: cy + (rng() - 0.5) * 0.05, z, rot: rng() * Math.PI * 2,
+              s: 0.55 + rng() * 0.45, c: shade });
+          }
+        }
         for (let k = 0; k < perCell; k++) {
           const x = ccx + (rng() - 0.5) * cell, z = ccz + (rng() - 0.5) * cell;
           // slight per-instance shade so the carpet isn't a flat colour
-          const shade = gcol.setHex(gc).multiplyScalar(0.8 + rng() * 0.4).getHex();
+          const shade = gcol.setHex(gc).multiplyScalar(q ? 0.9 + rng() * 0.3 : 0.8 + rng() * 0.4).getHex();
           inst.push({ x, y: cy + (rng() - 0.5) * 0.05, z, rot: rng() * Math.PI * 2,
-            s: q ? 0.4 + rng() * 0.4 : 0.7 + rng() * 0.6, c: shade });
+            s: q ? 0.65 + rng() * 0.5 : 0.7 + rng() * 0.6, c: shade });
         }
         // sparse baked variety on top of the instanced carpet (procedural only —
         // the kit carpet stands on its own; baked vertex-colour bits would clash)
@@ -1883,7 +1896,16 @@ export class World {
         }
       }
     }
-    const field = q ? veg.grassField(inst) : makeGrassField(inst);
+    if (q) {
+      // both grass layers ride one container so vegDrawDist toggles them together
+      const cont = new THREE.Group();
+      const carpet = veg.grassCarpet(lawn); if (carpet) cont.add(carpet);
+      const tall = veg.grassField(inst);    if (tall) cont.add(tall);
+      if (!cont.children.length) return null;
+      group.add(cont);
+      return cont;
+    }
+    const field = makeGrassField(inst);
     if (field) group.add(field);
     return field; // stored on the chunk so vegDrawDist can toggle its visibility
   }
@@ -2254,7 +2276,7 @@ export class World {
     if (bn === 'Murky Swamp') {
       scatter(Math.round((5 + rng() * 4) * fm), 'gleaf', makeGroundLeaves, SW_LEAF);
     }
-    scatter(Math.round((2 + rng() * 3) * Math.min(fm, 2)), `bush:${biome.foliage[0]}`,
+    scatter(Math.round((qVegDeco ? 4 + rng() * 3 : 2 + rng() * 3) * Math.min(fm, 2)), `bush:${biome.foliage[0]}`,
       (r) => makeBush(biome.foliage[0], r), SW_BUSH, { q: veg.bush });
     scatter(1 + Math.floor(rng() * 2), 'rock', makeRock, null, { q: veg.rock });
     scatter(Math.round((2 + rng() * 3) * Math.min(fm, 2)), `pebbles:${biome.trunk}`,
@@ -2875,6 +2897,7 @@ export class World {
     audio.sfx('wood_chop', 0.55);
     if (tree.hp > 0) return 0;
     tree.alive = false;
+    this.canopyDirty = true; // its pool of canopy shade goes with it
     const dx = tree.x - fromPos.x, dz = tree.z - fromPos.z;
     const len = Math.hypot(dx, dz) || 1;
     this.fallingTrees.push({ mesh: tree.mesh, t: 0, dirX: (dz / len), dirZ: (dx / len), kind: 'tree' });

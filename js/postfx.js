@@ -112,15 +112,47 @@ const COMPOSITE_FRAG = /* glsl */`
   uniform sampler2D tScene;
   uniform sampler2D tAO;
   uniform sampler2D tBloom;
+  uniform sampler2D tDepth;
+  uniform sampler2D tCanopy;      // R: remaining light under crowns (1 = open)
+  uniform sampler2D tCanopyMeta;  // R: ground height, G: canopy-top height
+  uniform mat4 uInvProj;
+  uniform mat4 uCamWorld;
+  uniform vec2 uCanopyCenter;     // world xz of the shade map's center
+  uniform float uCanopyInvSize;   // 1 / meters covered by the map
+  uniform float uCanopyStrength;
   uniform vec2 texel;
   uniform float aoStrength;
   uniform float aoFloor;
   uniform float bloomStrength;
   uniform bool useAO;
+  uniform bool useCanopy;
   uniform bool useBloom;
   uniform bool useFXAA;
   varying vec2 vUv;
   const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+  // canopy shade: reconstruct the pixel's WORLD position from depth, look up
+  // the crown-density map there, and darken only what sits UNDER the crowns
+  // (the meta map carries ground + canopy-top heights, so sunlit canopy tops
+  // and anything above the foliage stay bright)
+  float canopyShade() {
+    float d = texture2D(tDepth, vUv).x;
+    if (d >= 0.9999) return 1.0;                       // sky
+    vec4 ndc = vec4(vUv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
+    vec4 v = uInvProj * ndc;
+    vec3 world = (uCamWorld * vec4(v.xyz / v.w, 1.0)).xyz;
+    vec2 uv2 = (world.xz - uCanopyCenter) * uCanopyInvSize + 0.5;
+    if (uv2.x <= 0.0 || uv2.x >= 1.0 || uv2.y <= 0.0 || uv2.y >= 1.0) return 1.0;
+    float dens = 1.0 - texture2D(tCanopy, uv2).r;      // 0 open … →1 thick woods
+    if (dens < 0.004) return 1.0;
+    vec2 meta = texture2D(tCanopyMeta, uv2).rg;
+    float groundH = meta.r * 176.0 - 16.0;
+    float topH = meta.g * 32.0;
+    if (topH < 0.5) return 1.0;
+    // full shade from the ground up through the trunks, fading out as the
+    // surface approaches the canopy top (the crown itself catches the sun)
+    float fade = 1.0 - smoothstep(topH * 0.5, topH * 0.9, world.y - groundH);
+    return 1.0 - min(dens * fade * uCanopyStrength, 0.5);
+  }
   vec3 s2l(vec3 c){ return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
   vec3 l2s(vec3 c){ c = max(c, 0.0); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
   // FXAA-lite: the non-MSAA post target loses edge AA, which reads as harsh
@@ -148,16 +180,20 @@ const COMPOSITE_FRAG = /* glsl */`
   }
   void main() {
     vec3 c = useFXAA ? fxaa(vUv) : texture2D(tScene, vUv).rgb;
-    if (useAO) {
-      float ao = texture2D(tAO, vUv).r;            // 1 = open (guard pins it), <1 = occluded
-      ao = mix(1.0, ao, aoStrength);               // scale the occlusion amount
-      ao = max(ao, aoFloor);                       // deepest allowed darkening
-      // open ground is ALREADY 1.0 (SSAO above-plane guard), so let AO show
-      // FULLY in crevices/contacts — only spare near-white highlights so
-      // speculars don't get gouged. (The old ambient-weight faded AO out of
-      // everything bright, which is why it looked like nothing happened.)
+    if (useAO || useCanopy) {
+      float occl = 1.0;
+      if (useAO) {
+        float ao = texture2D(tAO, vUv).r;          // 1 = open (guard pins it), <1 = occluded
+        ao = mix(1.0, ao, aoStrength);             // scale the occlusion amount
+        ao = max(ao, aoFloor);                     // deepest allowed darkening
+        occl = ao;
+      }
+      // the canopy term is where the visible "AO" now lives: shade pools
+      // under tree crowns and deepens where many crowns overlap
+      if (useCanopy) occl *= canopyShade();
+      // spare near-white highlights so speculars don't get gouged
       float hl = smoothstep(0.9, 1.0, dot(c, LUMA));
-      float f = mix(ao, 1.0, hl);
+      float f = mix(occl, 1.0, hl);
       c = l2s(s2l(c) * f);                          // multiply in LINEAR light
     }
     if (useBloom) c += texture2D(tBloom, vUv).rgb * bloomStrength;
@@ -212,9 +248,14 @@ export class PostFX {
     this.blurMat = mat(BLUR_FRAG, { tDiffuse: { value: null }, dir: { value: new THREE.Vector2() } });
     this.compositeMat = mat(COMPOSITE_FRAG, {
       tScene: { value: null }, tAO: { value: null }, tBloom: { value: null },
+      tDepth: { value: null }, tCanopy: { value: null }, tCanopyMeta: { value: null },
+      uInvProj: { value: new THREE.Matrix4() }, uCamWorld: { value: new THREE.Matrix4() },
+      uCanopyCenter: { value: new THREE.Vector2() }, uCanopyInvSize: { value: 1 / 400 },
+      uCanopyStrength: { value: 0.9 },
       texel: { value: new THREE.Vector2() },
       aoStrength: { value: 0.25 }, aoFloor: { value: 0.30 }, bloomStrength: { value: 0.55 },
-      useAO: { value: false }, useBloom: { value: false }, useFXAA: { value: false },
+      useAO: { value: false }, useCanopy: { value: false },
+      useBloom: { value: false }, useFXAA: { value: false },
     });
   }
 
@@ -232,7 +273,9 @@ export class PostFX {
     this.renderer.render(this.quadScene, this.quadCam);
   }
 
-  // opts: { ssao, bloom, aoRadius, aoStrength, aoFloor }
+  // opts: { ssao, bloom, aoRadius, aoStrength, aoFloor, canopy }
+  // canopy: { densTex, metaTex, cx, cz, size, strength } — the world-space
+  // crown-shade map maintained by canopy.js
   render(scene, camera, opts = {}) {
     const r = this.renderer;
     r.setRenderTarget(this.rtScene);
@@ -272,6 +315,19 @@ export class PostFX {
     c.useFXAA.value = true;
     c.aoStrength.value = opts.aoStrength ?? 0.25;
     c.aoFloor.value = opts.aoFloor ?? 0.30;
+    const cp = opts.canopy;
+    c.useCanopy.value = !!cp;
+    // always bind real textures (unbound samplers trip driver warnings)
+    c.tDepth.value = this.rtScene.depthTexture;
+    c.tCanopy.value = cp ? cp.densTex : this.rtAOb.texture;
+    c.tCanopyMeta.value = cp ? cp.metaTex : this.rtAOb.texture;
+    if (cp) {
+      c.uInvProj.value.copy(camera.projectionMatrixInverse);
+      c.uCamWorld.value.copy(camera.matrixWorld);
+      c.uCanopyCenter.value.set(cp.cx, cp.cz);
+      c.uCanopyInvSize.value = 1 / cp.size;
+      c.uCanopyStrength.value = cp.strength ?? 0.9;
+    }
     this._pass(this.compositeMat, null);
   }
 
