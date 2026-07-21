@@ -27,6 +27,11 @@ import { bakeGroup, bakeAccumulator, buildBakedMesh, bakeAt, BAKED_MAT,
          templateMesh, tplRng } from './models.js';
 import { worldPatch } from './worldpatch.js';
 import { audio } from './audio.js';
+import * as veg from './vegekit.js';
+
+// biomes that swap to the quality-vegetation glTF kit when the Graphics toggle
+// is on (the kit is a lush temperate-forest set; other biomes stay procedural)
+const QUALITY_VEG_BIOMES = new Set(['Verdant Forest']);
 
 const CHUNK = 40;
 const VIEW_RADIUS = 3;   // chunks around the player kept alive
@@ -174,6 +179,7 @@ export class World {
     this.time = 0;               // world clock (drives berry regrowth)
     this.foliageMult = 1;        // graphics setting: scatter-density multiplier
     this.treeDetail = 0;         // graphics setting: 0 low / 1 med / 2 high canopies
+    this.qualityVeg = false;     // graphics setting: swap to the glTF nature kit
     this.farChunks = new Map();  // cheap far-LOD tiles (terrain + tree impostors)
     this.farRadius = 0;          // chunks of far tier past viewRadius (main sets it)
     this._berryEaten = new Map(); // bush key -> world time it was harvested
@@ -1678,6 +1684,14 @@ export class World {
     return obj;
   }
 
+  // is the quality-vegetation glTF kit active for THIS chunk? (opt-in Graphics
+  // toggle, kit finished loading, a biome the kit suits, and NOT the god-view
+  // editor's forced-fast render)
+  _useQualityVeg(biome) {
+    return this.qualityVeg && !this.groundOnly && veg.ready()
+      && QUALITY_VEG_BIOMES.has(biome.name);
+  }
+
   // 60% slow inside any static web field (Dark Forest ground webs)
   webSlowAt(x, z) {
     const cx = Math.floor(x / CHUNK), cz = Math.floor(z / CHUNK);
@@ -1786,14 +1800,16 @@ export class World {
 
   // Ultra grass: a jittered grid tuft on every green grassy cell — dense turf
   // everywhere, one baked mesh, its own rng so other decos don't shift.
-  _grassFill(deco, group, cxw, czw, fm) {
+  _grassFill(deco, group, cxw, czw, fm, q = false) {
     // Ultra grass is INSTANCED: one shared tuft geometry stamped thousands of
     // times per chunk in ONE draw call, so the ground can be carpeted far
     // denser than baking allowed. Expensive terrain checks run on a coarse
     // grid; each valid cell spawns many tuft instances at jittered offsets.
     // Taller grass, grain and flowers stay baked into `deco` (sparse, on top).
+    // With the quality kit (`q`) the tuft mesh is a real ~300-tri glTF blade
+    // clump, so density & scale drop hard to keep the triangle budget sane.
     const cell = Math.max(1.7, Math.min(3.2, 3.6 / Math.sqrt(fm)));
-    const perCell = 7 + Math.round(fm * 2.4);           // ~15 tufts/cell at ultra
+    const perCell = q ? (2 + Math.round(fm * 0.6)) : (7 + Math.round(fm * 2.4)); // ~15/cell ultra
     const cx = (cxw / CHUNK) | 0, cz = (czw / CHUNK) | 0;
     const rng = mulberry32((this.seed ^ 0x6a55f1) ^ (cx * 73856093) ^ (cz * 19349663));
     const inst = [];
@@ -1816,10 +1832,12 @@ export class World {
           const x = ccx + (rng() - 0.5) * cell, z = ccz + (rng() - 0.5) * cell;
           // slight per-instance shade so the carpet isn't a flat colour
           const shade = gcol.setHex(gc).multiplyScalar(0.8 + rng() * 0.4).getHex();
-          inst.push({ x, y: cy + (rng() - 0.5) * 0.05, z, rot: rng() * Math.PI * 2, s: 0.7 + rng() * 0.6, c: shade });
+          inst.push({ x, y: cy + (rng() - 0.5) * 0.05, z, rot: rng() * Math.PI * 2,
+            s: q ? 0.4 + rng() * 0.4 : 0.7 + rng() * 0.6, c: shade });
         }
-        // sparse baked variety on top of the instanced carpet
-        if (rng() < 0.5) {
+        // sparse baked variety on top of the instanced carpet (procedural only —
+        // the kit carpet stands on its own; baked vertex-colour bits would clash)
+        if (!q && rng() < 0.5) {
           const x = ccx + (rng() - 0.5) * cell, z = czw + gz + (rng() - 0.5) * cell + cell * 0.5;
           const v = (rng() * 8) | 0, rot = rng() * Math.PI * 2, roll = rng();
           const y = this.heightAt(x, z);
@@ -1832,7 +1850,7 @@ export class World {
         }
       }
     }
-    const field = makeGrassField(inst);
+    const field = q ? veg.grassField(inst) : makeGrassField(inst);
     if (field) group.add(field);
   }
 
@@ -2005,16 +2023,21 @@ export class World {
     // building + baking each tree from scratch was the chunk-gen hitch.
     const { spots: treeSpots, denseWood } = this._treeSpots(cx, cz, biome);
     const td = this.treeDetail ?? 0;
+    const qVeg = this._useQualityVeg(biome);
     for (const s of treeSpots) {
       const tkey = `tree:${td}:${biome.name}:${s.size}:${s.v}`;
       let mesh, radius;
-      const shared = templateMesh(tkey, () => makeTree(s.size, biome, tplRng(tkey), td),
-        { amp: 0.6, y0: 3, y1: 12 });
-      if (shared) ({ mesh, radius } = shared);
-      else { // maker produced un-bakeable extras — bake this one live
-        const made = makeTree(s.size, biome, rng, td);
-        mesh = bakeGroup(made.mesh, true, { amp: 0.6, y0: 3, y1: 12 });
-        radius = made.radius;
+      if (qVeg) { // quality kit: a real stylized glTF tree at the same spot
+        ({ mesh, radius } = veg.tree(s.size, s.v, tplRng('q' + tkey)));
+      } else {
+        const shared = templateMesh(tkey, () => makeTree(s.size, biome, tplRng(tkey), td),
+          { amp: 0.6, y0: 3, y1: 12 });
+        if (shared) ({ mesh, radius } = shared);
+        else { // maker produced un-bakeable extras — bake this one live
+          const made = makeTree(s.size, biome, rng, td);
+          mesh = bakeGroup(made.mesh, true, { amp: 0.6, y0: 3, y1: 12 });
+          radius = made.radius;
+        }
       }
       this._place(mesh, s.x, s.z);
       mesh.rotation.y = s.rotY;
@@ -2047,13 +2070,28 @@ export class World {
     // plants ride the wind shader and part around the walking player --
     const fm = this.foliageMult ?? 1;
     const deco = bakeAccumulator();
+    const qVegDeco = this._useQualityVeg(biome); // kit clones replace baked deco
     // scatter STAMPS pre-baked templates (6 variants per look) instead of
-    // building every plant's geometry from scratch — pure array math now
+    // building every plant's geometry from scratch — pure array math now. When
+    // quality vegetation is on and a call passes `opts.q`, the spot instead
+    // gets a cloned glTF kit model dropped straight into the chunk group.
     const scatter = (n, keyBase, build, sway = null, opts = {}) => {
+      const q = (qVegDeco && opts.q) ? opts.q : null;
       for (let i = 0; i < n; i++) {
         const x = cxw + rng() * CHUNK, z = czw + rng() * CHUNK;
         if (!inBounds(x, z)) continue;
         if (opts.filter && !opts.filter(x, z)) continue;
+        if (q) { // quality kit clone — its own rng stream (visual only)
+          const obj = q(rng);
+          const sc = opts.sMin !== undefined ? opts.sMin + rng() * (opts.sMax - opts.sMin) : 1;
+          obj.position.set(x, this.heightAt(x, z), z);
+          obj.rotation.y = rng() * Math.PI * 2;
+          if (sc !== 1) obj.scale.multiplyScalar(sc);
+          group.add(obj);
+          continue;
+        }
+        // procedural path — rng draw order kept EXACTLY as before (x, z, key,
+        // sc, sy, rot) so the baked forest is byte-identical when quality is off
         const key = keyBase + ':' + ((rng() * 6) | 0);
         const tpl = bakeTemplate(key, () => build(tplRng(key)));
         const sc = opts.sMin !== undefined ? opts.sMin + rng() * (opts.sMax - opts.sMin) : 1;
@@ -2158,7 +2196,7 @@ export class World {
     const bn = biome.name;
     // GRASS: at Ultra a dense grid blankets every green grassy patch; below
     // that, the classic sparse-ish scatter (so "High = what we had before")
-    if (fm >= 2.4) this._grassFill(deco, group, cxw, czw, fm);
+    if (fm >= 2.4 || qVegDeco) this._grassFill(deco, group, cxw, czw, fm, qVegDeco);
     else scatter(Math.round((22 + rng() * 12) * fm), `grass:${biome.grass}`,
       (r) => makeGrassTuft(biome.grass, r), SW_GRASS);
     if (biome.jungleFlora) {
@@ -2174,20 +2212,20 @@ export class World {
         { sMin: 1.2, sMax: 1.6 });
     } else if (denseWood) {
       // thick woods grow a forest floor: ferns, low leaves, mushroom rings
-      scatter(Math.round((6 + rng() * 4) * fm), 'fern', makeFern, SW_FERN);
-      scatter(Math.round((4 + rng() * 3) * fm), 'gleaf', makeGroundLeaves, SW_LEAF);
-      scatter(Math.round((2 + rng() * 3) * fm), 'shroom', makeMushroom);
+      scatter(Math.round((6 + rng() * 4) * fm), 'fern', makeFern, SW_FERN, { q: veg.fern });
+      scatter(Math.round((4 + rng() * 3) * fm), 'gleaf', makeGroundLeaves, SW_LEAF, { q: veg.plant });
+      scatter(Math.round((2 + rng() * 3) * fm), 'shroom', makeMushroom, null, { q: veg.mushroom });
     }
     if (bn === 'Murky Swamp') {
       scatter(Math.round((5 + rng() * 4) * fm), 'gleaf', makeGroundLeaves, SW_LEAF);
     }
     scatter(Math.round((2 + rng() * 3) * Math.min(fm, 2)), `bush:${biome.foliage[0]}`,
-      (r) => makeBush(biome.foliage[0], r), SW_BUSH);
-    scatter(1 + Math.floor(rng() * 2), 'rock', makeRock);
+      (r) => makeBush(biome.foliage[0], r), SW_BUSH, { q: veg.bush });
+    scatter(1 + Math.floor(rng() * 2), 'rock', makeRock, null, { q: veg.rock });
     scatter(Math.round((2 + rng() * 3) * Math.min(fm, 2)), `pebbles:${biome.trunk}`,
-      (r) => makePebbles(r, r() < 0.5 ? 0x8a8a84 : biome.trunk));
-    if (biome.flowers) scatter(Math.round((3 + rng() * 5) * fm), 'flower', makeFlower, SW_FLOWER);
-    if (biome.mushrooms) scatter(Math.round((1 + rng() * 3) * fm), 'shroom', makeMushroom);
+      (r) => makePebbles(r, r() < 0.5 ? 0x8a8a84 : biome.trunk), null, { q: veg.pebble });
+    if (biome.flowers) scatter(Math.round((3 + rng() * 5) * fm), 'flower', makeFlower, SW_FLOWER, { q: veg.flower });
+    if (biome.mushrooms) scatter(Math.round((1 + rng() * 3) * fm), 'shroom', makeMushroom, null, { q: veg.mushroom });
     // waterside reeds hug the banks of bog pools, lakes and rivers (not the
     // open ocean beach — coastDist keeps them inland, except in the swamp)
     if (bn !== 'Scorched Desert' && bn !== 'Frozen Peak') {

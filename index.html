@@ -51,8 +51,8 @@
   <div id="waypoint-arrow" class="hidden"><span class="wp-dist"></span></div>
   <!-- blizzard / sandstorm whiteout overlay -->
   <div id="blizzard"></div>
-  <!-- underwater tint while swimming -->
-  <div id="underwater"><div class="uw-caustics"></div></div>
+  <!-- underwater overlay removed (was an ugly full-screen blue caustic net) -->
+  <div id="underwater"></div>
   <div id="lowhp" class="hidden"></div>
   <div id="gold-flash"></div>
 
@@ -361,6 +361,10 @@
           <label class="opt-field opt-toggle">
             <span class="opt-label">Foliage motion <small style="opacity:.6;font-weight:normal">(wind&nbsp;+&nbsp;trampling)</small></span>
             <input type="checkbox" id="set-foliagemove" checked>
+          </label>
+          <label class="opt-field opt-toggle">
+            <span class="opt-label opt-warn">🌿 Quality vegetation <small style="opacity:.6;font-weight:normal">(3D nature models · heavier)</small></span>
+            <input type="checkbox" id="set-vegquality">
           </label>
           <label class="opt-field opt-toggle">
             <span class="opt-label">☁️ Clouds</span>

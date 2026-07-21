@@ -30,8 +30,7 @@ export const BAKED_MAT = new THREE.MeshLambertMaterial({ vertexColors: true });
 export const FOL_TRAIL = 8; // trail slots (must match the GLSL array size)
 BAKED_MAT.userData.shaders = []; // all foliage shaders (baked + instanced grass)
 
-const _FOL_UNIFORMS = `
-attribute float sway;
+const _FOL_UNIFORMS_BASE = `
 uniform float uTime;
 uniform vec3 uPlayer;
 uniform vec2 uPlayerVel;
@@ -39,6 +38,13 @@ uniform float uWind;
 uniform float uPush;
 uniform vec4 uDist[${FOL_TRAIL}];
 uniform vec2 uDistDir[${FOL_TRAIL}];`;
+// baked/instanced foliage reads its sway weight from a per-vertex attribute.
+// NB the leading newline: this string is glued straight after `#include
+// <common>`, so without it the attribute line would fuse onto the include's
+// last (comment) line and `sway` would read as undeclared.
+const _FOL_UNIFORMS = '\nattribute float sway;' + _FOL_UNIFORMS_BASE;
+// …external kit meshes have no such attribute, so they derive it in-shader.
+const _FOL_UNIFORMS_NOATTR = _FOL_UNIFORMS_BASE;
 
 // the wind + player-trample sway, given an expression for this vertex's world
 // position (baked meshes: modelMatrix*pos; instanced grass: also *instanceMatrix)
@@ -109,6 +115,35 @@ GRASS_INST_MAT.onBeforeCompile = (shader) => {
     .replace('#include <begin_vertex>', _folBody('(modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz'));
   BAKED_MAT.userData.shaders.push(shader); // main.js updates them all together
 };
+
+// ---- wind sway for EXTERNAL meshes (the quality-vegetation glTF kit) ----
+// The Quaternius kit meshes carry no baked `sway` attribute, so the sway
+// weight is derived IN-SHADER from each vertex's LOCAL height, ramped y0→y1
+// (a tree's trunk base stays rigid; the canopy tips ride the full wind). The
+// material joins the shared foliage-shader list, so main.js drives its
+// wind/trample/footfall uniforms every frame exactly like the baked foliage —
+// one seam, so the kit sways in perfect sync with the procedural greenery.
+export function applyWindShader(material, y0 = 0, y1 = 1, instanced = false) {
+  const prev = material.onBeforeCompile;
+  const wp = instanced
+    ? '(modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz'
+    : '(modelMatrix * vec4(transformed, 1.0)).xyz';
+  material.onBeforeCompile = (shader) => {
+    prev?.(shader);
+    _initFolUniforms(shader);
+    shader.uniforms.uSwayY0 = { value: y0 };
+    shader.uniforms.uSwayY1 = { value: y1 };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>' + _FOL_UNIFORMS_NOATTR
+        + '\nuniform float uSwayY0;\nuniform float uSwayY1;')
+      .replace('#include <begin_vertex>',
+        'float sway = clamp((position.y - uSwayY0) / max(uSwayY1 - uSwayY0, 0.001), 0.0, 1.0);\n'
+        + _folBody(wp));
+    BAKED_MAT.userData.shaders.push(shader);
+  };
+  material.customProgramCacheKey = () => 'wind' + y0 + '_' + y1 + (instanced ? 'i' : '');
+  return material;
+}
 
 const _bakeMat4 = new THREE.Matrix4();
 const _bakeNrm = new THREE.Matrix3();

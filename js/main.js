@@ -26,6 +26,7 @@ import { DungeonWorld } from './dungeon.js';
 import { Moba } from './moba.js';
 import { Player } from './player.js';
 import { preloadHumanModel, humanModelEnabled } from './humanmodel.js';
+import * as vegKit from './vegekit.js';
 import { EnemyManager } from './enemies.js';
 import { Projectiles } from './projectiles.js';
 import { Companions } from './companions.js';
@@ -339,6 +340,9 @@ if (_cloudMap?.patch && worldPatch.load(_cloudMap.patch)) {
 applyTweaks();          // …including enemy/item stat tweaks from the object editor
 if (humanModelEnabled()) { // experimental rigged-human avatar (Graphics settings)
   try { await preloadHumanModel(); } catch (e) { console.warn('[human] model load failed, using box man', e); }
+}
+if (vegKit.enabled()) { // quality-vegetation glTF kit (Graphics settings)
+  try { await vegKit.preload(); } catch (e) { console.warn('[vegekit] preload failed, using procedural greenery', e); }
 }
 let world = new World(scene, game.seed);
 
@@ -2612,6 +2616,7 @@ const settings = Object.assign(
   settings.showFps ??= false;
   settings.fpsCap ??= 0; // 0 = unlimited
   settings.humanModel ??= false; // experimental rigged-human avatar
+  settings.vegQuality ??= false; // quality-vegetation glTF kit
   $id('set-texdetail').value = String(settings.texDetail);
   $id('set-shadows').checked = settings.shadows !== false;
   $id('set-resscale').value = String(settings.resScale);
@@ -2644,6 +2649,29 @@ const settings = Object.assign(
     ui.toast(humanBox.checked
       ? '🧍 Human avatar ON — reload the page to apply'
       : '🧍 Human avatar OFF — reload the page to apply', 'info');
+  });
+
+  // Quality vegetation — the Quaternius glTF nature kit for the Verdant Forest.
+  // Applied live: the kit loads on demand, then the near ring is rebuilt so the
+  // greenery swaps in without a reload.
+  const vegBox = $id('set-vegquality');
+  vegBox.checked = !!settings.vegQuality;
+  const rebuildVeg = () => {
+    world.qualityVeg = !!settings.vegQuality && vegKit.ready();
+    world.regenChunks();
+    for (let i = 0; i < 24 && world.warmUp(player.pos, 30) > 0; i++) { /* fill */ }
+  };
+  vegBox.addEventListener('change', async () => {
+    settings.vegQuality = vegBox.checked;
+    localStorage.setItem('atw-settings', JSON.stringify(settings));
+    audio.sfx('click', 0.4);
+    if (vegBox.checked && !vegKit.ready()) {
+      ui.toast('🌿 Loading quality vegetation…', 'info');
+      try { await vegKit.preload(); }
+      catch (e) { console.warn('[vegekit] preload failed', e); ui.toast('🌿 Vegetation kit failed to load', 'warn'); return; }
+    }
+    rebuildVeg();
+    ui.toast(vegBox.checked ? '🌿 Quality vegetation ON' : '🌿 Quality vegetation OFF', 'info');
   });
 
   // FPS cap slider (150 on the track = unlimited → stored as 0)
@@ -5113,6 +5141,7 @@ function applyViewMode() {
 function applyGraphics() {
   world.groundDetail = settings.texDetail ?? 0;
   world.treeDetail = TREE_DETAIL[settings.treeDetail ?? 'low'] ?? 0;
+  world.qualityVeg = !!settings.vegQuality && vegKit.ready();
   // shadows: user toggle (autoQuality stage 2 can still force them off)
   const shadowsOn = settings.shadows !== false && autoQuality.stage < 2;
   if (renderer.shadowMap.enabled !== shadowsOn) {
@@ -5360,8 +5389,9 @@ function step() {
       }
     }
   }
-  // underwater blue tint fades in while the hero is swimming submerged
-  $id('underwater').classList.toggle('on', game.mode === 'play' && !!player.swimming);
+  // the full-screen blue "caustic net" overlay was removed — it read as an
+  // ugly grid over the whole screen; keep the layer permanently off
+  $id('underwater').classList.remove('on');
   // water surfaces (ocean/lakes/rivers) share the same clock + sun direction
   _waterSunDir.set(24, 19, 15).normalize(); // matches the fixed sun offset in updateCamera
   if (WATER_SHADERS.length) {
