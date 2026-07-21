@@ -17,6 +17,7 @@
 
 import * as THREE from 'three';
 import { COOP_WORLD_SEED, WoodsNet } from './net.js';
+import { WoodsNetWS } from './netws.js';
 import { ARENA, ARENA_RETURN_DELAY, arenaReward, ENEMY_TYPES, BOSS_RANKS,
          MOBA_BUILDINGS, roundResource, itemById, enemyLevelFor } from './config.js';
 import { makeMan, makeAxe, makeBow, makePickaxe, makeClub, makeSword, makeHandSpear,
@@ -594,6 +595,9 @@ export class Multiplayer {
   //        startPlaying(), popup(pos,text,color) }
   constructor(ctx) {
     this.ctx = ctx;
+    // transport: Firebase (WoodsNet) for Create Co-op / PvP / MOBA; the dedicated
+    // WebSocket server (WoodsNetWS) for "Server" games. Swapped in serverStart().
+    this.net = WoodsNet;
     this.active = false;
     this.mode = null;          // 'coop' | 'pvp'
     this.isHost = false;
@@ -642,7 +646,7 @@ export class Multiplayer {
           audio.sfx('hit', 0.3, 110);
           return;
         }
-        WoodsNet.sendEvent({
+        this.net.sendEvent({
           type: 'hit', dmg: Math.round(dmg * 10) / 10,
           ax: +ctx.player.pos.x.toFixed(1), az: +ctx.player.pos.z.toFixed(1),
           ...(opts?.bleed ? { bl: opts.bleed.dps, bt: opts.bleed.dur } : {}),
@@ -655,7 +659,7 @@ export class Multiplayer {
       },
       stun: (e, sec) => {
         if (e?.id === 'partnerPet') return;
-        WoodsNet.sendEvent({
+        this.net.sendEvent({
           type: 'hit', dmg: 0, stun: sec,
           ax: +ctx.player.pos.x.toFixed(1), az: +ctx.player.pos.z.toFixed(1),
         });
@@ -673,7 +677,7 @@ export class Multiplayer {
       get mesh() { return self.remote.mesh; },
       get dead() { return self.remote.dead; },
       get stealthed() { return self.remote.stealthed; },
-      takeDamage: (dmg, src) => WoodsNet.sendEvent({
+      takeDamage: (dmg, src) => this.net.sendEvent({
         type: 'pdmg', dmg: Math.round(dmg * 10) / 10,
         ai: src?.id,
         ax: src?.pos ? +src.pos.x.toFixed(1) : undefined,
@@ -681,7 +685,7 @@ export class Multiplayer {
         ar: src?.range != null ? +src.range.toFixed(1) : undefined,
         sh: src?.shot ? 1 : undefined,
       }),
-      applyStun: (sec, src) => WoodsNet.sendEvent({
+      applyStun: (sec, src) => this.net.sendEvent({
         type: 'pdmg', dmg: 0, stun: sec,
         ai: src?.id,
         ax: src?.pos ? +src.pos.x.toFixed(1) : undefined,
@@ -700,7 +704,7 @@ export class Multiplayer {
       get hp() { return self.remote?.petHp ?? 0; },
       get maxHp() { return self.remote?.petMaxHp ?? 0; },
       get dead() { return !self.remote?.petId || (self.remote?.petHp ?? 0) <= 0; },
-      takeDamage: (dmg, src) => WoodsNet.sendEvent({
+      takeDamage: (dmg, src) => this.net.sendEvent({
         type: 'petDmg', dmg: Math.round(dmg * 10) / 10,
         ai: src?.id,
         ax: src?.pos ? +src.pos.x.toFixed(1) : undefined,
@@ -712,7 +716,7 @@ export class Multiplayer {
 
   // ---------- lobby ----------
   async host(mode, intervalMin) {
-    const { code, meta } = await WoodsNet.createGame(mode, intervalMin);
+    const { code, meta } = await this.net.createGame(mode, intervalMin);
     this.isHost = true;
     this.meta = meta;
     this._watchMeta();
@@ -723,17 +727,33 @@ export class Multiplayer {
   }
 
   async join(code) {
-    const meta = await WoodsNet.joinGame(code);
+    const meta = await this.net.joinGame(code);
     this.isHost = false;
     this.meta = meta;
     this._watchMeta();
     this._begin(meta);
   }
 
+  // "Server" games: the neutral WebSocket server is the authority, so every
+  // player — creator included — is a pure GUEST (renders the server's snapshots,
+  // sends events). code = join an existing server room; null = create one.
+  async serverStart(code) {
+    this.net = WoodsNetWS;
+    this.isHost = false;
+    let meta;
+    if (code) meta = await this.net.joinGame(code);
+    else meta = (await this.net.createGame('coop')).meta;
+    meta.mode = 'coop';
+    this.meta = meta;
+    this._watchMeta();
+    this._begin(meta);
+    return this.net.code;
+  }
+
   // one meta watcher for both roles: it starts the game, promotes the
   // survivor to host when the creator vanishes, and greets mid-game joiners
   _watchMeta() {
-    WoodsNet.onMeta((m) => {
+    this.net.onMeta((m) => {
       if (!m) { this._partnerLeft(); return; } // room truly gone
       this.meta = m;
       // the creator disappeared → the remaining player TAKES OVER the room
@@ -742,9 +762,9 @@ export class Multiplayer {
         return;
       }
       // a partner joined my room (first time or mid-game)
-      if (this.isHost && m.guest && m.guest !== WoodsNet.partnerUid) {
+      if (this.isHost && m.guest && m.guest !== this.net.partnerUid) {
         if (this.active && this.mode === 'moba') return; // 1v1 seats don't refill
-        WoodsNet.setPartner(m.guest);
+        this.net.setPartner(m.guest);
         if (!this.active) this._begin(m);
         else this._attachPartner();
       }
@@ -754,10 +774,13 @@ export class Multiplayer {
   // co-op only: the world keeps running under new management. The shadow
   // dissolves and my OWN simulation takes over; the code stays joinable.
   async _becomeHost() {
+    // server-authoritative games have no player host to promote to — the neutral
+    // server always runs the sim. Never spin up a competing client sim.
+    if (this.meta?.host === 'server') return;
     if (this.mode !== 'coop') { this._partnerLeft(); return; }
     this._promoting = true;
     this.isHost = true;
-    try { await WoodsNet.becomeHost(); } catch { /* net hiccup — play on */ }
+    try { await this.net.becomeHost(); } catch { /* net hiccup — play on */ }
     this.shadow?.dispose();
     this.shadow = null;
     this.remote.mesh.visible = false;
@@ -771,7 +794,7 @@ export class Multiplayer {
     }
     this._campSynced = false;
     this._promoting = false;
-    this.ctx.ui.toast(`👑 The host left — YOU run the world now. Code ${WoodsNet.code} stays open (Settings).`, 'boss');
+    this.ctx.ui.toast(`👑 The host left — YOU run the world now. Code ${this.net.code} stays open (Settings).`, 'boss');
   }
 
   // a NEW player joined my running world
@@ -796,9 +819,9 @@ export class Multiplayer {
       this.remote.petId = 0;
       this.remote.petHp = this.remote.petMaxHp = 0;
     }
-    WoodsNet.setPartner(null);
-    WoodsNet.updateMeta({ guest: null });
-    this.ctx.ui.toast(`👋 Partner disconnected — room ${WoodsNet.code} stays OPEN for a new player (Settings).`, 'boss');
+    this.net.setPartner(null);
+    this.net.updateMeta({ guest: null });
+    this.ctx.ui.toast(`👋 Partner disconnected — room ${this.net.code} stays OPEN for a new player (Settings).`, 'boss');
   }
 
   _begin(meta) {
@@ -812,12 +835,12 @@ export class Multiplayer {
         this.moba = ctx.createMobaHost(meta.seed);
       } else {
         this.mobaShadow = new MobaShadow(ctx.scene, null, ctx.ui, {
-          sendEvent: (e) => WoodsNet.sendEvent(e),
+          sendEvent: (e) => this.net.sendEvent(e),
           popup: ctx.popup,
         });
         ctx.attachMobaGuest(meta.seed, this.mobaShadow);
         this.mobaShadow.world = ctx.world; // the fresh MobaWorld from the swap
-        WoodsNet.onSnap((snap) => this.mobaShadow.applySnap(snap));
+        this.net.onSnap((snap) => this.mobaShadow.applySnap(snap));
       }
     } else {
       // world seed: shared in co-op, per-player in pvp (own worlds)
@@ -834,23 +857,23 @@ export class Multiplayer {
 
     if (this.mode === 'coop' && !this.isHost) {
       this.shadow = new ShadowWorld(ctx.scene, ctx.world, ctx.ui, {
-        sendEvent: (e) => WoodsNet.sendEvent(e),
+        sendEvent: (e) => this.net.sendEvent(e),
         popup: ctx.popup,
         discover: (t) => ctx.onDiscover(t),
       });
-      WoodsNet.onSnap((snap) => this.shadow.applySnap(snap));
+      this.net.onSnap((snap) => this.shadow.applySnap(snap));
     }
 
-    WoodsNet.onPartnerState((s) => {
+    this.net.onPartnerState((s) => {
       if (s) { this.remote.setState(s); return; }
       // their state node vanished → they disconnected
       if (this.isHost && this.mode === 'coop' && this.remote?.lastSeen) this._partnerAway();
       else if (this.mode === 'moba' && this.remote?.lastSeen) this._partnerLeft();
     });
-    WoodsNet.onEvent((ev) => this._onEvent(ev));
+    this.net.onEvent((ev) => this._onEvent(ev));
 
     if (this.mode === 'pvp' && this.isHost) {
-      WoodsNet.updateMeta({ nextArenaAt: Date.now() + meta.interval * 60000 });
+      this.net.updateMeta({ nextArenaAt: Date.now() + meta.interval * 60000 });
     }
 
     ctx.startPlaying(); // hides menu, starts music, spawns the local wave
@@ -894,7 +917,7 @@ export class Multiplayer {
     const arenaHot = this.arena.active;
     const rate = this.mode === 'coop' ? 70 : this.mode === 'moba' ? 80 : (arenaHot ? 70 : 500);
     const localPet = ctx.petTarget && !ctx.petTarget.dead ? ctx.petTarget : null;
-    WoodsNet.sendState({
+    this.net.sendState({
       x: +p.pos.x.toFixed(1), z: +p.pos.z.toFixed(1),
       fx: +p.facing.x.toFixed(2), fz: +p.facing.z.toFixed(2),
       hp: Math.round(p.hp), mhp: p.maxHp, lv: p.level,
@@ -944,7 +967,7 @@ export class Multiplayer {
         const nearAny = (x, z) =>
           Math.hypot(x - p1.x, z - p1.z) < 130 ||
           (p2 && Math.hypot(x - p2.x, z - p2.z) < 130);
-        WoodsNet.sendSnap({
+        this.net.sendSnap({
           e: ctx.enemyMgr.snapshot().filter(s => nearAny(s.x, s.z)),
           p: ctx.pickups.snapshot().filter(s => nearAny(s.x, s.z)),
           s: ctx.projectiles.snapshotShots(),
@@ -954,7 +977,7 @@ export class Multiplayer {
       this._snapT -= dt;
       if (this._snapT <= 0) {
         this._snapT = 0.2;
-        WoodsNet.sendSnap({ m: this.moba.snapshot(), w: Math.round(this.moba.waveT) });
+        this.net.sendSnap({ m: this.moba.snapshot(), w: Math.round(this.moba.waveT) });
       }
     }
 
@@ -1024,7 +1047,7 @@ export class Multiplayer {
     this.arena.resolved = true;
     this.arena.iWon = false;
     this.arena.overT = ARENA_RETURN_DELAY;
-    WoodsNet.sendEvent({ type: 'arenaDeath' });
+    this.net.sendEvent({ type: 'arenaDeath' });
     this.ctx.ui.toast('☠️ Defeated… returning in 5 s.', 'boss');
   }
 
@@ -1053,7 +1076,7 @@ export class Multiplayer {
     p.pos.copy(this.arena.prevPos);
     if (this.mode === 'pvp') this.remote.mesh.visible = false;
     if (this.isHost) {
-      WoodsNet.updateMeta({ nextArenaAt: Date.now() + (this.meta.interval || 3) * 60000 });
+      this.net.updateMeta({ nextArenaAt: Date.now() + (this.meta.interval || 3) * 60000 });
     }
     ctx.ui.toast('Back to the hunt. Next duel is ticking…', 'info');
   }
@@ -1113,9 +1136,9 @@ export class Multiplayer {
   }
 
   // ---------- MOBA event senders ----------
-  sendMobaBuild(id, lane) { WoodsNet.sendEvent({ type: 'mbuild', id, lane }); }
-  sendMobaReward(xp, meat) { WoodsNet.sendEvent({ type: 'mreward', xp, meat }); }
-  sendMobaEnd(partnerWon) { WoodsNet.sendEvent({ type: 'mobaEnd', won: partnerWon }); }
+  sendMobaBuild(id, lane) { this.net.sendEvent({ type: 'mbuild', id, lane }); }
+  sendMobaReward(xp, meat) { this.net.sendEvent({ type: 'mreward', xp, meat }); }
+  sendMobaEnd(partnerWon) { this.net.sendEvent({ type: 'mobaEnd', won: partnerWon }); }
 
   // local player died — true means "handled, don't show the end screen"
   handleLocalDeath() {
@@ -1176,7 +1199,7 @@ export class Multiplayer {
 
   tryRevivePartner() {
     if (!this.revivablePartner()) return false;
-    WoodsNet.sendEvent({ type: 'revive' });
+    this.net.sendEvent({ type: 'revive' });
     this.ctx.ui.toast('💚 You pull your partner back to their feet!', 'level');
     audio.sfx('purchase', 0.5, 200);
     return true;
@@ -1187,7 +1210,7 @@ export class Multiplayer {
     const from = center || this.ctx.player.pos;
     const to = this.remote.targetPos || this.remote.pos;
     if (!to || Math.hypot(from.x - to.x, from.z - to.z) > radius) return false;
-    WoodsNet.sendEvent({ type: 'classHeal', a: Math.max(1, Math.round(amount)) });
+    this.net.sendEvent({ type: 'classHeal', a: Math.max(1, Math.round(amount)) });
     return true;
   }
 
@@ -1196,26 +1219,26 @@ export class Multiplayer {
     const from = this.ctx.player.pos;
     const to = this.remote.targetPos || this.remote.pos;
     if (!to || Math.hypot(from.x - to.x, from.z - to.z) > radius) return false;
-    WoodsNet.sendEvent({ type: 'classRevive', hp: Math.max(0.1, Math.min(1, hpFrac)) });
+    this.net.sendEvent({ type: 'classRevive', hp: Math.max(0.1, Math.min(1, hpFrac)) });
     return true;
   }
 
   sendCampSync() {
     if (!this.active || this.mode !== 'coop' || !this.ctx.camp) return;
     const camp = this.ctx.camp;
-    WoodsNet.sendEvent({ type: 'camp', lv: camp.levels, st: camp.storage, pos: camp.positions,
+    this.net.sendEvent({ type: 'camp', lv: camp.levels, st: camp.storage, pos: camp.positions,
       ...(camp.gravePos ? { gp: camp.gravePos } : {}) });
   }
 
   sendPing(x, z) {
     if (!this.active) return;
-    WoodsNet.sendEvent({ type: 'ping', x: +x.toFixed(1), z: +z.toFixed(1) });
+    this.net.sendEvent({ type: 'ping', x: +x.toFixed(1), z: +z.toFixed(1) });
   }
 
   // guest → host: "spawn this dropped stack/item on the ground for everyone"
   sendDrop(kind, payload, x, z, ownerLock = false) {
     if (!this.active || this.mode !== 'coop') return;
-    WoodsNet.sendEvent({ type: 'drop', k: kind, p: payload, x: +x.toFixed(1), z: +z.toFixed(1),
+    this.net.sendEvent({ type: 'drop', k: kind, p: payload, x: +x.toFixed(1), z: +z.toFixed(1),
       ...(ownerLock ? { lk: 1 } : {}) });
   }
 
@@ -1230,7 +1253,7 @@ export class Multiplayer {
   }
 
   sendKillXp(xp) {
-    WoodsNet.sendEvent({ type: 'xpkill', xp });
+    this.net.sendEvent({ type: 'xpkill', xp });
   }
 
   // Co-op host: share a slain creature with the partner when they were close
@@ -1242,7 +1265,7 @@ export class Multiplayer {
     if (!r?.mesh?.visible || r.dead || !r.lastSeen) return;
     const pos = r.targetPos ?? r.pos;
     if (Math.hypot(pos.x - enemy.pos.x, pos.z - enemy.pos.z) > radius) return;
-    WoodsNet.sendEvent({
+    this.net.sendEvent({
       type: 'questKill',
       t: enemy.type,
       b: enemy.bossRank || 0,
@@ -1256,17 +1279,17 @@ export class Multiplayer {
 
   // co-op host: a pickup was magnet-collected by the partner's proxy
   onRemoteCollect(pickup) {
-    WoodsNet.sendEvent({ type: 'grant', kind: pickup.kind, payload: pickup.payload });
+    this.net.sendEvent({ type: 'grant', kind: pickup.kind, payload: pickup.payload });
   }
 
   sendChop(tree, power) {
     if (this.active && this.mode === 'coop') {
-      WoodsNet.sendEvent({ type: 'chop', x: +tree.x.toFixed(1), z: +tree.z.toFixed(1), power });
+      this.net.sendEvent({ type: 'chop', x: +tree.x.toFixed(1), z: +tree.z.toFixed(1), power });
     }
   }
 
   sendBerry(key) {
-    if (this.active && this.mode === 'coop') WoodsNet.sendEvent({ type: 'berry', k: key });
+    if (this.active && this.mode === 'coop') this.net.sendEvent({ type: 'berry', k: key });
   }
 
   // The host computed this hit against my position as it knew it — which is
@@ -1449,7 +1472,7 @@ export class Multiplayer {
   }
 
   broadcastWin() {
-    if (this.active && this.mode === 'coop') WoodsNet.sendEvent({ type: 'win' });
+    if (this.active && this.mode === 'coop') this.net.sendEvent({ type: 'win' });
   }
 
   dispose() {
@@ -1461,6 +1484,6 @@ export class Multiplayer {
     this.mobaShadow?.dispose(); this.mobaShadow = null;
     document.getElementById('mp-status')?.classList.add('hidden');
     document.getElementById('downed-hint')?.classList.add('hidden');
-    WoodsNet.leave();
+    this.net.leave();
   }
 }

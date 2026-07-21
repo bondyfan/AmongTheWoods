@@ -3331,18 +3331,20 @@ $id('mp-server-btn')?.addEventListener('click', async () => {
   const btn = $id('mp-server-btn');
   if (btn.disabled) return;
   btn.disabled = true;
+  const code = ($id('mp-code').value || '').trim().toUpperCase();
   try {
-    const { WoodsNetWS } = await import('./netws.js');
-    // Milestone 1: prove the full client → wss → server path end-to-end. Server-
-    // hosted co-op gameplay (the sim running ON the server) is the next milestone;
-    // for now this confirms the link and hands you back to Create Co-op.
-    const { code } = await WoodsNetWS.createGame('coop');
-    ui.toast(`🖥️ Server online — room ${code}. Server co-op play arrives in the next update; use 🤝 Create Co-op for now.`, 'level');
-    WoodsNetWS.leave();
+    stopServerStatusWatch();
+    const session = await ensureMp();
+    // enter a server-hosted co-op game — the neutral server runs the world. A
+    // code in the box joins that server room; empty creates a fresh one.
+    const roomCode = await session.serverStart(code || null);
+    mpCode = roomCode;
+    if (!code) showJoinCodeHud(roomCode); // creator: show the join code beacon
   } catch (e) {
-    ui.toast('🖥️ Server error: ' + (e?.message || e), 'boss');
+    mpError(e);
+    startServerStatusWatch();
+    btn.disabled = false;
   }
-  btn.disabled = false;
 });
 $id('mode-survival-btn').addEventListener('click', () => showModeOptions('survival'));
 $id('mode-moba-btn').addEventListener('click', () => showModeOptions('moba'));
