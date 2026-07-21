@@ -1,6 +1,10 @@
 // ---- Sound / music manager (assets reused from the era-battle project) ----
 
+import { CLASS_TREES } from './config.js';
+
 const SFX_PATH = 'assets/sounds/';
+// every class active ability now has its own cast sound named by its id
+const ABILITY_SFX = CLASS_TREES.flatMap(t => t.actives.map(a => a.id));
 const MUSIC_PATH = 'assets/music/';
 
 class AudioManager {
@@ -39,7 +43,9 @@ class AudioManager {
       // harvesting: axe biting wood, pick striking stone, a tree keeling over
       'wood_chop', 'stone_mine', 'tree_fall',
       // ability / UI FX: target lock-on + spell voices (fire/frost/holy/boom/chime)
-      'select', 'chime', 'boom', 'flame', 'freeze', 'holy'];
+      'select', 'chime', 'boom', 'flame', 'freeze', 'holy',
+      // one dedicated cast sound per class active ability (keyed by ability id)
+      ...ABILITY_SFX];
     // nature ambience loops — warmed via HTTP cache, played through loopStart
     const AMB = ['forest_ambience', 'wind_ambience', 'swamp_ambience', 'cave_ambience', 'water_lapping',
       'torch_loop', 'night_crickets', 'verdant_birds', 'jungle_rain'];

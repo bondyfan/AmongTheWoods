@@ -375,7 +375,7 @@ export class Player {
         return false;
       }
       this.spellCds[id] = this.classAbilityCooldown(id);
-      audio.sfx('special', 0.45);
+      audio.sfx(id, 0.55); // each active ability has its own signature cast sound
       return true;
     }
     const spell = spellById(id);
@@ -2355,7 +2355,7 @@ export class Player {
           this.castWindup = null;
           if (this._castClassAbility(skill, rank, ctx)) {
             this.spellCds[id] = this.classAbilityCooldown(id);
-            audio.sfx('special', 0.45);
+            audio.sfx(id, 0.55); // windup abilities land on their own signature sound
           } else audio.sfx('error', 0.3, 300);
         }
       }
