@@ -10,6 +10,13 @@ class Input {
     this.mouse = { x: 0, y: 0, left: false, right: false }; // x,y = NDC; the
     this.leftPressed = false;
     this.leftReleased = false;
+    // touch controls (js/touch.js drives these): an analog move stick + a
+    // held-attack flag. touchAim is the last stick direction, so the player
+    // faces / strikes the way they're moving on a phone.
+    this.touch = { active: false, mx: 0, mz: 0 };
+    this.touchAttack = false;
+    this.touchBlock = false;
+    this.touchAim = { x: 0, z: -1 };
     // OS cursor is a normal free cursor — the player just faces wherever it is.
 
     this.keyHandlers = new Map();
@@ -66,20 +73,22 @@ class Input {
   onKey(code, fn) { this.keyHandlers.set(code, fn); }
 
   get moveX() {
+    if (this.touch.active) return this.touch.mx;
     return (this.keys.has('KeyD') || this.keys.has('ArrowRight') ? 1 : 0) -
            (this.keys.has('KeyA') || this.keys.has('ArrowLeft') ? 1 : 0);
   }
   get moveZ() {
+    if (this.touch.active) return this.touch.mz;
     return (this.keys.has('KeyS') || this.keys.has('ArrowDown') ? 1 : 0) -
            (this.keys.has('KeyW') || this.keys.has('ArrowUp') ? 1 : 0);
   }
   // Right-click remains a quick repeating attack in top-down mode. Left-click
   // is edge-tracked separately so holding and releasing can charge a strike.
   get quickAttack() { return !this.rpgMode && this.mouse.right; }
-  // Hold the attack button (left mouse OR spacebar) to auto-swing.
-  get attackHeld() { return this.mouse.left || this.keys.has('Space'); }
+  // Hold the attack button (left mouse OR spacebar OR the on-screen button).
+  get attackHeld() { return this.mouse.left || this.keys.has('Space') || this.touchAttack; }
   get block() {
-    return this.keys.has('ControlLeft') || this.keys.has('ControlRight') || this.keys.has('KeyV');
+    return this.touchBlock || this.keys.has('ControlLeft') || this.keys.has('ControlRight') || this.keys.has('KeyV');
   }
   // Hold Shift to raise the target-lock reticle: the nearest unit to the
   // screen centre gets selected and single-target abilities snap onto it.

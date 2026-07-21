@@ -15,6 +15,7 @@ import { PostFX } from './postfx.js';
 import { Camp } from './camp.js';
 import { audio } from './audio.js';
 import { input } from './input.js';
+import { initTouch } from './touch.js';
 import { World, latticeHash } from './world.js';
 import { ShipLine } from './ship.js';
 import { loadWorldPatch, applyTweaks } from './worldpatch.js';
@@ -134,6 +135,7 @@ const game = {
   tod: 8 / 24,    // time of day 0..1 (0 = midnight) — the day opens at 08:00
   nightK: 0,      // 0 = full day, 1 = deep night (drives lights/spawns/fireflies)
   biomeIndex: 0,
+  touch: false,   // set once the player uses the on-screen touch controls
   seed: 1, // THE world seed — one canonical world everywhere (solo + multiplayer)
   editorView: false, // admin World-Editor top-down mode (freezes the sim)
   devFly: false,
@@ -4436,10 +4438,46 @@ function updateWaves(dt) {
   }
 }
 
+// touch controls are live once the player has used them (set by js/touch.js)
+function touchActive() { return !!game.touch; }
+
+// nearest attackable enemy within ~50° of a heading and the player's reach+a
+// bit — used so mobile attacks feel like they lock onto what you face
+function nearestAimTarget(dirx, dirz) {
+  const list = combatMgr()?.alive?.() ?? enemyMgr.list;
+  const reach = player.attackRange + 3;
+  let best = null, bestD = reach * reach;
+  for (const e of list) {
+    if (e.dying || e.friendly || e.cfg?.passive) continue;
+    const dx = e.pos.x - player.pos.x, dz = e.pos.z - player.pos.z;
+    const d2 = dx * dx + dz * dz;
+    if (d2 > bestD) continue;
+    const dl = Math.sqrt(d2) || 1;
+    if ((dx / dl) * dirx + (dz / dl) * dirz < 0.64) continue; // outside ~50° cone
+    best = e; bestD = d2;
+  }
+  return best;
+}
+
 function updateAim() {
   // during any ground placement the free cursor drives the aim, even in RPG view
   const placing = pendingAbility || pendingCampItem || pendingNest;
-  if (game.rpgView && !placing) {
+  if (touchActive() && !placing && !game.rpgView) {
+    // phone top-down: strike the way the stick points (or the last direction
+    // while standing still), and snap toward the nearest enemy in that arc so
+    // tapping attack feels like it locks on
+    const a = input.touch.active
+      ? { x: input.touch.mx, z: input.touch.mz } : input.touchAim;
+    let dirx = a.x, dirz = a.z;
+    const dl = Math.hypot(dirx, dirz) || 1; dirx /= dl; dirz /= dl;
+    const foe = nearestAimTarget(dirx, dirz);
+    if (foe) {
+      const fx = foe.pos.x - player.pos.x, fz = foe.pos.z - player.pos.z, fl = Math.hypot(fx, fz) || 1;
+      dirx = fx / fl; dirz = fz / fl;
+    }
+    input.touchAim.x = dirx; input.touchAim.z = dirz;
+    aimPoint.set(player.pos.x + dirx * player.attackRange, 0, player.pos.z + dirz * player.attackRange);
+  } else if (game.rpgView && !placing) {
     // third person: you strike what's in FRONT of you — aim rides the facing
     aimPoint.set(player.pos.x + player.facing.x * player.attackRange,
       0, player.pos.z + player.facing.z * player.attackRange);
@@ -5413,6 +5451,7 @@ function renderSmithPreview(dt) {
 
 world.update(0, player.pos); // pre-generate the starting forest
 updateCamera();
+initTouch(game); // on-screen controls arm on the first touch (phones/tablets)
 tick();
 
 // boot loading screen: preload every sound before the menu unlocks so

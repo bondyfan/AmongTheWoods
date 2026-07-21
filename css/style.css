@@ -1195,3 +1195,69 @@ body.slotting .spell-slot.empty {
   height: 100%; width: 0%; border-radius: 2px;
   background: linear-gradient(90deg, #d8c27a, #ffe9a8);
 }
+
+/* ---------- on-screen touch controls (phones / tablets) ---------- */
+/* the whole layer ignores pointer events; only the controls capture them */
+#touch-ui { position: fixed; inset: 0; z-index: 16; pointer-events: none; }
+#touch-ui.hidden { display: none; }
+
+#tc-stick {
+  position: absolute; left: 26px; bottom: 26px;
+  width: 132px; height: 132px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(20,30,16,0.42), rgba(20,30,16,0.22));
+  border: 2px solid rgba(230,240,210,0.35);
+  pointer-events: auto; touch-action: none;
+}
+#tc-knob {
+  position: absolute; left: 50%; top: 50%; width: 58px; height: 58px;
+  margin: -29px 0 0 -29px; border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #7fa04e, #4c6b35);
+  border: 2px solid rgba(240,240,220,0.7); box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+  transition: transform 0.04s linear;
+}
+
+#tc-actions {
+  position: absolute; right: 24px; bottom: 30px;
+  display: flex; align-items: flex-end; gap: 16px;
+}
+#tc-actions button {
+  pointer-events: auto; touch-action: none; -webkit-tap-highlight-color: transparent;
+  border-radius: 50%; border: 2px solid rgba(240,240,220,0.55);
+  color: #f6f0e0; display: flex; align-items: center; justify-content: center;
+  padding: 0; user-select: none;
+}
+#tc-attack {
+  width: 96px; height: 96px; font-size: 40px;
+  background: radial-gradient(circle at 40% 35%, #b5563e, #7a2f24);
+  box-shadow: 0 3px 12px rgba(0,0,0,0.5);
+}
+#tc-block {
+  width: 66px; height: 66px; font-size: 26px; margin-bottom: 8px;
+  background: radial-gradient(circle at 40% 35%, #43678f, #29405f);
+}
+#tc-actions button.held { filter: brightness(1.35); transform: scale(0.93); }
+
+/* burger button: hidden on desktop, shown in touch mode */
+#burger-btn {
+  display: none; position: absolute; bottom: 18px; right: 18px;
+  width: 52px; height: 52px; border-radius: 12px; font-size: 24px;
+  background: linear-gradient(#4c6b35, #34491f); color: #f0ead8;
+  border: 2px solid #6d8f4c; pointer-events: auto; z-index: 12;
+  -webkit-tap-highlight-color: transparent;
+}
+body.touch #burger-btn { display: block; }
+
+/* in touch mode the menu column is tucked behind the burger */
+body.touch #hud-buttons {
+  bottom: 80px; right: 18px; display: none;
+  background: rgba(12,18,8,0.85); padding: 8px; border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.12);
+}
+body.touch.menu-open #hud-buttons { display: flex; }
+body.touch #hud-buttons button { font-size: 17px; padding: 13px 18px; }
+/* hotkey hints are meaningless on a phone */
+body.touch kbd { display: none; }
+
+/* keep the sticks clear of the spellbar & minimap on small screens */
+body.touch #minimap { bottom: 172px; }
+body.touch #minimap-zoom { bottom: 172px; }

@@ -100,6 +100,8 @@
       <button id="mm-zoom-out" title="Zoom out">−</button>
     </div>
 
+    <!-- burger toggles the button column on phones -->
+    <button id="burger-btn" aria-label="Menu">☰</button>
     <div id="hud-buttons">
       <button id="base-btn" class="hidden">🏰 Base <kbd>B</kbd></button>
       <button id="shop-btn">🛠 Upgrades <kbd>U</kbd></button>
@@ -107,6 +109,15 @@
       <button id="bestiary-btn">📕 Bestiary <kbd>N</kbd></button>
       <button id="settings-btn">⚙️ Settings</button>
       <button id="help-btn">❓ Controls <kbd>H</kbd></button>
+    </div>
+  </div>
+
+  <!-- on-screen touch controls (shown only once a touch is detected) -->
+  <div id="touch-ui" class="hidden">
+    <div id="tc-stick"><div id="tc-knob"></div></div>
+    <div id="tc-actions">
+      <button id="tc-block" aria-label="Block">🛡️</button>
+      <button id="tc-attack" aria-label="Attack">⚔️</button>
     </div>
   </div>
 
