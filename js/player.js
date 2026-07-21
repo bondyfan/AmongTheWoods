@@ -25,6 +25,12 @@ const rankValue = (skill, key, rank, fallback = 0) => {
   return value ?? fallback;
 };
 
+// Single-unit "designation" abilities: they act on ONE enemy and are pointless
+// fired at nothing, so casting them with no valid target is refused (see
+// castSpell) instead of whiffing into the air. Pet-command Hunt Command is
+// gated the same way in main.js.
+const NEEDS_TARGET = new Set(['target', 'execute', 'magicTarget', 'shadowstep']);
+
 export class Player {
   constructor(scene, hooks) {
     this.hooks = hooks; // { popup, onLevelUp, onDeath, onHurt, onEquipChange }
@@ -360,6 +366,15 @@ export class Player {
         return false;
       }
       const rank = this.classRank(id);
+      // Designation abilities (Shadowstep, Fireball, Backstab, Execute…) must
+      // NOT fire into empty air — refuse the cast (no windup, no cooldown) and
+      // tell the player to pick a target. Checked before the windup commits.
+      if (NEEDS_TARGET.has(classSkill.action) && !this._hasClassTarget(classSkill, rank, ctx)) {
+        this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
+          'Select an enemy first (hold Shift)', '#ffcc66');
+        audio.sfx('error', 0.35, 300);
+        return false;
+      }
       // Abilities with a windup charge for a moment before landing: the player
       // raises the weapon, a telegraph ring grows underfoot, and the strike
       // fires from update() once the timer runs out. Cooldown starts on impact.
@@ -463,6 +478,18 @@ export class Player {
       return rankValue(skill, 'maxStep', rank, 0) || (15 + (rank - 1) * 7.5);
     }
     return rankValue(skill, 'range', rank, 12) + 1.5;
+  }
+
+  // Whether a designation ability would find a valid enemy right now — used to
+  // refuse a blank cast BEFORE any windup/cooldown is spent. Mirrors the
+  // target() closure in _castClassAbility (Shift-lock first, else nearest-to-aim).
+  _hasClassTarget(skill, rank, ctx) {
+    const range = rankValue(skill, 'range', rank, 12);
+    const sel = this._selectedTarget;
+    if (sel && !sel.dying && !sel.dead && ctx.enemyMgr?.alive?.().includes(sel)
+      && sel.pos.distanceTo(this.pos) <= this._targetMaxRange(skill, rank)) return true;
+    const aim = ctx.rpgView ? this.pos.clone().addScaledVector(this.facing, range) : ctx.aimPoint;
+    return !!this._findClassTarget(ctx.enemyMgr, aim, range);
   }
 
   _findClassTarget(enemyMgr, aimPoint, range = 12) {
