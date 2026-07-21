@@ -234,8 +234,12 @@ export class Camp {
         }
         if (best) {
           this.towerCd = 1.2;
+          // Scale with the target's own health so the tower stays relevant deep
+          // in the game (a flat 25 was ~13 min/kill at L50). ~2.5% max HP/bolt,
+          // floored at 25 so it still one-shots trickles of early critters.
+          const tdmg = Math.max(25, Math.round((best.maxHp || 0) * 0.025));
           projectiles.spawnBolt(t.position.clone().setY(t.position.y + 3.8), best, {
-            dmg: 25, onHit: () => enemyMgr.damage(best, 25, null, 'tower'),
+            dmg: tdmg, onHit: () => enemyMgr.damage(best, tdmg, null, 'tower'),
           });
           audio.sfx('attack_ranged', 0.2, 300);
         }

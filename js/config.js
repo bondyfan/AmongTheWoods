@@ -575,21 +575,21 @@ export const ITEMS = [
     desc: 'Volcanic point shatters rock, golems and armour with charged hits.' },
   { id: 'huntSpear',  slot: 'weapon', level: 10, icon: '🔱', name: 'Hunting Spear', cost: { wood: 20, stone: 8, hide: 3 },
     weapon: { kind: 'melee', style: 'spear', dmg: 104, cd: 1.64, range: 2.8, chop: 0, mine: 0, tier: 1,
-      combo: [1, 1.2], chargeLunge: 1.25 },
-    desc: 'Safe, narrow reach. Charged attacks lunge forward into exposed weak points.' },
+      combo: [1, 1.2] },
+    desc: "Safe, narrow reach that keeps dangerous foes at spear's length; strikes from behind bite into weak points." },
   // -- weapons: ranged (invented with the Wooden Cabin era; train Range to extend) --
   { id: 'huntingBow', slot: 'weapon', level: 7, icon: '🏹', name: 'Hunting Bow',   cost: { wood: 25, hide: 4 }, needs: 'cabin',
     weapon: { kind: 'bow', style: 'bow', dmg: 32, cd: 2.14, range: 3.5, pierce: false, tier: 1 },
-    desc: 'Hold and release for an accurate weak-point shot. Supports special arrows.' },
+    desc: 'A quick, accurate shot straight to the mark. Supports special arrows.' },
   { id: 'longbow',    slot: 'weapon', level: 12, icon: '🎯', name: 'Longbow',       cost: { wood: 40, hide: 8, iron: 4 }, needs: 'furnace',
     weapon: { kind: 'bow', style: 'bow', dmg: 64, cd: 1.78, range: 7, pierce: false, tier: 2 },
-    desc: 'Long-ranged precision bow; fully drawn shots find weak points.' },
+    desc: 'A long-ranged precision bow that reaches far across the field.' },
   { id: 'recurveBow', slot: 'weapon', level: 14, icon: '🏹', name: 'Recurve Bow',   cost: { wood: 45, hide: 10, iron: 6 }, needs: 'furnace',
     weapon: { kind: 'bow', style: 'bow', dmg: 52, cd: 1.38, range: 8.5, pierce: false, tier: 2 },
     desc: 'Snappy recurve limbs support fast follow-up shots and special arrows.' },
   { id: 'rapidBow',   slot: 'weapon', level: 16, icon: '🌀', name: 'Windstorm Bow', cost: { wood: 45, iron: 14, hide: 10 }, needs: 'furnace',
     weapon: { kind: 'bow', style: 'bow', dmg: 60, cd: 1.0, range: 10, pierce: true, tier: 3 },
-    desc: 'Very fast piercing arrows; charged shots tear through a whole line.' },
+    desc: 'Very fast arrows that pierce clean through a whole line of enemies.' },
   // -- medieval (Age 5, needs the Keep) --
   { id: 'steelSword', slot: 'weapon', level: 18, icon: '⚔️', name: 'Knight\'s Sword', cost: { iron: 25, wood: 10, hide: 8 }, needs: 'keep',
     weapon: { kind: 'melee', style: 'sword', dmg: 300, cd: 1.2, range: 2.1, chop: 0, mine: 0, tier: 3,
@@ -603,12 +603,12 @@ export const ITEMS = [
   { id: 'highlandSpear', slot: 'weapon', level: 27, icon: '⚡', name: 'Highland Greatspear',
     cost: { wood: 55, iron: 38, hide: 18, essence: 14 }, needs: 'runic',
     weapon: { kind: 'melee', style: 'spear', dmg: 420, cd: 1.84, range: 3.3, chop: 0, mine: 0, tier: 4,
-      combo: [1, 1.25], chargeLunge: 1.5 },
-    desc: 'A storm-tempered reach weapon. Charged attacks lunge deep into exposed weak points.' },
+      combo: [1, 1.25] },
+    desc: 'A storm-tempered reach weapon with long, sweeping strikes; hits from behind find weak points.' },
   { id: 'serpentBow', slot: 'weapon', level: 41, icon: '🐍', name: 'Serpent Bow',
     cost: { wood: 85, hide: 35, iron: 45, essence: 35 }, needs: 'spirit',
     weapon: { kind: 'bow', style: 'bow', dmg: 190, cd: 1.24, range: 14, pierce: true, tier: 4 },
-    desc: 'A recurved jungle bow: fast 95-damage arrows pierce through packed enemies.' },
+    desc: 'A recurved jungle bow: fast, heavy arrows pierce through packed enemies.' },
   { id: 'frostAxe', slot: 'weapon', level: 46, icon: '🧚', name: 'Frostforged Axe',
     cost: { wood: 90, iron: 70, hide: 30, essence: 55 }, needs: 'primal',
     weapon: { kind: 'melee', style: 'axe', dmg: 520, cd: 1.64, range: 2.35, chop: 3, mine: 1, tier: 4,
@@ -670,9 +670,17 @@ export const ITEMS = [
     cost: { hide: 15, iron: 10, essence: 10 }, needs: 'furnace', stats: { regen: 1.2, hp: 40 },
     desc: '+1.2 ❤️/s regeneration, +40 max health.' },
   // -- companions --
-  // Wolves are no longer bought here: the Beastmaster TAMES beasts (Tame Beast),
-  // and the arcane spheres (Guardian / Frost / Gemini) are now learnable MAGE
-  // abilities in the class tree — see CLASS_TREES → mage actives below.
+  // The arcane spheres (Guardian / Frost / Gemini) became learnable MAGE
+  // abilities (see CLASS_TREES → mage actives), but the PERSISTENT wolf pet
+  // stays a Beastmaster item: it is the ONLY thing that sets player.pet, which
+  // the whole pet pillar (Pet Training track + Mend Companion / Hunt Command /
+  // Stampede + Pack Tactics / Animal Handler) is built on. Tame Beast is a
+  // separate 20-second battlefield charm, not this permanent companion. Any
+  // 'companion'-slot item is auto-locked to the Beastmaster (requiredClassForItem).
+  { id: 'tamedWolf', slot: 'companion', level: 7, icon: '🐺', name: 'Tamed Wolf', cost: { meat: 165, essence: 3 }, pet: { dmg: 14 },
+    desc: 'A loyal wolf raised at your side. It fights nearby enemies and grows with Pet Training. Beastmaster only.' },
+  { id: 'alphaWolf', slot: 'companion', level: 16, icon: '👑', name: 'Alpha Wolf', cost: { meat: 360, essence: 8 }, pet: { dmg: 32 },
+    desc: 'A massive pack leader — far tougher and deadlier than a tamed wolf, and the anchor for every pet skill. Beastmaster only.' },
   // -- expedition gear (Supplies tab): wearable comfort items, each with its
   // own WoW-style slot. supply: true keeps them out of the weapon/gear shops.
   // torches BURN: one stick lasts ~5 real minutes (5 in-game hours), then it

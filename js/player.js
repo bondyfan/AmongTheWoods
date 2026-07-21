@@ -3131,7 +3131,11 @@ export class Player {
     const speed = crossbow ? 31 : 23 + charge * 9;
     const weakPoint = !crossbow && charge >= 0.78;
     const crit = weakPoint || Math.random() < this.critChance + (this.bowCritBonus || 0);
-    const drawMult = crossbow ? 1 + charge * 0.25 : 0.85 + charge * 1.05;
+    // Charging was removed, so `charge` is always 0. Bows must therefore fire
+    // at their FULL listed damage (the old `0.85 + …` floor secretly docked
+    // every bow 15% forever). Crossbow was already at 1.0. If hold-to-charge
+    // ever returns, both branches still scale up from their honest base.
+    const drawMult = crossbow ? 1 + charge * 0.25 : 1 + charge * 1.05;
     const mountMult = mounted ? 1.18 : 1;
     const arrowMode = crossbow ? 'bolt' : this.arrowMode;
     const effects = arrowMode === 'broadhead'
