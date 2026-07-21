@@ -1322,8 +1322,13 @@ export class World {
     const size = WORLD.radius * 2 + 400;
     const geo = new THREE.PlaneGeometry(size, size, 1, 1);
     geo.rotateX(-Math.PI / 2);
-    const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: 0x14232c }));
-    mesh.position.y = -4.2;
+    // EARTHY dark, sunk well below sea level: a sculpted valley (World Editor
+    // "Lower") that dips beneath it now shows dark GROUND, never a flat teal
+    // sheet that read as phantom water. It sits under the 92%-opaque ocean, so
+    // the sea's look is unchanged; it's only ever seen at the fog horizon or in
+    // a very deep dig.
+    const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: 0x241d13 }));
+    mesh.position.y = -26;
     this._addStatic(mesh);
     // the OCEAN — a ring hugging the coastline (a full-map sheet would leak
     // through every inland dip and flood the deserts with phantom water).
@@ -1510,6 +1515,22 @@ export class World {
       const nz = Math.max(cz * 40, Math.min(z, cz * 40 + 40));
       if (Math.hypot(nx - x, nz - z) > r) continue;
       this._fillGroundGeoFast(chunk.tile.geometry);
+    }
+  }
+
+  // after a sculpt stroke, drop every tree/rock in the area back onto the new
+  // ground height IN PLACE (individual meshes, so no chunk rebuild / flash).
+  // Baked decorations don't move, but the big props do — no floating trees.
+  regroundProps(x, z, r = 60) {
+    for (const [key, chunk] of this.chunks) {
+      const [cx, cz] = key.split(',').map(Number);
+      const nx = Math.max(cx * 40, Math.min(x, cx * 40 + 40));
+      const nz = Math.max(cz * 40, Math.min(z, cz * 40 + 40));
+      if (Math.hypot(nx - x, nz - z) > r) continue;
+      for (const p of [...(chunk.trees ?? []), ...(chunk.rocks ?? []), ...(chunk.bushes ?? [])]) {
+        if (!p.mesh || Math.hypot(p.x - x, p.z - z) > r) continue;
+        p.mesh.position.y = this.heightAt(p.x, p.z);
+      }
     }
   }
 
@@ -1781,7 +1802,7 @@ export class World {
           const x = ccx + (rng() - 0.5) * cell, z = ccz + (rng() - 0.5) * cell;
           // slight per-instance shade so the carpet isn't a flat colour
           const shade = gcol.setHex(gc).multiplyScalar(0.8 + rng() * 0.4).getHex();
-          inst.push({ x, y: cy + (rng() - 0.5) * 0.05, z, rot: rng() * Math.PI * 2, s: 0.85 + rng() * 0.9, c: shade });
+          inst.push({ x, y: cy + (rng() - 0.5) * 0.05, z, rot: rng() * Math.PI * 2, s: 0.7 + rng() * 0.6, c: shade });
         }
         // sparse baked variety on top of the instanced carpet
         if (rng() < 0.5) {
@@ -1974,11 +1995,11 @@ export class World {
       const tkey = `tree:${td}:${biome.name}:${s.size}:${s.v}`;
       let mesh, radius;
       const shared = templateMesh(tkey, () => makeTree(s.size, biome, tplRng(tkey), td),
-        { amp: 0.35, y0: 1.6, y1: 6 });
+        { amp: 0.6, y0: 3, y1: 12 });
       if (shared) ({ mesh, radius } = shared);
       else { // maker produced un-bakeable extras — bake this one live
         const made = makeTree(s.size, biome, rng, td);
-        mesh = bakeGroup(made.mesh, true, { amp: 0.35, y0: 1.6, y1: 6 });
+        mesh = bakeGroup(made.mesh, true, { amp: 0.6, y0: 3, y1: 12 });
         radius = made.radius;
       }
       this._place(mesh, s.x, s.z);
@@ -2230,7 +2251,7 @@ export class World {
           : e.variant === 'dead' ? { ...BIOMES[5], trees: { pine: 0, leafy: 0, birch: 0, dead: 1 } }
           : biomeAt(e.x, e.z);
         const made2 = makeTree(size, tb, drng);
-        const mesh = bakeGroup(made2.mesh, true, { amp: 0.35, y0: 1.6, y1: 6 });
+        const mesh = bakeGroup(made2.mesh, true, { amp: 0.6, y0: 3, y1: 12 });
         const radius = made2.radius;
         this._place(mesh, e.x, e.z);
         mesh.rotation.y = drng() * Math.PI * 2;
