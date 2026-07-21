@@ -2577,9 +2577,13 @@ export class Player {
       // RPG third-person mode: WoW-style tank controls — A/D TURN the
       // character, W drives forward, S backs up; the camera hangs behind
       if (ctx.rpgView) {
-        const pitch = ctx.devFly ? (ctx.devFlyPitch ?? 0) : 0;
-        const forwardFlat = ctx.devFly ? Math.cos(pitch) : 1;
-        const forwardY = ctx.devFly ? -Math.sin(pitch) : 0;
+        // Fly mode AND swimming both let the camera pitch drive vertical motion:
+        // aim down to dive, aim up to surface (forwardY), while the horizontal
+        // reach shrinks (forwardFlat) the steeper you look — just like flying.
+        const usePitch = ctx.devFly || this.swimming;
+        const pitch = usePitch ? (ctx.devFlyPitch ?? 0) : 0;
+        const forwardFlat = usePitch ? Math.cos(pitch) : 1;
+        const forwardY = usePitch ? -Math.sin(pitch) : 0;
         if (ctx.mouseLook) {
           // mouse steers the character — A/D become pure strafing
           const fwd = -mz, strafe = mx;
@@ -2619,11 +2623,9 @@ export class Player {
         const guardSlow = this.blocking ? 0.48 : 1;
         const mountBonus = ctx.mounted ? 9 : ctx.boatMount ? 6 : 0;
         const terrainMult = ctx.boatMount ? (wk > 0 ? 0.65 : 0.45)
-          : (wk === 2 && this.swimming) ? 0.6  // deep water: 60% — but ONLY once he's
-                                               // actually swimming (the stroke animation
-                                               // is playing), never the instant he steps in
-          : wk === 2 ? 1       // just entered deep water: full speed until the stroke starts
-          : wk === 1 ? 0.62    // shallow water: wading
+          : (wk === 2 && this.swimming) ? 0.6  // 60% ONLY while he's truly swimming (the
+                                               // stroke animation is playing) — no slowdown
+                                               // wading in or the frame he first steps deep
           : 1;
         const speed = (this.speed + this.moveSpeedBonus + mountBonus) * terrainMult
           * guardSlow * (this.tameChannel ? 0 : this.castWindup ? 0.5 : 1)
@@ -2659,10 +2661,17 @@ export class Player {
           else if (canStep(0, dz)) this.pos.z += dz;
           world.collide(this.pos, 0.45,
             { boat: ctx.boat, wade: true, swimmer: (this.stats?.swim || 0) > 0 || !!this.upgrades?.swim });
+          // swimming down/up: the look pitch (flyY) sinks or lifts the diver.
+          // clamped to the surface here; the bed clamp is applied with the pose.
+          if (this.swimming && flyY !== 0)
+            this.swimDepth = Math.max(0, (this.swimDepth || 0) - flyY * speed * dt);
         }
         this._applyBounds(ctx);
         this.walkT += dt * speed;
       }
+      // remember this frame's vertical swim intent so the pose can nose the
+      // body down while diving / up while surfacing (0 when not driving)
+      this._swimDive = (moving && this.swimming) ? flyY : 0;
     }
 
     // -- aim: face the mouse point (RPG mode faces where the keys steer) --
@@ -2680,19 +2689,29 @@ export class Player {
     if (this.swimming) {
       this.swimT = (this.swimT || 0) + dt;
       const wy = world.waterYAt?.(this.pos.x, this.pos.z) ?? this.mesh.position.y;
-      // float horizontal, chest just under the surface, gentle bob
-      this.mesh.position.y = wy - 0.55 + Math.sin(this.swimT * 1.6) * 0.06;
+      const surfaceY = wy - 0.55;
+      // dive depth is clamped so he floats to the surface at the top and never
+      // sinks through the lake bed at the bottom
+      const bedY = world.heightAt(this.pos.x, this.pos.z);
+      const maxDepth = Math.max(0, surfaceY - bedY - 0.5);
+      this.swimDepth = Math.min(Math.max(0, this.swimDepth || 0), maxDepth);
+      const depth = this.swimDepth;
+      const bob = depth < 0.1 ? Math.sin(this.swimT * 1.6) * 0.06 : 0; // bob only at the surface
+      this.mesh.position.y = surfaceY - depth + bob;
       // The heading (Y) MUST be applied before the forward pitch (X); with the
       // default XYZ order the pitch happens first, so the yaw then rolls the
       // already-tilted body onto its side whenever he swims any non-default
       // direction (that's the "lying sideways" look). YXZ = yaw first, then
       // pitch about the body's OWN lateral axis => a clean prone float on his
-      // belly, head pointing the way he swims.
+      // belly, head pointing the way he swims. In RPG 3D the body noses DOWN
+      // while diving and UP while surfacing, so he points where he's going.
       this.mesh.rotation.order = 'YXZ';
-      this.mesh.rotation.x = 1.45;               // ~83°: prone, head raised a touch to look ahead
+      const dive = ctx.rpgView ? (this._swimDive || 0) : 0; // <0 diving, >0 surfacing
+      this.mesh.rotation.x = Math.max(0.5, Math.min(2.6, 1.45 - dive * 1.05));
     } else if (this.mesh.rotation.x !== 0) {
       this.mesh.rotation.x = 0;                  // stand back up on land
       this.mesh.rotation.order = 'XYZ';          // restore the default Euler order ashore
+      this.swimDepth = 0; this._swimDive = 0;    // start at the surface next time we swim
     }
     // local +z toward the aim point, so arm swings (toward +z) punch forward
     // Whirlwind: spin the whole body two full turns on top of the facing
