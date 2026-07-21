@@ -2228,6 +2228,9 @@ function startPlaying() {
   if (DEVMODE) player.setLevel(MAX_LEVEL);
   // build the world around the spawn behind the overlay, then reveal
   warmUpAndReveal();
+  // co-op survival: once the world is revealed, offer New-vs-Load — but only if
+  // you're signed in and actually have cloud saves worth bringing back
+  maybeOfferCoopStart();
 }
 
 function startGame() {
@@ -3100,6 +3103,57 @@ function applyLoadedState(d) {
   audio.sfx('victory', 0.4);
 }
 $id('loadgame').querySelector('.panel-close').addEventListener('click', () => $id('loadgame').classList.add('hidden'));
+
+// ---------- co-op survival: "New game vs Load" prompt on entering ----------
+// When you drop into a co-op survival world while signed in AND you have cloud
+// saves, offer to bring a character back instead of always starting fresh.
+// Guests and first-time players (no saves) skip the prompt and just play new.
+let _coopStartNewestId = null;
+async function maybeOfferCoopStart() {
+  if (!authUser) return;                     // no account → no cloud saves
+  if (!(mp?.active && mp.mode === 'coop' && game.kind === 'survival')) return;
+  let saves = [];
+  try { saves = await (await ensureAuth()).listSaves(); } catch { return; }
+  if (!saves.length) return;                 // nothing to load — start fresh silently
+  const newest = saves[0];                   // listSaves is newest-first
+  _coopStartNewestId = newest.id;
+  const when = new Date(newest.at).toLocaleString();
+  const tag = newest.auto ? '🔄 Autosave · ' : '';
+  $id('cs-last-meta').textContent = `${tag}${newest.biome ?? '?'} · Lv ${newest.level ?? '?'} · ${when}`;
+  // always open on the first (New/Load) step
+  $id('coopstart-choose').classList.remove('hidden');
+  $id('coopstart-load').classList.add('hidden');
+  // wait out the "entering the woods" overlay so the prompt lands on the world,
+  // not on the loading spinner
+  showCoopStartWhenRevealed();
+}
+function showCoopStartWhenRevealed() {
+  const ov = $id('enter-overlay');
+  if (ov && !ov.classList.contains('hidden')) { setTimeout(showCoopStartWhenRevealed, 150); return; }
+  $id('coopstart').classList.remove('hidden');
+}
+function closeCoopStart() { $id('coopstart').classList.add('hidden'); }
+$id('cs-new').addEventListener('click', () => { audio.sfx('click', 0.4); closeCoopStart(); });
+$id('cs-load').addEventListener('click', () => {
+  audio.sfx('click', 0.4);
+  $id('coopstart-choose').classList.add('hidden');
+  $id('coopstart-load').classList.remove('hidden');
+});
+$id('cs-back').addEventListener('click', () => {
+  audio.sfx('click', 0.4);
+  $id('coopstart-load').classList.add('hidden');
+  $id('coopstart-choose').classList.remove('hidden');
+});
+$id('cs-last').addEventListener('click', async () => {
+  audio.sfx('click', 0.4);
+  closeCoopStart();
+  if (_coopStartNewestId) await doLoad(_coopStartNewestId);
+});
+$id('cs-choose').addEventListener('click', () => {
+  audio.sfx('click', 0.4);
+  closeCoopStart();
+  openLoadGame();
+});
 
 async function ensureMp() {
   if (!mp) {

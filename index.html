@@ -484,6 +484,31 @@
     </div>
   </div>
 
+  <!-- co-op survival: on entering, choose a fresh start or bring a saved
+       character back (only shown when signed in and you HAVE cloud saves) -->
+  <div id="coopstart" class="panel hidden">
+    <div class="panel-head">
+      <h2>🌲 Enter the woods</h2>
+    </div>
+    <div id="coopstart-body">
+      <div id="coopstart-choose">
+        <p class="cs-lead">You have saved characters. Start this co-op run fresh, or bring one back?</p>
+        <button id="cs-new" class="cs-big">🆕 New game from scratch
+          <small>Wake in the cave at level 1 with an empty camp.</small></button>
+        <button id="cs-load" class="cs-big">☁️ Load a saved game
+          <small>Restore your character, gear and camp into this world.</small></button>
+      </div>
+      <div id="coopstart-load" class="hidden">
+        <p class="cs-lead">Which save?</p>
+        <button id="cs-last" class="cs-big">⏱️ Continue last save
+          <small id="cs-last-meta">—</small></button>
+        <button id="cs-choose" class="cs-big">📂 Choose another save…
+          <small>Pick from your full save history.</small></button>
+        <button id="cs-back" class="mini-btn cs-back">← Back</button>
+      </div>
+    </div>
+  </div>
+
   <!-- blacksmith: quests + forging (E at a smith camp) -->
   <div id="smith" class="panel hidden">
     <div class="panel-head">
