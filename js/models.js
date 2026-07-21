@@ -534,36 +534,58 @@ vec2 _rip(vec2 p, vec2 d, float fr, float am, float sp, float t){
   return d * (-sin(dot(d, p) * fr + t * sp) * am * fr);
 }
 // per-pixel water normal: sum of directional ripples; returns the analytic
-// surface normal (fine detail, independent of the mesh resolution)
-vec3 waterNormal(vec2 p, float t){
+// surface normal (fine detail, independent of the mesh resolution). detail
+// (1 near camera to 0 far) fades the high-frequency octaves out with distance
+// so far water goes glassy-smooth instead of aliasing into a shimmering grid.
+vec3 waterNormal(vec2 p, float t, float detail){
   vec2 g = vec2(0.0);
   g += _rip(p, vec2( 0.80, 0.30), 1.4 , 0.16 , 1.3, t);
   g += _rip(p, vec2(-0.50, 0.90), 2.6 , 0.10 , 1.9, t);
-  g += _rip(p, vec2( 0.30,-0.70), 4.7 , 0.06 , 2.5, t);
-  g += _rip(p, vec2( 0.90, 0.40), 8.5 , 0.035, 3.1, t);
-  g += _rip(p, vec2(-0.20, 0.98), 15.0, 0.02 , 3.8, t);
+  g += _rip(p, vec2( 0.30,-0.70), 4.7 , 0.06 , 2.5, t) * detail;
+  g += _rip(p, vec2( 0.90, 0.40), 8.5 , 0.030, 3.1, t) * detail;
+  g += _rip(p, vec2(-0.20, 0.98), 15.0, 0.016, 3.8, t) * detail * detail;
   return normalize(vec3(-g.x, 1.0, -g.y));
 }`)
       .replace('#include <opaque_fragment>', `
 vec2 rp = vWaterWP.xz;
-vec3 Nr = mix(vec3(0.0, 1.0, 0.0), waterNormal(rp, uTime), uFx);
-vec3 Vw = normalize(cameraPosition - vWaterWP);
+vec3 toCam = cameraPosition - vWaterWP;
+float camDist = length(toCam);
+// fade the fine ripple octaves with distance so far water settles into a
+// smooth reflective sheet rather than a boiling grid of aliased glints
+float detail = 1.0 - smoothstep(16.0, 85.0, camDist);
+vec3 Nr = mix(vec3(0.0, 1.0, 0.0), waterNormal(rp, uTime, detail), uFx);
+vec3 Vw = toCam / max(camDist, 1e-3);
 float facing = clamp(dot(Vw, Nr), 0.0, 1.0);
-float fres = pow(1.0 - facing, 3.0);
-// body tint: rich deep blue looking down, lighter teal where shallower
-vec3 deepC = diffuse * 0.42;
-vec3 shallowC = diffuse * 1.25 + vec3(0.0, 0.05, 0.08);
-vec3 body = mix(deepC, shallowC, facing * 0.65);
-outgoingLight = mix(outgoingLight, body, 0.74);
-// sky reflection brightens the grazing angles (the far side of the water)
-outgoingLight += vec3(0.62, 0.8, 0.95) * fres * 0.75 * uFx;
-// TIGHT sun sparkles riding the fine per-pixel normal (small, not blobby)
+float graze = 1.0 - facing;                 // 0=straight down, 1=edge-on
+float fres = graze * graze * graze * graze;  // pow(graze,4): reflective at a graze
+// body tint: rich deep blue looking straight down, lighter teal at a graze
+vec3 deepC = diffuse * 0.40;
+vec3 shallowC = diffuse * 1.28 + vec3(0.0, 0.05, 0.09);
+vec3 body = mix(deepC, shallowC, facing * 0.6);
+outgoingLight = mix(outgoingLight, body, 0.78);
+// sky reflection: a soft sky-gradient tint that grows toward the far grazing
+// edge: this is what reads as a genuinely reflective water surface
+vec3 skyRefl = mix(vec3(0.55, 0.72, 0.90), vec3(0.80, 0.90, 0.99), Nr.y * 0.5 + 0.5);
+outgoingLight = mix(outgoingLight, skyRefl, clamp(fres * 0.7, 0.0, 0.7) * uFx);
+// sun glitter, ANTIALIASED. A pinpoint highlight on a big near-flat plane
+// aliases into a "matrix" grid of blocky sparkles, so we ROUGHEN it (widen +
+// dim) exactly where that happens: at distance (detail to 0) and at grazing
+// angles, leaving a clean sheen up close and broad soft glints afar.
 vec3 Hn = normalize(Vw + normalize(uSunDir));
-float spec = pow(max(dot(Nr, Hn), 0.0), 200.0);
-outgoingLight += vec3(1.0, 0.98, 0.9) * spec * 5.0 * uFx;
-// TRANSLUCENT: see the bed straight down, reflective/opaque at a graze, and
-// fade to nothing at the shoreline (vWedge) so the disc has no hard edge
-diffuseColor.a = clamp(mix(opacity, 0.96, fres) * vWedge, 0.02, 1.0);
+float ndh = max(dot(Nr, Hn), 0.0);
+float rough = clamp(max(1.0 - detail, graze * graze), 0.0, 1.0);
+float shininess = mix(150.0, 22.0, rough);
+float spec = pow(ndh, shininess) * (0.35 + 0.65 * detail);
+outgoingLight += vec3(1.0, 0.97, 0.88) * spec * 2.2 * uFx;
+// soft foam lacing the shoreline (rides the wedge fade at the disc rim)
+float foam = smoothstep(0.42, 0.12, vWedge) * smoothstep(0.02, 0.13, vWedge);
+foam *= 0.55 + 0.45 * sin(dot(rp, vec2(2.3, 1.7)) + uTime * 2.0);
+foam = clamp(foam, 0.0, 1.0) * uFx;
+outgoingLight += vec3(0.90, 0.95, 1.0) * foam * 0.5;
+// TRANSLUCENT: see the bed straight down, reflective/opaque at a graze; foam
+// stays opaque; the whole disc fades to nothing at the shore (vWedge)
+float a = max(mix(opacity, 0.97, fres), foam * 0.85);
+diffuseColor.a = clamp(a * vWedge, 0.02, 1.0);
 #include <opaque_fragment>`);
     WATER_SHADERS.push(shader);
   };
