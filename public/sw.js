@@ -21,7 +21,9 @@ self.addEventListener('fetch', (e) => {
   e.respondWith((async () => {
     try {
       const fresh = await fetch(req);
-      if (fresh && fresh.ok && (fresh.type === 'basic')) {
+      // ONLY cache full 200 responses: a 206 Partial Content (range request —
+      // streamed audio/video) can't be put in the Cache and throws
+      if (fresh && fresh.status === 200 && fresh.type === 'basic') {
         const cache = await caches.open(CACHE);
         cache.put(req, fresh.clone());
       }

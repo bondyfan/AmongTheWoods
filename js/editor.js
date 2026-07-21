@@ -864,6 +864,14 @@ export class WorldEditor {
 
   // ---------- persistence ----------
   async save() {
+    // the /__worldpatch write-to-disk endpoint only exists under `vite dev`.
+    // The deployed build has no server, so a POST there just 405s and spams
+    // the console — download the patch instead (drop it into assets/ + commit).
+    if (!import.meta.env.DEV) {
+      this.export();
+      this.o.toast('💾 Deployed build — downloaded world-patch.json. Replace assets/world-patch.json and commit to ship it.');
+      return;
+    }
     const body = JSON.stringify(worldPatch.serialize());
     try {
       const res = await fetch('/__worldpatch', { method: 'POST', body,
