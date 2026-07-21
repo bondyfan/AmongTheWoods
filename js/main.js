@@ -4259,6 +4259,10 @@ function updateAim() {
   updateAimArc(aimArc, player.pos.x, player.pos.z, Math.atan2(dx, dz),
     range, halfAngle, thickness, (x, z) => world.heightAt(x, z));
   aimArc.material.color.setHex(bow ? 0x9fd8ff : 0xffe9a8);
+  // melee: depth-test ON so the marker never shines THROUGH the player's own
+  // body; the bow's distant slice keeps rendering over rises in the terrain
+  aimArc.material.depthTest = !bow;
+  aimArc.renderOrder = bow ? 10 : 0;
 }
 
 // ---------- biome / atmosphere transitions ----------

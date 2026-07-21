@@ -2564,7 +2564,9 @@ export class Player {
         leftArm.rotation.x = -1.5;
         rightArm.rotation.x = -0.4 - k * 0.85; // drawing the string back
       } else {
-        rightArm.rotation.x = 0.9 * k;                    // rising behind the shoulder
+        // (+x rotation lifts the hanging arm up BEHIND the head — the classic
+        // axe-over-the-shoulder pose the strike then chops down from)
+        rightArm.rotation.x = 2.3 * k;                    // raising OVERHEAD
         rightArm.rotation.z = -0.5 * k * this.swingSide;  // …and out to this swing's side
       }
     } else if (this.attackT > 0) {
@@ -2574,15 +2576,15 @@ export class Player {
         leftArm.rotation.x = -1.5;
         rightArm.rotation.x = -1.2 * Math.sin(k * Math.PI);
       } else {
-        // the windup already raised the arm to one side — whip DOWN and across
-        // to the other side: a diagonal top-to-bottom chop
+        // the windup raised the arm OVERHEAD to one side — now whip it DOWN
+        // in front and across to the other side: a true top-to-bottom chop.
+        // Starts exactly at the windup's end pose (+2.3 overhead) and ends
+        // forward-low (-1.1), so the two phases blend seamlessly.
         const side = this.attackSide || 1;
-        const windup = 0.9 * Math.min(1, k / 0.12);
-        const strike = k <= 0.12 ? 0 : (k - 0.12) / 0.88;
-        const whip = strike * strike * (3 - 2 * strike); // smoothstep
-        rightArm.rotation.x = windup * (1 - whip) - 2.6 * whip;
-        rightArm.rotation.z = (-0.5 * (1 - whip) + 0.3 * whip) * side; // sweep across the body
-        rightSocket.rotation.x = -1.1 * whip * (1 - strike * 0.4); // wrist flick
+        const whip = k * k * (3 - 2 * k); // smoothstep over the whole swing
+        rightArm.rotation.x = 2.3 - 3.4 * whip;            // overhead → forward-low
+        rightArm.rotation.z = (-0.5 + 0.8 * whip) * side;  // sweep across the body
+        rightSocket.rotation.x = -1.1 * whip * (1 - k * 0.4); // wrist flick
       }
     } else {
       rightArm.rotation.x = -swing * 0.6;
