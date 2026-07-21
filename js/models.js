@@ -3182,53 +3182,68 @@ function pickTreeType(weights, rng) {
 // size: 0 sapling … 4 forest giant (five tiers — bigger tree, more wood and
 // far more hidden trunk health). Returns { mesh, radius } — radius = collision.
 // --- tree-detail helpers (detail 0 = low / 1 = medium / 2 = high) ---
-// scatter small shade-varied LEAF CLUMPS over a canopy blob so the crown
-// reads as thousands of leaves instead of one smooth ball
+// clothe a canopy blob in small shade-varied leaf bumps that HUG its surface,
+// so the crown reads as a rich bushy mass of foliage — never floating balls
 function _canopyLeaves(g, cx, cy, cz, r, color, detail, rng) {
-  const n = detail >= 2 ? 9 : 5;
+  const n = detail >= 2 ? 12 : 6;
   const base = new THREE.Color(color);
   for (let i = 0; i < n; i++) {
-    const a = rng() * Math.PI * 2, e = rng() * Math.PI - Math.PI / 2;
-    const rr = r * (0.72 + rng() * 0.42);
+    const a = rng() * Math.PI * 2;
+    const e = rng() * 1.5 - 0.2;               // biased to the upper hemisphere
+    const rr = r * (0.86 + rng() * 0.16);      // sit ON the blob surface
     const lx = cx + Math.cos(a) * Math.cos(e) * rr;
-    const ly = cy + Math.sin(e) * rr * 0.72;
+    const ly = cy + Math.sin(e) * rr * 0.85;
     const lz = cz + Math.sin(a) * Math.cos(e) * rr;
-    const shade = base.clone().multiplyScalar(0.8 + rng() * 0.4).getHex();
-    let s;
-    if (detail >= 2 && rng() < 0.5) {      // a flat leaf plate for texture
-      s = box(0.14 + rng() * 0.06, 0.035, 0.14 + rng() * 0.06, shade);
-      s.rotation.set(rng() * 3, rng() * 3, rng() * 3);
-    } else {                               // a small leaf clump
-      s = sphere(0.09 + rng() * 0.11, shade, 5);
-    }
+    const shade = base.clone().multiplyScalar(0.84 + rng() * 0.3).getHex();
+    const s = sphere(r * (0.2 + rng() * 0.14), shade, 5);
     s.castShadow = false;
     s.position.set(lx, ly, lz);
+    s.scale.y = 0.82;
     g.add(s);
   }
 }
 
-// a few branches angling up-and-out from the upper trunk, leaf-tufted at
-// their tips on high detail
+// a few real branches for HIGH detail — each is a group whose base sits on
+// the trunk and whose leaf tuft is a CHILD at the branch tip, so the tuft can
+// never float away from the branch (the old maths detached them)
 function _treeBranches(g, trunkH, scale, trunkColor, foliageColor, detail, rng) {
-  const n = detail >= 2 ? 3 + Math.floor(rng() * 3) : 2;
+  if (detail < 2) return;
+  const n = 3 + Math.floor(rng() * 2);
   for (let i = 0; i < n; i++) {
-    const len = (0.45 + rng() * 0.5) * scale;
-    const b = cyl(0.025 * scale, 0.05 * scale, len, trunkColor, 5);
-    const a = (i / n) * Math.PI * 2 + rng() * 0.6;
-    const y = trunkH * (0.5 + rng() * 0.38);
-    const tilt = 0.7 + rng() * 0.4;
-    b.position.set(Math.cos(a) * 0.1 * scale, y, Math.sin(a) * 0.1 * scale);
-    b.rotation.set(Math.sin(a) * tilt, 0, -Math.cos(a) * tilt);
-    b.castShadow = false;
-    g.add(b);
-    if (detail >= 2) {                     // leaf tuft at the branch tip
-      const t = sphere(0.18 * scale + 0.05, foliageColor, 5);
-      t.castShadow = false;
-      const rr = (0.1 + len * 0.55) * scale;
-      t.position.set(Math.cos(a) * rr, y + len * 0.34, Math.sin(a) * rr);
-      g.add(t);
-    }
+    const len = (0.5 + rng() * 0.45) * scale;
+    const br = new THREE.Group();
+    const c = cyl(0.028 * scale, 0.05 * scale, len, trunkColor, 5);
+    c.position.y = len / 2;                    // base at the group origin
+    c.castShadow = false;
+    br.add(c);
+    const t = sphere(0.22 * scale + 0.05, foliageColor, 5);
+    t.castShadow = false; t.position.y = len; t.scale.y = 0.85; // rides the tip
+    br.add(t);
+    br.position.y = trunkH * (0.55 + rng() * 0.3);
+    br.rotation.y = (i / n) * Math.PI * 2 + rng() * 0.5;
+    br.rotation.x = 0.9 + rng() * 0.35;        // lean up-and-out
+    g.add(br);
   }
+}
+
+// a DENSE patch of many TINY grass blades spread over a small area — the
+// Ultra grass-fill stamps these overlapping so the ground reads as a thick
+// continuous lawn of countless little blades
+export function makeGrassPatch(color, rng) {
+  const g = new THREE.Group();
+  const n = 6 + Math.floor(rng() * 3);         // 6-8 tiny blades per patch
+  const c = new THREE.Color(color);
+  for (let i = 0; i < n; i++) {
+    const h = 0.12 + rng() * 0.18;             // tiny
+    const shade = c.clone().multiplyScalar(0.85 + rng() * 0.3).getHex();
+    const b = cone(0.03, h, shade, 3);
+    b.castShadow = false;
+    const a = rng() * Math.PI * 2, rr = Math.sqrt(rng()) * 0.62;
+    b.position.set(Math.cos(a) * rr, h / 2, Math.sin(a) * rr);
+    b.rotation.set((rng() - 0.5) * 0.5, rng() * Math.PI, (rng() - 0.5) * 0.5);
+    g.add(b);
+  }
+  return g;
 }
 
 export function makeTree(size, biome, rng, detail = 0) {

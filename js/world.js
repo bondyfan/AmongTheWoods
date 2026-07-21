@@ -11,8 +11,8 @@ import * as THREE from 'three';
 import { WORLD, BIOMES, biomeAt, biomeIndexAt, radiusOf, zoneInfoAt,
          ZONE_LINES, wobX, wobZ, hubEdgeR, coastRAt, coastDistAt,
          HARBOR_SPECS } from './config.js';
-import { makeTree, makeRock, makeGrassTuft, makeGrassBlades, makeGrainStalk, makeMeadowFlower,
-         makeFlower, makeMushroom, makeBush,
+import { makeTree, makeRock, makeGrassTuft, makeGrassBlades, makeGrassPatch,
+         makeGrainStalk, makeMeadowFlower, makeFlower, makeMushroom, makeBush,
          makeLog, makeBoulder, makeBridge, makeCampfire, makeStalagmite,
          makeBerryBush, makeShrine, makeMonolith, makeCrypt, makeBlacksmith, makeCobweb,
          makeFarm, makeTrader, makeBeehive, makeBeehiveBig, makeCocoon, makeGlade, makeGraveyardRuin,
@@ -1744,46 +1744,51 @@ export class World {
   // Ultra grass: a jittered grid tuft on every green grassy cell — dense turf
   // everywhere, one baked mesh, its own rng so other decos don't shift.
   _grassFill(deco, cxw, czw, fm) {
-    const step = Math.max(1.6, Math.min(3.6, 3.5 / Math.sqrt(fm)));
+    // The expensive terrain checks (water / path / biome) run on a COARSE
+    // grid; each valid cell then stamps SEVERAL dense tiny-blade patches at
+    // jittered offsets. That gives a thick continuous lawn without paying a
+    // water/path query for every little clump.
+    const cell = Math.max(2.2, Math.min(4.2, 4.7 / Math.sqrt(fm)));
+    const perCell = fm >= 3 ? 3 : fm >= 2 ? 2 : 1;
     const cx = (cxw / CHUNK) | 0, cz = (czw / CHUNK) | 0;
     const rng = mulberry32((this.seed ^ 0x6a55f1) ^ (cx * 73856093) ^ (cz * 19349663));
-    // sway profiles per look
-    const SW_LO = { amp: 1, h: 0.42 }, SW_HI = { amp: 1, h: 0.95 };
+    const SW_LO = { amp: 1, h: 0.3 }, SW_HI = { amp: 1, h: 0.95 };
     const SW_GR = { amp: 1, h: 1.0 }, SW_FL = { amp: 0.9, h: 0.32 };
-    for (let gz = 0; gz < CHUNK; gz += step) {
-      for (let gx = 0; gx < CHUNK; gx += step) {
-        const x = cxw + gx + (rng() - 0.5) * step;
-        const z = czw + gz + (rng() - 0.5) * step;
-        const v = (rng() * 8) | 0, rot = rng() * Math.PI * 2, roll = rng();
-        // cheapest cullers first (this runs for every cell of every chunk):
-        // biome greenness, then the cave/water/path gate
-        const gc = biomeAt(x, z).grass;
+    for (let gz = 0; gz < CHUNK; gz += cell) {
+      for (let gx = 0; gx < CHUNK; gx += cell) {
+        const ccx = cxw + gx + cell * 0.5, ccz = czw + gz + cell * 0.5;
+        // one set of checks for the whole cell (cheapest cullers first)
+        const gc = biomeAt(ccx, ccz).grass;
         if (!(((gc >> 8) & 255) > ((gc >> 16) & 255) && ((gc >> 8) & 255) > (gc & 255))) continue;
-        if (radiusOf(x, z) < 14) continue;               // starting cave
-        if (this.isWater(x, z)) continue;                // water / lakes / bog
-        if (this.pathDistance(x, z) < 3) continue;       // keep trails clear
-        if (worldPatch.buildingGroundAt?.(x, z)) continue; // town squares
-        const y = this.heightAt(x, z);
-        // MEADOW MIX — small blades dominate, with occasional taller grass,
-        // a bushier grass type, a grain stalk and the rare wildflower
-        let key, build, sw, sc;
-        if (roll < 0.60) {                 // short base turf (small)
-          key = `gf:${gc}:${v}`; build = () => makeGrassBlades(gc, tplRng(key));
-          sw = SW_LO; sc = 0.7 + rng() * 0.5;
-        } else if (roll < 0.78) {          // a taller grass clump
-          key = `gt:${gc}:${v}`; build = () => makeGrassBlades(gc, tplRng(key));
-          sw = SW_HI; sc = 1.5 + rng() * 0.8;
-        } else if (roll < 0.90) {          // a bushier fan-grass type
-          key = `gb:${gc}:${v}`; build = () => makeGrassTuft(gc, tplRng(key));
-          sw = SW_LO; sc = 0.6 + rng() * 0.4;
-        } else if (roll < 0.965) {         // a grain / oat stalk
-          key = `grn:${v}`; build = () => makeGrainStalk(tplRng(key));
-          sw = SW_GR; sc = 0.8 + rng() * 0.5;
-        } else {                           // a wildflower
-          key = `flw:${v}`; build = () => makeMeadowFlower(tplRng(key));
-          sw = SW_FL; sc = 0.85 + rng() * 0.5;
+        if (radiusOf(ccx, ccz) < 14) continue;              // starting cave
+        if (this.isWater(ccx, ccz)) continue;               // water / lakes / bog
+        if (this.pathDistance(ccx, ccz) < 3.5) continue;    // keep trails clear
+        if (worldPatch.buildingGroundAt?.(ccx, ccz)) continue; // town squares
+        for (let k = 0; k < perCell; k++) {
+          const x = ccx + (rng() - 0.5) * cell, z = ccz + (rng() - 0.5) * cell;
+          const v = (rng() * 8) | 0, rot = rng() * Math.PI * 2, roll = rng();
+          const y = this.heightAt(x, z);
+          // MEADOW MIX — dense tiny-blade patches dominate; occasional taller
+          // grass, a bushier tuft, a grain stalk and the rare wildflower
+          let key, build, sw, sc;
+          if (roll < 0.76) {                 // dense patch of tiny blades (base)
+            key = `gp:${gc}:${v}`; build = () => makeGrassPatch(gc, tplRng(key));
+            sw = SW_LO; sc = 1.0 + rng() * 0.5;
+          } else if (roll < 0.87) {          // a taller grass clump
+            key = `gt:${gc}:${v}`; build = () => makeGrassBlades(gc, tplRng(key));
+            sw = SW_HI; sc = 1.5 + rng() * 0.9;
+          } else if (roll < 0.94) {          // a bushier fan-grass type
+            key = `gb:${gc}:${v}`; build = () => makeGrassTuft(gc, tplRng(key));
+            sw = SW_LO; sc = 0.6 + rng() * 0.4;
+          } else if (roll < 0.98) {          // a grain / oat stalk
+            key = `grn:${v}`; build = () => makeGrainStalk(tplRng(key));
+            sw = SW_GR; sc = 0.8 + rng() * 0.5;
+          } else {                           // a wildflower
+            key = `flw:${v}`; build = () => makeMeadowFlower(tplRng(key));
+            sw = SW_FL; sc = 0.85 + rng() * 0.5;
+          }
+          stampTemplate(deco, bakeTemplate(key, build), x, y, z, rot, sw, sc);
         }
-        stampTemplate(deco, bakeTemplate(key, build), x, y, z, rot, sw, sc);
       }
     }
   }
