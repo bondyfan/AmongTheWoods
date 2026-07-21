@@ -36,8 +36,8 @@ export class Projectiles {
 
   // Homing bolt. onHit (optional) resolves the damage — used by guardian
   // spheres (enemyMgr.damage) and MOBA towers (units/heroes alike).
-  spawnBolt(origin, target, { dmg, onHit = null }) {
-    const mesh = makeBolt();
+  spawnBolt(origin, target, { dmg, onHit = null, color }) {
+    const mesh = makeBolt(color);
     mesh.position.copy(origin);
     this.scene.add(mesh);
     this.list.push({

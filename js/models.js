@@ -3400,10 +3400,10 @@ export function makeRock(rng) {
 }
 
 // ---------- Companions & projectiles ----------
-export function makeGuardianSphere() {
+export function makeGuardianSphere(emissive = 0x38c0ff) {
   const g = new THREE.Group();
   const core = new THREE.Mesh(new THREE.SphereGeometry(0.28, 12, 10),
-    new THREE.MeshLambertMaterial({ color: 0x2b3a4a, emissive: 0x38c0ff, emissiveIntensity: 0.8 }));
+    new THREE.MeshLambertMaterial({ color: 0x2b3a4a, emissive, emissiveIntensity: 0.8 }));
   core.castShadow = true;
   const ring = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.04, 6, 18),
     new THREE.MeshLambertMaterial({ color: 0x9fd8ff, emissive: 0x225577, emissiveIntensity: 0.6 }));
@@ -3423,8 +3423,8 @@ export function makeArrow() {
   return g;
 }
 
-export function makeBolt() {
+export function makeBolt(color = 0x7fe0ff) {
   const m = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 6),
-    new THREE.MeshBasicMaterial({ color: 0x7fe0ff }));
+    new THREE.MeshBasicMaterial({ color }));
   return m;
 }

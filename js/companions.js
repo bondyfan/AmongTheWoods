@@ -94,12 +94,13 @@ class PetWolf {
 }
 
 class GuardianSphere {
-  constructor(scene, slot) {
+  constructor(scene, slot, count = 1, color = 0x38c0ff) {
     this.id = nextCompanionId++;
     this.slot = slot;
-    this.mesh = makeGuardianSphere();
+    this.count = count;      // how many spheres share this orbit (for spacing)
+    this.mesh = makeGuardianSphere(color);
     scene.add(this.mesh);
-    this.t = slot * Math.PI; // opposite phases
+    this.t = (count > 1 ? (slot / count) * Math.PI * 2 : slot * Math.PI); // spread around
     this.shootCd = 0;
   }
 
@@ -128,7 +129,11 @@ class GuardianSphere {
       for (const { e } of inRange) {
         projectiles.spawnBolt(this.mesh.position.clone(), e, {
           dmg: orb.dmg,
-          onHit: () => enemyMgr.damage(e, orb.dmg, null),
+          color: orb.boltColor,
+          onHit: () => {
+            enemyMgr.damage(e, orb.dmg, null);
+            if (orb.freeze) enemyMgr.stun?.(e, orb.freeze);
+          },
         });
       }
     }
@@ -143,6 +148,8 @@ export class Companions {
     this.wolfItem = null;
     this.spheres = [];
     this.orbItem = null;
+    this.summonSpheres = [];   // Mage summoned spheres (player.orbSummons)
+    this._summonSig = '';
   }
 
   // Rebuild companions to match the player's pet/orb equipment.
@@ -197,6 +204,31 @@ export class Companions {
       });
     }
     if (player.orb) for (const s of this.spheres) s.update(dt, player, enemyMgr, projectiles, player.orb);
+    this._syncSummons(dt, player, enemyMgr, projectiles);
+  }
+
+  // Mage sphere summons live on player.orbSummons ([{ id, t, orb }]). Rebuild
+  // the visible spheres only when the active set (kind + count) changes; each
+  // sphere then homes bolts using its own summon's orb spec every frame.
+  _syncSummons(dt, player, enemyMgr, projectiles) {
+    const summons = (player.orbSummons || []).filter(s => s.t > 0);
+    const sig = summons.map(s => `${s.id}:${s.orb.count}`).join('|');
+    if (sig !== this._summonSig) {
+      for (const s of this.summonSpheres) this.scene.remove(s.mesh);
+      this.summonSpheres = [];
+      for (const su of summons) {
+        for (let i = 0; i < su.orb.count; i++) {
+          const sp = new GuardianSphere(this.scene, i, su.orb.count, su.orb.sphereColor);
+          sp.summonId = su.id;
+          this.summonSpheres.push(sp);
+        }
+      }
+      this._summonSig = sig;
+    }
+    for (const sp of this.summonSpheres) {
+      const su = summons.find(s => s.id === sp.summonId);
+      if (su) sp.update(dt, player, enemyMgr, projectiles, su.orb);
+    }
   }
 
   // the pet proxy routes enemy attacks here — the wolf takes REAL hits now

@@ -111,6 +111,7 @@ export class Player {
     this.hotTickT = 0;
     this.guardianSpiritT = 0;
     this.guardianSpiritHeal = 0;
+    this.orbSummons = [];            // Mage sphere summons: [{ id, t, orb }] — Companions renders these
     this.combatDots = {};            // PvP bleed/burn/poison/Rend received over the network
     this.combatDotTickT = 0;
     this.escapeRushT = 0;
@@ -316,6 +317,7 @@ export class Player {
     this.classShield = 0;
     this.hotT = this.hotRate = 0;
     this.guardianSpiritT = 0;
+    this.orbSummons = [];
     this.combatDots = {};
     this.combatDotTickT = 0;
     this.petCommandTargetId = null;
@@ -924,6 +926,28 @@ export class Player {
       }
       audio.sfx('special', 0.5, 0);
       this.breakStealth();
+      return true;
+    }
+
+    if (skill.action === 'summon') {
+      // Arcane spheres (Mage): orbit the caster and auto-fire bolts for a while.
+      // Damage is baked in now (level + spell/element mastery); re-casting the
+      // same sphere refreshes it, and the different kinds coexist.
+      const dmg = rv('dmg') * this.levelSpellMult * this._classMagicMultiplier(skill.element || null);
+      const frost = skill.element === 'frost';
+      const orb = {
+        count: rv('orbCount', 1),
+        targets: rv('targets', 1),
+        dmg,
+        freeze: skill.freeze ? rv('freeze') : 0,
+        sphereColor: frost ? 0x7fe0ff : 0x38c0ff,
+        boltColor: frost ? 0xbfe6ff : 0x7fe0ff,
+      };
+      this.orbSummons = this.orbSummons.filter(s => s.id !== skill.id);
+      this.orbSummons.push({ id: skill.id, t: rv('duration'), orb });
+      this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
+        `${skill.icon} ${skill.name}`, skill.element === 'frost' ? '#bfe6ff' : '#8ed8ff');
+      audio.sfx('special', 0.5, 0);
       return true;
     }
 
@@ -1841,6 +1865,10 @@ export class Player {
     this.venomT = Math.max(0, this.venomT - dt);
     this.evadeT = Math.max(0, this.evadeT - dt);
     this.guardianSpiritT = Math.max(0, this.guardianSpiritT - dt);
+    if (this.orbSummons.length) {
+      for (const s of this.orbSummons) s.t -= dt;
+      this.orbSummons = this.orbSummons.filter(s => s.t > 0);
+    }
     this.escapeRushT = Math.max(0, this.escapeRushT - dt);
     for (const key of ['warCryT', 'bloodFuryT', 'avatarT', 'arrowHasteT',
       'poisonBladesT', 'sprintT', 'combustionT']) this[key] = Math.max(0, this[key] - dt);

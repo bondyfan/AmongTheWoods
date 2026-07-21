@@ -666,24 +666,10 @@ export const ITEMS = [
   { id: 'bloodAmulet', slot: 'charm', level: 18, icon: '🩸', name: 'Bloodstone Amulet',
     cost: { hide: 15, iron: 10, essence: 10 }, needs: 'furnace', stats: { regen: 1.2, hp: 40 },
     desc: '+1.2 ❤️/s regeneration, +40 max health.' },
-  // -- pet (companion) --
-  { id: 'tamedWolf', slot: 'companion', level: 7, icon: '🐺', name: 'Tamed Wolf', cost: { meat: 165, essence: 3 }, pet: { dmg: 14 },
-    desc: 'A loyal wolf fights by your side (100 HP — train it up in Training).' },
-  { id: 'alphaWolf', slot: 'companion', level: 16, icon: '👑', name: 'Alpha Wolf', cost: { meat: 360, essence: 8 }, pet: { dmg: 32 },
-    desc: 'A huge alpha. Bites for 32.' },
-  // -- orb (guardian sphere — iron-age wonder) --
-  { id: 'guardianSphere', slot: 'companion', level: 10,  icon: '🔮', name: 'Guardian Sphere', cost: { meat: 50, stone: 30, iron: 6, essence: 4 }, needs: 'furnace',
-    orb: { count: 1, targets: 1, dmg: 12 },
-    desc: 'Orbits you and fires bolts at enemies.' },
-  { id: 'twinSphere',     slot: 'companion', level: 16,  icon: '✨', name: 'Twin-bolt Sphere', cost: { meat: 90, iron: 14, stone: 40, essence: 8 }, needs: 'furnace',
-    orb: { count: 1, targets: 2, dmg: 14 },
-    desc: 'Fires two bolts at once (14 dmg each).' },
-  { id: 'frostSphere',    slot: 'companion', level: 14,  icon: '❄️', name: 'Frost Sphere',   cost: { meat: 80, stone: 35, essence: 6 }, needs: 'furnace',
-    orb: { count: 1, targets: 1, dmg: 22 },
-    desc: 'A cold-burning orb: single heavy bolts for 22 damage.' },
-  { id: 'duoSphere',      slot: 'companion', level: 20, icon: '🌐', name: 'Gemini Spheres',  cost: { meat: 130, iron: 24, stone: 60, essence: 12 }, needs: 'furnace',
-    orb: { count: 2, targets: 2, dmg: 14 },
-    desc: 'TWO spheres, each firing twin bolts.' },
+  // -- companions --
+  // Wolves are no longer bought here: the Beastmaster TAMES beasts (Tame Beast),
+  // and the arcane spheres (Guardian / Frost / Gemini) are now learnable MAGE
+  // abilities in the class tree — see CLASS_TREES → mage actives below.
   // -- expedition gear (Supplies tab): wearable comfort items, each with its
   // own WoW-style slot. supply: true keeps them out of the weapon/gear shops.
   // torches BURN: one stick lasts ~5 real minutes (5 in-game hours), then it
@@ -1055,6 +1041,15 @@ export const CLASS_TREES = [
         { cd: 65, buff: 'combustion', duration: [10, 13, 16], power: [0.35, 0.5, 0.7] }),
       A('mage_elemental_storm', '🌩️', 'Elemental Storm', 50, 'Fire and ice ravage a huge aimed area.', 'zone',
         { cd: 90, zone: 'elemental', castRange: 20, radius: [7, 8.5, 10], duration: [9, 12, 15], damage: [35, 52, 72], interval: 1, stun: 0.5 }),
+      // Summoned arcane spheres (formerly buyable companions): they orbit the
+      // Mage and auto-fire bolts for a while. Re-casting the SAME sphere
+      // refreshes it; the three kinds can orbit together.
+      A('mage_guardian_sphere', '🔮', 'Guardian Sphere', 10, 'Summon an arcane sphere that orbits you and fires bolts at nearby enemies.', 'summon',
+        { cd: 26, duration: [16, 20, 26], orbCount: 1, targets: 1, dmg: [16, 26, 38] }),
+      A('mage_frost_sphere', '❄️', 'Frost Sphere', 20, 'Summon a cold sphere: heavy single bolts that briefly freeze what they strike.', 'summon',
+        { cd: 34, element: 'frost', duration: [16, 20, 26], orbCount: 1, targets: 1, dmg: [30, 48, 70], freeze: [0.5, 0.7, 1.0] }),
+      A('mage_gemini_spheres', '🌐', 'Gemini Spheres', 35, 'Summon TWO spheres, each striking two enemies at once.', 'summon',
+        { cd: 48, duration: [16, 20, 26], orbCount: 2, targets: 2, dmg: [20, 32, 46] }),
     ] },
 
   { id: 'priest', icon: '⛪', name: 'Priest', color: '#f0df91',
