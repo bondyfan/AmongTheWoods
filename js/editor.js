@@ -675,7 +675,11 @@ export class WorldEditor {
         worldPatch.brushHeight(aim.x, aim.z, radius, -amt);
         worldPatch.brushCells('water', aim.x, aim.z, radius, 1);
         break;
-      case 'smooth': worldPatch.brushSmooth(aim.x, aim.z, radius, strength * dt * 4); break;
+      case 'smooth':
+        // real-surface blur: levels bumps / sharp edges into gentle curves
+        worldPatch.brushSmoothReal(aim.x, aim.z, radius, strength * dt * 8,
+          (wx, wz) => this.o.world.heightAt(wx, wz));
+        break;
       case 'hclear': worldPatch.brushHeightErase(aim.x, aim.z, radius); break;
       case 'terrain': worldPatch.brushCells('terrain', aim.x, aim.z, radius, this.terrainIdx); break;
       case 'water': worldPatch.brushCells('water', aim.x, aim.z, radius, 1); break;

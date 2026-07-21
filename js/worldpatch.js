@@ -137,6 +137,40 @@ class WorldPatch {
     });
   }
 
+  // TRUE terrain smoothing: melt bumps and sharp edges into gentle curves by
+  // pulling the REAL surface (procedural base + sculpt delta) toward its LOCAL
+  // average — a box blur, NOT a flatten-to-one-value. sampleH(wx,wz) returns
+  // the current real height (world.heightAt already folds in this delta), so it
+  // smooths untouched procedural bumps too and keeps working on hold.
+  brushSmoothReal(x, z, radius, k0, sampleH) {
+    const cell = PATCH_CELL, K = 2; // blur kernel radius in cells (±8 m)
+    // snapshot the real surface across the brush + a K-cell margin ONCE, so the
+    // blur reads pre-stroke heights (writing as we go can't skew the average)
+    const c0x = Math.floor((x - radius) / cell) - K, c1x = Math.ceil((x + radius) / cell) + K;
+    const c0z = Math.floor((z - radius) / cell) - K, c1z = Math.ceil((z + radius) / cell) + K;
+    const H = new Map();
+    for (let cz = c0z; cz <= c1z; cz++) {
+      for (let cx = c0x; cx <= c1x; cx++) H.set(key(cx, cz), sampleH(cx * cell, cz * cell));
+    }
+    this._stroke(x, z, radius, (cx, cz, k) => {
+      let sum = 0, n = 0;
+      for (let dz = -K; dz <= K; dz++) {
+        for (let dx = -K; dx <= K; dx++) {
+          const h = H.get(key(cx + dx, cz + dz));
+          if (h !== undefined) { sum += h; n++; }
+        }
+      }
+      if (!n) return;
+      const cur = H.get(key(cx, cz));           // real height here now
+      const target = sum / n;                   // local average = smoothed
+      const kk = key(cx, cz);
+      const delta = this.height.get(kk) ?? 0;
+      // ease the real surface toward the average; base stays, only delta moves
+      const nd = delta + (target - cur) * Math.min(1, k0 * k);
+      if (Math.abs(nd) < 0.01) this.height.delete(kk); else this.height.set(kk, nd);
+    });
+  }
+
   // erase sculpting back to the procedural ground
   brushHeightErase(x, z, radius) {
     this._stroke(x, z, radius, (cx, cz) => this.height.delete(key(cx, cz)));
