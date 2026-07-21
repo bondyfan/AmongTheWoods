@@ -169,6 +169,8 @@ export class UI {
     $('weapon-display').innerHTML = `${itemIcon(weapon)} ${weapon.name}`
       + `<span class="combat-state">${combat.join(' · ')}</span>`;
 
+    this.updateBuffBar(player);
+
     // critical health: pulsing bar + red screen edges
     const critHp = !player.dead && player.hp > 0 && player.hp < player.maxHp * 0.2;
     document.querySelector('.bar-wrap.hp').classList.toggle('crit', critHp);
@@ -210,6 +212,47 @@ export class UI {
     el.classList.remove('anim');
     void el.offsetWidth;
     el.classList.add('anim');
+  }
+
+  // active timed self-buffs, shown just above the weapon indicator. Each cell
+  // is an icon with a fill that DRAINS as the buff counts down + a seconds
+  // readout (or the shield amount for the absorb pool).
+  updateBuffBar(player) {
+    const bar = $('buff-bar');
+    if (!bar) return;
+    const buffs = player.activeBuffs?.() || [];
+    // reconcile cells by id (keeps the pop-in animation stable frame to frame)
+    const seen = new Set();
+    for (const b of buffs) {
+      seen.add(b.id);
+      let el = this._buffCells?.get(b.id);
+      if (!el) {
+        this._buffCells ??= new Map();
+        el = document.createElement('div');
+        el.innerHTML = '<div class="buff-fill"></div><div class="buff-icon"></div><span class="buff-timer"></span>';
+        this._buffCells.set(b.id, el);
+        bar.appendChild(el);
+        el._iconKey = null;
+      }
+      el.className = 'buff-cell kind-' + b.kind + (b.t != null && b.t <= 3 ? ' expiring' : '');
+      const iconKey = b.id + (classSkillById(b.id.replace('orb:', ''))?.type === 'active' ? ':art' : ':emoji');
+      if (el._iconKey !== iconKey) {
+        el._iconKey = iconKey;
+        const art = b.id.startsWith('orb:') ? skillArt(b.id.slice(4), b.icon) : b.icon;
+        el.querySelector('.buff-icon').innerHTML = art;
+      }
+      const fill = el.querySelector('.buff-fill');
+      if (b.dur) fill.style.height = Math.max(0, Math.min(100, b.t / b.dur * 100)) + '%';
+      else fill.style.height = '100%';
+      el.querySelector('.buff-timer').textContent =
+        b.t == null ? (b.value ?? '') : Math.ceil(b.t);
+    }
+    // drop cells whose buff ended
+    if (this._buffCells) {
+      for (const [id, el] of this._buffCells) {
+        if (!seen.has(id)) { el.remove(); this._buffCells.delete(id); }
+      }
+    }
   }
 
   updateSpellbar(player) {

@@ -37,7 +37,9 @@ class AudioManager {
       'spear_throw', 'map_reveal',
       'torch_equip', 'aggro', 'equip_gear', 'buy',
       // harvesting: axe biting wood, pick striking stone, a tree keeling over
-      'wood_chop', 'stone_mine', 'tree_fall'];
+      'wood_chop', 'stone_mine', 'tree_fall',
+      // ability / UI FX: target lock-on + spell voices (fire/frost/holy/boom/chime)
+      'select', 'chime', 'boom', 'flame', 'freeze', 'holy'];
     // nature ambience loops — warmed via HTTP cache, played through loopStart
     const AMB = ['forest_ambience', 'wind_ambience', 'swamp_ambience', 'cave_ambience', 'water_lapping',
       'torch_loop', 'night_crickets', 'verdant_birds', 'jungle_rain'];

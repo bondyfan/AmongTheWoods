@@ -82,9 +82,17 @@
     </div>
     <!-- resources live in the INVENTORY (I) now, not in a HUD strip -->
 
+    <div id="buff-bar"></div>
     <div id="weapon-display"></div>
     <div id="pet-display" class="hidden"></div>
     <div id="supply-display" class="hidden"></div>
+
+    <!-- hold-Shift target-lock reticle (centre screen) -->
+    <div id="reticle" class="hidden">
+      <span class="ret-b tl"></span><span class="ret-b tr"></span>
+      <span class="ret-b bl"></span><span class="ret-b br"></span>
+      <span class="ret-dot"></span>
+    </div>
 
     <canvas id="minimap" width="120" height="230"></canvas>
     <div id="minimap-zoom" class="hidden">

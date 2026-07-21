@@ -91,6 +91,13 @@ const SOUNDS = [
   ['wood_chop', 'A sharp axe blade biting deep into a living tree trunk: one clean heavy chop with a crisp woody thock, a slight resonant ring of the axehead and a few bark chips scattering, outdoor forest acoustics. Single dry hit, very short, no music, no human voice', 0.7],
   ['stone_mine', 'A heavy iron pickaxe striking solid rock face: one sharp metallic clang with a gritty stone crunch and small rubble skittering, slightly resonant quarry acoustics. Single dry hit, very short, no music, no human voice', 0.7],
   ['tree_fall', 'A large felled tree keeling over and crashing down: a loud fibrous trunk crack and tearing splinter, a slow groaning tip-over with whooshing branches, then a heavy ground-shaking thud with leaves rustling and settling. Single dry event, no music, no human voice', 2.2],
+  // ---- ability / UI FX (spells, target-lock) ----
+  ['select', 'A crisp sci-fi target-lock confirm blip: a short bright two-tone synthetic chirp with a clean glassy arcane shimmer tail as a reticle snaps onto a target, tight and futuristic, no music, no voice', 0.5],
+  ['chime', 'A bright magical spell chime: a clean crystalline ascending twinkle with a soft harp-like shimmer and a warm glowing tail, arcane and pleasant, short, no music, no voice', 0.9],
+  ['boom', 'A huge deep explosion impact: a heavy concussive low-end BOOM with a punchy shockwave thump and a crackling debris tail, cinematic and powerful, short, no music, no voice', 1.4],
+  ['flame', 'A roaring gout of fire erupting: a whooshing WHOOMPH of igniting flame with a deep roaring fire body and crackling embers, hot and forceful, short, no music, no voice', 1.2],
+  ['freeze', 'A sharp frost-freeze spell: a crisp crackling sheet of ice forming fast with a glassy crystalline snap and a cold shimmering ring-out, brittle and icy, short, no music, no voice', 1.0],
+  ['holy', 'A radiant holy blessing: a warm glowing choir-like swell with a bright bell shimmer and a soft angelic sparkle, divine and uplifting, short, no music, no words', 1.3],
 ];
 
 const exists = async (p) => { try { await access(p); return true; } catch { return false; } };

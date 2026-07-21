@@ -168,6 +168,64 @@ kbd {
   display: block; margin-top: 3px; color: #d6e8b9;
   font-size: 10px; letter-spacing: 0.7px; text-align: center;
 }
+
+/* ---------- buff bar (active timed self-buffs, above the weapon) ---------- */
+#buff-bar {
+  position: absolute; bottom: 132px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 6px; pointer-events: none; z-index: 11;
+}
+#buff-bar:empty { display: none; }
+.buff-cell {
+  position: relative; width: 40px; height: 40px; border-radius: 9px; overflow: hidden;
+  background: rgba(10, 16, 8, 0.62); border: 2px solid rgba(255, 255, 255, 0.22);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.5); animation: buffPop 0.22s ease-out;
+}
+.buff-cell.expiring { animation: buffBlink 0.6s steps(2) infinite; }
+.buff-cell .buff-icon {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 21px; z-index: 2; text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+}
+.buff-cell .buff-icon .skill-art { width: 30px; height: 30px; }
+/* fill drains from the bottom as the buff counts down */
+.buff-cell .buff-fill {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 100%; z-index: 1;
+  background: linear-gradient(to top, rgba(120, 200, 90, 0.5), rgba(120, 200, 90, 0.12));
+}
+.buff-cell.kind-defensive .buff-fill { background: linear-gradient(to top, rgba(120, 190, 255, 0.5), rgba(120, 190, 255, 0.12)); }
+.buff-cell.kind-shield .buff-fill { background: linear-gradient(to top, rgba(150, 210, 255, 0.55), rgba(150, 210, 255, 0.15)); }
+.buff-cell.kind-hot .buff-fill { background: linear-gradient(to top, rgba(120, 230, 130, 0.5), rgba(120, 230, 130, 0.12)); }
+.buff-cell.kind-summon .buff-fill { background: linear-gradient(to top, rgba(120, 200, 255, 0.5), rgba(120, 200, 255, 0.12)); }
+.buff-cell.kind-stealth .buff-fill { background: linear-gradient(to top, rgba(150, 140, 200, 0.5), rgba(150, 140, 200, 0.12)); }
+.buff-cell .buff-timer {
+  position: absolute; bottom: 1px; right: 2px; z-index: 3;
+  font-size: 10px; font-weight: bold; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.95);
+}
+@keyframes buffPop { from { transform: scale(0.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@keyframes buffBlink { 0% { border-color: rgba(255,255,255,0.22); } 100% { border-color: #ff6b5a; } }
+
+/* ---------- hold-Shift target-lock reticle ---------- */
+#reticle {
+  position: fixed; top: 50%; left: 50%; width: 46px; height: 46px;
+  transform: translate(-50%, -50%); pointer-events: none; z-index: 14;
+}
+#reticle.hidden { display: none; }
+#reticle .ret-b {
+  position: absolute; width: 12px; height: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.8);
+  transition: border-color 0.12s;
+}
+#reticle .ret-b.tl { top: 0; left: 0; border-right: none; border-bottom: none; }
+#reticle .ret-b.tr { top: 0; right: 0; border-left: none; border-bottom: none; }
+#reticle .ret-b.bl { bottom: 0; left: 0; border-right: none; border-top: none; }
+#reticle .ret-b.br { bottom: 0; right: 0; border-left: none; border-top: none; }
+#reticle .ret-dot {
+  position: absolute; top: 50%; left: 50%; width: 3px; height: 3px; border-radius: 50%;
+  transform: translate(-50%, -50%); background: rgba(255, 255, 255, 0.85);
+}
+#reticle.locked { animation: retLock 0.9s ease-in-out infinite; }
+#reticle.locked .ret-b { border-color: #ff6b52; box-shadow: 0 0 6px rgba(255, 107, 82, 0.8); }
+#reticle.locked .ret-dot { background: #ff6b52; }
+@keyframes retLock { 0%,100% { transform: translate(-50%,-50%) scale(1); } 50% { transform: translate(-50%,-50%) scale(0.82); } }
 /* the action bar + drag hint sit in their OWN top layer, above open modals
    (z-index 30), so abilities can be dragged from the Class tab down onto it */
 #actionbar {

@@ -151,6 +151,17 @@ class WorldPatch {
     });
   }
 
+  // plain Lower support: pin every stroked cell whose NATURAL terrain is water
+  // to forced-dry (=2), so a dug valley never fills — even below sea level or
+  // through a lake/bog/river. Cells already dry are left untouched (no bloat).
+  brushDryWater(x, z, radius, isNaturalWater) {
+    this._stroke(x, z, radius, (cx, cz, k, wx, wz) => {
+      const kk = key(cx, cz);
+      if (this.water.get(kk) === 2) return;         // already pinned dry
+      if (isNaturalWater(wx, wz)) this.water.set(kk, 2);
+    });
+  }
+
   // ---- entities ----
   addEntity(kind, type, x, z, extra = {}) {
     const e = { id: 'e' + this._nextId++, kind, type,

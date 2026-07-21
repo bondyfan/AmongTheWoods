@@ -81,6 +81,11 @@ class Input {
   get block() {
     return this.keys.has('ControlLeft') || this.keys.has('ControlRight') || this.keys.has('KeyV');
   }
+  // Hold Shift to raise the target-lock reticle: the nearest unit to the
+  // screen centre gets selected and single-target abilities snap onto it.
+  get selecting() {
+    return this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
+  }
 
   takeLeftPressed() {
     const pressed = this.leftPressed;

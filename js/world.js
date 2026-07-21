@@ -1695,6 +1695,34 @@ export class World {
     return { spots, denseWood };
   }
 
+  // FAR god-view (editor zoomed right out): the real trees AND their far-LOD
+  // impostors are both culled for speed, so the map would read as bare
+  // terrain. Drop a single green dot at every tree + tall-plant spot — one
+  // Points cloud per chunk, CONSTANT screen size, so a whole biome's forest
+  // cover stays visible however far the camera pulls back. Editor-only.
+  _treeDots(cx, cz, biome) {
+    const { spots } = this._treeSpots(cx, cz, biome);
+    const deco = this._bigDecoSpots(cx, cz, biome);
+    const n = spots.length + deco.length;
+    if (!n) return null;
+    const pos = new Float32Array(n * 3);
+    let i = 0;
+    for (const s of spots) { pos[i++] = s.x; pos[i++] = this.heightAt(s.x, s.z) + 1.5; pos[i++] = s.z; }
+    for (const d of deco) { pos[i++] = d.x; pos[i++] = this.heightAt(d.x, d.z) + 1.5; pos[i++] = d.z; }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    if (!this._treeDotMat) {
+      this._treeDotMat = new THREE.PointsMaterial({ color: 0x53e23c, size: 6,
+        sizeAttenuation: false, transparent: true, opacity: 0.92,
+        depthWrite: false, fog: false, toneMapped: false });
+      this._treeDotMat.userData.shared = true; // survives per-chunk disposal
+    }
+    const pts = new THREE.Points(geo, this._treeDotMat);
+    pts.frustumCulled = false;
+    pts.renderOrder = 4;
+    return pts;
+  }
+
   // tall landmark decorations (palms, cacti) get the same treatment: one
   // dedicated stream, stamped identically by both detail tiers
   _bigDecoSpots(cx, cz, biome) {
@@ -1748,8 +1776,11 @@ export class World {
     group.add(tile);
 
     // far god-view LOD: terrain only — the map stays readable and FAST when
-    // the editor camera looks at a whole biome at once
+    // the editor camera looks at a whole biome at once. A cheap green dot is
+    // dropped at every tree/tall-plant spot so the forest cover stays visible.
     if (this.groundOnly) {
+      const dots = this._treeDots(cx, cz, biome);
+      if (dots) group.add(dots);
       this.scene.add(group);
       this.chunks.set(key, { group, tile, trees: [], rocks: [], webs: [], bushes: [], props: [], hives: [] });
       return;

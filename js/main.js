@@ -27,6 +27,7 @@ import { preloadHumanModel, humanModelEnabled } from './humanmodel.js';
 import { EnemyManager } from './enemies.js';
 import { Projectiles } from './projectiles.js';
 import { Companions } from './companions.js';
+import { Targeting } from './targeting.js';
 import { Pickups, pickupSfx } from './pickups.js';
 import { Minimap, MobaMinimap } from './minimap.js';
 import { UI, MOB_INFO_RADIUS, mobLevelBadge } from './ui.js';
@@ -1989,6 +1990,7 @@ const enemyMgr = new EnemyManager(scene, world, {
 enemyMgr.onLocalHit = () => { player.combatNoiseT = 0; };
 
 const projectiles = new Projectiles(scene);
+const targeting = new Targeting(scene, camera);
 const companions = new Companions(scene, {
   popup: (pos, text, color) => ui.popup(pos, text, color),
   toast: (text, cls) => ui.toast(text, cls),
@@ -4045,10 +4047,14 @@ function handleClassWorldAction(action, skill, rank, ctx = {}) {
     }
     const commandAim = ctx.rpgView
       ? player.pos.clone().addScaledVector(player.facing, 32) : (ctx.aimPoint || aimPoint);
-    const target = combatMgr()?.alive?.()
-      .filter(e => !e.cfg?.passive && Math.hypot(e.pos.x - player.pos.x, e.pos.z - player.pos.z) < 32)
-      .map(e => ({ e, d: Math.hypot(e.pos.x - commandAim.x, e.pos.z - commandAim.z) }))
-      .sort((a, b) => a.d - b.d)[0]?.e;
+    // a Shift-locked enemy wins if it's in range; otherwise nearest-to-aim
+    const sel = player._selectedTarget;
+    const target = (sel && !sel.dying && !sel.dead && !sel.cfg?.passive
+      && Math.hypot(sel.pos.x - player.pos.x, sel.pos.z - player.pos.z) < 32) ? sel
+      : combatMgr()?.alive?.()
+        .filter(e => !e.cfg?.passive && Math.hypot(e.pos.x - player.pos.x, e.pos.z - player.pos.z) < 32)
+        .map(e => ({ e, d: Math.hypot(e.pos.x - commandAim.x, e.pos.z - commandAim.z) }))
+        .sort((a, b) => a.d - b.d)[0]?.e;
     if (!target) {
       ui.toast('📣 Aim near an enemy to issue Hunt Command.', 'error');
       return false;
@@ -5053,6 +5059,7 @@ function step() {
   if (game.mode === 'play' && !game.paused && !game.editorView) {
     game.time += dt;
     updateAim(dt);
+    targeting.update(dt, { input, player, alive: combatMgr()?.alive?.() || [] });
     updateNestGhost();
     updateCampItemGhost();
     updateAbilityGhost();

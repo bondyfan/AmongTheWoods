@@ -112,6 +112,7 @@ export class Player {
     this.guardianSpiritT = 0;
     this.guardianSpiritHeal = 0;
     this.orbSummons = [];            // Mage sphere summons: [{ id, t, orb }] — Companions renders these
+    this._selectedTarget = null;     // hold-Shift target lock (set by Targeting each frame)
     this.combatDots = {};            // PvP bleed/burn/poison/Rend received over the network
     this.combatDotTickT = 0;
     this.escapeRushT = 0;
@@ -454,6 +455,16 @@ export class Player {
     return true;
   }
 
+  // How far a Shift-locked target may sit and still be consumed by an ability.
+  // Shadowstep gets a generous per-rank teleport reach (15/22/30 m); other
+  // single-target abilities use their own range (a small grace added on top).
+  _targetMaxRange(skill, rank) {
+    if (skill.action === 'shadowstep') {
+      return rankValue(skill, 'maxStep', rank, 0) || (15 + (rank - 1) * 7.5);
+    }
+    return rankValue(skill, 'range', rank, 12) + 1.5;
+  }
+
   _findClassTarget(enemyMgr, aimPoint, range = 12) {
     const list = enemyMgr?.alive?.() || [];
     const point = aimPoint || this.pos.clone().addScaledVector(this.facing, range);
@@ -623,6 +634,13 @@ export class Player {
     }
     const target = () => {
       const range = rv('range', 12);
+      // A Shift-locked unit wins outright, as long as it's alive and within
+      // this ability's reach — so aiming with the reticle beats facing/mouse.
+      const sel = this._selectedTarget;
+      if (sel && !sel.dying && !sel.dead && enemyMgr?.alive?.().includes(sel)
+        && sel.pos.distanceTo(this.pos) <= this._targetMaxRange(skill, rank)) {
+        return sel;
+      }
       const targetAim = ctx.rpgView
         ? this.pos.clone().addScaledVector(this.facing, range) : ctx.aimPoint;
       return this._findClassTarget(enemyMgr, targetAim, range);
@@ -722,8 +740,25 @@ export class Player {
         this.spinT = this.spinDur * 0.7; // quick spin as knives fly out
         this._spawnClassRing(this.pos, radius, 0x8ec6c9, 0.4);
         this._fxBurst(this.pos, 0xbfe9b0, 16, 7, 0.5); // poisoned knives
+        // short outward knife-slivers so it reads as a fan of blades
+        for (let i = 0; i < 8; i++) {
+          const a = (i / 8) * Math.PI * 2;
+          this._fxStreak(this.pos.clone().add(new THREE.Vector3(Math.cos(a) * radius * 0.6, 0.9, Math.sin(a) * radius * 0.6)),
+            a, 0xd8f0c8, 0.09, 0.7, 0.3, 0.7);
+        }
         audio.sfx('attack_ranged', 0.6, 0);
         audio.sfx('special', 0.45, 0);
+      } else if (skill.action === 'magicAoe') {
+        // Frost Nova — an expanding ice shockwave + radial frost spikes
+        this._spawnClassRing(this.pos, radius * 1.35, 0x9fe8ff, 0.55);
+        this._fxGroundCracks(this.pos, radius, 0x9fe8ff, 10);
+        this._fxBurst(this.pos, 0xd4f4ff, 18, 6, 0.6);
+        audio.sfx('freeze', 0.7, 0);
+      } else if (skill.action === 'holyNova') {
+        // radiant divine detonation: double ring + a shower of holy sparks
+        this._spawnClassRing(this.pos, radius * 0.72, 0xfff0b0, 0.5);
+        this._fxBurst(this.pos, 0xfff0b0, 20, 7, 0.55);
+        audio.sfx('holy', 0.6, 0);
       }
       if (hostile) this.breakStealth();
       return true;
@@ -747,8 +782,25 @@ export class Player {
       if (skill.id === 'war_cleaving_wave') {
         this._fxWave(this.pos.clone().addScaledVector(this.facing, 1.2), this.facing,
           Math.max(3, range - 1.5));
+        this._fxGroundCracks(this.pos.clone().addScaledVector(this.facing, range * 0.5), range * 0.4, 0xffc257, 4);
         audio.sfx('attack_melee', 0.6, 0);
         audio.sfx('special', 0.45, 0);
+      } else if (skill.action === 'magicCone') {
+        // Dragon Breath — a fan of flame (or frost) streaks along the facing
+        const fire = skill.element !== 'frost';
+        const col = fire ? 0xff6b2f : 0x9fe8ff;
+        const baseAng = Math.atan2(this.facing.x, this.facing.z);
+        for (let i = 0; i < 9; i++) {
+          const a = baseAng + (i / 8 - 0.5) * 0.95;
+          const dir = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
+          const p = this.pos.clone().addScaledVector(dir, range * (0.35 + Math.random() * 0.55))
+            .setY(this.mesh.position.y + 0.7 + Math.random() * 1.1);
+          this._fxStreak(p, a, col, 0.32, 1.3, 0.4, 0.72);
+        }
+        this._fxWave(this.pos.clone().addScaledVector(this.facing, 1.2), this.facing, Math.max(3, range - 1.5), col);
+        this._fxBurst(this.pos.clone().addScaledVector(this.facing, range * 0.5).setY(this.mesh.position.y + 1),
+          fire ? 0xff8a3a : 0xcdf2ff, 14, 6, 0.5);
+        audio.sfx(fire ? 'flame' : 'freeze', 0.65, 0);
       }
       this.breakStealth();
       return true;
@@ -805,6 +857,10 @@ export class Player {
       const castRange = rv('castRange', 18);
       const at = this._classAimPoint(ctx.aimPoint, castRange, !!ctx.rpgView);
       this._addClassZone(skill, rank, at);
+      // ignition / conjure cue matched to the element
+      const zsfx = { fire: 'flame', frost: 'freeze', elemental: 'boom',
+        healing: 'holy', smoke: 'spawn' }[skill.zone];
+      if (zsfx) audio.sfx(zsfx, skill.zone === 'elemental' ? 0.55 : 0.6, 0);
       if (skill.zone !== 'healing' && skill.zone !== 'smoke') this.breakStealth();
       return true;
     }
@@ -835,13 +891,33 @@ export class Player {
         damageTarget(enemy, result.amount, Object.keys(opts).length ? opts : null);
         hits++;
       }
-      this._spawnClassRing(at, radius, skill.element === 'fire' || skill.burn ? 0xff6b2f : 0xd9e88a);
-      // detonation: a fireball-style burst + cracks (Explosive Arrow / Meteor)
-      const burst = skill.element === 'fire' || skill.burn ? 0xff6b2f : 0xd9e88a;
-      this._fxBurst(at, burst, 16, 6, 0.55);
-      this._fxGroundCracks(at, radius * 0.8, burst, 5);
-      audio.sfx('rock_crack', 0.7, 0);
-      audio.sfx('special', 0.55, 0);
+      const fire = skill.element === 'fire' || skill.burn;
+      const burst = fire ? 0xff6b2f : 0xd9e88a;
+      const meteor = skill.id === 'mage_meteor';
+      // something falls out of the sky and slams down: a meteor (fire trail) or
+      // a plunging explosive arrow, then a big shockwave + rising plume
+      const dropTop = new THREE.Vector3(at.x, (ctx.world?.heightAt?.(at.x, at.z) ?? this.mesh.position.y) + (meteor ? 9 : 6), at.z);
+      const impactY = (ctx.world?.heightAt?.(at.x, at.z) ?? this.mesh.position.y);
+      const dropMesh = new THREE.Mesh(
+        new THREE.SphereGeometry(meteor ? 0.5 : 0.18, 8, 6),
+        new THREE.MeshBasicMaterial({ color: burst, transparent: true, opacity: 0.95,
+          blending: THREE.AdditiveBlending, depthWrite: false }));
+      dropMesh.position.copy(dropTop);
+      this.scene.add(dropMesh);
+      this.classFx.push({ mesh: dropMesh, t: 0.42, life: 0.42, kind: 'drop',
+        from: dropTop, to: new THREE.Vector3(at.x, impactY + 0.2, at.z), trail: burst, player: this });
+      // expanding shockwave rings + detonation burst + scorch cracks
+      this._spawnClassRing(at, radius, burst);
+      this._spawnClassRing(at, radius * 1.4, burst, 0.6);
+      this._fxBurst(at, burst, meteor ? 26 : 18, 7, 0.6);
+      this._fxGroundCracks(at, radius * 0.85, burst, 6);
+      // rising fire plume
+      for (let i = 0; i < (fire ? 8 : 4); i++) {
+        this._fxRiser(new THREE.Vector3(at.x + (Math.random() - 0.5) * radius, impactY + 0.3, at.z + (Math.random() - 0.5) * radius),
+          fire ? 0xff8a3a : 0xd9e88a, new THREE.Vector3(0, 2.5 + Math.random() * 2, 0), 0.6, 0.22, 0.8);
+      }
+      audio.sfx('boom', 0.7, 0);
+      if (fire) audio.sfx('flame', 0.5, 0);
       this.breakStealth();
       return true;
     }
@@ -872,12 +948,18 @@ export class Player {
     if (skill.action === 'stealth') {
       this.stealthT = rv('duration') + (this.classEffects.stealthDuration || 0);
       this._setStealth(true);
+      // a dark shadow-implosion swallowing the rogue
+      this._fxBurst(this.mesh.position.clone().setY(this.mesh.position.y + 0.9), 0x2a2740, 12, 5, 0.4);
+      this._spawnClassRing(this.pos, 1.8, 0x4a3f6a, 0.4);
+      audio.sfx('spawn', 0.35, 0);
       return true;
     }
 
     if (skill.action === 'evade') {
       this.evadeT = rv('duration') + (this.classEffects.evadeDuration || 0);
       this._spawnClassRing(this.pos, 2.3, 0x7ee8ff, this.evadeT);
+      this._fxBurst(this.mesh.position.clone().setY(this.mesh.position.y + 1), 0x7ee8ff, 8, 4, 0.4);
+      audio.sfx('spawn', 0.4, 0);
       return true;
     }
 
@@ -889,6 +971,7 @@ export class Player {
         const enemyForward = new THREE.Vector3(-Math.sin(ry), 0, -Math.cos(ry));
         this.pos.copy(enemy.pos).addScaledVector(enemyForward, -1.4);
         this.facing.copy(enemyForward);
+        ctx.world?.collide?.(this.pos, 0.45); this._applyBounds(ctx); // long blinks respect walls/bounds
         damageTarget(enemy, this._classWeaponDamage(enemy, rv('weaponMult', 1), true));
         this.attackDur = 0.3; this.attackT = 0.3; this._spawnSlash();
         this._meleeAbilityFx(skill, enemy.pos);
@@ -899,6 +982,14 @@ export class Player {
         this.attackDur = 0.3; this.attackT = 0.3; this._spawnSlash();
         this._meleeAbilityFx(skill, this.pos.clone().addScaledVector(this.facing, 1.4));
       }
+      // a shadow after-image ribbon connecting origin → destination
+      const seg = new THREE.Vector3().subVectors(this.pos, from);
+      const steps = Math.min(10, Math.max(3, Math.round(seg.length() / 1.2)));
+      const ang = Math.atan2(seg.x, seg.z);
+      for (let i = 0; i <= steps; i++) {
+        const p = from.clone().addScaledVector(seg, i / steps).setY(this.mesh.position.y + 0.9);
+        this._fxStreak(p, ang, 0x7a5cff, 0.14, 1.1, 0.3 + 0.1 * (i / steps), 0.6 * (1 - i / steps) + 0.2);
+      }
       this._fxBurst(from, 0x7a5cff, 10, 4, 0.42);          // vanish puff
       this._fxBurst(this.pos, 0x9c8cff, 10, 4, 0.42);        // reappear puff
       audio.sfx('special', 0.5, 0);
@@ -908,7 +999,11 @@ export class Player {
 
     if (skill.action === 'magicTarget') {
       const enemy = target();
-      const color = skill.element === 'frost' ? 0x75cfff : 0xff6b2f;
+      const frost = skill.element === 'frost';
+      const color = frost ? 0x75cfff : 0xff6b2f;
+      // a real orb flies from the caster's hand — cosmetic (damage is instant),
+      // it homes on the target and bursts, with a short trail of embers/shards
+      const origin = this.pos.clone().addScaledVector(this.facing, 0.6).setY(this.mesh.position.y + 1.1);
       if (enemy) {
         const result = this._classMagicDamage(rv('damage'), skill.element);
         const opts = skill.burn
@@ -916,15 +1011,18 @@ export class Player {
           : null;
         damageTarget(enemy, result.amount, opts);
         if (skill.stun) enemyMgr.stun?.(enemy, rv('stun'));
+        ctx.projectiles?.spawnBolt(origin, enemy, { dmg: 0, color, onHit: () => {} });
         this._fxBurst(enemy.pos, color, 12, 5, 0.5);
         this._spawnClassRing(enemy.pos, 1.8, color, 0.4);
+        if (frost) this._spawnClassRing(enemy.pos, 1.2, 0xcdf2ff, 0.35); // frost crust
       } else {
         // no target — hurl the bolt forward and burst it in the air
         const at = this.pos.clone().addScaledVector(this.facing, Math.min(10, rv('range', 12) * 0.6));
         this._spawnClassRing(at, 2, color, 0.45);
         this._fxBurst(at, color, 12, 5, 0.5);
       }
-      audio.sfx('special', 0.5, 0);
+      this._fxBurst(origin, color, 4, 2.5, 0.3, 0.12);       // muzzle flash at the hand
+      audio.sfx(frost ? 'freeze' : 'flame', 0.5, 0);
       this.breakStealth();
       return true;
     }
@@ -945,17 +1043,28 @@ export class Player {
       };
       this.orbSummons = this.orbSummons.filter(s => s.id !== skill.id);
       this.orbSummons.push({ id: skill.id, t: rv('duration'), orb });
+      // arcane conjuring flourish: a rune ring per sphere + a rising spark column
+      const runeCol = frost ? 0xbfe6ff : 0x8ed8ff;
+      for (let i = 0; i < orb.count; i++) this._spawnClassRing(this.pos, 1.8 + i * 0.5, runeCol, 0.55);
+      this._fxBurst(this.mesh.position.clone().setY(this.mesh.position.y + 1.4), runeCol, 10 * orb.count, 4, 0.5);
       this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
         `${skill.icon} ${skill.name}`, skill.element === 'frost' ? '#bfe6ff' : '#8ed8ff');
-      audio.sfx('special', 0.5, 0);
+      audio.sfx('chime', 0.55, 0);
       return true;
     }
 
     if (skill.action === 'shield') {
       this.classShield = Math.max(this.classShield,
         rv('amount') * this.levelSpellMult * (1 + (this.classEffects.shieldPower || 0)));
+      this._shieldMax = Math.max(this._shieldMax || 0, this.classShield);
+      // the bubble mesh (see _updateBuffAuras) snaps up; add a crackle of shards
+      const ice = skill.id === 'mage_ice_barrier';
+      this._fxBurst(this.mesh.position.clone().setY(this.mesh.position.y + 1),
+        ice ? 0xbfe6ff : 0x8ed8ff, 14, 5, 0.5);
+      this._spawnClassRing(this.pos, 2.2, ice ? 0xbfe6ff : 0xbfe0ff, 0.5);
       this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
         `🛡️ ${Math.round(this.classShield)} shield`, '#8ed8ff');
+      audio.sfx(ice ? 'freeze' : 'holy', 0.55, 0);
       return true;
     }
 
@@ -974,6 +1083,12 @@ export class Player {
 
     if (skill.action === 'heal') {
       this._healSelf(this._classHeal(rv('amount')));
+      // descending golden light: an inward ring + a column of holy motes
+      const flash = skill.id === 'priest_flash_heal';
+      this._spawnClassRing(this.pos, flash ? 2.6 : 2.0, flash ? 0xfff4c0 : 0xffe6a0, 0.5);
+      this._fxBurst(this.mesh.position.clone().setY(this.mesh.position.y + 1.2),
+        flash ? 0xfff4c0 : 0xffe6a0, flash ? 16 : 10, flash ? 6 : 4, flash ? 0.35 : 0.5);
+      audio.sfx(flash ? 'chime' : 'holy', 0.5, 0);
       this.hooks.onClassWorldAction?.('healAlly', skill, rank, ctx);
       return true;
     }
@@ -982,6 +1097,9 @@ export class Player {
       this.hotT = rv('duration');
       this.hotRate = this._classHeal(rv('amount') * (1 + (this.classEffects.hotPower || 0)));
       this.hotTickT = 0;
+      this._spawnClassRing(this.pos, 1.8, 0x8ee87f, 0.5);
+      this._fxBurst(this.mesh.position.clone().setY(this.mesh.position.y + 1), 0x8ee87f, 8, 3, 0.5);
+      audio.sfx('chime', 0.45, 0);
       return true;
     }
 
@@ -991,12 +1109,21 @@ export class Player {
       this.combatDotTickT = 0;
       this.stunT = 0;
       this._healSelf(this._classHeal(rv('amount')));
+      // a dove-white wash sweeping down the body
+      this._spawnClassRing(this.pos, 2.2, 0xf0f6ff, 0.5);
+      this._fxBurst(this.mesh.position.clone().setY(this.mesh.position.y + 1.4), 0xf0f6ff, 12, 3.5, 0.55);
+      audio.sfx('chime', 0.5, 0);
       return true;
     }
 
     if (skill.action === 'guardian') {
       this.guardianSpiritT = rv('duration');
       this.guardianSpiritHeal = Math.min(1, rv('amount') * (1 + (this.classEffects.guardianPower || 0)));
+      // halo appears via _updateBuffAuras; punctuate with a golden feather-burst
+      this._ensureHalo();
+      this._spawnClassRing(this.pos, 2.4, 0xffe6a0, 0.6);
+      this._fxBurst(this.mesh.position.clone().setY(this.mesh.position.y + 1.6), 0xfff0a5, 14, 4, 0.6);
+      audio.sfx('holy', 0.55, 0);
       return true;
     }
 
@@ -1035,14 +1162,27 @@ export class Player {
         this._fxBurst(at, 0x9c8cff, 10, 4.5, 0.4);
         audio.sfx('attack_melee', 0.7, 0); audio.sfx('hit', 0.5, 0); break;
       }
+      case 'rogue_shadowstep': {
+        const s = sideVec(0.7);
+        this._fxGroundSlash({ x: at.x - s.x, z: at.z - s.z }, { x: at.x + s.x, z: at.z + s.z }, 0x9c8cff, 0.3, 0.45);
+        this._fxBurst(at, 0x7a5cff, 12, 5, 0.45);
+        audio.sfx('attack_melee', 0.7, 0); break;
+      }
       case 'rogue_kidney_shot':
         this._fxBurst(at, 0xbfe9b0, 9, 4, 0.45);
         this._spawnClassRing(at, 1.4, 0x8ec6c9, 0.4);
+        // electric stun sparks circling above the victim's head
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * Math.PI * 2;
+          this._fxRiser({ x: at.x + Math.cos(a) * 0.5, y: (at.y ?? this.mesh.position.y) + 2.0, z: at.z + Math.sin(a) * 0.5 },
+            0xffe14a, new THREE.Vector3(Math.cos(a) * 0.6, 0.3, Math.sin(a) * 0.6), 0.5, 0.16, 0.9);
+        }
         audio.sfx('hit', 0.65, 0); audio.sfx('special', 0.4, 0); break;
       case 'rogue_assassinate':
         this._fxGroundSlash(this.pos, at, 0x6f5cff, 0.8, 0.55);
         this._fxBurst(at, 0x9c8cff, 16, 5.5, 0.55);
-        audio.sfx('attack_melee', 0.85, 0); audio.sfx('special', 0.55, 0); break;
+        this._spawnClassRing(at, 1.8, 0x6f5cff, 0.5);
+        audio.sfx('attack_melee', 0.85, 0); audio.sfx('boom', 0.4, 0); break;
       default:
         this._fxBurst(at, 0xffd27f, 6, 3, 0.4); audio.sfx('attack_melee', 0.5, 0);
     }
@@ -1053,8 +1193,9 @@ export class Player {
     const pct = (v) => `${Math.round(v * 100)}%`;
     const head = this.mesh.position.clone().setY(this.mesh.position.y + 2.3);
     if (skill.buff === 'warCry') {
-      this._spawnClassRing(this.pos, 4.2, 0xff8a5f, 0.6);
-      this._fxBurst(this.pos, 0xff8a5f, 10, 5, 0.5);
+      // three expanding "shout" shockwave rings + a rally burst
+      for (let i = 0; i < 3; i++) this._spawnClassRing(this.pos, 3.2 + i * 1.4, 0xffa24a, 0.55 + i * 0.15);
+      this._fxBurst(this.pos, 0xffb46a, 14, 6, 0.55);
       this.hooks.popup(head, `📯 +${pct(power)} dmg · -${pct(power * 0.5)} taken · ${duration}s`, '#ffb08a', 'big');
       audio.sfx('aggro', 0.8, 0);
     } else if (skill.buff === 'bloodFury') {
@@ -1065,11 +1206,30 @@ export class Player {
     } else if (skill.buff === 'avatar') {
       this._spawnClassRing(this.pos, 3.4, 0xd8d8e0, 0.8);
       this._fxBurst(this.pos, 0xd8d8e0, 14, 4, 0.7);
+      this._fxGroundCracks(this.pos, 3.2, 0xbfa06a, 8);
       this.hooks.popup(head, `🗿 +${pct(power)} dmg · shield ${pct(power)} HP · ${duration}s`, '#e8e8f0', 'big');
-      audio.sfx('evolve', 0.6, 0);
+      audio.sfx('evolve', 0.6, 0); audio.sfx('rock_crack', 0.5, 0);
+    } else if (skill.buff === 'combustion') {
+      this._spawnClassRing(this.pos, 3.0, 0xff6b2f, 0.6);
+      this._fxBurst(this.pos, 0xff7a3a, 14, 6, 0.6);
+      this.hooks.popup(head, `🔥 ${skill.name} · +${pct(power)} fire · ${duration}s`, '#ffb27a', 'big');
+      audio.sfx('flame', 0.6, 0);
+    } else if (skill.buff === 'poisonBlades') {
+      this._spawnClassRing(this.pos, 2.4, 0x9bd94a, 0.5);
+      this._fxBurst(this.pos, 0xbfe9b0, 10, 4, 0.5);
+      this.hooks.popup(head, `☠️ ${skill.name} · ${duration}s`, '#bfe9b0');
+      audio.sfx('snake_attack', 0.5, 0);
+    } else if (skill.buff === 'sprint' || skill.buff === 'arrowHaste') {
+      const cool = skill.buff === 'arrowHaste' ? 0xffd24a : 0x9fe0ff;
+      this._spawnClassRing(this.pos, 2.4, cool, 0.45);
+      this._fxBurst(this.pos, cool, 10, 6, 0.45, 0.12);
+      this.hooks.popup(head, `${skill.icon} ${skill.name} · ${duration}s`, '#dff0ff');
+      audio.sfx('spawn', 0.4, 0);
     } else {
       this._spawnClassRing(this.pos, 2.6, 0x9cd8ff, 0.5);
+      this._fxBurst(this.pos, 0x9cd8ff, 8, 4, 0.45, 0.12);
       this.hooks.popup(head, `✨ ${skill.name} · ${duration}s`, '#bfe0ff');
+      audio.sfx('special', 0.4, 0);
     }
   }
 
@@ -1171,9 +1331,11 @@ export class Player {
         const rv = (key, fallback = 0) => rankValue(skill, key, zone.rank, fallback);
         if (skill.zone === 'healing') {
           if (inside) this._healSelf(this._classHeal(rv('amount')));
+          this._spawnZoneTickFx(zone);
           this.hooks.onClassWorldAction?.('zoneHeal', skill, zone.rank, { ...ctx, zone });
         } else if (skill.zone !== 'smoke') {
           if (skill.zone === 'arrows') this._spawnArrowRainFx(zone);
+          else this._spawnZoneTickFx(zone);
           for (const enemy of enemyMgr?.alive?.() || []) {
             if (enemy.pos.distanceTo(zone.pos) > zone.radius + (enemy.hitR || 0)) continue;
             let result;
@@ -1328,6 +1490,154 @@ export class Player {
     }
   }
 
+  // per-tick element FX inside a ground zone (Flamestrike/Blizzard/Storm/Sanctuary)
+  _spawnZoneTickFx(zone) {
+    const kind = zone.skill.zone;
+    const rnd = () => {
+      const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * zone.radius;
+      return { x: zone.pos.x + Math.cos(a) * r, z: zone.pos.z + Math.sin(a) * r };
+    };
+    const baseY = zone.mesh.position.y;
+    if (kind === 'fire' || (kind === 'elemental' && Math.random() < 0.5)) {
+      for (let i = 0; i < 3; i++) {
+        const p = rnd();
+        this._fxRiser(new THREE.Vector3(p.x, baseY + 0.2, p.z), 0xff6b2f,
+          new THREE.Vector3(0, 2.4 + Math.random() * 1.6, 0), 0.5, 0.2, 0.8);
+      }
+    }
+    if (kind === 'frost' || kind === 'elemental') {
+      for (let i = 0; i < 3; i++) {
+        const p = rnd();
+        const m = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.005, 0.8, 4),
+          new THREE.MeshBasicMaterial({ color: 0xbfe6ff, transparent: true, opacity: 0.9 }));
+        m.position.set(p.x, baseY + 6 + Math.random() * 3, p.z);
+        this.scene.add(m);
+        this.classFx.push({ mesh: m, t: 0.6, life: 0.6, kind: 'fallingArrow' });
+      }
+    }
+    if (kind === 'elemental' && Math.random() < 0.5) {
+      // a lightning bolt cracking down inside the storm
+      const p = rnd();
+      this._fxStreak(new THREE.Vector3(p.x, baseY + 2.2, p.z), Math.random() * Math.PI,
+        0xdcc8ff, 0.16, 4.2, 0.22, 0.95);
+      this._fxBurst(new THREE.Vector3(p.x, baseY + 0.2, p.z), 0xdcc8ff, 6, 4, 0.3);
+    }
+    if (kind === 'healing') {
+      for (let i = 0; i < 2; i++) {
+        const p = rnd();
+        this._fxRiser(new THREE.Vector3(p.x, baseY + 0.2, p.z), 0x9fe89a,
+          new THREE.Vector3(0, 1.4 + Math.random(), 0), 0.6, 0.14, 0.7);
+      }
+    }
+  }
+
+  // a stretched additive streak (speed lines, shadow trails) that just fades
+  _fxStreak(pos, angle, color, w = 0.16, h = 1.1, life = 0.35, op0 = 0.7) {
+    const geo = new THREE.PlaneGeometry(w, h);
+    const mat = new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: op0, side: THREE.DoubleSide,
+      depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(pos);
+    mesh.rotation.y = angle;
+    this.scene.add(mesh);
+    this.classFx.push({ mesh, t: life, life, kind: 'fade', op0 });
+  }
+
+  // ---- persistent aura meshes (created lazily, parented to the player) ----
+  _ensureShieldBubble() {
+    if (this._shieldBubble) return this._shieldBubble;
+    const geo = new THREE.SphereGeometry(1, 16, 12);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0x8fd4ff, transparent: true, opacity: 0, side: THREE.DoubleSide,
+      depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    const m = new THREE.Mesh(geo, mat);
+    m.position.y = 1.0; m.scale.set(1.25, 1.5, 1.25); m.visible = false;
+    this.mesh.add(m);
+    return (this._shieldBubble = m);
+  }
+
+  _ensureHalo() {
+    if (this._halo) return this._halo;
+    const geo = new THREE.TorusGeometry(0.42, 0.06, 8, 20);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffe6a0, transparent: true, opacity: 0, depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const m = new THREE.Mesh(geo, mat);
+    m.position.y = 2.5; m.visible = false;
+    this.mesh.add(m);
+    return (this._halo = m);
+  }
+
+  // one place for every ongoing self-buff visual, ticked from update()
+  _updateBuffAuras(dt) {
+    this.classAuraT -= dt;
+    const emit = this.classAuraT <= 0;
+    if (emit) this.classAuraT = 0.09;
+    const mote = (color, spread = 0.9, rise = 2.2, size = 0.14, op = 0.75) => {
+      const off = new THREE.Vector3((Math.random() - 0.5) * spread,
+        0.4 + Math.random() * 1.2, (Math.random() - 0.5) * spread);
+      this._fxRiser(this.mesh.position.clone().add(off), color,
+        new THREE.Vector3(0, rise, 0), 0.5 + Math.random() * 0.2, size, op);
+    };
+    if (emit) {
+      if (this.bloodFuryT > 0) mote(0xd23b2f);
+      if (this.warCryT > 0) mote(0xffa24a, 1.3, 1.6, 0.16);         // rally sparks
+      if (this.arrowHasteT > 0) mote(0xffd24a, 0.7, 2.8, 0.12);     // amber speed motes
+      if (this.poisonBladesT > 0) mote(0x9bd94a, 0.7, 1.4, 0.13);   // toxic drips
+      if (this.combustionT > 0) mote(0xff6b2f, 0.8, 2.4, 0.16);     // fire flare
+      if (this.hotT > 0) mote(0x8ee87f, 0.8, 1.3, 0.13, 0.7);       // green regen
+      if (this.guardianSpiritT > 0) mote(0xfff0a5, 0.6, 1.8, 0.12); // holy motes
+    }
+    // sprint / fleet foot: after-image speed streaks trailing behind you
+    if (this.sprintT > 0) {
+      this._sprintFxT = (this._sprintFxT || 0) - dt;
+      if (this._sprintFxT <= 0) {
+        this._sprintFxT = 0.05;
+        const back = Math.atan2(-this.facing.x, -this.facing.z);
+        for (let i = 0; i < 2; i++) {
+          const side = (i - 0.5) * 0.9;
+          const p = this.mesh.position.clone()
+            .add(new THREE.Vector3(-this.facing.z * side, 0.9 + Math.random() * 0.5, this.facing.x * side));
+          this._fxStreak(p, back, 0x9fe0ff, 0.1, 0.9, 0.28, 0.55);
+        }
+      }
+    }
+    // Avatar: grow into a juggernaut while the buff runs
+    const avatarScale = this.avatarT > 0 ? 1.16 : 1;
+    const curScale = this.mesh.scale.x;
+    if (Math.abs(curScale - avatarScale) > 0.002) {
+      this.mesh.scale.setScalar(curScale + (avatarScale - curScale) * Math.min(1, dt * 6));
+    }
+    // absorb-shield bubble (Ice Barrier / Power Word: Shield / Avatar)
+    const bubble = this.classShield > 0.5 ? this._ensureShieldBubble() : this._shieldBubble;
+    if (bubble) {
+      if (this.classShield > 0.5) {
+        this._shieldMax = Math.max(this._shieldMax || 0, this.classShield);
+        const frac = Math.min(1, this.classShield / (this._shieldMax || 1));
+        bubble.visible = true;
+        bubble.material.opacity = 0.12 + 0.16 * frac;
+        const s = 1.15 + 0.2 * frac;
+        bubble.scale.set(s, s * 1.2, s);
+        bubble.rotation.y += dt * 0.6;
+      } else { bubble.visible = false; this._shieldMax = 0; }
+    }
+    // Guardian Spirit halo
+    const halo = this.guardianSpiritT > 0 ? this._ensureHalo() : this._halo;
+    if (halo) {
+      halo.visible = this.guardianSpiritT > 0;
+      if (halo.visible) {
+        this._haloPhase = (this._haloPhase || 0) + dt * 4;
+        halo.material.opacity = 0.6 + 0.3 * Math.sin(this._haloPhase);
+        halo.rotation.z += dt * 2;
+      }
+    }
+  }
+
   _updateClassFx(dt) {
     for (let i = this.classFx.length - 1; i >= 0; i--) {
       const fx = this.classFx[i];
@@ -1335,6 +1645,19 @@ export class Player {
       const k = 1 - Math.max(0, fx.t) / fx.life;
       const op0 = fx.op0 ?? 0.8;
       switch (fx.kind) {
+        case 'fade':
+          fx.mesh.material.opacity = op0 * (1 - k);
+          break;
+        case 'drop': { // a meteor / plunging shot falling into its impact point
+          const kk = Math.min(1, k);
+          fx.mesh.position.lerpVectors(fx.from, fx.to, kk * kk); // accelerate down
+          fx.mesh.material.opacity = 0.95 * (1 - kk * kk * kk);
+          if (fx.trail && Math.random() < 0.7) {
+            this._fxRiser(fx.mesh.position.clone(), fx.trail,
+              new THREE.Vector3(0, 0.6, 0), 0.3, 0.16, 0.7);
+          }
+          break;
+        }
         case 'fallingArrow':
           fx.mesh.position.y -= dt * 16;
           fx.mesh.material.opacity = op0 * (1 - k);
@@ -1557,6 +1880,57 @@ export class Player {
     if (this.warCryT > 0) cut += this.warCryPower * 0.5;
     if (this.avatarT > 0) cut += this.avatarPower * 0.45;
     return Math.min(0.65, cut);
+  }
+
+  // Every timed self-buff the HUD buff-bar renders. `dur` (max duration for the
+  // drain ratio) is recovered without touching any setter: the timers count
+  // monotonically DOWN, so the largest value we sample IS the value at cast.
+  // `_buffMax` remembers that per key and resets once a buff lapses.
+  activeBuffs() {
+    this._buffMax ??= {};
+    const DESCS = [
+      ['warCryT', '📯', 'War Cry', 'buff'],
+      ['bloodFuryT', '🔥', 'Blood Fury', 'buff'],
+      ['avatarT', '🗿', 'Avatar', 'buff'],
+      ['arrowHasteT', '⚡', 'Arrow Haste', 'buff'],
+      ['poisonBladesT', '☠️', 'Poison Blades', 'buff'],
+      ['sprintT', '🏃', 'Sprint', 'buff'],
+      ['combustionT', '🔥', 'Combustion', 'buff'],
+      ['hasteT', '⚡', 'Haste', 'buff'],
+      ['rageT', '😡', 'Rage', 'buff'],
+      ['roastT', '🍗', 'Roast', 'buff'],
+      ['stealthT', '🌑', 'Stealth', 'stealth'],
+      ['evadeT', '💨', 'Evade', 'defensive'],
+      ['stoneSkinT', '🪨', 'Stone Skin', 'defensive'],
+      ['spiritWardT', '👻', 'Spirit Ward', 'defensive'],
+      ['guardianSpiritT', '👼', 'Guardian Spirit', 'defensive'],
+      ['hotT', '🌿', 'Renew', 'hot'],
+    ];
+    const out = [];
+    for (const [field, icon, name, kind] of DESCS) {
+      const t = this[field] || 0;
+      if (t > 0.05) {
+        const dur = this._buffMax[field] = Math.max(this._buffMax[field] || 0, t);
+        out.push({ id: field, icon, name, t, dur, kind });
+      } else if (this._buffMax[field]) {
+        this._buffMax[field] = 0;
+      }
+    }
+    // Absorb shield (Ice Barrier / Power Word: Shield / Avatar) — a value, no timer
+    if (this.classShield > 0.5) {
+      out.push({ id: 'classShield', icon: '🛡️', name: 'Shield', t: null,
+        dur: null, kind: 'shield', value: Math.round(this.classShield) });
+    }
+    // Mage orbiting sphere summons — one cell per active summon
+    for (const s of this.orbSummons || []) {
+      if (s.t <= 0.05) continue;
+      const skill = classSkillById(s.id);
+      const key = 'orb:' + s.id;
+      const dur = this._buffMax[key] = Math.max(this._buffMax[key] || 0, s.t);
+      out.push({ id: key, icon: skill?.icon || '🔮', name: skill?.name || 'Sphere',
+        t: s.t, dur, kind: 'summon' });
+    }
+    return out;
   }
 
   cycleArrowMode() {
@@ -1936,23 +2310,10 @@ export class Player {
     }
     // ---- Tame Beast channel: root in place, rain hearts, charm on finish ----
     if (this.tameChannel) this._updateTameChannel(dt, enemyMgr);
-    // ---- visible auras for timed class buffs ----
-    if (this.bloodFuryT > 0) {
-      this.classAuraT -= dt;
-      if (this.classAuraT <= 0) {
-        this.classAuraT = 0.13;
-        const off = new THREE.Vector3((Math.random() - 0.5) * 0.9,
-          0.4 + Math.random() * 1.2, (Math.random() - 0.5) * 0.9);
-        this._fxRiser(this.mesh.position.clone().add(off), 0xd23b2f,
-          new THREE.Vector3(0, 2.2, 0), 0.55, 0.14, 0.75);
-      }
-    }
-    // Avatar: visibly grow into a juggernaut while the buff runs
-    const avatarScale = this.avatarT > 0 ? 1.16 : 1;
-    const curScale = this.mesh.scale.x;
-    if (Math.abs(curScale - avatarScale) > 0.002) {
-      this.mesh.scale.setScalar(curScale + (avatarScale - curScale) * Math.min(1, dt * 6));
-    }
+    // ---- visible auras for every timed class buff (blood fury, war cry,
+    // arrow haste, poison blades, combustion, renew, guardian halo, sprint
+    // streaks, avatar growth, shield bubble) ----
+    this._updateBuffAuras(dt);
     if (this.hotT > 0) {
       this.hotT = Math.max(0, this.hotT - dt);
       this.hotTickT -= dt;

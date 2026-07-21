@@ -36,6 +36,7 @@ const POI_MAKERS = {
 const TERRAIN_TOOLS = [
   { id: 'raise',   icon: '⛰️', name: 'Raise' },
   { id: 'lower',   icon: '🕳️', name: 'Lower' },
+  { id: 'lowerwet', icon: '🏞️', name: 'Dig lake' },
   { id: 'smooth',  icon: '🫓', name: 'Smooth' },
   { id: 'hclear',  icon: '🧽', name: 'Restore' },
   { id: 'terrain', icon: '🎨', name: 'Paint' },
@@ -563,8 +564,10 @@ export class WorldEditor {
     const inField = (el) => el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName);
     window.addEventListener('keydown', (ev) => {
       if (!this.active || inField(ev.target)) return;
-      if (ev.code === 'BracketLeft') this._setRadius(this.radius - 2);
-      if (ev.code === 'BracketRight') this._setRadius(this.radius + 2);
+      // proportional step so the now-huge radius range is fast to drag
+      const rstep = Math.max(2, Math.round(this.radius * 0.15));
+      if (ev.code === 'BracketLeft') this._setRadius(this.radius - rstep);
+      if (ev.code === 'BracketRight') this._setRadius(this.radius + rstep);
       if (ev.code === 'Minus') this._setStrength(this.strength - 0.25);
       if (ev.code === 'Equal') this._setStrength(this.strength + 0.25);
       if (ev.code === 'Escape' && this._testPick) this._setTestPick(false);
@@ -614,7 +617,22 @@ export class WorldEditor {
     const amt = strength * dt * 8;
     switch (this.tool) {
       case 'raise':  worldPatch.brushHeight(aim.x, aim.z, radius, amt); break;
-      case 'lower':  worldPatch.brushHeight(aim.x, aim.z, radius, -amt); break;
+      case 'lower':
+        // plain Lower digs a DRY valley — any cell whose natural terrain is
+        // water (coast, lake, bog, river) gets pinned dry, so lowering below
+        // sea level never floods the pit. The per-cell water scan only runs
+        // when water is actually near the brush (cheap gate for huge strokes).
+        worldPatch.brushHeight(aim.x, aim.z, radius, -amt);
+        if (this._waterNear(aim.x, aim.z, radius)) {
+          worldPatch.brushDryWater(aim.x, aim.z, radius,
+            (wx, wz) => this.o.world.isWater(wx, wz));
+        }
+        break;
+      case 'lowerwet':
+        // Dig lake: lower AND fill with shallow water — an instant pond/lake
+        worldPatch.brushHeight(aim.x, aim.z, radius, -amt);
+        worldPatch.brushCells('water', aim.x, aim.z, radius, 1);
+        break;
       case 'smooth': worldPatch.brushSmooth(aim.x, aim.z, radius, strength * dt * 4); break;
       case 'hclear': worldPatch.brushHeightErase(aim.x, aim.z, radius); break;
       case 'terrain': worldPatch.brushCells('terrain', aim.x, aim.z, radius, this.terrainIdx); break;
@@ -630,6 +648,20 @@ export class WorldEditor {
     }
     this._areaGrow(aim.x, aim.z, radius + 12);
     this._groundStroked = true;
+  }
+
+  // cheap gate for plain Lower: is any natural water within reach of the
+  // brush? Probes the center + two rings — natural water bodies are large, so
+  // this never misses one, and it spares a huge stroke ~40k isWater() calls.
+  _waterNear(x, z, radius) {
+    const w = this.o.world;
+    if (w.isWater(x, z)) return true;
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2, cs = Math.cos(a), sn = Math.sin(a);
+      if (w.isWater(x + cs * radius, z + sn * radius)) return true;
+      if (w.isWater(x + cs * radius * 0.5, z + sn * radius * 0.5)) return true;
+    }
+    return false;
   }
 
   // ---------- placement ----------
@@ -1036,7 +1068,7 @@ export class WorldEditor {
         </div>
       </div>
       <div class="we-group" data-we="radbox"><span class="we-cap">Radius</span>
-        <div class="we-ctl"><input data-we="rad" type="range" min="2" max="60" step="1">
+        <div class="we-ctl"><input data-we="rad" type="range" min="2" max="400" step="1">
           <span class="we-val" data-we="radv"></span></div></div>
       <div class="we-group" data-we="strbox"><span class="we-cap">Strength</span>
         <div class="we-ctl"><input data-we="str" type="range" min="0.25" max="5" step="0.25">
@@ -1360,7 +1392,7 @@ export class WorldEditor {
   }
 
   _setRadius(v) {
-    this.radius = Math.max(2, Math.min(60, v));
+    this.radius = Math.round(Math.max(2, Math.min(400, v)));
     if (this._radEl) { this._radEl.value = this.radius; this._radV.textContent = `${this.radius} m`; }
   }
 
