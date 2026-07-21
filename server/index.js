@@ -13,8 +13,12 @@ import http from 'node:http';
 import { WebSocketServer } from 'ws';
 import { MSG, PROTOCOL_VERSION, decode, encode, genCode } from './protocol.js';
 import { Room } from './room.js';
+import { GameRoom } from './sim/game-room.mjs';   // requires the 'three' hook (boot.mjs)
 
 const PORT = Number(process.env.PORT || 8080);
+// M2: run the authoritative simulation server-side for co-op rooms. Default ON;
+// set WOODS_SIM=0 to fall back to the M1 client-authority relay.
+const SIM = process.env.WOODS_SIM !== '0';
 const HOST = process.env.HOST || '0.0.0.0'; // set 127.0.0.1 behind a reverse proxy
 const TICK_HZ = Number(process.env.TICK_HZ || 15);
 const EMPTY_ROOM_TTL_MS = Number(process.env.EMPTY_ROOM_TTL_MS || 120000); // keep briefly for reconnects
@@ -33,6 +37,12 @@ function createRoom(mode, seed) {
   }
   if (!code) return null;
   const room = new Room(code, mode, seed ?? 1);
+  if (SIM && mode === 'coop') {
+    room.attachSim(new GameRoom({
+      broadcast: (o, e) => room.broadcast(o, e),
+      sendTo: (u, o) => room.sendTo(u, o),
+    }));
+  }
   rooms.set(code, room);
   return room;
 }

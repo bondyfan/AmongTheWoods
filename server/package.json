@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "description": "Dedicated authoritative game server for Among The Woods co-op (Version C).",
-  "main": "index.js",
+  "main": "boot.mjs",
   "scripts": {
-    "start": "node index.js",
-    "dev": "node --watch index.js"
+    "start": "node boot.mjs",
+    "dev": "node --watch boot.mjs"
   },
   "engines": {
     "node": ">=18"

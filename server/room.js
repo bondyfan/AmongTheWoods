@@ -24,11 +24,16 @@ export class Room {
     this.code = code;
     this.meta = freshMeta(mode, seed);
     this.players = new Map();     // uid -> { uid, ws, lastState, joinedAt }
-    this.authorityUid = null;     // the player currently running the sim (M1)
+    this.authorityUid = null;     // M1 relay only: the player running the sim
     this.lastSnap = null;         // most recent world snapshot (for late joiners)
+    this.sim = null;              // M2: the server-side GameRoom (server IS authority)
     this.createdAt = Date.now();
     this.lastActivity = Date.now();
   }
+
+  // M2: attach the authoritative server simulation. Once attached, NO player is
+  // the authority — the server runs the sim in tick() and broadcasts snapshots.
+  attachSim(sim) { this.sim = sim; this.authorityUid = null; }
 
   get size() { return this.players.size; }
   get empty() { return this.players.size === 0; }
@@ -36,30 +41,30 @@ export class Room {
   add(uid, ws) {
     this.lastActivity = Date.now();
     this.players.set(uid, { uid, ws, lastState: null, joinedAt: Date.now() });
-    if (!this.authorityUid) this.authorityUid = uid; // first in runs the sim (M1)
-    if (this.players.size >= 1) this.meta.state = 'playing';
-    // tell the newcomer who they are + who's already here
+    if (this.sim) this.sim.addPlayer(uid);                 // M2: server authority
+    else if (!this.authorityUid) this.authorityUid = uid;  // M1: first in runs the sim
+    this.meta.state = 'playing';
+    // with a sim EVERYONE is a guest (server is authority); M1 promotes the first
+    const role = (!this.sim && uid === this.authorityUid) ? 'authority' : 'guest';
     this.sendTo(uid, {
-      t: MSG.WELCOME, code: this.code, uid,
-      role: uid === this.authorityUid ? 'authority' : 'guest',
-      meta: this.meta,
+      t: MSG.WELCOME, code: this.code, uid, role, meta: this.meta,
       peers: [...this.players.keys()].filter((u) => u !== uid),
     });
-    if (this.lastSnap && uid !== this.authorityUid) {
+    if (!this.sim && this.lastSnap && uid !== this.authorityUid) {
       this.sendTo(uid, { t: MSG.SNAP_UP, snap: this.lastSnap });
     }
-    // announce the newcomer + current authority to everyone else
     this.broadcast({ t: MSG.PEER, event: 'join', uid }, uid);
-    this.broadcast({ t: MSG.PEER, event: 'authority', uid: this.authorityUid });
+    if (!this.sim) this.broadcast({ t: MSG.PEER, event: 'authority', uid: this.authorityUid });
   }
 
   remove(uid) {
     this.players.delete(uid);
     this.lastActivity = Date.now();
+    this.sim?.removePlayer(uid);
     this.broadcast({ t: MSG.PEER, event: 'leave', uid });
-    if (uid === this.authorityUid) {
-      // promote the longest-present survivor to authority (M1). M2 removes this
-      // entirely — the server is always the authority.
+    // M1 relay only: promote a survivor to authority. With a sim, the server
+    // stays the authority — nothing to hand over.
+    if (!this.sim && uid === this.authorityUid) {
       this.authorityUid = null;
       const next = [...this.players.values()].sort((a, b) => a.joinedAt - b.joinedAt)[0];
       if (next) {
@@ -74,12 +79,16 @@ export class Room {
     const p = this.players.get(uid);
     if (p) p.lastState = state;
     this.lastActivity = Date.now();
+    this.sim?.onState(uid, state);   // M2: feed the guest's proxy (enemy targeting)
+    // still relay so guests render each other's avatars
     this.broadcast({ t: MSG.STATE_UP, from: uid, state }, uid);
   }
 
   onEvent(uid, ev) {
     this.lastActivity = Date.now();
-    // events carry the sender; co-op fans them to everyone else in the room
+    // M2: world-mutating events (ehit/collect/drop/chop/berry) are consumed by
+    // the sim, not relayed; peer-relay events (revive/ping/…) fall through.
+    if (this.sim && this.sim.onEvent(uid, ev)) return;
     this.broadcast({ t: MSG.EVENT_UP, ev: { from: uid, ...ev } }, uid);
   }
 
@@ -95,12 +104,10 @@ export class Room {
     this.broadcast({ t: MSG.META_UP, meta: this.meta });
   }
 
-  // ---- MILESTONE 2 SEAM ----
-  // The authoritative simulation goes here. Today it is a no-op (a real player
-  // is the authority and streams `snap` via onSnap). When the sim is ported to
-  // the server, this method advances enemies/pickups and calls
-  // `this.broadcast({ t: MSG.SNAP_UP, snap })` itself, and authorityUid retires.
-  tick(_dtMs) { /* no-op until the sim is ported (see README, Milestone 2) */ }
+  // ---- MILESTONE 2 ----
+  // With a sim attached, advance the authoritative simulation; it broadcasts its
+  // own snapshots. Without one (M1 relay rooms) this stays a no-op.
+  tick(dtMs) { this.sim?.tick(dtMs); }
 
   // ---- transport helpers ----
   sendTo(uid, obj) {
