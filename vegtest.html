@@ -1,0 +1,120 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Vegetation Kit Test</title>
+<style>
+  html,body{margin:0;height:100%;background:#6b8f4e;overflow:hidden;font-family:monospace}
+  #log{position:fixed;top:0;left:0;padding:6px 10px;color:#fff;background:rgba(0,0,0,.5);
+       font-size:12px;white-space:pre;z-index:10;max-width:60vw}
+</style>
+<script type="importmap">
+  { "imports": { "three": "./libs/three.module.js" } }
+</script>
+</head>
+<body>
+<div id="log">loading…</div>
+<script type="module">
+import * as THREE from 'three';
+import * as veg from './js/vegekit.js';
+import { BAKED_MAT } from './js/models.js';
+
+const log = (m) => { document.getElementById('log').textContent = m;
+  console.log('[vegtest]', m); };
+window.addEventListener('error', e => log('ERROR: ' + e.message));
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x9fc0e8);
+scene.fog = new THREE.Fog(0x9fc0e8, 40, 120);
+
+const cam = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 500);
+cam.position.set(0, 9, 26);
+cam.lookAt(0, 4, 0);
+
+scene.add(new THREE.HemisphereLight(0xcfe6ff, 0x4a5a30, 1.1));
+const sun = new THREE.DirectionalLight(0xfff2dd, 1.4);
+sun.position.set(20, 30, 12); sun.castShadow = true;
+sun.shadow.camera.left = -30; sun.shadow.camera.right = 30;
+sun.shadow.camera.top = 30; sun.shadow.camera.bottom = -30;
+sun.shadow.mapSize.set(2048, 2048);
+scene.add(sun);
+
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(200, 200),
+  new THREE.MeshLambertMaterial({ color: 0x5f8a44 }));
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
+scene.add(ground);
+
+// deterministic rng
+let s = 12345;
+const rng = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+
+await veg.preload();
+log('kit loaded. ready=' + veg.ready());
+
+// a row of every tree variant
+for (let i = 0; i < 5; i++) {
+  const { mesh } = veg.tree(2, i, rng);
+  mesh.position.set(-16 + i * 8, 0, -4);
+  mesh.rotation.y = rng() * 6.28;
+  mesh.traverse(o => { if (o.isMesh) o.castShadow = o.castShadow; });
+  scene.add(mesh);
+}
+// tree sizes
+for (let i = 0; i < 5; i++) {
+  const { mesh } = veg.tree(i, i, rng);
+  mesh.position.set(-16 + i * 8, 0, -18);
+  scene.add(mesh);
+}
+// ground deco row
+const decos = [veg.bush, veg.fern, veg.plant, veg.flower, veg.mushroom, veg.rock, veg.pebble];
+decos.forEach((fn, i) => {
+  const o = fn(rng);
+  o.position.set(-16 + i * 5, 0, 8);
+  o.rotation.y = rng() * 6.28;
+  scene.add(o);
+});
+// instanced grass carpet
+const inst = [];
+const col = new THREE.Color();
+for (let k = 0; k < 600; k++) {
+  const x = (rng() - 0.5) * 34, z = 6 + rng() * 12;
+  inst.push({ x, y: 0, z, rot: rng() * 6.28, s: 0.5 + rng() * 0.4,
+    c: col.setHSL(0.28, 0.5, 0.35 + rng() * 0.2).getHex() });
+}
+const field = veg.grassField(inst);
+if (field) scene.add(field);
+// dense short lawn carpet (fills the ground into continuous turf)
+const lawn = [];
+for (let k = 0; k < 2500; k++) {
+  const x = (rng() - 0.5) * 40, z = 4 + rng() * 16;
+  lawn.push({ x, y: 0, z, rot: rng() * 6.28, s: 0.55 + rng() * 0.45,
+    c: col.setHSL(0.28, 0.5, 0.38 + rng() * 0.16).getHex() });
+}
+const carpet = veg.grassCarpet(lawn);
+if (carpet) scene.add(carpet);
+
+log('placed. trees + deco + ' + (field ? inst.length + ' grass' : 'NO grass') +
+    '. fol shaders=' + BAKED_MAT.userData.shaders.length);
+
+let t = 0;
+renderer.setAnimationLoop(() => {
+  t += 0.016;
+  // drive the shared foliage wind uniforms so sway animates
+  for (const sh of BAKED_MAT.userData.shaders) {
+    if (sh.uniforms.uTime) sh.uniforms.uTime.value = t;
+    if (sh.uniforms.uWind) sh.uniforms.uWind.value = 1;
+  }
+  cam.position.x = Math.sin(t * 0.15) * 8;
+  cam.lookAt(0, 4, -2);
+  renderer.render(scene, cam);
+});
+window.__vegtestReady = true;
+</script>
+</body>
+</html>

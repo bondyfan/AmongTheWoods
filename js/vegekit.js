@@ -37,25 +37,67 @@ const MODELS = [
 
 // material atlas → shader recipe. `wind:[y0,y1]` (LOCAL model-space heights)
 // gives the sway ramp; `null` = rigid. `alpha` = leaf/petal cutout; `double`
-// = render both sides (leaf cards, grass blades).
+// = render both sides (leaf cards, grass blades). `fill` = emissive self-lift
+// (0..1) that raises the darkest shaded/AO'd areas toward the texture colour so
+// the kit reads bright & soft like the stylized promo art, not near-black.
 const MAT_CFG = {
-  Bark_NormalTree:    { tex: 'Bark_NormalTree.png',      alpha: true,  wind: null,        double: false, shadow: true  },
-  Leaves_NormalTree:  { tex: 'Leaves_NormalTree_C.png',  alpha: true,  wind: [2.2, 8.5],  double: true,  shadow: true  },
-  Leaves_TwistedTree: { tex: 'Leaves_TwistedTree_C.png', alpha: true,  wind: [0.0, 1.4],  double: true,  shadow: true  },
-  Leaves:             { tex: 'Leaves.png',               alpha: true,  wind: [0.05, 1.3], double: true,  shadow: false },
-  Flowers:            { tex: 'Flowers.png',              alpha: true,  wind: [0.05, 1.6], double: true,  shadow: false },
-  Grass:              { tex: 'Grass.png',                alpha: false, wind: [0.0, 1.4],  double: true,  shadow: false },
-  Mushrooms:          { tex: 'Mushrooms.png',            alpha: false, wind: null,        double: false, shadow: false },
-  Rocks:              { tex: 'Rocks_Diffuse.png',        alpha: false, wind: null,        double: false, shadow: true  },
-  PathRocks:          { tex: 'PathRocks_Diffuse.png',    alpha: false, wind: null,        double: false, shadow: false },
+  Bark_NormalTree:    { tex: 'Bark_NormalTree.png',      alpha: true,  wind: null,        double: false, shadow: true,  fill: 0.14 },
+  Leaves_NormalTree:  { tex: 'Leaves_NormalTree_C.png',  alpha: true,  wind: [2.2, 8.5],  double: true,  shadow: true,  fill: 0.34 },
+  Leaves_TwistedTree: { tex: 'Leaves_TwistedTree_C.png', alpha: true,  wind: [0.0, 1.4],  double: true,  shadow: true,  fill: 0.34 },
+  Leaves:             { tex: 'Leaves.png',               alpha: true,  wind: [0.05, 1.3], double: true,  shadow: false, fill: 0.34 },
+  Flowers:            { tex: 'Flowers.png',              alpha: true,  wind: [0.05, 1.6], double: true,  shadow: false, fill: 0.38 },
+  Grass:              { tex: 'Grass.png',                alpha: false, wind: [0.0, 1.4],  double: true,  shadow: false, fill: 0.30 },
+  Mushrooms:          { tex: 'Mushrooms.png',            alpha: false, wind: null,        double: false, shadow: false, fill: 0.30 },
+  Rocks:              { tex: 'Rocks_Diffuse.png',        alpha: false, wind: null,        double: false, shadow: true,  fill: 0.12 },
+  PathRocks:          { tex: 'PathRocks_Diffuse.png',    alpha: false, wind: null,        double: false, shadow: false, fill: 0.12 },
 };
+
+// The kit bakes strong ambient occlusion into COLOR_0 (dark at leaf-clump cores
+// and blade bases). At full strength under our low-ambient forest lighting that
+// crushes the whole kit to a contrasty near-black. AO_KEEP dials that baked AO
+// back to a soft, stylized amount so foliage stays bright and even-toned.
+const AO_KEEP = 0.58;
+
+// lift the baked-AO vertex colours toward white (mix by AO_KEEP), so the darkest
+// occluded areas never sink to black. Chains onto whatever onBeforeCompile is
+// already set (the wind patch runs after this via its own prev? call).
+function _softenAO(m) {
+  const prev = m.onBeforeCompile;
+  m.onBeforeCompile = (shader) => {
+    prev?.(shader);
+    // vColor may be vec3 (USE_COLOR) or vec4 (USE_COLOR_ALPHA) — `.rgb` is valid
+    // for both. Lift it toward white so the baked AO reads soft, not near-black.
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <color_fragment>',
+      '#if defined( USE_COLOR_ALPHA ) || defined( USE_COLOR )\n'
+      + '  diffuseColor.rgb *= mix( vec3(1.0), vColor.rgb, ' + AO_KEEP.toFixed(3) + ' );\n'
+      + '#endif'
+    );
+  };
+}
 
 const _UP = new THREE.Vector3(0, 1, 0);
 const _texCache = new Map();   // filename → THREE.Texture (deduped)
 const _matCache = new Map();   // atlas name → THREE.Material (shared, wind-patched)
 const _templates = new Map();  // model stem → flattened Group template
-let _grassGeo = null, _grassMat = null;
+let _grassGeo = null, _grassMat = null;   // tall wispy accent tufts
+let _shortGeo = null, _shortMat = null;   // dense short-blade lawn carpet
 let _ready = false, _loading = null;
+
+// the shared instanced-grass material: soft self-lit blades, per-instance colour
+// on instanceColor, softened baked AO, instance-aware wind. One per grass layer.
+function _grassInstMat() {
+  const tex = _texture('Grass.png');
+  const m = new THREE.MeshLambertMaterial({
+    map: tex, vertexColors: true,
+    emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: MAT_CFG.Grass.fill,
+    side: THREE.DoubleSide,
+  });
+  m.userData.shared = true;
+  _softenAO(m);
+  applyWindShader(m, 0.0, 1.4, true); // instance-aware wind
+  return m;
+}
 
 // read the Graphics toggle straight from localStorage (needed at early boot,
 // before the settings object exists) — mirrors humanmodel.humanModelEnabled().
@@ -79,13 +121,20 @@ function _texture(file) {
 function _material(name) {
   if (_matCache.has(name)) return _matCache.get(name);
   const cfg = MAT_CFG[name] || MAT_CFG.Leaves;
+  const tex = _texture(cfg.tex);
   const m = new THREE.MeshLambertMaterial({
-    map: _texture(cfg.tex),
-    vertexColors: true,                     // kit COLOR_0 = free baked AO
+    map: tex,
+    vertexColors: true,                     // kit COLOR_0 = softened baked AO
+    // self-lit floor: the texture colour added back at `fill` strength so the
+    // darkest lambert-shaded / occluded pixels read soft & bright, not black
+    emissive: 0xffffff,
+    emissiveMap: tex,
+    emissiveIntensity: cfg.fill ?? 0.3,
     alphaTest: cfg.alpha ? 0.5 : 0,
     side: cfg.double ? THREE.DoubleSide : THREE.FrontSide,
   });
   m.userData.shared = true;                 // survive chunk disposal
+  _softenAO(m);                             // tame the harsh baked-AO contrast
   if (cfg.wind) applyWindShader(m, cfg.wind[0], cfg.wind[1]);
   _matCache.set(name, m);
   return m;
@@ -125,18 +174,15 @@ export async function preload() {
         _templates.set(name, _flatten(gltf.scene));
       } catch (e) { console.warn('[vegekit] failed', name, e); }
     }));
-    // the grass carpet is INSTANCED — pull one grass mesh's geometry + material
-    const gg = _templates.get('Grass_Common_Tall');
-    const gm = gg?.children[0];
-    if (gm) {
-      _grassGeo = gm.geometry;
-      _grassMat = new THREE.MeshLambertMaterial({
-        map: _texture('Grass.png'), vertexColors: true,
-        side: THREE.DoubleSide,
-      });
-      _grassMat.userData.shared = true;
-      applyWindShader(_grassMat, 0.0, 1.4, true); // instance-aware wind
-    }
+    // the grass is INSTANCED in two layers — pull each grass mesh's geometry and
+    // give both the same soft, self-lit blade material as the rest of the kit:
+    //  • tall wispy tufts (accent height, sparser)
+    //  • a DENSE short-blade carpet — the lush "lawn" that fills the ground so
+    //    the eye reads continuous turf, not bald terrain between tufts.
+    const gTall = _templates.get('Grass_Common_Tall')?.children[0];
+    if (gTall) { _grassGeo = gTall.geometry; _grassMat = _grassInstMat(); }
+    const gShort = _templates.get('Grass_Common_Short')?.children[0];
+    if (gShort) { _shortGeo = gShort.geometry; _shortMat = _grassInstMat(); }
     _ready = true;
   })();
   return _loading;
@@ -166,7 +212,8 @@ const _deco = (stems, sMin, sMax) => (rng) => {
   if (g) g.scale.setScalar(sMin + rng() * (sMax - sMin));
   return g || new THREE.Group();
 };
-export const bush     = _deco(['Bush_Common', 'Bush_Common_Flowers'], 0.9, 1.35);
+// lean toward the flowering bush — it's the lush, readable shape from the ref art
+export const bush     = _deco(['Bush_Common', 'Bush_Common_Flowers', 'Bush_Common_Flowers'], 0.95, 1.4);
 export const fern     = _deco(['Fern_1', 'Plant_1_Big'],               0.8, 1.2);
 export const plant    = _deco(['Plant_1', 'Plant_7', 'Clover_1', 'Clover_2'], 0.85, 1.25);
 export const flower   = _deco(['Flower_3_Group', 'Flower_4_Group', 'Flower_3_Single', 'Flower_4_Single'], 0.8, 1.2);
@@ -174,12 +221,12 @@ export const mushroom = _deco(['Mushroom_Common', 'Mushroom_Laetiporus'], 0.8, 1
 export const rock     = _deco(['Rock_Medium_1', 'Rock_Medium_2', 'Rock_Medium_3'], 0.55, 1.0);
 export const pebble   = _deco(['Pebble_Round_1', 'Pebble_Round_2', 'Pebble_Round_3'], 0.8, 1.4);
 
-// INSTANCED grass carpet from a list of {x,y,z,rot,s,c} tufts — one draw call.
+// INSTANCED grass from a list of {x,y,z,rot,s,c} tufts — one draw call each.
 const _gm = new THREE.Matrix4(), _gq = new THREE.Quaternion();
 const _gp = new THREE.Vector3(), _gs = new THREE.Vector3(), _gc = new THREE.Color();
-export function grassField(list) {
-  if (!list.length || !_grassGeo) return null;
-  const im = new THREE.InstancedMesh(_grassGeo, _grassMat, list.length);
+function _instGrass(list, geo, mat) {
+  if (!list.length || !geo) return null;
+  const im = new THREE.InstancedMesh(geo, mat, list.length);
   im.castShadow = false; im.receiveShadow = false;
   for (let i = 0; i < list.length; i++) {
     const it = list[i];
@@ -193,3 +240,7 @@ export function grassField(list) {
   im.computeBoundingSphere();
   return im;
 }
+// tall wispy accent tufts (height + movement on top of the lawn)
+export function grassField(list) { return _instGrass(list, _grassGeo, _grassMat); }
+// the dense short-blade lawn that fills the ground into continuous turf
+export function grassCarpet(list) { return _instGrass(list, _shortGeo, _shortMat); }
