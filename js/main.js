@@ -4209,6 +4209,7 @@ const BIOME_HAZARD_NOTES = {
 };
 let envSpeedMult = 1;
 let biomeLightK = 1; // smoothed per-biome light dimming factor
+let atmoCaveK = 0;   // how deep in the home cave we are (sky dome fades out)
 
 // per-biome music: the big hour-long tracks stream lazily on first entry
 const BIOME_MUSIC = [
@@ -4459,6 +4460,7 @@ function updateAtmosphere(dt) {
   // the cave is pitch dark — but once a home is BUILT over it, it's lit
   const caveK = (camp?.levels.home ?? 0) > 0 ? 0
     : Math.max(0, Math.min(1, (WORLD.caveR + 6 - r) / (WORLD.caveR + 3)));
+  atmoCaveK = caveK;
   // gloomy biomes (Dark Forest, Haunted Forest, swamp) dim the world lights
   // themselves — the screen overlay alone left the geometry too bright
   biomeLightK += (Math.min(1, biome.light ?? 1) - biomeLightK) * Math.min(1, dt * 1.5);
@@ -4469,11 +4471,19 @@ function updateAtmosphere(dt) {
   const dusk = Math.max(0, 1 - Math.abs(nightK - 0.5) * 4); // peaks at the twilight band
   sun.color.setRGB(1 - 0.25 * nightK, 0.95 - 0.2 * nightK + 0.05 * dusk, 0.87 - 0.15 * nightK - 0.15 * dusk);
   // the camera sits ~30 m away — keep the fog behind the hero so the cave
-  // interior stays dimly visible while the outside world is swallowed
-  const fogK = FOG_SCALE[settings.drawDist ?? 'normal'] ?? 1;
-  scene.fog.near = (35 - 14 * caveK) * fogK;
-  scene.fog.far = (110 - 60 * caveK) * fogK;
+  // interior stays dimly visible while the outside world is swallowed.
+  // RPG view looks along the ground, so it gets a much deeper fog wall —
+  // the far-LOD chunk tier (world.farRadius) fills the land out to it.
+  const fogK = (FOG_SCALE[settings.drawDist ?? 'normal'] ?? 1)
+    * (autoQuality.stage >= 3 ? 0.75 : 1);
+  const baseNear = game.rpgView ? 46 : 35;
+  const baseFar = game.rpgView ? 205 : 115;
+  scene.fog.near = (baseNear - 16 * caveK) * fogK;
+  scene.fog.far = (baseFar - (baseFar - 50) * caveK) * fogK;
   syncFarToFog(); // the camera stops rendering what the fog already hides
+  world.farRadius = game.kind === 'survival'
+    ? Math.min(14, Math.ceil((scene.fog.far * 1.05) / 40) + 1)
+    : 0; // MOBA / arena maps are small and walled — no far tier
 
   // caveK already fades smoothly with distance, so apply it directly; the
   // slow time-lerp is only for biome-to-biome transitions out in the open
@@ -4493,7 +4503,7 @@ function updateAtmosphere(dt) {
 // draw-distance option scales the fog wall; the camera far plane then hugs
 // the fog (plus a small margin) so nothing invisible is ever drawn or
 // shadow-cast — in RPG view this culls ~2/3 of the old frustum
-const FOG_SCALE = { short: 0.72, normal: 1, far: 1.5, furthest: 2.1 };
+const FOG_SCALE = { short: 0.72, normal: 1, far: 1.6, furthest: 2.4 };
 const NIGHT_SKY = new THREE.Color(0x0a1230), NIGHT_FOG = new THREE.Color(0x141a34);
 const _atmoA = new THREE.Color(), _atmoB = new THREE.Color();
 function syncFarToFog() {
@@ -4530,8 +4540,10 @@ function applyViewMode() {
   // top-down-only (they don't do anything meaningful behind-the-shoulder).
   document.querySelectorAll('.rpg-only').forEach(el => el.classList.toggle('hidden', !rpg));
   document.querySelectorAll('.topdown-only').forEach(el => el.classList.toggle('hidden', rpg));
-  scene.fog.near = rpg ? 45 : 35;
-  scene.fog.far = rpg ? (autoQuality.stage >= 3 ? 150 : 195) : (autoQuality.stage >= 3 ? 90 : 110);
+  // initial values only — updateAtmosphere recomputes fog (and the far-LOD
+  // radius that goes with it) every frame from the same base numbers
+  scene.fog.near = rpg ? 46 : 35;
+  scene.fog.far = rpg ? (autoQuality.stage >= 3 ? 154 : 205) : (autoQuality.stage >= 3 ? 90 : 115);
   camera.far = rpg ? 340 : 300;
   camera.fov = rpg ? 60 : 50;
   camera.updateProjectionMatrix();
@@ -4657,7 +4669,9 @@ function updateCamera(dt = 0) {
     camera.position.set(player.pos.x + fx * 14 + sx, py + 26, player.pos.z + fz * 14 + sz);
     camera.lookAt(player.pos.x - fx * 2 + sx, py, player.pos.z - fz * 2 + sz);
   }
-  sun.position.set(player.pos.x + 18, 35, player.pos.z + 12);
+  // lower sun = longer, more dramatic shadows AND a disc you actually see
+  // in the sky when looking toward it (elevation ~34°)
+  sun.position.set(player.pos.x + 24, 19, player.pos.z + 15);
   sun.target.position.set(player.pos.x, 0, player.pos.z);
 }
 
@@ -4727,7 +4741,7 @@ function step() {
     }
   }
   // water surfaces (ocean/lakes/rivers) share the same clock + sun direction
-  _waterSunDir.set(18, 35, 12).normalize(); // matches the fixed sun offset in updateCamera
+  _waterSunDir.set(24, 19, 15).normalize(); // matches the fixed sun offset in updateCamera
   if (WATER_SHADERS.length) {
     for (const sh of WATER_SHADERS) {
       sh.uniforms.uTime.value = _windT;
@@ -4746,6 +4760,12 @@ function step() {
   skyU.uZenith.value.copy(scene.background);
   skyU.uSunDir.value.copy(_waterSunDir);
   skyU.uSunColor.value.copy(sun.color);
+  skyU.uTime.value = _windT;
+  // sun + clouds fade at night, in the home cave and underground (the dome
+  // then collapses to the plain fog/sky gradient — no sun in a dungeon)
+  const dayK = game.dungeon ? 0 : (1 - (game.nightK || 0) * 0.92) * (1 - atmoCaveK);
+  skyU.uDay.value = dayK;
+  skyU.uCloudAmt.value = game.dungeon ? 0 : 0.9 * (1 - atmoCaveK);
 
   // on-screen FPS meter (smoothed; refreshes the label ~5×/s)
   if (settings.showFps && dt > 0) {

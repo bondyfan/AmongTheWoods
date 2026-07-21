@@ -19,7 +19,7 @@ import { makeTree, makeRock, makeGrassTuft, makeFlower, makeMushroom, makeBush,
          makeTemple, makeLianaPole, makeBonfire, makeSummitCairn, makeCactus,
          makeLairEntrance, makeCage, makeFern, makeTownHouse, makeChurch,
          makeFountain, makeWheatTuft, makeJunglePlant, makeReeds, makePebbles,
-         makePalm, makeGroundLeaves } from './models.js';
+         makePalm, makeGroundLeaves, makeFarTree } from './models.js';
 import { makePier } from './ship.js';
 import { bakeGroup, bakeAccumulator, buildBakedMesh, bakeAt, BAKED_MAT,
          isSharedMaterial, waterMaterial } from './models.js';
@@ -171,6 +171,8 @@ export class World {
     this._woodLogDrops = new Set();
     this.time = 0;               // world clock (drives berry regrowth)
     this.foliageMult = 1;        // graphics setting: scatter-density multiplier
+    this.farChunks = new Map();  // cheap far-LOD tiles (terrain + tree impostors)
+    this.farRadius = 0;          // chunks of far tier past viewRadius (main sets it)
     this._berryEaten = new Map(); // bush key -> world time it was harvested
     this.pois = [];              // landmarks: shrines / monoliths / crypts
     this.onPoiSpawned = null;    // main hooks this to post crypt guards
@@ -202,6 +204,7 @@ export class World {
       this._disposeGroup(chunk.group);
     }
     this.chunks.clear();
+    for (const key of [...this.farChunks.keys()]) this._dropFarChunk(key);
     for (const f of this.fallingTrees) f.mesh.parent?.remove(f.mesh);
     this.fallingTrees = [];
     this.removeArena();
@@ -1418,12 +1421,19 @@ export class World {
       this._disposeGroup(chunk.group);
     }
     this.chunks.clear();
+    for (const key of [...this.farChunks.keys()]) this._dropFarChunk(key);
   }
 
   // rebuild ONLY the chunks touching a circle — editor strokes repaint the
   // spot they touched instead of flashing the whole island away
   regenChunksNear(x, z, r = 60) {
     const redo = [];
+    for (const [key, fc] of [...this.farChunks]) {
+      const [cx, cz] = key.split(',').map(Number);
+      const nx = Math.max(cx * 40, Math.min(x, cx * 40 + 40));
+      const nz = Math.max(cz * 40, Math.min(z, cz * 40 + 40));
+      if (Math.hypot(nx - x, nz - z) <= r) this._dropFarChunk(key); // re-streams fresh
+    }
     for (const [key, chunk] of [...this.chunks]) {
       const [cx, cz] = key.split(',').map(Number);
       const nx = Math.max(cx * 40, Math.min(x, cx * 40 + 40));
@@ -1604,6 +1614,7 @@ export class World {
     if (!Number.isFinite(cx) || !Number.isFinite(cz)) return;
     const key = this._chunkKey(cx, cz);
     if (this.chunks.has(key)) return;
+    this._dropFarChunk(key); // the real chunk replaces its far-LOD stand-in
     const group = new THREE.Group();
     const trees = [];
     const rocks = [];
@@ -2085,6 +2096,82 @@ export class World {
     this.chunks.set(key, { group, tile, trees, rocks, webs: chunkWebs, bushes, props, hives });
   }
 
+  // ---- far-LOD tier: the world out to the fog wall ----
+  // Beyond viewRadius the land used to just END (~160 m) while the fog wall
+  // sat much further — the island visibly ran out of world. Far chunks are
+  // CHEAP stand-ins: the same vertex-colored terrain tile plus all of the
+  // chunk's trees as low-poly impostors merged into ONE mesh — 2 draw calls
+  // instead of ~35, no entities, no collision, no shadows. When the player
+  // walks close, the real chunk replaces the stand-in (and vice versa).
+  _genFarChunk(cx, cz) {
+    if (!Number.isFinite(cx) || !Number.isFinite(cz)) return;
+    const key = this._chunkKey(cx, cz);
+    if (this.farChunks.has(key) || this.chunks.has(key)) return;
+    const cxw = cx * CHUNK, czw = cz * CHUNK;
+    const midR = radiusOf(cxw + CHUNK / 2, czw + CHUNK / 2);
+    // fully out at sea: the ocean ring covers it — store a tombstone so the
+    // streaming loop doesn't retry the spot every frame
+    if (midR > WORLD.radius + 80) { this.farChunks.set(key, { group: null }); return; }
+    const biome = biomeAt(cxw + CHUNK / 2, czw + CHUNK / 2);
+    const group = new THREE.Group();
+    const tile = this._groundTile(cxw, czw);
+    tile.updateMatrix();
+    tile.matrixAutoUpdate = false;
+    group.add(tile);
+
+    // lakes read as water even from afar (visual only — no treasure hooks)
+    for (const lake of this.lakesNear(cxw + CHUNK / 2, czw + CHUNK / 2)) {
+      if (lake.x < cxw || lake.x >= cxw + CHUNK || lake.z < czw || lake.z >= czw + CHUNK) continue;
+      const mesh = new THREE.Mesh(new THREE.CircleGeometry(lake.r, 14), waterMaterial(0x3f6f9e, 0.87));
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.set(lake.x, this.heightAt(lake.x, lake.z) + 0.22, lake.z);
+      group.add(mesh);
+    }
+
+    // impostor forest: same density/size logic as the real chunk (its own rng
+    // stream — exact positions differ, but through 150+ m of fog the swap to
+    // real trees on approach is imperceptible)
+    const rng = mulberry32((this.seed ^ 0xFA7) ^ (cx * 73856093) ^ (cz * 19349663));
+    let count = Math.round((8 + rng() * 8) * biome.treeDensity);
+    if (biome.denseForests) {
+      const f = valueNoise(cxw + CHUNK / 2, czw + CHUNK / 2, 240, this.seed + 133);
+      if (f > 0.68) {
+        const k = Math.min(1, (f - 0.68) / 0.1);
+        count = Math.min(70, Math.round(count * (3 + k * k * 4)));
+      }
+    }
+    const acc = bakeAccumulator();
+    for (let i = 0; i < count; i++) {
+      const x = cxw + rng() * CHUNK;
+      const z = czw + rng() * CHUNK;
+      if (radiusOf(x, z) < 100) continue;      // base meadow stays open
+      if (this.isWater(x, z)) continue;
+      if (this.pathDistance(x, z) < 4.5) continue;
+      const roll = rng();
+      const size = roll < 0.30 ? 0 : roll < 0.60 ? 1 : roll < 0.82 ? 2 : roll < 0.95 ? 3 : 4;
+      bakeAt(acc, makeFarTree(size, biome, rng), x, this.heightAt(x, z), z, rng() * Math.PI * 2);
+    }
+    const forest = buildBakedMesh(acc, false);
+    if (forest) {
+      forest.receiveShadow = false;
+      forest.updateMatrix();
+      forest.matrixAutoUpdate = false;
+      group.add(forest);
+    }
+    this.scene.add(group);
+    this.farChunks.set(key, { group });
+  }
+
+  _dropFarChunk(key) {
+    const fc = this.farChunks.get(key);
+    if (!fc) return;
+    if (fc.group) {
+      this.scene.remove(fc.group);
+      this._disposeGroup(fc.group);
+    }
+    this.farChunks.delete(key);
+  }
+
   update(dt, playerPos) {
     this.time += dt;
     // beehives rebuild themselves a while after being smashed
@@ -2129,13 +2216,39 @@ export class World {
       }
     }
 
+    // far-LOD tier: cheap terrain+forest tiles from the full-detail edge out
+    // to the fog wall, so the world never visibly runs out
+    const fr = this.groundOnly ? 0 : Math.min(this.farRadius ?? 0, 14);
+    if (fr > vr) {
+      let fbudget = 2;
+      for (let ring = vr + 1; ring <= fr && fbudget > 0; ring++) {
+        for (let dx = -ring; dx <= ring && fbudget > 0; dx++) {
+          for (let dz = -ring; dz <= ring && fbudget > 0; dz++) {
+            if (Math.max(Math.abs(dx), Math.abs(dz)) !== ring) continue;
+            const k = this._chunkKey(pcx + dx, pcz + dz);
+            if (this.chunks.has(k) || this.farChunks.has(k)) continue;
+            this._genFarChunk(pcx + dx, pcz + dz);
+            fbudget--;
+          }
+        }
+      }
+    }
+
     for (const [key, chunk] of this.chunks) {
       const [cx, cz] = key.split(',').map(Number);
-      if (Math.abs(cx - pcx) > (this.viewRadius ?? VIEW_RADIUS) + 1 || Math.abs(cz - pcz) > (this.viewRadius ?? VIEW_RADIUS) + 1) {
+      const d = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
+      if (d > (this.viewRadius ?? VIEW_RADIUS) + 1) {
         this.scene.remove(chunk.group);
         this._disposeGroup(chunk.group);
         this.chunks.delete(key);
+        // no hole while walking away: swap the evicted chunk for a far tile
+        if (d <= fr) this._genFarChunk(cx, cz);
       }
+    }
+    for (const [key, fc] of this.farChunks) {
+      const [cx, cz] = key.split(',').map(Number);
+      const d = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
+      if (d > fr + 1 || (fc.group === null && d > fr)) this._dropFarChunk(key);
     }
 
     for (let i = this.fallingTrees.length - 1; i >= 0; i--) {

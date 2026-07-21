@@ -200,9 +200,13 @@ export function mat(color) {
 // ---- sky dome ----
 // A gradient replaces the old flat scene.background color: a horizon band
 // (kept equal to the CURRENT fog color every frame, so terrain fades into
-// the sky with zero seam) rising to a deeper zenith tint, plus a soft glowing
-// sun disc. The dome is small (well inside camera.far) and re-centered on
-// the camera every frame, so at any radius it shows no parallax at all.
+// the sky with zero seam) rising to a deeper zenith tint. On top of it:
+// drifting procedural FBM CLOUDS (lit from the sun, dark undersides, silver
+// lining), and a proper SUN — a big soft disc with a tight bright core plus
+// a wide warm forward-scatter halo (the "rays" feel), dimmed behind clouds
+// and faded out at night / underground via uDay & uCloudAmt. The dome is
+// small (well inside camera.far) and re-centered on the camera every frame,
+// so at any radius it shows no parallax at all.
 const SKY_VERT = /* glsl */`
   varying vec3 vSkyDir;
   void main() {
@@ -214,16 +218,48 @@ const SKY_FRAG = /* glsl */`
   uniform vec3 uZenith;
   uniform vec3 uSunDir;
   uniform vec3 uSunColor;
+  uniform float uTime;
+  uniform float uDay;      // 1 = full daylight, 0 = deep night / underground
+  uniform float uCloudAmt; // cloud opacity master (0 hides them entirely)
   varying vec3 vSkyDir;
+  float chash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+  float cnoise(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(chash(i), chash(i + vec2(1.0, 0.0)), f.x),
+               mix(chash(i + vec2(0.0, 1.0)), chash(i + vec2(1.0, 1.0)), f.x), f.y);
+  }
+  float cfbm(vec2 p) {
+    float a = 0.5, s = 0.0;
+    for (int i = 0; i < 4; i++) { s += a * cnoise(p); p = p * 2.17 + vec2(11.3, 7.9); a *= 0.5; }
+    return s;
+  }
   void main() {
-    float h = clamp(vSkyDir.y, -1.0, 1.0);
+    vec3 dir = normalize(vSkyDir);
+    float h = clamp(dir.y, -1.0, 1.0);
     float t = pow(1.0 - max(h, 0.0), 1.8);
     vec3 col = mix(uZenith, uHorizon, t);
     if (h < 0.0) col = mix(col, uHorizon * 0.55, smoothstep(0.0, -0.35, h));
-    float sunDot = max(dot(vSkyDir, normalize(uSunDir)), 0.0);
-    float sunDisc = smoothstep(0.9985, 0.9997, sunDot);
-    float sunGlow = pow(sunDot, 12.0) * 0.5;
-    col += uSunColor * (sunDisc * 1.4 + sunGlow);
+    vec3 sd = normalize(uSunDir);
+    float sunDot = max(dot(dir, sd), 0.0);
+    // clouds: two FBM layers on a slowly drifting plane overhead
+    float cov = 0.0;
+    if (h > 0.015 && uCloudAmt > 0.001) {
+      vec2 cuv = dir.xz / (h + 0.18) * 0.55 + uTime * vec2(0.0065, 0.0028);
+      float den = cfbm(cuv * 1.1) * 0.72 + cfbm(cuv * 3.1 + 40.0) * 0.28;
+      cov = smoothstep(0.5, 0.7, den) * smoothstep(0.015, 0.14, h) * uCloudAmt;
+      float thick = smoothstep(0.5, 0.92, den);
+      vec3 cLight = mix(vec3(0.17, 0.19, 0.26), vec3(1.03, 1.01, 0.98), uDay);
+      vec3 cShade = mix(vec3(0.09, 0.10, 0.15), vec3(0.62, 0.66, 0.75), uDay);
+      vec3 cloudCol = mix(cLight, cShade, thick);
+      // silver lining: cloud edges facing the sun catch its color
+      cloudCol += uSunColor * pow(sunDot, 4.0) * 0.35 * (1.0 - thick) * uDay;
+      col = mix(col, cloudCol, cov);
+    }
+    // the sun: bright core disc, soft rim, wide warm halo — behind clouds it dims
+    float disc = smoothstep(0.99935, 0.99985, sunDot);
+    float halo = pow(sunDot, 80.0) * 0.6 + pow(sunDot, 7.0) * 0.25;
+    col += uSunColor * (disc * 1.6 + halo) * uDay * (1.0 - cov * 0.85);
     gl_FragColor = vec4(col, 1.0);
   }`;
 export function makeSkyDome(radius = 45) {
@@ -236,6 +272,9 @@ export function makeSkyDome(radius = 45) {
       uZenith: { value: new THREE.Color(0x5a8fc0) },
       uSunDir: { value: new THREE.Vector3(0.35, 0.85, 0.25) },
       uSunColor: { value: new THREE.Color(0xfff2dd) },
+      uTime: { value: 0 },
+      uDay: { value: 1 },
+      uCloudAmt: { value: 0.9 },
     },
   });
   const mesh = new THREE.Mesh(geo, m);
@@ -243,6 +282,33 @@ export function makeSkyDome(radius = 45) {
   mesh.frustumCulled = false;
   mesh.matrixAutoUpdate = false;
   return mesh;
+}
+
+// impostor tree for the far-terrain tier: a handful of triangles that read
+// as the right silhouette through 150+ m of fog — box trunk + cone or puff
+// canopy in the biome's colors. Baked dozens-per-chunk into ONE mesh.
+export function makeFarTree(size, biome, rng) {
+  const g = new THREE.Group();
+  const scale = [0.9, 1.3, 1.8, 2.4, 3.1][Math.min(4, size)] * (0.8 + rng() * 0.45);
+  const H = 5.6 * scale;
+  const fol = biome.foliage[Math.floor(rng() * biome.foliage.length)];
+  const trunk = box(0.3 * scale, H * 0.5, 0.3 * scale, biome.trunk);
+  trunk.castShadow = false;
+  trunk.position.y = H * 0.25;
+  g.add(trunk);
+  if (biome.jungleFlora || rng() < 0.4) {
+    const puff = sphere(1.5 * scale, fol, 6);
+    puff.castShadow = false;
+    puff.position.y = H * 0.62;
+    puff.scale.y = 0.8;
+    g.add(puff);
+  } else {
+    const c = cone(1.5 * scale, H * 0.62, fol, 6);
+    c.castShadow = false;
+    c.position.y = H * 0.55;
+    g.add(c);
+  }
+  return g;
 }
 
 export const WATER_SHADERS = [];
