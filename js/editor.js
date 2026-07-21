@@ -126,6 +126,7 @@ export class WorldEditor {
     this.optMarkers = true;
     this.optNames = true;
     this.optElev = false;
+    this.gfx = 'high'; // editor render quality: low | medium | high (draw distance is NEVER touched)
     this._nameSprites = new Map();
     this._nameT = 0;
     this.grabbed = null;
@@ -518,6 +519,7 @@ export class WorldEditor {
     if (on && this.optElev) { this.o.world.debugElevation = true; this.o.onDirty('ground', {}); }
     if (on && !this._ui) this._buildUI();
     if (this._ui) this._ui.style.display = on ? '' : 'none';
+    if (on) this.o.onGfx?.(this.gfx); // apply the editor render quality
     if (!on) {
       this.painting = false;
       if (this.grabbed) this._dropGrab(); // an aborted drag still commits cleanly
@@ -1016,6 +1018,10 @@ export class WorldEditor {
       .we-opt { display:flex; gap:8px; align-items:center; padding:5px 0;
         color:var(--ink); font-size:12px; cursor:pointer; }
       .we-opt input { accent-color:var(--gold); }
+      .we-gfx button { padding:3px 9px; background:#20281a; color:var(--ink);
+        border:1px solid var(--line); border-radius:6px; cursor:pointer; font:inherit; font-size:11px; }
+      .we-gfx button:hover { background:#2c3722; }
+      .we-gfx button.on { background:#4c6a34; border-color:var(--gold); color:#ffe9bd; }
     </style>
 
     <div id="we-header">
@@ -1035,6 +1041,15 @@ export class WorldEditor {
               Mob names above creatures</label>
             <label class="we-opt"><input type="checkbox" data-we="opt-elev">
               Elevation colors (height map)</label>
+            <div class="we-opt" style="justify-content:space-between; gap:6px">
+              <span>Graphics <span style="color:var(--dim)">(FPS)</span></span>
+              <div class="we-gfx" data-we="gfx" style="display:flex; gap:3px">
+                <button data-gfx="low">Low</button>
+                <button data-gfx="medium">Med</button>
+                <button data-gfx="high">High</button>
+              </div>
+            </div>
+            <div style="font-size:10px; color:var(--dim); margin-top:2px">Lower = better FPS. View distance is unaffected.</div>
           </div>
         </div>
         <button class="we-act gold" data-we="save">💾 Save</button>
@@ -1397,6 +1412,13 @@ export class WorldEditor {
       this.o.onDirty('ground', {});
       this.o.toast(this.optElev ? '🗺️ Elevation colors ON' : '🗺️ Elevation colors off');
     };
+    // ---- editor render quality (resolution + shadows + tile detail; NEVER
+    // touches view distance) ----
+    const gfxBox = $('gfx');
+    for (const b of gfxBox.querySelectorAll('button')) {
+      b.classList.toggle('on', b.dataset.gfx === this.gfx);
+      b.onclick = () => this._setGfx(b.dataset.gfx);
+    }
     $('test').onclick = () => {
       this._setTestPick(!this._testPick);
       this.o.toast(this._testPick
@@ -1426,6 +1448,19 @@ export class WorldEditor {
   _setStrength(v) {
     this.strength = Math.max(0.25, Math.min(5, v));
     if (this._strEl) { this._strEl.value = this.strength; this._strV.textContent = `${this.strength.toFixed(2)}×`; }
+  }
+
+  // editor render quality — resolution / shadows / ground-tile density. It
+  // deliberately leaves view distance (chunk radius) alone: a lower tier just
+  // makes the SAME wide view cheaper to draw.
+  _setGfx(level) {
+    if (!['low', 'medium', 'high'].includes(level)) return;
+    this.gfx = level;
+    for (const b of this._$('gfx').querySelectorAll('button')) {
+      b.classList.toggle('on', b.dataset.gfx === level);
+    }
+    this.o.onGfx?.(level);
+    this.o.toast(`⚙️ Editor graphics: ${level.toUpperCase()} — view distance unchanged`);
   }
 
   _refreshStats() {

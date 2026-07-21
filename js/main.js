@@ -3968,8 +3968,26 @@ function toggleWorldEditor() {
       } else {
         world.viewRadius = null;
         if (world.groundOnly) { world.groundOnly = false; world.regenChunks(); }
+        applyGraphics(); // restore the player's resolution / shadows / tile detail
         applyViewMode(); // restores fog / camera.far / view radius for the CURRENT mode
       }
+    },
+    // editor-only render quality — cheaper fill-rate + geometry WITHOUT ever
+    // shrinking the streamed chunk radius (draw distance stays put)
+    onGfx: (level) => {
+      if (level === 'high') { applyGraphics(); return; } // = the game's own settings
+      const dpr = window.devicePixelRatio;
+      renderer.setPixelRatio(level === 'low' ? 1 : Math.min(dpr, 1.35));
+      const shadows = false; // low + medium both drop shadows
+      if (renderer.shadowMap.enabled !== shadows) {
+        renderer.shadowMap.enabled = shadows;
+        sun.castShadow = shadows;
+        scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
+      }
+      // coarser ground tiles (fewer verts per chunk) — a big win across the
+      // hundreds of far-LOD tiles a zoomed-out view streams
+      const detail = level === 'low' ? 0 : Math.min(settings.texDetail ?? 0, 1);
+      if (world.groundDetail !== detail) { world.groundDetail = detail; world.regenChunks(); }
     },
   });
   worldEditor.o.world = world; // survive world swaps
