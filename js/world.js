@@ -23,7 +23,7 @@ import { makeTree, makeRock, makeGrassTuft, makeGrassBlades, makeGrassField,
          makePalm, makeGroundLeaves, impostorTemplate } from './models.js';
 import { makePier } from './ship.js';
 import { bakeGroup, bakeAccumulator, buildBakedMesh, bakeAt, BAKED_MAT,
-         isSharedMaterial, waterMaterial, makeWaterDisc, bakeTemplate, stampTemplate,
+         isSharedMaterial, waterMaterial, makeWaterDisc, setWaterWedge, bakeTemplate, stampTemplate,
          templateMesh, tplRng } from './models.js';
 import { worldPatch } from './worldpatch.js';
 import { audio } from './audio.js';
@@ -1047,7 +1047,8 @@ export class World {
       geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
       geo.setIndex(idx);
       geo.computeVertexNormals();
-      const mesh = new THREE.Mesh(geo, waterMaterial(0x3f6f9e, 0.87));
+      setWaterWedge(geo, 1);
+      const mesh = new THREE.Mesh(geo, waterMaterial(0x3f6f9e, 0.72));
       this._addStatic(mesh);
     }
     for (const gate of this.gates) {
@@ -1353,7 +1354,10 @@ export class World {
     seaGeo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
     seaGeo.setIndex(sidx);
     seaGeo.computeVertexNormals();
-    const sea = new THREE.Mesh(seaGeo, waterMaterial(0x27618e, 0.95));
+    // fade the wedge in over the innermost ring or two so the sea meets the
+    // beach softly (k = 0 is the coast edge, k = RINGS is the deep horizon)
+    setWaterWedge(seaGeo, (vi) => Math.min(1, (vi % (RINGS + 1)) / 1.5));
+    const sea = new THREE.Mesh(seaGeo, waterMaterial(0x2a6a9e, 0.8));
     sea.position.y = -0.85;
     this._addStatic(sea);
   }
@@ -1942,7 +1946,7 @@ export class World {
     const chunkLakes = this.lakesNear(cxw + CHUNK / 2, czw + CHUNK / 2);
     for (const lake of chunkLakes) {
       if (lake.x < cxw || lake.x >= cxw + CHUNK || lake.z < czw || lake.z >= czw + CHUNK) continue;
-      const mesh = makeWaterDisc(lake.r, 0x2f6a9e, 0.9);
+      const mesh = makeWaterDisc(lake.r, 0x2d6a9a, 0.72);
       mesh.position.set(lake.x, this.heightAt(lake.x, lake.z) + 0.22, lake.z);
       group.add(mesh);
       if (lake.island) {
@@ -2412,7 +2416,7 @@ export class World {
     // lakes read as water even from afar (visual only — no treasure hooks)
     for (const lake of this.lakesNear(cxw + CHUNK / 2, czw + CHUNK / 2)) {
       if (lake.x < cxw || lake.x >= cxw + CHUNK || lake.z < czw || lake.z >= czw + CHUNK) continue;
-      const mesh = makeWaterDisc(lake.r, 0x2f6a9e, 0.9);
+      const mesh = makeWaterDisc(lake.r, 0x2d6a9a, 0.72);
       mesh.position.set(lake.x, this.heightAt(lake.x, lake.z) + 0.22, lake.z);
       group.add(mesh);
     }
