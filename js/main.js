@@ -683,11 +683,15 @@ function tickBlizzard(dt) {
       ? { fogC: 0x7b98a8, tint: 'rgba(120,150,170,0.32)', dur: 26, cdMin: 45, cdRng: 40, rain: true,
           on: '🌧️ A jungle downpour opens up!', off: '🌧️ The rain eases off…' }
     : name === 'Murky Swamp'
-      ? { fx: 'mist', mistC: 0xaab5a5, fogC: 0x99a495, tint: 'rgba(150,160,150,0.5)', dur: 30, cdMin: 40, cdRng: 45,
+      ? { fx: 'mist', mistC: 0xc4ccc2, fogC: 0x99a495, tint: 'rgba(150,160,150,0.5)', dur: 30, cdMin: 40, cdRng: 45,
           on: '🌫️ A thick fog rolls across the mire — you can barely see.', off: '🌫️ The fog thins…' }
     : name === 'Dark Forest'
-      ? { fx: 'mist', mistC: 0x525a52, fogC: 0x1c231c, tint: 'rgba(120,130,120,0.42)', dur: 24, cdMin: 50, cdRng: 55,
+      // mist is WHITE — pale banks drifting through the black woods
+      ? { fx: 'mist', mistC: 0xd2d8d0, fogC: 0x89948a, tint: 'rgba(190,198,190,0.4)', dur: 24, cdMin: 50, cdRng: 55,
           on: '🌫️ A cold mist creeps between the trees…', off: '🌫️ The mist lifts…' }
+    : name === 'Haunted Forest'
+      ? { fx: 'mist', mistC: 0xd6d6de, fogC: 0x8e8c9c, tint: 'rgba(196,194,208,0.4)', dur: 26, cdMin: 45, cdRng: 50,
+          on: '🌫️ A pale mist seeps between the dead trees…', off: '🌫️ The mist recedes…' }
     : null;
   const el = $id('blizzard');
   if (!spec) {
