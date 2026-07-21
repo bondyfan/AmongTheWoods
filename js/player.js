@@ -521,12 +521,22 @@ export class Player {
       const mid = from.clone().lerp(beast.mesh.position, 0.35 + Math.random() * 0.4)
         .setY(this.mesh.position.y + 1 + Math.random() * 1.2);
       this._fxHeart(mid);
+      // a pulsing green bond-cord: motes racing along the tether toward the beast
+      const prog = 1 - tc.t / (tc.dur || 20);
+      const p = from.clone().lerp(beast.mesh.position, Math.random());
+      this._fxRiser(p, 0x8ee87f, new THREE.Vector3().subVectors(beast.mesh.position, from).multiplyScalar(0.6),
+        0.35, 0.1 + prog * 0.12, 0.5 + prog * 0.4);
     }
     if (tc.t <= 0) {
       enemyMgr.tameBeast?.(beast, tc.skill.tameDur || 20);
       this.cancelTame(true);
       this.spellCds[tc.skill.id] = this.classAbilityCooldown(tc.skill.id);
-      audio.sfx('special', 0.7, 0);
+      // charm succeeds: a bright green ring + heart-burst on the new ally
+      this._spawnClassRing(beast.pos, (beast.hitR || 0.6) * 2.2, 0x8ee87f, 0.7);
+      this._fxBurst(beast.mesh.position.clone(), 0x8ee87f, 16, 5, 0.6);
+      for (let i = 0; i < 5; i++) this._fxHeart(beast.mesh.position.clone()
+        .add(new THREE.Vector3((Math.random() - 0.5), 1 + Math.random(), (Math.random() - 0.5))));
+      audio.sfx('chime', 0.7, 0);
     }
   }
 
@@ -728,12 +738,24 @@ export class Player {
       if (skill.id === 'war_ground_slam') {
         this._fxGroundCracks(this.pos, radius);
         this._fxBurst(this.pos, 0xd8b48a, 14, 6, 0.5);
+        // upward-flung rock chunks + a dust dome
+        for (let i = 0; i < 10; i++) {
+          const a = Math.random() * Math.PI * 2, r = Math.random() * radius * 0.7;
+          this._fxRiser(new THREE.Vector3(this.pos.x + Math.cos(a) * r, this.mesh.position.y + 0.2, this.pos.z + Math.sin(a) * r),
+            0xbfa079, new THREE.Vector3((Math.random() - 0.5) * 2, 3 + Math.random() * 2, (Math.random() - 0.5) * 2), 0.55, 0.22, 0.85);
+        }
         audio.sfx('rock_crack', 0.85, 0);
-        audio.sfx('base_hit', 0.5, 0);
+        audio.sfx('boom', 0.45, 0);
       } else if (skill.id === 'war_whirlwind') {
         this.spinT = this.spinDur; // body-spin animation
         this._spawnClassRing(this.pos, radius * 0.7, 0xffd27f, 0.4);
         this._fxBurst(this.pos, 0xffd27f, 12, 6, 0.45);
+        // sweeping blade-trail crescents orbiting the spin
+        for (let i = 0; i < 4; i++) {
+          const a = (i / 4) * Math.PI * 2;
+          this._fxWave(this.pos.clone().add(new THREE.Vector3(Math.sin(a), 0, Math.cos(a))),
+            new THREE.Vector3(Math.sin(a), 0, Math.cos(a)), radius * 0.5, 0xffe1a0, 0.42);
+        }
         audio.sfx('attack_melee', 0.6, 0);
         audio.sfx('special', 0.5, 0);
       } else if (skill.id === 'rogue_fan_knives') {
@@ -847,6 +869,21 @@ export class Player {
       // draw-and-loose flourish: a burst of fletching dust and a bowstring twang
       this.attackDur = 0.28; this.attackT = 0.28;
       this._fxBurst(origin, skill.pierce ? 0xffe08a : 0xe7d16f, count > 3 ? 10 : 5, 5, 0.35, 0.12);
+      const ang = Math.atan2(this.facing.x, this.facing.z);
+      if (skill.pierce) {
+        // a bright golden tracer-beam down the piercing arrow's whole flight
+        const reach = Math.min(28, this.weapon.range);
+        const mid = origin.clone().addScaledVector(this.facing, reach / 2);
+        this._fxStreak(mid, ang, 0xffe08a, 0.16, reach, 0.28, 0.85);
+        audio.sfx('spear_throw', 0.6, 0);
+      } else if (count > 3) {
+        // Ten-Arrow Volley — a wide fan flash of fletching streaks
+        for (let i = 0; i < count; i++) {
+          const a = ang + (i / (count - 1) - 0.5) * spread;
+          const p = origin.clone().add(new THREE.Vector3(Math.sin(a), 0, Math.cos(a)).multiplyScalar(2.2));
+          this._fxStreak(p, a, 0xf0da8a, 0.08, 1.6, 0.26, 0.7);
+        }
+      }
       audio.sfx('attack_ranged', 0.7, 0);
       if (count > 3) audio.sfx('special', 0.4, 0);
       this.breakStealth();
@@ -939,8 +976,18 @@ export class Player {
       this._spawnClassRing(this.pos, radius, 0xd6a94f, 0.9);
       this._fxGroundCracks(this.pos, radius * 0.85, 0xcbb08a, 7); // hoofprints/dust
       this._fxBurst(this.pos, 0xcbb08a, 18, 7, 0.6);
-      audio.sfx('boar_attack', 0.8, 0);
-      audio.sfx('special', 0.5, 0);
+      // a herd of ghostly beasts thundering across in the facing direction
+      const ang = Math.atan2(this.facing.x, this.facing.z);
+      for (let i = 0; i < 7; i++) {
+        const side = (Math.random() - 0.5) * radius * 1.4;
+        const start = this.pos.clone()
+          .add(new THREE.Vector3(-this.facing.z * side - this.facing.x * radius, 0.7 + Math.random() * 0.5,
+            this.facing.x * side - this.facing.z * radius));
+        this._fxStreak(start, ang, 0xe8d3a8, 0.5, 1.8, 0.5, 0.55);
+        this._fxRiser(start, 0xcbb08a, new THREE.Vector3(this.facing.x * 6, 1.2, this.facing.z * 6), 0.5, 0.24, 0.6);
+      }
+      audio.sfx('boar_attack', 0.85, 0);
+      audio.sfx('boom', 0.45, 0);
       this.breakStealth();
       return true;
     }
@@ -1545,7 +1592,10 @@ export class Player {
     this.classFx.push({ mesh, t: life, life, kind: 'fade', op0 });
   }
 
-  // ---- persistent aura meshes (created lazily, parented to the player) ----
+  // ---- persistent aura meshes ----
+  // These live in the SCENE (not parented to the player) so the per-frame
+  // stealth material-traversal and Avatar re-scale can't touch them; they are
+  // repositioned onto the player each frame in _updateBuffAuras.
   _ensureShieldBubble() {
     if (this._shieldBubble) return this._shieldBubble;
     const geo = new THREE.SphereGeometry(1, 16, 12);
@@ -1554,8 +1604,8 @@ export class Player {
       depthWrite: false, blending: THREE.AdditiveBlending,
     });
     const m = new THREE.Mesh(geo, mat);
-    m.position.y = 1.0; m.scale.set(1.25, 1.5, 1.25); m.visible = false;
-    this.mesh.add(m);
+    m.visible = false;
+    this.scene.add(m);
     return (this._shieldBubble = m);
   }
 
@@ -1568,8 +1618,8 @@ export class Player {
       blending: THREE.AdditiveBlending,
     });
     const m = new THREE.Mesh(geo, mat);
-    m.position.y = 2.5; m.visible = false;
-    this.mesh.add(m);
+    m.visible = false;
+    this.scene.add(m);
     return (this._halo = m);
   }
 
@@ -1620,6 +1670,7 @@ export class Player {
         this._shieldMax = Math.max(this._shieldMax || 0, this.classShield);
         const frac = Math.min(1, this.classShield / (this._shieldMax || 1));
         bubble.visible = true;
+        bubble.position.set(this.mesh.position.x, this.mesh.position.y + 1.0, this.mesh.position.z);
         bubble.material.opacity = 0.12 + 0.16 * frac;
         const s = 1.15 + 0.2 * frac;
         bubble.scale.set(s, s * 1.2, s);
@@ -1631,6 +1682,7 @@ export class Player {
     if (halo) {
       halo.visible = this.guardianSpiritT > 0;
       if (halo.visible) {
+        halo.position.set(this.mesh.position.x, this.mesh.position.y + 2.5, this.mesh.position.z);
         this._haloPhase = (this._haloPhase || 0) + dt * 4;
         halo.material.opacity = 0.6 + 0.3 * Math.sin(this._haloPhase);
         halo.rotation.z += dt * 2;
@@ -2373,11 +2425,19 @@ export class Player {
       world.collide(this.pos, 0.45,
         { boat: ctx.boat, wade: true, swimmer: (this.stats?.swim || 0) > 0 || !!this.upgrades?.swim });
       this._applyBounds(ctx);
-      // dust kicked up behind a combat charge (Bull Charge, Shadowstep dashes)
+      // dust + horizontal speed streaks kicked up behind a combat charge
+      // (Bull Charge, Shadowstep dashes) so the rush reads like a freight train
       if (this.dashSpec) {
         this._fxRiser(this.mesh.position.clone().setY(this.mesh.position.y + 0.25),
           0xcbb693, new THREE.Vector3((Math.random() - 0.5) * 1.6, 1.6,
             (Math.random() - 0.5) * 1.6), 0.4, 0.2, 0.5);
+        const back = Math.atan2(-this.dashDir.x, -this.dashDir.z);
+        for (let i = 0; i < 2; i++) {
+          const side = (i - 0.5) * 1.0;
+          const p = this.mesh.position.clone()
+            .add(new THREE.Vector3(-this.dashDir.z * side, 0.8 + Math.random() * 0.6, this.dashDir.x * side));
+          this._fxStreak(p, back, 0xf0e0b0, 0.12, 1.2, 0.24, 0.6);
+        }
       }
       for (const e of enemyMgr.alive()) {
         if (this.dashHit.has(e.id)) continue;
@@ -2386,8 +2446,9 @@ export class Player {
           if (this.dashSpec.stun) enemyMgr.stun(e, this.dashSpec.stun);
           if (Math.random() < (this.dashSpec.staggerChance || 0)) enemyMgr.stun?.(e, 0.8);
           enemyMgr.damage(e, this.dmgMult * this.dashSpec.dmg, this.dashDir);
-          this._fxBurst(e.pos, 0xffb08a, 8, 4, 0.4);
-          audio.sfx('hit', 0.5, 0);
+          this._fxBurst(e.pos, 0xffb08a, 12, 5, 0.45);
+          this._spawnClassRing(e.pos, 1.6, 0xffc79a, 0.4);
+          audio.sfx('hit', 0.55, 0); audio.sfx('base_hit', 0.4, 0);
         }
       }
       moving = true;

@@ -3979,10 +3979,14 @@ function placeHunterTrap(count = 1, power = 1, field = false) {
     mesh.position.set(x, world.heightAt(x, z) + 0.07, z);
     scene.add(mesh);
     hunterTraps.push({ mesh, x, z, power, life: 90, armT: 0.4 });
+    // a dust puff + a green arming-ring pulse as each trap latches into place
+    player._fxBurst(new THREE.Vector3(x, world.heightAt(x, z) + 0.2, z), 0xbfae86, 6, 3, 0.4);
+    player._spawnClassRing(new THREE.Vector3(x, world.heightAt(x, z), z), 1.1, 0x9bd94a, 0.5);
   }
   while (hunterTraps.length > 8) removeHunterTrap(hunterTraps[0]);
   ui.toast(count > 1 ? `🪤 Trap field placed (${count}).` : '🪤 Snare placed.', '');
-  audio.sfx('click', 0.45);
+  // a metallic set/latch instead of the menu blip
+  audio.sfx('equip_gear', 0.55, 0);
   return true;
 }
 
@@ -4038,6 +4042,14 @@ function handleClassWorldAction(action, skill, rank, ctx = {}) {
     healLocalCompanion(wolf.maxHp * rv('power', 0.35));
     player.petCommandPower = Math.max(player.petCommandPower || 0, rv('power', 0.35) * 0.5);
     player.petCommandT = Math.max(player.petCommandT || 0, 6);
+    // green healing sparkle column + empowered-claw glow on the companion
+    player._fxBurst(wolf.mesh.position.clone(), 0x8ee87f, 12, 4, 0.5);
+    player._spawnClassRing(wolf.pos, 1.4, 0x8ee87f, 0.5);
+    for (let i = 0; i < 4; i++) {
+      player._fxRiser(wolf.mesh.position.clone(), 0xbfffb0,
+        new THREE.Vector3((Math.random() - 0.5), 2 + Math.random(), (Math.random() - 0.5)), 0.5, 0.14, 0.7);
+    }
+    audio.sfx('chime', 0.5, 0);
     return true;
   }
   if (action === 'petCommand') {
@@ -4062,6 +4074,12 @@ function handleClassWorldAction(action, skill, rank, ctx = {}) {
     player.petCommandTargetId = target.id;
     player.petCommandT = 8;
     player.petCommandPower = rv('power', 0);
+    // a red command marker over the quarry + a shout burst from the player
+    player._spawnClassRing(target.pos, (target.hitR || 0.6) * 2, 0xff5a44, 0.6);
+    player._fxBurst(target.mesh.position.clone(), 0xff7a5a, 10, 4, 0.5);
+    player._fxBurst(player.mesh.position.clone().setY(player.mesh.position.y + 1.4), 0xffcf8a, 6, 4, 0.4);
+    ui.popup(target.mesh.position.clone().setY(target.mesh.position.y + 2), '🎯', '#ff6b52', 'big');
+    audio.sfx('aggro', 0.7, 0);
     ui.toast(`📣 Hunt Command: ${target.cfg?.name ?? target.type}`, 'level');
     return true;
   }
@@ -4071,6 +4089,15 @@ function handleClassWorldAction(action, skill, rank, ctx = {}) {
     if (companions.wolf) healLocalCompanion(player._classHeal(base, companions.wolf));
     const radius = rv('radius', 10) * (1 + (player.classEffects.healRadius || 0));
     mp?.sendClassHeal?.(player._classHeal(base, mp?.remote), radius);
+    // a soft holy dome showing the heal radius + rising light motes
+    player._spawnClassRing(player.pos, radius, 0xbfe8a0, 0.8);
+    player._spawnClassRing(player.pos, radius * 0.6, 0xffe6a0, 0.6);
+    for (let i = 0; i < 8; i++) {
+      const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * radius;
+      player._fxRiser(new THREE.Vector3(player.pos.x + Math.cos(a) * r, player.mesh.position.y + 0.3, player.pos.z + Math.sin(a) * r),
+        0xbfffb0, new THREE.Vector3(0, 1.6 + Math.random(), 0), 0.6, 0.14, 0.7);
+    }
+    audio.sfx('holy', 0.55, 0);
     return true;
   }
   if (action === 'healAlly') {
@@ -4085,6 +4112,16 @@ function handleClassWorldAction(action, skill, rank, ctx = {}) {
   }
   if (action === 'resurrection') {
     const restored = rv('amount', 0.45);
+    // a triumphant pillar of light + golden ring + rising sparks (self or ally)
+    player._spawnClassRing(player.pos, 3, 0xfff0b0, 0.8);
+    const pillar = player.pos.clone().setY(player.mesh.position.y + 2.2);
+    player._fxStreak(pillar, 0, 0xfff0c0, 1.4, 4.2, 0.7, 0.85);
+    player._fxStreak(pillar, Math.PI / 2, 0xfff0c0, 1.4, 4.2, 0.7, 0.85);
+    for (let i = 0; i < 14; i++) {
+      player._fxRiser(player.mesh.position.clone(), 0xfff0a5,
+        new THREE.Vector3((Math.random() - 0.5) * 1.5, 3 + Math.random() * 2, (Math.random() - 0.5) * 1.5), 0.8, 0.18, 0.85);
+    }
+    audio.sfx('holy', 0.75, 0);
     if (mp?.sendClassRevive?.(restored, 14)) return true;
     player._healSelf(player.maxHp * restored);
     ui.toast('✝️ No fallen ally nearby — the miracle restores your health.', 'level');
