@@ -2231,6 +2231,7 @@ function startPlaying() {
 }
 
 function startGame() {
+  stopServerStatusWatch(); // leaving the lobby — stop polling the dedicated server
   startPlaying();
   ui.toast('You wake in a cave… follow the light. Punch small trees for wood, craft at the camp (U).', 'info');
 }
@@ -3189,11 +3190,55 @@ function showModeOptions(mode) {
   opts.classList.remove('hidden');
   opts.classList.toggle('is-moba', mode === 'moba');
   $id('mode-title').textContent = mode === 'moba' ? '🏰 MOBA' : '🌲 Survival';
+  if (mode === 'survival') startServerStatusWatch(); else stopServerStatusWatch();
 }
+
+// ---- dedicated-server ("Server" button) live availability ----
+// The button is enabled ONLY while the server's /health says it's ready; the
+// small label shows why it's greyed out (offline / not configured) or the live
+// player/room count when it's up.
+let ServerStatusMod = null, _serverUnsub = null;
+async function startServerStatusWatch() {
+  const btn = $id('mp-server-btn'), status = $id('mp-server-status');
+  if (!btn) return;
+  try {
+    if (!ServerStatusMod) ServerStatusMod = (await import('./serverstatus.js')).ServerStatus;
+  } catch { return; }
+  ServerStatusMod.start();
+  _serverUnsub?.();
+  _serverUnsub = ServerStatusMod.onChange((online, detail) => {
+    btn.disabled = !online;
+    btn.classList.toggle('is-offline', !online);
+    if (status) status.textContent = online ? `· ${detail}` : `· ${detail}`;
+  });
+}
+function stopServerStatusWatch() {
+  _serverUnsub?.(); _serverUnsub = null;
+  ServerStatusMod?.stop();
+}
+
+$id('mp-server-btn')?.addEventListener('click', async () => {
+  const btn = $id('mp-server-btn');
+  if (btn.disabled) return;
+  btn.disabled = true;
+  try {
+    const { WoodsNetWS } = await import('./netws.js');
+    // Milestone 1: prove the full client → wss → server path end-to-end. Server-
+    // hosted co-op gameplay (the sim running ON the server) is the next milestone;
+    // for now this confirms the link and hands you back to Create Co-op.
+    const { code } = await WoodsNetWS.createGame('coop');
+    ui.toast(`🖥️ Server online — room ${code}. Server co-op play arrives in the next update; use 🤝 Create Co-op for now.`, 'level');
+    WoodsNetWS.leave();
+  } catch (e) {
+    ui.toast('🖥️ Server error: ' + (e?.message || e), 'boss');
+  }
+  btn.disabled = false;
+});
 $id('mode-survival-btn').addEventListener('click', () => showModeOptions('survival'));
 $id('mode-moba-btn').addEventListener('click', () => showModeOptions('moba'));
 $id('mode-back-btn').addEventListener('click', () => {
   audio.sfx('click', 0.4);
+  stopServerStatusWatch();
   resetLobbyUI();
   $id('mode-options').classList.add('hidden');
   $id('mode-select').classList.remove('hidden');
@@ -3224,6 +3269,7 @@ $id('mp-coop-btn').addEventListener('click', async () => {
     // beacon until the first friend joins, then only in Settings
     const code = await session.host('coop', null);
     mpCode = code;
+    stopServerStatusWatch();
     showJoinCodeHud(code);
   } catch (e) { mpError(e); }
   btn.disabled = false;
