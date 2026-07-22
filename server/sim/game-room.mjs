@@ -143,15 +143,22 @@ export class GameRoom {
   _targets() {
     const out = [];
     for (const P of this.players.values()) {
-      if (!P.proxy.dead) out.push(P.proxy);   // enemyMgr skips stealthed itself
+      // ALWAYS include the player proxy, even when dead — the enemy AI needs it
+      // as a spatial anchor (_anchor falls back to targets[0]) and filters
+      // dead/stealthed for actual targeting itself. The client does the same;
+      // passing an empty array crashes enemyMgr.update (anchor undefined).
+      out.push(P.proxy);
       if (P.hasPet && !P.petProxy.dead) out.push(P.petProxy);
     }
     return out;
   }
 
   _broadcastSnap() {
-    const alive = [...this.players.values()].filter(P => !P.proxy.dead).map(P => P.proxy.pos);
-    const near = (x, z) => alive.some(p => Math.hypot(x - p.x, z - p.z) < NEAR);
+    // near-filter on ALL players (alive or downed) — a downed player is still in
+    // the world watching, so enemies around them must keep streaming (an
+    // alive-only filter emptied the snapshot and culled every enemy client-side)
+    const positions = [...this.players.values()].map(P => P.proxy.pos);
+    const near = (x, z) => positions.some(p => Math.hypot(x - p.x, z - p.z) < NEAR);
     const snap = {
       e: this.enemyMgr.snapshot().filter(s => near(s.x, s.z)),
       p: this.pickups.snapshot().filter(s => near(s.x, s.z)),

@@ -103,5 +103,25 @@ ck('collected pickup is gone from the world', !room.pickups.list.some(p => p.id 
 ck('peer-relay event (revive) is not consumed → Room relays it', room.onEvent('A', { type: 'revive' }) === false);
 ck('world-mutating event (ehit) IS consumed', room.onEvent('A', { type: 'ehit', id: 999999, dmg: 1 }) === true);
 
+// death → revive must NOT crash the sim (the empty-targets anchor bug) and must
+// keep streaming enemies to a downed player, and damage must land after revive
+let deathThrew = null;
+try {
+  for (let i = 0; i < 40; i++) { room.onState('A', { x: 0, z: 0, dead: 1 }); room.onState('B', { x: 5, z: 5, dead: 1 }); room.tick(DT); }
+} catch (e) { deathThrew = e; }
+ck('sim survives BOTH players dead (no anchor crash)', deathThrew === null, deathThrew?.message);
+ck('downed players still receive enemy snapshots', bcasts.at(-1)?.e.length > 0, 'e=' + bcasts.at(-1)?.e.length);
+room.onState('A', { x: 0, z: 0, dead: 0 });     // revive
+room.tick(DT);
+const rt = bcasts.at(-1).e.find(e => e.hp > 0);
+let reviveDmg = false;
+if (rt) {
+  const b = rt.hp;
+  for (let i = 0; i < 8; i++) { room.onEvent('A', { type: 'ehit', id: rt.id, dmg: 60 }); room.onState('A', { x: rt.x, z: rt.z, dead: 0 }); room.tick(DT); }
+  const a = bcasts.at(-1).e.find(e => e.id === rt.id);
+  reviveDmg = !a || a.hp < b;
+}
+ck('damage lands again after revive', reviveDmg);
+
 console.log(`\n=== GameRoom test: ${pass} passed, ${fail} failed ===`);
 process.exit(fail ? 1 : 0);
