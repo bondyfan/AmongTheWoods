@@ -2809,7 +2809,12 @@ const settings = Object.assign(
   // show the room code so a friend can join the running game; admin mode
   // is offered only in singleplayer (it would wreck a shared session)
   $id('settings-btn').addEventListener('click', () => {
-    $id('set-mpcode').textContent = (mp?.active && mpCode) ? mpCode : '— (not in a multiplayer game)';
+    $id('set-mpcode').textContent = mp?.isServer
+      ? '🖥️ Server world — everyone joins automatically (no code)'
+      : (mp?.active && mpCode) ? mpCode : '— (not in a multiplayer game)';
+    $id('mpcode-note').textContent = mp?.isServer
+      ? 'Everyone who picks 🖥️ Server drops into this same shared world.'
+      : 'Share this code so a friend can join your running game.';
     $id('admin-row').style.display = (DEVMODE && game.kind === 'survival' && !mp?.active) ? '' : 'none';
     $id('set-admin').checked = !!game.adminMode;
     // save/load: co-op survival → cloud (needs sign-in); solo survival → THIS
@@ -3331,15 +3336,14 @@ $id('mp-server-btn')?.addEventListener('click', async () => {
   const btn = $id('mp-server-btn');
   if (btn.disabled) return;
   btn.disabled = true;
-  const code = ($id('mp-code').value || '').trim().toUpperCase();
   try {
     stopServerStatusWatch();
     const session = await ensureMp();
-    // enter a server-hosted co-op game — the neutral server runs the world. A
-    // code in the box joins that server room; empty creates a fresh one.
-    const roomCode = await session.serverStart(code || null);
-    mpCode = roomCode;
-    if (!code) showJoinCodeHud(roomCode); // creator: show the join code beacon
+    // ONE shared server world — the neutral server runs it and everyone joins the
+    // SAME room automatically. No codes, so no invite beacon to show.
+    await session.serverStart();
+    mpCode = null;
+    hideJoinCodeHud();
   } catch (e) {
     mpError(e);
     startServerStatusWatch();

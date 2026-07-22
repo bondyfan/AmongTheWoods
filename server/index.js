@@ -11,11 +11,14 @@
 
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
-import { MSG, PROTOCOL_VERSION, decode, encode, genCode } from './protocol.js';
+import { MSG, PROTOCOL_VERSION, decode, encode } from './protocol.js';
 import { Room } from './room.js';
 import { GameRoom } from './sim/game-room.mjs';   // requires the 'three' hook (boot.mjs)
 
 const PORT = Number(process.env.PORT || 8080);
+// ONE shared server world: every "Server" player joins THE SAME room, so there
+// are no per-room codes to create or join. (Set MAIN_ROOM_CODE to rename it.)
+const MAIN_ROOM = (process.env.MAIN_ROOM_CODE || 'WOODS').toUpperCase();
 // M2: run the authoritative simulation server-side for co-op rooms. Default ON;
 // set WOODS_SIM=0 to fall back to the M1 client-authority relay.
 const SIM = process.env.WOODS_SIM !== '0';
@@ -29,13 +32,7 @@ const STARTED_AT = Date.now();
 const rooms = new Map();               // code -> Room
 const emptySince = new Map();          // code -> timestamp it went empty
 
-function createRoom(mode, seed) {
-  let code = null;
-  for (let i = 0; i < 8 && !code; i++) {
-    const c = genCode();
-    if (!rooms.has(c)) code = c;
-  }
-  if (!code) return null;
+function createRoom(mode, seed, code) {
   const room = new Room(code, mode, seed ?? 1);
   if (SIM && mode === 'coop') {
     room.attachSim(new GameRoom({
@@ -45,6 +42,11 @@ function createRoom(mode, seed) {
   }
   rooms.set(code, room);
   return room;
+}
+
+// the single shared world — created on first join, then kept alive 24/7
+function mainRoom() {
+  return rooms.get(MAIN_ROOM) || createRoom('coop', 1, MAIN_ROOM);
 }
 
 function dropIfEmpty(room) {
@@ -116,17 +118,8 @@ wss.on('connection', (ws) => {
 function handleHello(ws, m) {
   const uid = String(m.uid || '').slice(0, 40);
   if (!uid) { fail(ws, 'Missing uid.', true); return; }
-  const mode = m.mode === 'coop' ? 'coop' : 'coop'; // only co-op is server-hosted for now
-
-  let room;
-  if (m.want === 'join') {
-    const code = String(m.code || '').trim().toUpperCase();
-    room = rooms.get(code);
-    if (!room) { fail(ws, `Game ${code} not found.`, true); return; }
-  } else {
-    room = createRoom(mode, m.seed);
-    if (!room) { fail(ws, 'Could not allocate a room, try again.', true); return; }
-  }
+  // ONE shared world: ignore want/code entirely — everyone lands in the same room.
+  const room = mainRoom();
 
   // one uid can't be in two seats — kick the stale socket
   if (room.players.has(uid)) {
@@ -173,6 +166,7 @@ setInterval(() => {
   });
   const now = Date.now();
   for (const [code, since] of emptySince) {
+    if (code === MAIN_ROOM) continue; // the shared world persists even when empty
     if (now - since > EMPTY_ROOM_TTL_MS) { rooms.delete(code); emptySince.delete(code); }
   }
 }, HEARTBEAT_MS);

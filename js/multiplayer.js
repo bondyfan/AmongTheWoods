@@ -601,6 +601,7 @@ export class Multiplayer {
     this.active = false;
     this.mode = null;          // 'coop' | 'pvp'
     this.isHost = false;
+    this.isServer = false;     // true once serverStart() joins the shared server world
     this.remote = null;        // RemotePlayer
     this.shadow = null;        // ShadowWorld (co-op guest)
     this.meta = null;
@@ -734,15 +735,14 @@ export class Multiplayer {
     this._begin(meta);
   }
 
-  // "Server" games: the neutral WebSocket server is the authority, so every
-  // player — creator included — is a pure GUEST (renders the server's snapshots,
-  // sends events). code = join an existing server room; null = create one.
-  async serverStart(code) {
+  // "Server" games: ONE shared world on the neutral server. The server is the
+  // authority, so every player is a pure GUEST (renders the server's snapshots,
+  // sends events). There are no per-room codes — everyone joins the same world.
+  async serverStart() {
     this.net = WoodsNetWS;
     this.isHost = false;
-    let meta;
-    if (code) meta = await this.net.joinGame(code);
-    else meta = (await this.net.createGame('coop')).meta;
+    this.isServer = true;
+    const meta = (await this.net.createGame('coop')).meta;
     meta.mode = 'coop';
     this.meta = meta;
     this._watchMeta();
