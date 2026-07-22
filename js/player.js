@@ -2165,11 +2165,15 @@ export class Player {
   // ---------- progression ----------
   addXp(n) {
     this.xp += Math.round(n * (this.xpMult || 1));
+    let leveled = false;
     while (this.level < MAX_LEVEL && this.xp >= XP_LEVELS[this.level + 1]) {
       this.level++;
       this.recompute(); // level-scaled stats (pet) pick the level up immediately
       this.hooks.onLevelUp(this.level);
+      leveled = true;
     }
+    // dinging restores you to FULL health — a level-up is a real breather
+    if (leveled) this.hp = this.maxHp;
   }
 
   // jump straight to a level (used by ?devmode and admin overrides) without

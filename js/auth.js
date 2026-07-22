@@ -54,7 +54,7 @@ export const Auth = {
     ensure();
     this._cbs.push(cb);
     onAuthStateChanged(auth, (u) => {
-      this.user = u ? { uid: u.uid, name: u.displayName || 'Adventurer', photo: u.photoURL || '' } : null;
+      this.user = u ? { uid: u.uid, name: u.displayName || 'Adventurer', photo: u.photoURL || '', email: u.email || '' } : null;
       for (const c of this._cbs) { try { c(this.user); } catch {} }
     });
   },
@@ -64,7 +64,7 @@ export const Auth = {
     const provider = new GoogleAuthProvider();
     const res = await signInWithPopup(auth, provider);
     const u = res.user;
-    this.user = { uid: u.uid, name: u.displayName || 'Adventurer', photo: u.photoURL || '' };
+    this.user = { uid: u.uid, name: u.displayName || 'Adventurer', photo: u.photoURL || '', email: u.email || '' };
     return this.user;
   },
 

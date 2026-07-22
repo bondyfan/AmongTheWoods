@@ -1217,6 +1217,19 @@ body.slotting .spell-slot.empty {
 #gate-signin:hover { transform: translateY(-2px); box-shadow: 0 12px 32px rgba(0,0,0,0.55); }
 #gate-signin:active { transform: translateY(0); }
 #gate-msg { margin-top: 18px; color: #ffb3a0; font-size: 14px; min-height: 18px; }
+/* "Checking sign-in…" placeholder: shown until the Firebase session resolves,
+   so an already-signed-in player never sees a fake login flash */
+#gate-checking { display: none; flex-direction: column; align-items: center;
+  gap: 16px; color: #b9cfa0; font-size: 16px; letter-spacing: 0.5px; }
+#auth-gate.checking #gate-signin,
+#auth-gate.checking #gate-guest,
+#auth-gate.checking #gate-msg,
+#auth-gate.checking .gate-tag { display: none; }
+#auth-gate.checking #gate-checking { display: flex; }
+.gate-spinner { width: 34px; height: 34px; border-radius: 50%;
+  border: 3px solid rgba(255,255,255,0.16); border-top-color: #8fbf5a;
+  animation: gate-spin 0.8s linear infinite; }
+@keyframes gate-spin { to { transform: rotate(360deg); } }
 
 /* ---- melee/bow windup bar: minimalist sliver centered above the action bar ---- */
 #swing-bar-wrap {

@@ -154,8 +154,12 @@ window.addEventListener('resize', () => {
 
 // ---------- game state ----------
 const DEVMODE = /(?:^|[?&])devmode/i.test(location.search); // admin tools only with ?devmode
+// The World Editor is locked to the owner account: available with ?devmode OR
+// when signed in with this email. isAdmin() reads authUser (set once auth resolves).
+const ADMIN_EMAIL = 'bondyfanfrankwild@gmail.com';
+function isAdmin() { return DEVMODE || authUser?.email === ADMIN_EMAIL; }
 const devDistanceRadius = DEVMODE ? new DevDistanceRadius(scene) : null;
-let worldEditor = null; // created lazily on first F2 (DEVMODE only)
+let worldEditor = null; // created lazily on first F2 (admin only)
 const game = {
   mode: 'menu',   // menu | play | dead | won
   kind: 'survival', // survival | moba
@@ -2444,19 +2448,24 @@ const $id = (id) => document.getElementById(id);
 
 // ?devmode-only left-side tools: a world-space ruler and free RPG flight.
 // Opening the ruler panel turns its terrain-following circle on.
-if (DEVMODE) {
-  // main-menu shortcut straight into the World Editor
+// main-menu shortcut into the World Editor. Idempotent, so it can be added
+// either at boot (?devmode) or once auth resolves to the admin email.
+function addWorldEditorMenuButton() {
+  if ($id('menu-world-editor')) return;
   const modeSel = $id('mode-select');
-  if (modeSel) {
-    const web = document.createElement('button');
-    web.id = 'menu-world-editor';
-    web.innerHTML = '🛠️ World Editor<br><small>Admin: sculpt the island</small>';
-    web.addEventListener('click', () => {
-      startGame();
-      setTimeout(() => toggleWorldEditor(), 350);
-    });
-    modeSel.appendChild(web);
-  }
+  if (!modeSel) return;
+  const web = document.createElement('button');
+  web.id = 'menu-world-editor';
+  web.innerHTML = '🛠️ World Editor<br><small>Admin: sculpt the island</small>';
+  web.addEventListener('click', () => {
+    startGame();
+    setTimeout(() => toggleWorldEditor(), 350);
+  });
+  modeSel.appendChild(web);
+}
+if (DEVMODE) addWorldEditorMenuButton();
+
+if (DEVMODE) {
   const tool = $id('dev-distance-tool');
   const toggle = $id('dev-distance-toggle');
   const panel = $id('dev-distance-panel');
@@ -2853,7 +2862,9 @@ async function ensureAuth() {
   return AuthMod;
 }
 function openGate() {
-  $id('auth-gate').classList.remove('gone');
+  // reveal the sign-in / guest buttons: we've confirmed nobody is signed in, so
+  // the "Checking sign-in…" placeholder can step aside
+  $id('auth-gate').classList.remove('gone', 'checking');
   const g = $id('gate-guest');
   if (g) { g.disabled = false; g.classList.remove('loading'); }
 }
@@ -2876,19 +2887,27 @@ function renderUserBadge(u) {
 if (DEVMODE) {
   passGate();
 } else {
-  // watch the session: a REAL user (with a uid) drops the gate; anything else
-  // keeps it up. onAuthStateChanged fires once on load with the current user.
+  // The gate starts in a "checking" state (spinner, no buttons — see the
+  // `checking` class in index.html) so an ALREADY signed-in player never sees a
+  // fake "Sign in with Google" flash for the 1-2 s Firebase takes to resolve
+  // the session. We only reveal the buttons once we KNOW nobody is signed in.
+  // A late-firing auth callback (onAuthStateChanged is async, sometimes fires
+  // after a guest click) must not slam the gate back open.
+  // Safety net: if the auth check stalls (offline / Firebase blocked), reveal
+  // the buttons anyway so nobody is stuck staring at the spinner.
+  const gateFallback = setTimeout(() => { if (!authUser && !game.guest) openGate(); }, 6000);
   (async () => {
     try {
       (await ensureAuth()).watch((u) => {
+        clearTimeout(gateFallback);
         authUser = (u && u.uid) ? u : null;
         renderUserBadge(authUser);
-        // a guest has deliberately dismissed the gate — a late-firing auth
-        // callback (Firebase fires onAuthStateChanged async, sometimes AFTER
-        // the guest click) must not slam it back open
+        if (authUser?.email === ADMIN_EMAIL) addWorldEditorMenuButton();
         if (authUser) passGate(); else if (!game.guest) openGate();
       });
     } catch (e) {
+      clearTimeout(gateFallback);
+      openGate(); // reveal the buttons so the player can still continue as guest / retry
       $id('gate-msg').textContent = 'Could not reach Google sign-in: ' + (e?.message || e);
     }
   })();
@@ -4149,7 +4168,7 @@ input.onKey('KeyE', () => {
 // F2 — the admin World Editor: a top-down god view with brushes (DEVMODE)
 let edPopT = 0;
 function toggleWorldEditor() {
-  if (!DEVMODE || game.mode !== 'play' || game.kind !== 'survival' || mp?.active || game.dungeon) return;
+  if (!isAdmin() || game.mode !== 'play' || game.kind !== 'survival' || mp?.active || game.dungeon) return;
   worldEditor ??= new WorldEditor({
     scene, world,
     getAim: () => aimPoint,
