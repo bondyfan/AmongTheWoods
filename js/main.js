@@ -5180,8 +5180,13 @@ function updateAtmosphere(dt) {
   // themselves — the screen overlay alone left the geometry too bright
   biomeLightK += (Math.min(1, biome.light ?? 1) - biomeLightK) * Math.min(1, dt * 1.5);
   const nightK = game.nightK || 0;
-  hemi.intensity = (0.74 - 0.5 * caveK) * biomeLightK * (1 - 0.68 * nightK);
-  sun.intensity = 1.8 * (1 - 0.8 * caveK) * biomeLightK * (1 - 0.85 * nightK);
+  // night bites harder now: the world's own lights drop close to nothing after
+  // dark (hemi ~0.10, sun ~0.11 at deep night) so a held torch's real point
+  // light is what actually carves out the visible bubble — night without a
+  // torch is genuinely gloomy. (We darken the LIGHTS, not the screen overlay,
+  // which would flatten the torchlight too.)
+  hemi.intensity = (0.74 - 0.5 * caveK) * biomeLightK * (1 - 0.86 * nightK);
+  sun.intensity = 1.8 * (1 - 0.8 * caveK) * biomeLightK * (1 - 0.94 * nightK);
   // warm the sun at dawn/dusk, silver it at deep night
   const dusk = Math.max(0, 1 - Math.abs(nightK - 0.5) * 4); // peaks at the twilight band
   sun.color.setRGB(1 - 0.25 * nightK, 0.95 - 0.2 * nightK + 0.05 * dusk, 0.87 - 0.15 * nightK - 0.15 * dusk);
@@ -5222,8 +5227,11 @@ function updateAtmosphere(dt) {
   // Gloomy biomes (fogCap) barely take the night tint — their air is already
   // BLACKER than the navy night fog, and lerping toward it LIGHTENED them.
   const nightBlend = biome.fogCap ? nightK * 0.15 : nightK;
-  const fogTarget = _atmoA.set(biome.fog).lerp(NIGHT_FOG, nightBlend * 0.8).lerp(caveFog, caveK);
-  const skyTarget = _atmoB.set(biome.sky).lerp(NIGHT_SKY, nightBlend * 0.85).lerp(caveFog, caveK);
+  // pull the fog wall + horizon almost fully into the (dark) night colors —
+  // otherwise the distant mist stays lighter than the now-dark ground and
+  // reads as a glowing band on the horizon, which makes no sense at night
+  const fogTarget = _atmoA.set(biome.fog).lerp(NIGHT_FOG, nightBlend * 0.94).lerp(caveFog, caveK);
+  const skyTarget = _atmoB.set(biome.sky).lerp(NIGHT_SKY, nightBlend * 0.94).lerp(caveFog, caveK);
   if (blizzard.k > 0.01 && blizzard.spec?.fogC) {
     // the storm colors the AIR (white blizzard, ochre sand wall…) without
     // moving the fog wall — distant terrain drowns in the storm's hue
@@ -5245,7 +5253,7 @@ function updateAtmosphere(dt) {
 // the fog (plus a small margin) so nothing invisible is ever drawn or
 // shadow-cast — in RPG view this culls ~2/3 of the old frustum
 const FOG_SCALE = { short: 0.72, normal: 1, far: 1.6, furthest: 2.4 };
-const NIGHT_SKY = new THREE.Color(0x0a1230), NIGHT_FOG = new THREE.Color(0x141a34);
+const NIGHT_SKY = new THREE.Color(0x070c22), NIGHT_FOG = new THREE.Color(0x0d1226);
 const _atmoA = new THREE.Color(), _atmoB = new THREE.Color();
 const _stormC = new THREE.Color();
 let _fogCap = 999; // smoothed per-biome fog ceiling (Dark/Haunted close in)
