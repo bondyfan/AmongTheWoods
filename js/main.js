@@ -5892,9 +5892,10 @@ function step() {
   // the World Editor renders CLEAN — no bloom / AO / vignette
   const usePost = (settings.bloom || settings.ssao) && postfx && !game.editorView;
   if (usePost) {
-    // "Ambient occlusion" = canopy shade (the visible part: pools of shade
-    // under tree crowns, deeper where the wood is thick) + a MILD screen-space
-    // contact term. The old strong SSAO read as global darkness/contrast.
+    // "Ambient occlusion" = canopy shade ONLY: soft pools of shade under tree
+    // crowns, nothing global. The screen-space SSAO term is gone — THAT was the
+    // "whole screen dark + contrast" the player disliked. Open ground, sky and
+    // anything not under a crown pass through the post path unchanged.
     let canopy = null;
     if (settings.ssao) {
       canopyShade ??= new CanopyShade();
@@ -5908,8 +5909,7 @@ function step() {
       }
     }
     postfx.render(scene, camera, {
-      ssao: !!settings.ssao, bloom: !!settings.bloom,
-      aoRadius: 1.8, aoStrength: 0.10, aoFloor: 0.55,
+      ssao: false, bloom: !!settings.bloom, // no screen-space contact term
       canopy,
     });
   } else { renderer.setRenderTarget(null); renderer.render(scene, camera); }

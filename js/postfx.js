@@ -179,6 +179,11 @@ const COMPOSITE_FRAG = /* glsl */`
     return (lB < lMin || lB > lMax) ? rA : rB;
   }
   void main() {
+    // tScene is an sRGB-tagged target, so sampling DECODES to LINEAR light
+    // here. The whole composite works in linear and encodes back to sRGB at
+    // the very end — a raw ShaderMaterial gets NO automatic output encode, so
+    // writing the linear value straight out (the old bug) darkened the whole
+    // frame ~60% the moment the post path switched on.
     vec3 c = useFXAA ? fxaa(vUv) : texture2D(tScene, vUv).rgb;
     if (useAO || useCanopy) {
       float occl = 1.0;
@@ -194,10 +199,10 @@ const COMPOSITE_FRAG = /* glsl */`
       // spare near-white highlights so speculars don't get gouged
       float hl = smoothstep(0.9, 1.0, dot(c, LUMA));
       float f = mix(occl, 1.0, hl);
-      c = l2s(s2l(c) * f);                          // multiply in LINEAR light
+      c *= f;                                       // occlusion is a LINEAR-light multiply
     }
     if (useBloom) c += texture2D(tBloom, vUv).rgb * bloomStrength;
-    gl_FragColor = vec4(c, 1.0);
+    gl_FragColor = vec4(l2s(c), 1.0);              // LINEAR → sRGB for the canvas
   }`;
 
 // hemisphere kernel: points in the +Z hemisphere, bunched toward the origin
