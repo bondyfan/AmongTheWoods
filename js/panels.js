@@ -4,9 +4,9 @@
 import { SHOP_GROUPS, SMITH_GROUPS, questFor, repeatableQuestFor, questXpFor,
          QUEST_CATEGORY_LABELS, QUESTS_PER_BIOME, BIOMES, SLOTS, SLOT_LABELS, ENEMY_TYPES, ITEMS,
          MOBA_BUILDINGS, CAMP_BUILDINGS, RES_ICONS, RESOURCES, CONSUMABLES,
-         MAX_SPELL_SLOTS, fmtResource, itemById, spellById, costFor,
+         MAX_SPELL_SLOTS, fmtResource, itemById, spellById, costFor, weaponDurabilityFor,
          CLASS_TREES, classTreeById, classSkillById, classSkillRequiredLevel,
-         classSkillMeatCost, classPathSkills, firstClassSkillId, CLASS_CHOOSE_COST,
+         classSkillMeatCost, classSkillEssenceCost, classPathSkills, firstClassSkillId, CLASS_CHOOSE_COST,
          classActiveInfo, classPassiveInfo, requiredClassForItem,
          PLAYER_HP, ENEMY_HP, ENEMY_DMG, xpKillFor, meatForLevel,
          enemyTypicalLevel } from './config.js';
@@ -169,6 +169,11 @@ export class Panels {
       if (w.chop > 0) stats.push(['🪓 Cutting power', w.chop]);
       if (w.mine > 0) stats.push(['⛏️ Mining power', w.mine]);
       stats.push(['Type', w.kind === 'bow' ? 'Ranged weapon' : 'Melee weapon']);
+      const maxDur = weaponDurabilityFor(item);
+      if (maxDur && this.player) {
+        const left = Math.max(0, maxDur - (this.player.weaponWearById?.[item.id] || 0));
+        stats.push(['Durability', left <= 0 ? '💔 broken — see a smith' : `${left} / ${maxDur}`]);
+      }
     }
     const st = item.stats || {};
     if (st.hp) stats.push(['Max health', '+' + st.hp]);
@@ -319,6 +324,10 @@ export class Panels {
       this._renderSmithQuests(wrap);
       return;
     }
+    if (this.smithTab === 'repair') {
+      this._renderSmithRepair(wrap);
+      return;
+    }
 
     const group = SMITH_GROUPS.find(g => g.key === this.smithTab);
     const entries = [...group.items()].sort((a, b) => a.level - b.level || a.name.localeCompare(b.name));
@@ -359,6 +368,50 @@ export class Panels {
     }
     wrap.querySelectorAll('.buy-btn').forEach(btn =>
       btn.addEventListener('click', () => this.hooks.onBuyItem(btn.dataset.id)));
+  }
+
+  // ---------- blacksmith repair: every weapon wears out; fixing is free ----------
+  _renderSmithRepair(wrap) {
+    const p = this.player;
+    const ids = [...new Set([p.equipment.weapon, ...p.invItems])]
+      .filter(id => id && weaponDurabilityFor(itemById(id)) > 0);
+    const worn = ids.filter(id => (p.weaponWearById?.[id] || 0) > 0);
+    const note = document.createElement('div');
+    note.className = 'empty-note';
+    note.textContent = worn.length
+      ? 'Every weapon dulls with use — the smith fixes them for free.'
+      : 'All your weapons are in perfect shape.';
+    wrap.appendChild(note);
+    if (worn.length > 1) {
+      const all = document.createElement('div');
+      all.className = 'card buyable';
+      all.innerHTML = `<div class="card-head"><span class="icon">🔧</span>
+          <span class="name">Repair everything</span></div>
+        <div class="card-foot"><button class="buy-btn" data-id="">Repair all — free</button></div>`;
+      wrap.appendChild(all);
+    }
+    for (const id of ids) {
+      const item = itemById(id);
+      const max = weaponDurabilityFor(item);
+      const left = Math.max(0, max - (p.weaponWearById?.[id] || 0));
+      const broken = left <= 0;
+      const pct = Math.round((left / max) * 100);
+      const card = document.createElement('div');
+      card.className = 'card' + (left < max ? ' buyable' : ' owned');
+      const barColor = broken ? '#e04f4f' : pct < 25 ? '#e0a34f' : '#7fc26a';
+      card.innerHTML = `
+        <div class="card-head"><span class="icon">${itemIcon(item)}</span>
+          <span class="name">${item.name}</span>
+          <span class="lv">${broken ? '💔 BROKEN' : `${left} / ${max}`}</span></div>
+        <div class="desc"><div style="height:7px;border-radius:4px;background:#0006;overflow:hidden">
+          <div style="height:100%;width:${pct}%;background:${barColor}"></div></div></div>
+        <div class="card-foot">${left < max
+          ? `<button class="buy-btn" data-id="${id}">Repair — free</button>`
+          : '<span class="tag ok">✔ Like new</span>'}</div>`;
+      wrap.appendChild(card);
+    }
+    wrap.querySelectorAll('.buy-btn').forEach(btn =>
+      btn.addEventListener('click', () => this.hooks.onRepairItem(btn.dataset.id || null)));
   }
 
   _questCard(q, state, extra = '') {
@@ -524,13 +577,14 @@ export class Panels {
     const p = this.player;
     const selected = classTreeById(p.selectedClass);
     const meatIcon = resIcon('meat', RES_ICONS.meat ?? '🍖');
+    const essenceIcon = resIcon('essence', RES_ICONS.essence ?? '🧪');
     container.innerHTML = '';
 
     const head = document.createElement('div');
     head.className = 'classp-head';
     head.innerHTML = `<div class="classp-title"><b>🧬 Class path</b>
         <span>${selected
-          ? `${selected.icon} ${selected.name} — follow the path, spend 🍖 to train each skill.`
+          ? `${selected.icon} ${selected.name} — follow the path: 🍖 trains passives, 🧪 essence powers active abilities.`
           : `Commit to ONE class. Choosing costs ${CLASS_CHOOSE_COST} 🍖 and is permanent until you reset at home.`}</span></div>
       <span class="classp-meat">${fmtResource(p.meat)} ${meatIcon}</span>`;
     container.appendChild(head);
@@ -587,8 +641,11 @@ export class Panels {
       const requiredLevel = classSkillRequiredLevel(skill, nextRank);
       const isFirst = skill.id === firstId;
       const meatCost = classSkillMeatCost(skill, nextRank, isFirst);
+      const essenceCost = classSkillEssenceCost(skill, nextRank, isFirst);
+      const costLabel = essenceCost > 0
+        ? `${fmtResource(essenceCost)} ${essenceIcon}` : `${fmtResource(meatCost)} ${meatIcon}`;
       const levelLocked = !maxed && p.level < requiredLevel;
-      const affordable = p.meat >= meatCost;
+      const affordable = p.meat >= meatCost && p.essence >= essenceCost;
       const canTrain = !maxed && !levelLocked && affordable;
 
       const pips = Array.from({ length: skill.maxRank }, (_, r) =>
@@ -598,7 +655,7 @@ export class Panels {
       if (maxed) action = '<span class="node-done">✓ Mastered</span>';
       else if (levelLocked) action = `<span class="node-lock">🔒 Reach Lv ${requiredLevel}</span>`;
       else action = `<button class="buy-btn node-train" data-class-skill="${skill.id}" ${canTrain ? '' : 'disabled'}>
-          ${rank ? `Upgrade → R${nextRank}` : 'Train'} · ${fmtResource(meatCost)} ${meatIcon}</button>`;
+          ${rank ? `Upgrade → R${nextRank}` : 'Train'} · ${costLabel}</button>`;
 
       // exact numbers for every rank; the trained rank is highlighted
       const rankRows = Array.from({ length: skill.maxRank }, (_, ri) => {

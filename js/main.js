@@ -6,7 +6,7 @@ import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOB
          biomeIndexAt, progressAt, fmtResource, roundResource, itemById, spellById,
          consumableById, essenceDropFor, MAX_LEVEL, XP_LEVELS, questFor, repeatableQuestFor,
          questXpFor, BIOME_LAIRS, CAMP_BUILDINGS, trainingLevelFor, CLASS_TREES,
-         classTreeById, classSkillById, classSkillRequiredLevel, classSkillMeatCost,
+         classTreeById, classSkillById, classSkillRequiredLevel, classSkillMeatCost, classSkillEssenceCost,
          CLASS_CHOOSE_COST, firstClassSkillId } from './config.js';
 import { makeAimArc, updateAimArc, makeRaft, makeBlacksmith, makeHorse, makeWisp, makeMan,
          makeGriffin, makeGriffinRoost, makeTumbleweed, BAKED_MAT, WATER_SHADERS,
@@ -223,6 +223,18 @@ const panels = new Panels({
   },
   onBuyItem: (id) => { buyItem(id); requestAutosave(); },
   onBuySpell: (id) => { buySpell(id); requestAutosave(); },
+  onRepairItem: (id) => { // blacksmith repair — free, id=null repairs everything
+    const ids = id ? [id] : Object.keys(player.weaponWearById || {});
+    let fixed = 0;
+    for (const wid of ids) if (player.repairWeapon(wid)) fixed++;
+    if (fixed) {
+      ui.toast(`🔧 The smith hammers your ${fixed > 1 ? 'weapons' : 'weapon'} back into shape — good as new.`, 'level');
+      audio.sfx('upgrade', 0.5);
+      refreshHud();
+      requestAutosave();
+    }
+    panels.refresh();
+  },
   onBuyStat: buyStat,
   onChooseClass: chooseClass,
   onTrainClassSkill: trainClassSkill,
@@ -335,6 +347,15 @@ let world = new World(scene, game.seed);
 
 const player = new Player(scene, {
   classRulesEnabled: () => game.kind === 'survival',
+  // weapons only wear out where a blacksmith exists to fix them
+  durabilityOn: () => game.kind === 'survival',
+  onWeaponBreak: (id) => {
+    const it = itemById(id);
+    ui.toast(`💔 ${it?.name ?? 'Weapon'} BROKE — you fight bare-handed until a blacksmith repairs it (free, ⚒ on the map).`, 'boss');
+    refreshHud();
+    panels.refresh();
+    requestAutosave();
+  },
   popup: (pos, text, color, cls) => ui.popup(pos, text, color, cls),
   onHurt: () => ui.hurtFlash(),
   onParry: (src) => {
@@ -2043,7 +2064,7 @@ const enemyMgr = new EnemyManager(scene, world, {
   onRemove: (enemy) => ui.removeTracker('hp' + enemy.id),
   // a beaten griffin drops its nest and flees; it may return in ~20 minutes
   onGriffinEscape: (enemy) => {
-    pickups.spawn('item', enemy.nestItem ?? 'desertNest', enemy.pos, 0.8);
+    pickups.spawn('item', enemy.nestItem ?? 'desertNest', enemy.pos, 0.8, null, true);
     if (enemy.griffinBiome != null) griffinNextAt[enemy.griffinBiome] = game.time + 1200;
     ui.banner('🪽 The griffin yields!');
     ui.toast('🪺 Beaten, the griffin drops its NEST and flees beyond the horizon. Place the nest to make a flight roost!', 'level');
@@ -2073,9 +2094,9 @@ function rollBossDrop(enemy) {
     const candidates = ITEMS.filter(i =>
       !i.free && !i.unique && !player.hasItem(i.id) && i.level <= player.level + 1
       && i.slot !== 'companion');
-    if (!candidates.length) { pickups.spawn('meat', 5, enemy.pos, 1); return; }
+    if (!candidates.length) { pickups.spawn('meat', 5, enemy.pos, 1, null, true); return; }
     const item = candidates[Math.floor(Math.random() * candidates.length)];
-    pickups.spawn('item', item.id, enemy.pos, 0.5);
+    pickups.spawn('item', item.id, enemy.pos, 0.5, null, true);
     return;
   }
   // no item? she may cough up a TREASURE MAP instead — an X somewhere out
@@ -2968,6 +2989,7 @@ function serializeState() {
     spellSlots: p.spellSlots.map(s => s ?? null),
     upgrades: { ...p.upgrades },
     torchFuel: { ...(p.torchFuelById || {}) },
+    weaponWear: { ...(p.weaponWearById || {}) },
     invSlots: p.invSlots,
     questDone: { ...p.questDone },
     questHistory: [...p.questHistory],
@@ -3140,6 +3162,7 @@ function applyLoadedState(d) {
   });
   p.upgrades = { ...(d.upgrades || {}) };
   p.torchFuelById = (d.torchFuel && typeof d.torchFuel === 'object') ? { ...d.torchFuel } : {};
+  p.weaponWearById = (d.weaponWear && typeof d.weaponWear === 'object') ? { ...d.weaponWear } : {};
   // MIGRATION: old saves stored supply gear as boolean upgrades — convert each
   // owned flag into the real item (equipped straight into its new slot)
   const upgradeSlots = { torch: 'offhand', torchoil: 'offhand', socks: 'legs',
@@ -3565,12 +3588,19 @@ function trainClassSkill(id) {
   }
   const firstOfClass = id === firstClassSkillId(skill.classId);
   const meatCost = classSkillMeatCost(skill, nextRank, firstOfClass);
+  const essenceCost = classSkillEssenceCost(skill, nextRank, firstOfClass);
   if (player.meat < meatCost) {
     ui.toast(`🍖 ${skill.name} rank ${nextRank} costs ${meatCost} meat.`, 'error');
     audio.sfx('error', 0.4);
     return;
   }
+  if (player.essence < essenceCost) {
+    ui.toast(`🧪 ${skill.name} rank ${nextRank} costs ${essenceCost} essence — hunt the deeper biomes.`, 'error');
+    audio.sfx('error', 0.4);
+    return;
+  }
   player.meat = roundResource(player.meat - meatCost);
+  if (essenceCost) player.essence = roundResource(player.essence - essenceCost);
   player.selectedClass = skill.classId;
   player.classTraining[id] = nextRank;
   player.enforceClassEquipment();

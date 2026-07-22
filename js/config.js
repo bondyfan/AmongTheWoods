@@ -1134,8 +1134,17 @@ export const CLASS_CHOOSE_COST = 10;
 export const CLASS_FIRST_SKILL_COST = 10;
 export const classSkillMeatCost = (skill, rank, firstOfClass = false) => {
   if (firstOfClass && rank <= 1) return CLASS_FIRST_SKILL_COST;
-  const base = (skill.type === 'active' ? 40 : 25) + skill.level * 2;
+  if (skill.type === 'active') return 0; // active abilities are paid in essence now
+  const base = 25 + skill.level * 2;
   return Math.ceil(base * rank * (1 + 0.3 * Math.max(0, rank - 1)) / 5) * 5;
+};
+// Active abilities cost Ethereal Essence instead of meat (passives stay meat).
+// The cheap first-of-class starter stays meat so a valley player — where no
+// essence drops — can always commit to a class and open its kit.
+export const classSkillEssenceCost = (skill, rank, firstOfClass = false) => {
+  if (skill.type !== 'active') return 0;
+  if (firstOfClass && rank <= 1) return 0;
+  return Math.max(1, Math.ceil(skill.level / 6 * rank * (1 + 0.2 * Math.max(0, rank - 1))));
 };
 // The skills of a class laid out as a single progression "path": passives and
 // active abilities interleaved by the level they unlock at (passive first on
