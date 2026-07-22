@@ -1003,14 +1003,14 @@ export const CLASS_TREES = [
       P('rogue_assassin', '💀', 'Assassin', 44, 'Extra damage to wounded targets (below 50% health).', { executeDmg: [0.15, 0.30, 0.50] }),
     ],
     actives: [
-      A('rogue_fleet', '🥾', 'Fleet Foot', 3, 'Dash off with a surge of movement speed for a short time.', 'buff',
-        { cd: 60, buff: 'sprint', duration: [5, 8, 15], power: [4, 6, 8] }),
-      A('rogue_stealth', '🌑', 'Stealth', 3, 'Become nearly invisible; attacking breaks stealth.', 'stealth',
+      A('rogue_fleet', '🌗', 'Shadow Dance', 3, 'For a few seconds EVERY strike counts as a backstab — even from the front — and builds Combo Points twice as fast.', 'buff',
+        { cd: 45, buff: 'shadowDance', duration: [5, 6, 8] }),
+      A('rogue_stealth', '🌑', 'Ambush', 3, 'Vanish. Your next strike from stealth is a guaranteed crit for huge bonus damage and instantly banks 3 Combo Points.', 'stealth',
         { cd: 26, duration: [8, 11, 15] }),
       A('rogue_evade', '💨', 'Evade', 7, 'Avoid every incoming attack during a short glowing window.', 'evade',
         { cd: 22, duration: [1, 1.4, 2] }),
-      A('rogue_backstab_active', '🔪', 'Backstab', 12, 'A brutal strike that is far stronger from behind.', 'target',
-        { cd: 10, range: 3.2, weaponMult: [2.0, 2.7, 3.5], backstab: true }),
+      A('rogue_backstab_active', '🔪', 'Backstab', 12, 'A brutal strike that is far stronger from behind. Builds a Combo Point (two from behind).', 'target',
+        { cd: 10, range: 3.2, weaponMult: [2.0, 2.7, 3.5], backstab: true, combo: 'build' }),
       A('rogue_shadowstep', '🌘', 'Shadowstep', 16, 'Teleport behind the aimed (or Shift-locked) enemy and strike. Reaches 15/22/30 m by rank.', 'shadowstep',
         { cd: 18, range: [10, 13, 16], maxStep: [15, 22, 30], weaponMult: [1.5, 2.1, 2.8] }),
       A('rogue_poison_blades', '☠️', 'Poison Blades', 20, 'Coat weapons with powerful poison.', 'buff',
@@ -1021,10 +1021,10 @@ export const CLASS_TREES = [
         { cd: 40, zone: 'smoke', castRange: 20, radius: [4.5, 5.5, 6.5], duration: [7, 9, 11], interval: 0.5 }),
       A('rogue_sprint', '🏃', 'Sprint', 33, 'Gain a tremendous burst of movement speed.', 'buff',
         { cd: 35, buff: 'sprint', duration: [6, 8, 10], power: [5, 8, 11] }),
-      A('rogue_kidney_shot', '⚡', 'Kidney Shot', 41, 'Stun one target and deal weapon damage.', 'target',
-        { cd: 24, range: 3.2, weaponMult: [1.0, 1.4, 1.9], stun: [3, 4, 5] }),
-      A('rogue_assassinate', '💀', 'Assassinate', 50, 'Execute a wounded target with immense damage.', 'execute',
-        { cd: 42, range: 3.2, weaponMult: [3.5, 4.8, 6.2], threshold: 0.4 }),
+      A('rogue_kidney_shot', '⚡', 'Kidney Shot', 41, 'Stun one target, deal weapon damage and build a Combo Point.', 'target',
+        { cd: 24, range: 3.2, weaponMult: [1.0, 1.4, 1.9], stun: [3, 4, 5], combo: 'build' }),
+      A('rogue_assassinate', '💀', 'Assassinate', 50, 'Execute a wounded target, SPENDING all Combo Points — the more you\'ve banked, the deadlier the blow.', 'execute',
+        { cd: 42, range: 3.2, weaponMult: [3.5, 4.8, 6.2], cpMult: [1.0, 1.15, 1.3], threshold: 0.4, combo: 'spend' }),
     ] },
 
   { id: 'mage', icon: '🧙', name: 'Mage', color: '#9c9cff',
@@ -1458,7 +1458,15 @@ export const SMITH_GROUPS = [
   { key: 'weapons', label: '⚔️ Weapons', items: () => ITEMS.filter(i => i.slot === 'weapon' && !i.free && !i.unique) },
   { key: 'gear',    label: '🛡️ Gear',    items: () => ITEMS.filter(i =>
       (['head', 'chest', 'boots', 'charm'].includes(i.slot) || i.shield) && !i.unique) },
+  { key: 'repair',  label: '🔧 Repair' },
 ];
+
+// ---- weapon durability: every weapon lasts this many swings/shots, then it
+// must be repaired at a blacksmith (free). Bare hands never wear out. ----
+export const weaponDurabilityFor = (item) => {
+  if (!item?.weapon || item.free) return 0; // 0 = indestructible
+  return item.weapon.durability ?? (item.weapon.kind === 'bow' ? 240 : 300);
+};
 
 // ---- Quest board: each biome keeps an eight-part line, but the objectives
 // now alternate between story, character, exploration, hunting and contracts.

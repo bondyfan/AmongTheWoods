@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { WORLD, XP_LEVELS, MAX_LEVEL, itemById, spellById, consumableById,
          biomeIndexAt, RESOURCES, MAX_SPELL_SLOTS, classSkillById,
          classEffectsFor, requiredClassForItem, isTameableBeast,
-         PLAYER_HP, OOC_DELAY, oocRegenFor } from './config.js';
+         PLAYER_HP, OOC_DELAY, oocRegenFor, weaponDurabilityFor } from './config.js';
 import { makeMan, makeAxe, makeBow, makePickaxe, makeTorchMesh, makeClub,
          makeSword, makeHandSpear, makeCrossbow, makeShield } from './models.js';
 import { audio } from './audio.js';
@@ -60,6 +60,9 @@ export class Player {
     // invItems = UNEQUIPPED copies in the backpack (duplicates allowed);
     // equipped pieces live only in `equipment`. 'fists' are innate.
     this.invItems = [];
+    // weapon durability: item id -> swings/shots SPENT (torchFuelById pattern;
+    // per-id like torch fuel — a repaired weapon id is good as new)
+    this.weaponWearById = {};
     this.invSlots = 10; // backpack stack slots (upgradeable in Supplies)
     this.equipment = { weapon: 'fists', offhand: null, head: null, chest: null, underlayer: null,
                        legs: null, boots: null, back: null, mount: null, charm: null, companion: null };
@@ -116,6 +119,11 @@ export class Player {
     this.classFx = [];
     this.stealthT = 0;
     this.stealthed = false;
+    this.ambushArmed = false;  // Rogue: next strike from stealth is an Ambush
+    this.shadowDanceT = 0;     // Rogue: omni-backstab window
+    this.shadowDancePower = 0;
+    this.comboPts = 0;         // Rogue Combo Points (0-5)
+    this.comboPtsT = 0;        // Combo Point decay timer
     this.evadeT = 0;
     this.classShield = 0;
     this.hotT = 0;
@@ -244,6 +252,49 @@ export class Player {
     else this.equipment[slot] = null;
     this.recompute();
     this.hooks.onEquipChange?.(slot);
+  }
+
+  // ---------- weapon durability ----------
+  // Wear is per item ID (like torch fuel): swings/shots spent. At 0 left the
+  // weapon is broken — recompute() swaps its stats for bare hands until a
+  // blacksmith repairs it (free).
+  weaponWearLeft(id) {
+    const max = weaponDurabilityFor(itemById(id));
+    if (!max) return Infinity; // fists & non-weapons never wear out
+    return Math.max(0, max - (this.weaponWearById?.[id] || 0));
+  }
+
+  // one basic attack fired — spend a use of the equipped weapon
+  _spendDurability() {
+    if (this.hooks.durabilityOn?.() === false) return;
+    const id = this.equipment.weapon;
+    if (this.weaponBrokenNow) return; // already swinging bare hands
+    const max = weaponDurabilityFor(itemById(id));
+    if (!max) return;
+    this.weaponWearById ??= {};
+    const spent = (this.weaponWearById[id] = (this.weaponWearById[id] || 0) + 1);
+    if (spent >= max) {
+      this.recompute(); // stats drop to bare hands
+      audio.sfx('rock_crack', 0.55, -160);
+      this.hooks.onWeaponBreak?.(id);
+    } else if (max - spent === 30) {
+      this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.4),
+        '⚠️ weapon almost worn out', '#ffcc66');
+    }
+  }
+
+  repairWeapon(id) {
+    if (!this.weaponWearById?.[id]) return false;
+    delete this.weaponWearById[id];
+    this.recompute();
+    return true;
+  }
+
+  // every owned weapon id (equipped + backpack) with wear on it
+  wornWeaponIds() {
+    const ids = new Set([this.equipment.weapon, ...this.invItems]);
+    return [...ids].filter(id => id && (this.weaponWearById?.[id] || 0) > 0
+      && weaponDurabilityFor(itemById(id)) > 0);
   }
 
   // one backpack SLOT per stack: each resource kind, each consumable kind,
@@ -631,12 +682,22 @@ export class Player {
   }
 
   _isBehind(enemy) {
+    if (this.shadowDanceT > 0) return true; // Shadow Dance: every hit lands "from behind"
     const ry = enemy.mesh?.rotation?.y ?? 0;
     const fx = -Math.sin(ry), fz = -Math.cos(ry);
     const dx = this.pos.x - enemy.pos.x, dz = this.pos.z - enemy.pos.z;
     const len = Math.hypot(dx, dz) || 1;
     return fx * dx / len + fz * dz / len < -0.35;
   }
+
+  // Rogue Combo Points: builders bank them (doubled during Shadow Dance),
+  // spenders (Assassinate) drain them for a payoff that scales with the count.
+  _gainCombo(n = 1) {
+    if (this.selectedClass !== 'rogue') return;
+    this.comboPts = Math.min(5, this.comboPts + n * (this.shadowDanceT > 0 ? 2 : 1));
+    this.comboPtsT = 8;
+  }
+  _spendCombo() { const cp = this.comboPts; this.comboPts = 0; this.comboPtsT = 0; return cp; }
 
   _classWeaponDamage(enemy, mult = 1, forceBackstab = false) {
     let damage = this.weapon.dmg * mult * this.dmgMult;
@@ -748,9 +809,19 @@ export class Player {
           opts.rend = { dps: rendDps, dur: skill.bleedDur };
         }
         if (skill.poison) opts.poison = { dps: rv('poison') * (1 + (this.classEffects.poisonPower || 0)), dur: 6 };
-        let amount = this._classWeaponDamage(enemy, rv('weaponMult', 1));
+        // Combo Points: spenders (Assassinate) scale off banked CP; builders bank it.
+        const wm = (skill.combo === 'spend')
+          ? 1.0 + rv('cpMult', 1.2) * this._spendCombo()
+          : rv('weaponMult', 1);
+        let amount = this._classWeaponDamage(enemy, wm);
         if (skill.backstab && this._isBehind(enemy)) amount *= 1.35 + rank * 0.15;
-        damageTarget(enemy, amount, opts);
+        let ambush = false;
+        if (this.ambushArmed) { // Ambush: guaranteed crit + big rider, then bank 3 CP
+          ambush = true; this.ambushArmed = false; amount *= 2.2; this._gainCombo(3);
+          this.hooks.popup(enemy.mesh.position.clone().setY(enemy.mesh.position.y + 2.3), '🗡️ AMBUSH', '#c9a4ff', 'big');
+        }
+        damageTarget(enemy, amount, ambush ? { ...opts, crit: true } : opts);
+        if (skill.combo === 'build') this._gainCombo(skill.backstab && this._isBehind(enemy) ? 2 : 1);
         if (skill.stun) enemyMgr.stun?.(enemy, rv('stun'));
         if (skill.bleedPct) this.hooks.popup(enemy.mesh.position.clone().setY(enemy.mesh.position.y + 2),
           `🩸 ${Math.round(rv('bleedPct') * 100)}% bleed / 30s`, '#ff6b68', 'big');
@@ -772,7 +843,7 @@ export class Player {
         warCry: ['warCryT', 'warCryPower'], bloodFury: ['bloodFuryT', 'bloodFuryPower'],
         avatar: ['avatarT', 'avatarPower'], arrowHaste: ['arrowHasteT', 'arrowHastePower'],
         poisonBlades: ['poisonBladesT', 'poisonBladesPower'], sprint: ['sprintT', 'sprintPower'],
-        combustion: ['combustionT', 'combustionPower'],
+        combustion: ['combustionT', 'combustionPower'], shadowDance: ['shadowDanceT', 'shadowDancePower'],
       }[skill.buff];
       if (!field) return false;
       this[field[0]] = duration;
@@ -1127,6 +1198,7 @@ export class Player {
 
     if (skill.action === 'stealth') {
       this.stealthT = rv('duration') + (this.classEffects.stealthDuration || 0);
+      this.ambushArmed = true; // the next strike from stealth is a loaded Ambush
       this._setStealth(true);
       // a dark shadow-implosion swallowing the rogue
       this._fxBurst(this.mesh.position.clone().setY(this.mesh.position.y + 0.9), 0x2a2740, 12, 5, 0.4);
@@ -1927,8 +1999,14 @@ export class Player {
     // your (quadratic) pool gets the longer a full breather takes — WoW style
     this.oocRegen = oocRegenFor(this.level);
 
-    // effective weapon = base weapon + training (range/power/swift tracks)
-    const base = equipped('weapon')?.weapon || itemById('fists').weapon;
+    // effective weapon = base weapon + training (range/power/swift tracks).
+    // A weapon at 0 durability stops working: the hero falls back to bare
+    // hands (fists stats, fists chop/mine) until a blacksmith repairs it.
+    this.weaponBrokenNow = this.hooks.durabilityOn?.() !== false
+      && this.equipment.weapon !== 'fists'
+      && this.weaponWearLeft(this.equipment.weapon) <= 0;
+    const base = this.weaponBrokenNow ? itemById('fists').weapon
+      : (equipped('weapon')?.weapon || itemById('fists').weapon);
     const s = this.stats;
     // An attack-speed drip over 50 levels (+0.012 att/s per level ≈ +0.6 at
     // the cap) — noticeable, but gear tiers still carry the damage growth.
@@ -2095,6 +2173,7 @@ export class Player {
       ['poisonBladesT', '☠️', 'Poison Blades', 'buff'],
       ['sprintT', '🏃', 'Sprint', 'buff'],
       ['combustionT', '🔥', 'Combustion', 'buff'],
+      ['shadowDanceT', '🌗', 'Shadow Dance', 'buff'],
       ['hasteT', '⚡', 'Haste', 'buff'],
       ['rageT', '😡', 'Rage', 'buff'],
       ['roastT', '🍗', 'Roast', 'buff'],
@@ -2125,6 +2204,11 @@ export class Player {
     if (this.classShield > 0.5) {
       out.push({ id: 'classShield', icon: '🛡️', name: 'Shield', t: null,
         dur: null, kind: 'shield', value: Math.round(this.classShield) });
+    }
+    // Rogue Combo Points — pips, not a timer (spent by Assassinate)
+    if (this.comboPts > 0) {
+      out.push({ id: 'comboPts', icon: '🗡️', name: 'Combo Points', t: null, dur: null,
+        kind: 'buff', value: '◆'.repeat(this.comboPts) });
     }
     // Mage orbiting sphere summons — one cell per active summon
     for (const s of this.orbSummons || []) {
@@ -2454,8 +2538,10 @@ export class Player {
     }
     this.escapeRushT = Math.max(0, this.escapeRushT - dt);
     for (const key of ['warCryT', 'bloodFuryT', 'avatarT', 'arrowHasteT',
-      'poisonBladesT', 'sprintT', 'combustionT']) this[key] = Math.max(0, this[key] - dt);
+      'poisonBladesT', 'sprintT', 'combustionT', 'shadowDanceT']) this[key] = Math.max(0, this[key] - dt);
     this.stealthT = Math.max(0, this.stealthT - dt);
+    if (this.stealthT <= 0) this.ambushArmed = false; // stealth lapsed unused → no free Ambush
+    if (this.comboPtsT > 0) { this.comboPtsT -= dt; if (this.comboPtsT <= 0) this.comboPts = 0; }
     this.parryT = Math.max(0, this.parryT - dt);
     this.comboT = Math.max(0, this.comboT - dt);
     this.hurtT += dt;
@@ -2782,6 +2868,7 @@ export class Player {
           this.swingWindup = null;
           if (this.weapon.kind === 'bow') this._doShoot(projectiles, 0, ctx.mounted);
           else this._doMelee(world, enemyMgr, ctx.pickups, 0, moving, ctx.mounted);
+          this._spendDurability();    // after the strike: the last use still lands full
           this.attackCd -= wu.dur;    // windup time counts into the swing cycle
         }
       }
@@ -3041,13 +3128,17 @@ export class Player {
     const baseArcDot = w.style === 'spear' || w.style === 'pick' ? 0.76 : 0.6;
     const arcDot = Math.max(-0.1, baseArcDot - (this.meleeArcBonus || 0));
     const baseCrit = Math.random() < this.critChance;
+    let builtCombo = false; // Rogue: a basic swing banks at most one Combo Point
     for (const e of enemyMgr.alive()) {
       if (this._inArc(e.pos.x, e.pos.z, w.range + (moving ? 0.25 : 0), e.hitR, arcDot)) {
         const weakPoint = this._hitsWeakPoint(e, charge);
-        const crit = baseCrit || weakPoint;
+        let ambush = false;
+        if (this.ambushArmed) { ambush = true; this.ambushArmed = false; }
+        const crit = baseCrit || weakPoint || ambush;
         const armored = (e.armor ?? (/golem|snapper|colossus/i.test(e.type) ? 0.3 : 0)) > 0;
         const armorMult = armored && w.armoredBonus ? w.armoredBonus : 1;
-        const dmg = this._classWeaponDamage(e, impactMult) * armorMult * (crit ? CRIT_MULT : 1);
+        let dmg = this._classWeaponDamage(e, impactMult) * armorMult * (crit ? CRIT_MULT : 1);
+        if (ambush) dmg *= 2.2;
         const poisonActive = this.poisonBladesT > 0
           ? 4 * this.poisonBladesPower * (1 + (this.classEffects.poisonPower || 0))
           : this.venomT > 0 ? 4 * (1 + (this.classEffects.poisonPower || 0)) : 0;
@@ -3060,6 +3151,9 @@ export class Player {
           ...(poisonActive ? { poison: { dps: poisonActive, dur: 5 } } : {}),
         };
         enemyMgr.damage(e, dmg, this.facing, 'local', opts);
+        if (ambush) { this._gainCombo(3);
+          this.hooks.popup(e.mesh.position.clone().setY(e.mesh.position.y + 2.3), '🗡️ AMBUSH', '#c9a4ff', 'big'); }
+        else if (!builtCombo && this.selectedClass === 'rogue' && this._isBehind(e)) { this._gainCombo(1); builtCombo = true; }
         if (this.bloodFuryT > 0) this._healSelf(dmg * this.bloodFuryPower);
         if (Math.random() < (this.classEffects.staggerChance || 0)) enemyMgr.stun?.(e, 0.8);
         if (w.stun && (charged || this.comboStep === combo.length - 1)) {
