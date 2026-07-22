@@ -7,18 +7,26 @@ browser. Clients connect over WebSocket; the room lives on the VPS 24/7.
   **🖥️ Server** button when it answers `{"ready":true}`.
 - `WebSocket /ws` → the game transport (see `protocol.js`, mirrors `js/net.js`).
 
-## Status — two milestones
+## Status — both milestones DONE ✅
 
-**Milestone 1 (now):** the server owns the room (registry, lifecycle, 24/7
-persistence, peer join/leave) and **relays** the co-op protocol. To stay
-playable before the sim is ported, the first client in a room is flagged the
-`authority` and runs the enemy/world simulation like today's host — but the room
-lives on the VPS, survives player churn, and the authority migrates
-automatically.
+**Milestone 1:** the server owns the room (registry, lifecycle, 24/7
+persistence, peer join/leave) and relays the co-op protocol.
 
-**Milestone 2 (next):** move the authoritative simulation onto the server
-(`Room.tick()` in `room.js`) so **no player** runs it. Protocol, rooms and
-lifecycle stay identical; only `tick()` starts producing `snap`.
+**Milestone 2 (live):** the authoritative simulation runs **on the server** —
+`GameRoom` (`sim/game-room.mjs`) drives the REAL game modules headless (World +
+EnemyManager + Pickups + Projectiles) and broadcasts `snap`. **No player** is the
+authority; every client — creator included — is a pure guest that renders the
+server's snapshots. Enable/disable with `WOODS_SIM` (default ON; `=0` falls back
+to the M1 client-authority relay).
+
+Classic **Create Co-op** still works entirely without this server (Firebase P2P,
+`js/net.js`); the **🖥️ Server** button is the server-hosted path (`js/netws.js`).
+The two transports coexist behind `multiplayer.js`'s `this.net` seam.
+
+> **Start via `boot.mjs`, never `index.js` directly.** The sim imports bare
+> `three`, resolved to `libs/three.module.js` by the ESM hook that `boot.mjs`
+> registers first. `node index.js` on a clean box (only `ws` installed) throws
+> `ERR_MODULE_NOT_FOUND: three`.
 
 ## Run locally
 
@@ -51,8 +59,9 @@ Description=Among The Woods server
 After=network.target
 [Service]
 WorkingDirectory=/opt/woods/server
-ExecStart=/usr/bin/node index.js
+ExecStart=/usr/bin/node boot.mjs
 Environment=PORT=8080
+# WOODS_SIM=0 to disable server-side sim (fall back to M1 client-authority relay)
 Restart=always
 RestartSec=2
 User=www-data
@@ -97,5 +106,6 @@ reason) whenever the box is down.
 | var | default | meaning |
 |-----|---------|---------|
 | `PORT` | `8080` | listen port |
-| `TICK_HZ` | `15` | server tick rate (drives `Room.tick` in M2) |
+| `WOODS_SIM` | `1` | server-side sim ON; `0` = M1 client-authority relay |
+| `TICK_HZ` | `15` | server tick rate (drives `Room.tick` → `GameRoom.tick`) |
 | `EMPTY_ROOM_TTL_MS` | `120000` | how long an empty room lingers for reconnects |
