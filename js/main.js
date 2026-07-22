@@ -160,6 +160,8 @@ const ADMIN_EMAIL = 'bondyfanfrankwild@gmail.com';
 function isAdmin() { return DEVMODE || authUser?.email === ADMIN_EMAIL; }
 const devDistanceRadius = DEVMODE ? new DevDistanceRadius(scene) : null;
 let worldEditor = null; // created lazily on first F2 (admin only)
+let openingEditor = false; // true while the menu shortcut is diving into the editor
+                           // — suppresses the survival New/Load character prompt
 const game = {
   mode: 'menu',   // menu | play | dead | won
   kind: 'survival', // survival | moba
@@ -2458,8 +2460,9 @@ function addWorldEditorMenuButton() {
   web.id = 'menu-world-editor';
   web.innerHTML = '🛠️ World Editor<br><small>Admin: sculpt the island</small>';
   web.addEventListener('click', () => {
+    openingEditor = true; // you're here to sculpt, not to play — skip New/Load
     startGame();
-    setTimeout(() => toggleWorldEditor(), 350);
+    setTimeout(() => { toggleWorldEditor(); openingEditor = false; }, 350);
   });
   modeSel.appendChild(web);
 }
@@ -3187,6 +3190,7 @@ $id('loadgame').querySelector('.panel-close').addEventListener('click', () => $i
 // prompt and just play new, exactly as before.
 let _startChoiceNewestId = null;
 async function maybeOfferStartChoice() {
+  if (openingEditor || game.editorView) return; // World Editor is not a play session
   if (!saveAvailable()) return;                 // pvp/moba have no saves
   if (saveIsCloud() && !authUser) return;       // co-op cloud needs sign-in
   let saves = [];
@@ -4220,6 +4224,7 @@ function toggleWorldEditor() {
     },
     onToggle: (on) => {
       game.editorView = on;
+      if (on) closeStartChoice(); // never leave the New/Load prompt over the editor
       document.body.classList.toggle('we-on', on); // hides the game HUD
       if (on && panels.open) panels.toggle(null);
       enemyMgr.zoneScale = on ? 3 : 1;   // mobs stay alive across the whole view
