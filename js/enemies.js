@@ -90,6 +90,8 @@ class Enemy {
     this.spellTimer = base.ranged ? base.spellCd * (0.5 + Math.random() * 0.5) : 0;
     this.pauseT = 0;
     this.stunT = 0;
+    this.stunDrT = 0;       // stun diminishing-returns window remaining
+    this.stunDrStacks = 0;  // hard stuns landed inside the current window
     this.armor = base.armor ?? (/golem|snapper|colossus/i.test(type) ? 0.34 : 0);
     this.armorBreak = 0;
     this.armorBreakT = 0;
@@ -651,7 +653,20 @@ export class EnemyManager {
   }
 
   stun(enemy, sec) {
-    if (!enemy.dying) enemy.stunT = Math.max(enemy.stunT, sec);
+    if (enemy.dying) return;
+    // Hard stuns (>=1 s) suffer diminishing returns: full, then 50%, then 25%,
+    // then immune, within an ~8 s window that each hard stun refreshes. Soft
+    // slows/staggers (<1 s — Blizzard/Storm ticks, Heavy Hands) are exempt so
+    // slow-zones keep working. This defuses the no-cost frost perma-lock (and
+    // warrior stun-chains) without touching any damage number.
+    if (sec >= 1) {
+      if (!(enemy.stunDrT > 0)) enemy.stunDrStacks = 0;
+      const scale = [1, 0.5, 0.25][enemy.stunDrStacks] ?? 0;
+      enemy.stunDrStacks = (enemy.stunDrStacks || 0) + 1;
+      enemy.stunDrT = 8;
+      sec *= scale;
+    }
+    if (sec > 0) enemy.stunT = Math.max(enemy.stunT, sec);
   }
 
   // Beastmaster charm: the beast fights at your side for a while, then reverts.
@@ -1061,6 +1076,7 @@ export class EnemyManager {
         }
       }
 
+      if (e.stunDrT > 0) e.stunDrT -= dt; // decay the stun-DR window in real time
       // stunned/frozen: no movement, no attacks
       if (e.stunT > 0) {
         e.stunT -= dt;

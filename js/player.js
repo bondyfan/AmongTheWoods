@@ -345,7 +345,7 @@ export class Player {
   // weapon in hand (bare hands don't count). Buffs, spells and heals are free.
   _abilityWeaponError(skill) {
     const BOW = new Set(['beast_arrow_haste', 'beast_ten_arrows', 'beast_arrow_rain',
-      'beast_piercing_shot', 'beast_explosive_arrow']);
+      'beast_piercing_shot', 'beast_explosive_arrow', 'beast_stampede']);
     if (BOW.has(skill.id) || ['multishot', 'markedShot', 'markedVolley'].includes(skill.action)) {
       return this.weapon.kind === 'bow' ? null : 'Equip a bow or crossbow first';
     }
@@ -385,9 +385,12 @@ export class Player {
       // Abilities with a windup charge for a moment before landing: the player
       // raises the weapon, a telegraph ring grows underfoot, and the strike
       // fires from update() once the timer runs out. Cooldown starts on impact.
-      if (classSkill.windup) {
+      // Pyroblast fires INSTANTLY while Combustion is up — the two fire buttons
+      // become one burst combo instead of two awkward standalones.
+      const windupT = (classSkill.id === 'mage_pyroblast' && this.combustionT > 0) ? 0 : classSkill.windup;
+      if (windupT) {
         this.castWindup = { skill: classSkill, rank, id,
-          t: classSkill.windup, dur: classSkill.windup,
+          t: windupT, dur: windupT,
           // lock the Shift-selected enemy in now so a long channel (Pyroblast)
           // still lands even after Shift is released mid-cast
           lockedTarget: NEEDS_TARGET.has(classSkill.action) ? this._selectedTarget : null };
@@ -733,9 +736,14 @@ export class Player {
         && enemy.hp / Math.max(1, enemy.maxHp) > skill.threshold);
       if (validHit) {
         const opts = {};
-        if (skill.bleedPct) opts.rend = {
-          dps: enemy.maxHp * rv('bleedPct') / Math.max(1, skill.bleedDur), dur: skill.bleedDur,
-        };
+        if (skill.bleedPct) {
+          // %-max-HP DoT. On bosses it's soft-capped to the player's own weapon
+          // output so it can't outscale the whole kit as boss HP balloons
+          // (uncapped it was the single worst outlier in the game).
+          let rendDps = enemy.maxHp * rv('bleedPct') / Math.max(1, skill.bleedDur);
+          if (enemy.bossRank > 0) rendDps = Math.min(rendDps, this.weapon.dmg * this.dmgMult * 1.5);
+          opts.rend = { dps: rendDps, dur: skill.bleedDur };
+        }
         if (skill.poison) opts.poison = { dps: rv('poison') * (1 + (this.classEffects.poisonPower || 0)), dur: 6 };
         let amount = this._classWeaponDamage(enemy, rv('weaponMult', 1));
         if (skill.backstab && this._isBehind(enemy)) amount *= 1.35 + rank * 0.15;
@@ -985,9 +993,17 @@ export class Player {
       for (const enemy of targets) {
         const crit = Math.random() < this.critChance + (this.bowCritBonus || 0);
         const dmg = this._classWeaponDamage(enemy, rv('weaponMult', 1)) * (crit ? CRIT_MULT : 1);
-        const bleedOpt = skill.bleed
-          ? { bleed: { dps: enemy.maxHp * rv('bleed') / 6, dur: 6 } }
-          : (this.classEffects.arrowBleed ? { bleed: { dps: this.weapon.dmg * this.classEffects.arrowBleed, dur: 5 } } : {});
+        let bleedOpt;
+        if (skill.bleed) {
+          // %-max-HP bleed, boss-soft-capped like Rend so it stays fine on trash
+          // but doesn't become an uncapped boss-melter.
+          let bDps = enemy.maxHp * rv('bleed') / 6;
+          if (enemy.bossRank > 0) bDps = Math.min(bDps, this.weapon.dmg * this.dmgMult * 1.2);
+          bleedOpt = { bleed: { dps: bDps, dur: 6 } };
+        } else {
+          bleedOpt = this.classEffects.arrowBleed
+            ? { bleed: { dps: this.weapon.dmg * this.classEffects.arrowBleed, dur: 5 } } : {};
+        }
         const opts = { ...(crit ? { crit: true } : {}), ...bleedOpt };
         damageTarget(enemy, dmg, Object.keys(opts).length ? opts : null);
         this._spawnMarkedArrow(ctx, enemy, tint);
