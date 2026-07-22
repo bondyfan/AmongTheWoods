@@ -719,6 +719,9 @@ export class Player {
     };
     const damageTarget = (enemy, amount, opts = null) => {
       if (!enemy) return false;
+      // Rupture: flagged AoE pops every active DoT on the target BEFORE the hit,
+      // turning remaining bleed/poison/rend/burn ticks into an instant burst.
+      if (skill.detonate) enemyMgr.detonateDots?.(enemy);
       enemyMgr.damage(enemy, amount, this.facing, 'local', opts);
       if (skill.classId === 'warrior' && Math.random() < (this.classEffects.staggerChance || 0)) {
         enemyMgr.stun?.(enemy, 0.8);
@@ -971,6 +974,7 @@ export class Player {
         ...(this.classEffects.arrowBleed ? { bleed: { dps: this.weapon.dmg * this.classEffects.arrowBleed, dur: 5 } } : {}),
       };
       damageTarget(enemy, dmg, Object.keys(opts).length ? opts : null);
+      enemyMgr.markPrey?.(enemy); // Prey Mark: the hunter's quarry takes +dmg from everyone
       if (skill.stun) enemyMgr.stun?.(enemy, rv('stun'));
       const tint = skill.poison ? 0x9bd94a : 0xffe08a;
       this._spawnMarkedArrow(ctx, enemy, tint);
@@ -1006,6 +1010,7 @@ export class Player {
         }
         const opts = { ...(crit ? { crit: true } : {}), ...bleedOpt };
         damageTarget(enemy, dmg, Object.keys(opts).length ? opts : null);
+        enemyMgr.markPrey?.(enemy); // Prey Mark on every volley target
         this._spawnMarkedArrow(ctx, enemy, tint);
         this._fxBurst(enemy.pos, tint, 8, 4, 0.45);
       }

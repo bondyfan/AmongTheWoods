@@ -1952,27 +1952,27 @@ const enemyMgr = new EnemyManager(scene, world, {
     for (let i = 0; i < piles; i++) {
       const amount = i === piles - 1 ? left : Math.ceil(enemy.meat / piles);
       left -= amount;
-      pickups.spawn('meat', amount, enemy.pos, 0.9 * enemy.sizeMult);
+      pickups.spawn('meat', amount, enemy.pos, 0.9 * enemy.sizeMult, null, true);
     }
     // big animals always drop their full hide (even if they chased you back
     // into the Verdant Forest); small critters there — and bats — leave a
     // scrap, with an occasional whole pelt so Lv3 hide gear is reachable early
-    if (enemy.type === 'sheep') pickups.spawn('wool', 1 + (Math.random() < 0.5 ? 1 : 0), enemy.pos, 0.8);
-    if (enemy.type === 'snapper' && Math.random() < 0.65) pickups.spawn('venom', 1, enemy.pos, 0.7);
+    if (enemy.type === 'sheep') pickups.spawn('wool', 1 + (Math.random() < 0.5 ? 1 : 0), enemy.pos, 0.8, null, true);
+    if (enemy.type === 'snapper' && Math.random() < 0.65) pickups.spawn('venom', 1, enemy.pos, 0.7, null, true);
     if (HIDE_BEARING.has(enemy.type)) {
-      pickups.spawn('hide', hideForLevel(enemy.level), enemy.pos, 1.1 * enemy.sizeMult);
+      pickups.spawn('hide', hideForLevel(enemy.level), enemy.pos, 1.1 * enemy.sizeMult, null, true);
     } else if (biomeIndexAt(enemy.pos.x, enemy.pos.z) === 0 || enemy.type === 'bat') {
-      pickups.spawn('hide', Math.random() < 0.1 ? 1 : VERDANT_HIDE_DROP, enemy.pos, 0.9);
+      pickups.spawn('hide', Math.random() < 0.1 ? 1 : VERDANT_HIDE_DROP, enemy.pos, 0.9, null, true);
     }
     // deep-woods kills bleed Ethereal Essence — the arcane currency
     if (!enemy.cfg.passive) {
       const ess = essenceDropFor(biomeIndexAt(enemy.pos.x, enemy.pos.z));
-      if (ess > 0) pickups.spawn('essence', ess, enemy.pos, 0.8);
+      if (ess > 0) pickups.spawn('essence', ess, enemy.pos, 0.8, null, true);
     }
     if (enemy.lairDrop) {
       // a NAMED lair boss: its unique item is GUARANTEED, plus a fat cache
-      pickups.spawn('item', enemy.lairDrop, enemy.pos, 0.4);
-      pickups.spawn('essence', 5, enemy.pos, 1.2);
+      pickups.spawn('item', enemy.lairDrop, enemy.pos, 0.4, null, true);
+      pickups.spawn('essence', 5, enemy.pos, 1.2, null, true);
       // in a dungeon the overworld poi list is swapped out — use the door ref
       const poi = (game.dungeon?.poi.id === enemy.lairId ? game.dungeon.poi : null)
         ?? world.pois?.find(p => p.id === enemy.lairId);
@@ -4384,7 +4384,7 @@ function confirmAbilityPlacement() {
   return true;
 }
 
-function placeHunterTrap(count = 1, power = 1, field = false) {
+function placeHunterTrap(count = 1, power = 1, field = false, dmgPct = 0.55, stun = 3.5) {
   if (game.kind !== 'survival' || player.selectedClass !== 'beastmaster' || player.dead || player.mounted) return false;
   for (let n = 0; n < count; n++) {
     const angle = count > 1 ? n / count * Math.PI * 2 : 0;
@@ -4407,7 +4407,7 @@ function placeHunterTrap(count = 1, power = 1, field = false) {
     }
     mesh.position.set(x, world.heightAt(x, z) + 0.07, z);
     scene.add(mesh);
-    hunterTraps.push({ mesh, x, z, power, life: 90, armT: 0.4 });
+    hunterTraps.push({ mesh, x, z, power, life: 90, armT: 0.4, dmgPct, stun });
     // a dust puff + a green arming-ring pulse as each trap latches into place
     player._fxBurst(new THREE.Vector3(x, world.heightAt(x, z) + 0.2, z), 0xbfae86, 6, 3, 0.4);
     player._spawnClassRing(new THREE.Vector3(x, world.heightAt(x, z), z), 1.1, 0x9bd94a, 0.5);
@@ -4431,9 +4431,9 @@ function updateHunterTraps(dt, enemyManager) {
       && Math.hypot(e.pos.x - trap.x, e.pos.z - trap.z) < 1.15 + (e.hitR || 0));
     if (!target) continue;
     const trapPower = (trap.power || 1) * (1 + (player.classEffects.trapPower || 0));
-    enemyManager.damage(target, Math.max(20, player.weapon.dmg * 0.55) * trapPower, null, 'local',
+    enemyManager.damage(target, Math.max(20, player.weapon.dmg * (trap.dmgPct ?? 0.55)) * trapPower, null, 'local',
       { bleed: { dps: 4 + player.level * 0.4, dur: 4 } });
-    enemyManager.stun?.(target, 3.5);
+    enemyManager.stun?.(target, trap.stun ?? 3.5);
     ui.popup(target.mesh.position.clone().setY(target.mesh.position.y + 1.8), '🪤 SNARED', '#d9e88a', 'big');
     player._fxBurst?.(target.pos, 0xaeb7ad, 12, 5, 0.45); // steel jaws snap shut
     player._spawnClassRing?.(target.pos, 1.3, 0xd9e88a, 0.4);
@@ -4460,8 +4460,8 @@ function healLocalCompanion(amount) {
 
 function handleClassWorldAction(action, skill, rank, ctx = {}) {
   const rv = (key, fallback = 0) => classRankValue(skill, key, rank, fallback);
-  if (action === 'trap') return placeHunterTrap(rv('count', 1), rv('power', 1), false);
-  if (action === 'trapField') return placeHunterTrap(rv('count', 3), rv('power', 1), true);
+  if (action === 'trap') return placeHunterTrap(rv('count', 1), rv('power', 1), false, rv('trapDmgPct', 0.55), rv('trapStun', 3.5));
+  if (action === 'trapField') return placeHunterTrap(rv('count', 3), rv('power', 1), true, rv('trapDmgPct', 0.55), rv('trapStun', 3.5));
   if (action === 'mendPet') {
     const wolf = companions.wolf;
     if (!wolf || player.petDead) {

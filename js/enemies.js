@@ -92,6 +92,8 @@ class Enemy {
     this.stunT = 0;
     this.stunDrT = 0;       // stun diminishing-returns window remaining
     this.stunDrStacks = 0;  // hard stuns landed inside the current window
+    this.markT = 0;         // Prey Mark remaining (takes +dmg from all sources)
+    this.markMult = 1;
     this.armor = base.armor ?? (/golem|snapper|colossus/i.test(type) ? 0.34 : 0);
     this.armorBreak = 0;
     this.armorBreakT = 0;
@@ -669,6 +671,37 @@ export class EnemyManager {
     if (sec > 0) enemy.stunT = Math.max(enemy.stunT, sec);
   }
 
+  // Prey Mark: the target takes more damage from ALL sources for a while.
+  // (Beastmaster marked shots light it up; every class's damage then reads it.)
+  markPrey(enemy, mult = 1.15, dur = 12) {
+    if (!enemy || enemy.dying) return;
+    enemy.markMult = Math.max(enemy.markMult || 1, mult);
+    enemy.markT = Math.max(enemy.markT || 0, dur);
+  }
+
+  // Rupture: consume every active DoT (poison/bleed/rend/burn) on an enemy,
+  // converting the remaining ticks into an instant burst + a splash to
+  // neighbours. DoTs already bypass armor, so the burst does too. Because the
+  // consumed DoT totals are themselves boss-soft-capped (rend/barbed), this is
+  // inherently boss-safe. No detonate flag on the inner hits = no recursion.
+  detonateDots(enemy, srcId = 'local') {
+    if (!enemy || enemy.dying) return 0;
+    let burst = 0;
+    for (const kind of ['poison', 'bleed', 'rend', 'burn']) {
+      const rem = Math.max(0, enemy[kind + 'T'] || 0) * Math.max(0, enemy[kind + 'Dps'] || 0);
+      if (rem > 0) { burst += 0.45 * rem; enemy[kind + 'T'] = 0; enemy[kind + 'Dps'] = 0; }
+    }
+    if (burst <= 0) return 0;
+    this.hooks.popup?.(enemy.mesh.position.clone().setY(enemy.mesh.position.y + 2.2), '💥', '#ff8a3a', 'big');
+    this.damage(enemy, burst, null, srcId, { armorPierce: 1, crit: true });
+    const splash = burst * 0.25;
+    if (splash > 0) for (const o of this.alive()) {
+      if (o === enemy || o.dying) continue;
+      if (o.pos.distanceTo(enemy.pos) <= 3 + (o.hitR || 0)) this.damage(o, splash, null, srcId, { armorPierce: 1 });
+    }
+    return burst;
+  }
+
   // Beastmaster charm: the beast fights at your side for a while, then reverts.
   tameBeast(enemy, dur = 20) {
     if (!enemy || enemy.dying || enemy.dead) return false;
@@ -691,6 +724,7 @@ export class EnemyManager {
     const armor = Math.max(0, (enemy.armor || 0) - (enemy.armorBreak || 0));
     const armorPierce = Math.max(0, Math.min(1, opts?.armorPierce || 0));
     dmg *= 1 - armor * (1 - armorPierce);
+    if (enemy.markT > 0) dmg *= enemy.markMult || 1; // Prey Mark: +dmg from ALL sources
     enemy.hp -= dmg;
     enemy.aggroed = true;
     enemy.returning = false; // getting hit re-engages a leashed enemy
@@ -1077,6 +1111,7 @@ export class EnemyManager {
       }
 
       if (e.stunDrT > 0) e.stunDrT -= dt; // decay the stun-DR window in real time
+      if (e.markT > 0) e.markT -= dt;     // Prey Mark expires
       // stunned/frozen: no movement, no attacks
       if (e.stunT > 0) {
         e.stunT -= dt;

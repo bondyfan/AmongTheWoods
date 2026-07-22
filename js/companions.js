@@ -124,7 +124,10 @@ class GuardianSphere {
       .slice(0, orb.targets);
 
     if (inRange.length) {
-      this.shootCd = 1.1 / Math.max(0.1, 1 + (player.classEffects?.petSpeed || 0));
+      // Mage spheres: fire-rate scales off the Mage's OWN cooldown passive
+      // (Arcane Focus). It used to read petSpeed — a Beastmaster-only stat the
+      // Mage can never have — so the scaling was permanently dead.
+      this.shootCd = 1.1 * Math.max(0.4, 1 - (player.classEffects?.classCdReduction || 0));
       audio.sfx('attack_ranged', 0.22, 150);
       for (const { e } of inRange) {
         projectiles.spawnBolt(this.mesh.position.clone(), e, {
