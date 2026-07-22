@@ -48,6 +48,7 @@ class PetWolf {
     if (!target && mode !== 'passive') {
       for (const e of enemyMgr.alive()) {
         if (mode === 'defensive' && !e.aggroed) continue;
+        if (e.cfg?.friendly || e.cfg?.passive) continue; // never maul guards/villagers
         const d2 = e.pos.distanceToSquared(player.pos);
         if (d2 < best) { best = d2; target = e; }
       }
@@ -118,6 +119,7 @@ class GuardianSphere {
     if (this.shootCd > 0) return;
 
     const inRange = enemyMgr.alive()
+      .filter(e => !e.cfg?.friendly) // spheres don't zap the village guards
       .map(e => ({ e, d2: e.pos.distanceToSquared(player.pos) }))
       .filter(o => o.d2 < 15 * 15)
       .sort((a, b) => a.d2 - b.d2)

@@ -730,7 +730,8 @@ export function makeMan() {
 
   g.add(leftLeg, rightLeg, torso, head, hair, leftEye, rightEye, leftPupil, rightPupil, leftArm, rightArm);
   g.userData = { leftLeg, rightLeg, leftArm, rightArm, rightSocket, leftSocket,
-                 torso, armL: la, armR: ra, leaf, capSlot, hair };
+                 torso, armL: la, armR: ra, leaf, capSlot, hair,
+                 legs: [leftLeg, rightLeg] }; // enemies.js drives `legs` — villagers walk
   return g;
 }
 
@@ -2246,6 +2247,38 @@ export function makeTribesman() {
   return g;
 }
 
+// Village guard: mailed shoulders, a steel kettle helm, spear and a round
+// shield — reads as "the law" next to the bare-headed villagers.
+export function makeSoldier() {
+  const g = humanoid({ fur: 0x5a6470, face: 0xc9a980, eyes: 0xdfe8f0, width: 0.78, height: 0.95 });
+  const tabard = box(0.6, 0.72, 0.12, 0x8a2f2a); // guard-red over the mail
+  tabard.position.set(0, 1.2, -0.31);
+  g.add(tabard);
+  const belt = box(0.98, 0.12, 0.62, 0x3a2c1c);
+  belt.position.y = 0.78;
+  g.add(belt);
+  const helm = box(0.56, 0.22, 0.54, 0x9aa4ae);
+  helm.position.y = 0.22;
+  g.userData.head.add(helm);
+  const brim = box(0.7, 0.06, 0.68, 0x8a949e);
+  brim.position.y = 0.12;
+  g.userData.head.add(brim);
+  const spear = box(0.07, 1.7, 0.07, 0x6a5236);
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.28, 5), mat(0xc9cdd4));
+  tip.position.y = 0.95;
+  spear.add(tip);
+  spear.position.set(0, -0.55, 0);
+  g.userData.arms[1].add(spear);
+  const shield = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.07, 10), mat(0x74513a));
+  shield.rotation.z = Math.PI / 2;
+  shield.position.set(-0.1, -0.5, 0);
+  const boss = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 6), mat(0x9aa4ae));
+  boss.position.x = -0.06;
+  shield.add(boss);
+  g.userData.arms[0].add(shield);
+  return g;
+}
+
 export function makeShaman() {
   const g = humanoid({ fur: 0x3c3a4c, face: 0x8a9a6a, eyes: 0xb26fff, width: 0.75, height: 0.9 });
   const robe = box(0.85, 0.7, 0.55, 0x4a3c5c);
@@ -2641,6 +2674,7 @@ export function makeEnemyMesh(type) {
     case 'shaman': return makeShaman();
     case 'poacher': return makePoacher();
     case 'villager': return makeMan();
+    case 'soldier': return makeSoldier();
     case 'thornling': return makeThornling();
     case 'treant': return makeTreant();
     case 'bogCrawler': return makeBogCrawler();

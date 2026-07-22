@@ -10,6 +10,7 @@ import { audio } from './audio.js';
 
 const MAGNET_RADIUS = 3.2;
 const COLLECT_RADIUS = 0.9;
+export const BURST_T = 1.0; // s — mob-drop pop: spawns 3× size, shrinks, untouchable
 
 let nextPickupId = 1;
 
@@ -24,7 +25,9 @@ export class Pickups {
 
   // kind: 'meat'|'wood'|'stone'|'hide'|'iron'|'item'; payload: amount (or itemId).
   // lock = {id, t}: the player who dropped it can't take it back for t seconds.
-  spawn(kind, payload, pos, scatter = 0.8, lock = null) {
+  // burst: mob loot pops out of the corpse 3× size and shrinks over BURST_T
+  // seconds — it can't be picked up (or magnetized) until the pop finishes.
+  spawn(kind, payload, pos, scatter = 0.8, lock = null, burst = false) {
     if (kind !== 'item') payload = roundResource(payload);
     const makers = { meat: makeMeatDrop, wood: makeWoodDrop, stone: makeStoneDrop,
                      hide: makeHideDrop, iron: makeIronDrop, berry: makeBerryDrop,
@@ -34,12 +37,20 @@ export class Pickups {
     const x = pos.x + (Math.random() - 0.5) * scatter * 2;
     const z = pos.z + (Math.random() - 0.5) * scatter * 2;
     mesh.position.set(x, this.world.heightAt(x, z) + 0.45, z);
-    this.scene.add(mesh);
-    this.list.push({
+    const p = {
       id: nextPickupId++, kind, payload, mesh,
       x, z, t: Math.random() * 6, magnet: false,
       lockId: lock?.id ?? null, lockT: lock?.t ?? 0,
-    });
+      burst: !!burst, age: 0,
+    };
+    if (burst) {
+      // launch from the corpse itself; update() arcs it out to (x, z)
+      p.sx = pos.x; p.sz = pos.z;
+      mesh.position.set(p.sx, this.world.heightAt(p.sx, p.sz) + 0.8, p.sz);
+      mesh.scale.setScalar(3);
+    }
+    this.scene.add(mesh);
+    this.list.push(p);
   }
 
   // targets: players that attract loot (solo: [player]; co-op host: both).
@@ -47,7 +58,22 @@ export class Pickups {
     for (let i = this.list.length - 1; i >= 0; i--) {
       const p = this.list[i];
       p.t += dt;
+      p.age += dt;
       if (p.lockT > 0) p.lockT -= dt;
+
+      // mob-loot pop: fly out of the corpse oversized, shrink to normal over
+      // BURST_T, and stay untouchable (no magnet, no collect) until done
+      if (p.burst && p.age < BURST_T) {
+        const k = p.age / BURST_T;
+        p.mesh.scale.setScalar(3 - 2 * k);
+        const ax = p.sx + (p.x - p.sx) * k;
+        const az = p.sz + (p.z - p.sz) * k;
+        const ground = this.world.heightAt(ax, az) + 0.45;
+        p.mesh.position.set(ax, ground + Math.sin(k * Math.PI) * 1.1, az);
+        p.mesh.rotation.y += dt * 4;
+        continue;
+      }
+      if (p.burst) { p.burst = false; p.mesh.scale.setScalar(1); }
 
       // nearest living target (the dropper is locked out for a while)
       let target = null, dist = Infinity;
@@ -88,7 +114,15 @@ export class Pickups {
       i: p.id, k: p.kind, pl: p.payload,
       x: +p.mesh.position.x.toFixed(1), z: +p.mesh.position.z.toFixed(1),
       ...(p.lockT > 0 && p.lockId === 'partner' ? { o: 1 } : {}),
+      // still popping out of the corpse: guest mirrors the shrink locally
+      ...(p.burst && p.age < BURST_T ? { b: +(BURST_T - p.age).toFixed(2) } : {}),
     }));
+  }
+
+  // a pickup the player may actually take (guest collect requests check this)
+  collectible(id) {
+    const p = this.list.find(q => q.id === id);
+    return !!p && !(p.burst && p.age < BURST_T);
   }
 
   removeById(id) {

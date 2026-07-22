@@ -166,7 +166,12 @@ export class UI {
     const combat = [];
     if (player.blocking) combat.push(player.weapon.parry ? 'PARRY' : 'BLOCK');
     if (player.weapon.style === 'bow') combat.push(`${player.arrowMode.toUpperCase()} · Z`);
-    $('weapon-display').innerHTML = `${itemIcon(weapon)} ${weapon.name}`
+    // durability: silent while healthy, an amber count when low, red when broken
+    const wearLeft = player.weaponWearLeft?.(player.equipment.weapon);
+    let dur = '';
+    if (player.weaponBrokenNow) dur = ' <span style="color:#ff6b5e">💔 BROKEN — smith repairs free</span>';
+    else if (Number.isFinite(wearLeft) && wearLeft <= 40) dur = ` <span style="color:#ffcc66">⚠ ${wearLeft}</span>`;
+    $('weapon-display').innerHTML = `${itemIcon(weapon)} ${weapon.name}${dur}`
       + `<span class="combat-state">${combat.join(' · ')}</span>`;
 
     this.updateBuffBar(player);

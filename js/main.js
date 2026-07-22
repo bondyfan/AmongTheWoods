@@ -1945,6 +1945,9 @@ function discoverType(type) {
 const enemyMgr = new EnemyManager(scene, world, {
   popup: (pos, text, color, cls) => ui.popup(pos, text, color, cls),
   onKill: (enemy) => {
+    // a fallen village guard yields nothing — no XP, meat or hide (and no
+    // quest credit); killing the law is its own punishment
+    if (enemy.cfg?.friendly) return;
     // kill XP is SHARED: every player within 100 m of the kill is rewarded —
     // 75% each when both share, the full amount when only one collects. The
     // +XP counter pops above the CHARACTER, not the corpse.

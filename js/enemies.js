@@ -304,6 +304,19 @@ export class EnemyManager {
       }
     }
 
+    // the generated Verdant hamlet: peasants on the square, two level-20
+    // soldiers holding the gate (pinned at their posts)
+    const vlg = this.world?.village;
+    if (vlg && Math.abs(vlg.x - cx) <= ZONE / 2 && Math.abs(vlg.z - cz) <= ZONE / 2) {
+      const gid = nextGroupId++;
+      for (let i = 0; i < 8; i++) {
+        pool.push({ type: 'villager', groupId: gid, at: { x: vlg.x, z: vlg.z } });
+      }
+      for (const g of vlg.guards) {
+        pool.push({ type: 'soldier', groupId: nextGroupId++, at: { x: g.x, z: g.z } });
+      }
+    }
+
     // World-Editor placed camps: fixed packs that always live at their
     // pinned spot in this cell (count / boss rank / camp flag from the patch)
     for (const pk of worldPatch.packsIn(cx, cz, ZONE)) {
@@ -812,10 +825,128 @@ export class EnemyManager {
     this.hooks.onKill(enemy);
   }
 
+  // a friendly guard as an attackable combat target (petProxy shape) — mobs
+  // can only strike entries of the targets array, so this is what lets them
+  // fight back. Cached per unit; threat lands via the 'npc<id>' src id.
+  _npcProxy(e) {
+    if (e._npcProxy) return e._npcProxy;
+    const mgr = this;
+    e._npcProxy = {
+      id: 'npc' + e.id,
+      get pos() { return e.pos; },
+      get dead() { return !!e.dying; },
+      get level() { return e.level; },
+      hitR: e.hitR,
+      takeDamage: (dmg, src) => {
+        if (src?.id != null) { e.guardFoeId = src.id; e.guardCombatT = 6; }
+        mgr.damage(e, dmg, null, src?.id != null ? 'e' + src.id : 'local');
+      },
+      applyStun: (s) => mgr.stun(e, s),
+    };
+    return e._npcProxy;
+  }
+
+  // ---- VILLAGE GUARD AI: hold the post; any hostile that steps within
+  // ENGAGE metres of the soldier gets run through. Chases to a short leash,
+  // then walks back to the gate. ----
+  _updateFriendly(e, dt) {
+    e.postX ??= e.pos.x; e.postZ ??= e.pos.z;
+    const ENGAGE = 3, LEASH = 24;
+    e.guardCombatT = Math.max(0, (e.guardCombatT ?? 0) - dt);
+    if (e.stunDrT > 0) e.stunDrT -= dt;
+    if (e.stunT > 0) { // guards can be staggered like anyone else
+      e.stunT -= dt;
+      e.mesh.position.set(e.pos.x, this.world.heightAt(e.pos.x, e.pos.z), e.pos.z);
+      return;
+    }
+
+    const hostile = (o) => o && o !== e && !o.dying && !o.cfg.friendly
+      && !o.cfg.passive && !(o.tamedT > 0) && !o.escaping;
+
+    // keep the current foe while it lives and stays near the post…
+    let foe = null;
+    if (e.guardFoe && hostile(e.guardFoe)
+        && Math.hypot(e.guardFoe.pos.x - e.postX, e.guardFoe.pos.z - e.postZ) < LEASH) {
+      foe = e.guardFoe;
+    }
+    // …or whoever just struck the guard…
+    if (!foe && e.guardFoeId != null) {
+      const hit = this.list.find(o => o.id === e.guardFoeId);
+      e.guardFoeId = null;
+      if (hostile(hit)) foe = hit;
+    }
+    // …otherwise draw steel on any hostile inside the engage ring
+    if (!foe) {
+      let fd = ENGAGE;
+      for (const o of this.list) {
+        if (!hostile(o)) continue;
+        const d = Math.hypot(o.pos.x - e.pos.x, o.pos.z - e.pos.z);
+        if (d < fd + (o.hitR || 0)) { fd = d; foe = o; }
+      }
+    }
+    e.guardFoe = foe;
+    if (foe) e.guardCombatT = Math.max(e.guardCombatT, 4);
+
+    // move: close on the foe, else walk home to the post
+    let vx = 0, vz = 0;
+    const goal = foe ? foe.pos : { x: e.postX, z: e.postZ };
+    const dx = goal.x - e.pos.x, dz = goal.z - e.pos.z;
+    const gd = Math.hypot(dx, dz) || 1;
+    const keep = foe ? Math.max(0.6, e.range * 0.75 + (foe.hitR || 0) * 0.5) : 0.3;
+    if (gd > keep) { vx = (dx / gd) * e.speed; vz = (dz / gd) * e.speed; }
+    // shoulder-room from everyone nearby
+    for (const o of this.list) {
+      if (o === e || o.dying) continue;
+      const sx = e.pos.x - o.pos.x, sz = e.pos.z - o.pos.z;
+      const d2 = sx * sx + sz * sz;
+      if (d2 < 1.44 && d2 > 1e-6) { const d = Math.sqrt(d2); vx += (sx / d) * 3; vz += (sz / d) * 3; }
+    }
+    e.pos.x += vx * dt; e.pos.z += vz * dt;
+    this.world.collide(e.pos, 0.4);
+
+    // strike — threat lands on the guard's own proxy id, pulling the mob off
+    // the villagers (and the player) and onto the soldier
+    e.attackCd -= dt;
+    if (foe && Math.hypot(foe.pos.x - e.pos.x, foe.pos.z - e.pos.z) < e.range + (foe.hitR || 0)
+        && e.attackCd <= 0) {
+      e.attackCd = e.cfg.attackCd;
+      e.lungeT = 0.25;
+      this.damage(foe, e.meleeDmg,
+        new THREE.Vector3(foe.pos.x - e.pos.x, 0, foe.pos.z - e.pos.z), 'npc' + e.id);
+      audio.sfx?.('attack_melee', 0.3, 60);
+    }
+
+    // presentation: face the foe (or stand easy facing out the gate)
+    const spd = Math.hypot(vx, vz);
+    if (foe || spd > 0.1) {
+      const fx = foe ? foe.pos.x - e.pos.x : vx, fz = foe ? foe.pos.z - e.pos.z : vz;
+      if (fx || fz) e.mesh.rotation.y = Math.atan2(fx, fz) + Math.PI;
+      e.walkT += dt * Math.max(2, spd);
+    } else if (this.world.village) {
+      const v = this.world.village;
+      e.mesh.rotation.y = Math.atan2(v.dirX, v.dirZ) + Math.PI;
+      e.walkT += dt * 0.6; // easy breathing sway at the post
+    }
+    const ud = e.mesh.userData;
+    (ud.legs || []).forEach((leg, li) => {
+      leg.rotation.x = spd > 0.1 ? Math.sin(e.walkT * 2.2 + (li % 2) * Math.PI) * 0.6 : 0;
+    });
+    if (e.lungeT > 0) e.lungeT -= dt;
+    e.mesh.position.set(e.pos.x, this.world.heightAt(e.pos.x, e.pos.z), e.pos.z);
+    e.mesh.scale.setScalar(e.sizeMult);
+  }
+
   // targets: array of { pos, dead, takeDamage(d), applyStun?(s) } — the local
   // player solo, or both players in co-op (the remote one via a network proxy).
   update(dt, targets, projectiles) {
     const anchor = this._anchor(targets);
+
+    // village guards IN COMBAT join the target list as attackable proxies, so
+    // a mob they strike turns on them (threat matches the proxy id). Idle
+    // guards stay invisible to mob aggro — nothing picks a fight at the gate
+    // until the guard swings first (or something hits him).
+    const fighting = this.list.filter(e => e.cfg.friendly && !e.dying && (e.guardCombatT ?? 0) > 0);
+    if (fighting.length) targets = targets.concat(fighting.map(e => this._npcProxy(e)));
 
     // suspended while a lair dungeon is open: no ambient zone spawning
     if (!this.suspend) {
@@ -949,6 +1080,14 @@ export class EnemyManager {
         e.mesh.position.set(e.pos.x, ground + Math.max(0, e.dropT) * 7, e.pos.z);
         e.mesh.rotation.y += dt * 2;
         if (e.dropT <= 0) e.aggroed = true; // hits the ground furious
+        continue;
+      }
+
+      // ---- friendly village guards run their own post-holding AI (before
+      // mob target selection — a guard must never count as "aggroed" or the
+      // player would sit in permanent combat at the village gate) ----
+      if (e.cfg.friendly) {
+        this._updateFriendly(e, dt);
         continue;
       }
 

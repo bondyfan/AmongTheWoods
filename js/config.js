@@ -371,6 +371,9 @@ export const ENEMY_TYPES = {
   villager: { name: 'Villager', icon: '🧑‍🌾',
              hpMult: 0.3,  dmgMult: 0,  speed: 2.3, range: 0,   attackCd: 1.0, xpMult: 0.2,  hitR: 0.4, aggro: 0,
              passive: true, herd: [3, 6] },
+  soldier: { name: 'Village Guard', icon: '💂',
+             hpMult: 1.0,  dmgMult: 1.0, speed: 5.2, range: 1.7, attackCd: 1.1, xpMult: 0, hitR: 0.5, aggro: 0,
+             friendly: true, fixedLevel: 20 },
   griffinChick: { name: 'Griffin Fledgling', icon: '🐤',
              hpMult: 0.8, dmgMult: 0.75, speed: 3.8, range: 1.4, attackCd: 1.0, xpMult: 0.6, hitR: 0.55, aggro: 22,
              flying: true },
@@ -417,6 +420,7 @@ const enemyThreat = (t) => {
 
 export function enemyLevelFor(type, difficulty = 0, bossRank = 0, elite = false) {
   const cfg = ENEMY_TYPES[type] ?? {};
+  if (cfg.fixedLevel) return cfg.fixedLevel; // village guards are Lv20 anywhere
   const biomeIndex = biomeIndexForDifficulty(difficulty);
   const [lo, hi] = ZONE_LEVEL_BANDS[biomeIndex];
   if (cfg.passive) return lo;

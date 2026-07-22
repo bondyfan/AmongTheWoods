@@ -308,6 +308,9 @@ class ShadowWorld {
       }
       s.x = p.x; s.z = p.z;
       s.locked = !!p.o; // my own drop — hands off for a few seconds
+      // mob-loot pop still running on the host: mirror the oversized shrink
+      // locally (burstT counts down in the bob loop) and don't grab it yet
+      if (p.b !== undefined) s.burstT = Math.max(s.burstT ?? 0, p.b);
     }
     for (const [id, s] of this.pickups) {
       if (!pickIds.has(id)) { this.scene.remove(s.mesh); this.pickups.delete(id); this.pendingCollect.delete(id); }
@@ -420,6 +423,12 @@ class ShadowWorld {
       s.t += dt;
       s.mesh.position.y = this.world.heightAt(s.x, s.z) + 0.45 + Math.sin(s.t * 3) * 0.12;
       s.mesh.rotation.y += dt * 1.2;
+      // mirrored mob-loot pop: oversized and untouchable until the timer runs out
+      if (s.burstT > 0) {
+        s.burstT -= dt;
+        s.mesh.scale.setScalar(s.burstT > 0 ? 1 + 2 * s.burstT : 1);
+        if (s.burstT > 0) continue;
+      }
       if (!this.pendingCollect.has(s.id) && !localPlayer.dead && !s.locked) {
         const d = Math.hypot(localPlayer.pos.x - s.x, localPlayer.pos.z - s.z);
         if (d < 3.0) {
@@ -1389,6 +1398,7 @@ export class Multiplayer {
       case 'collect': { // co-op host: partner wants pickup #id
         const cand = ctx.pickups.list.find(x => x.id === ev.id);
         if (cand && cand.lockT > 0 && cand.lockId === 'partner') break; // still theirs-locked
+        if (cand && !ctx.pickups.collectible(ev.id)) break; // mob-loot pop still running
         const pk = ctx.pickups.removeById(ev.id);
         if (pk) this.onRemoteCollect(pk);
         break;

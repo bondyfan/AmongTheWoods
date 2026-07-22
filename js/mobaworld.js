@@ -73,6 +73,7 @@ export class MobaWorld extends World {
   _genRings() { this.rings = []; this.edges = []; this.hubGates = []; this.borderLines = []; this.gateList = []; }
   _genLakes() { this.lakes = []; }   // no lakes (keeps lanes reliable)
   _genPois() { this.pois = []; }     // no survival landmarks either
+  _genVillage() { this.village = null; } // the hamlet is a survival thing
   _genSmiths() { this.smiths = []; }
   _genPaths() { this.pathPts = []; this._pathBuckets = new Map(); }
   lakesNear() { return []; }

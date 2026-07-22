@@ -229,6 +229,7 @@ export class Camp {
         if (!t) return;
         let best = null, bd = 20;
         for (const e of enemyMgr.alive()) {
+          if (e.cfg?.friendly || e.cfg?.passive) continue; // hold fire on friendlies
           const d = Math.hypot(e.pos.x - t.position.x, e.pos.z - t.position.z);
           if (d < bd) { bd = d; best = e; }
         }

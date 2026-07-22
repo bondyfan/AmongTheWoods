@@ -194,6 +194,7 @@ export class World {
     this._genRings();
     this._genLakes();
     this._genPois();
+    this._genVillage();
     this._genSmiths();
     this._genPaths();
     this._buildGround();
@@ -238,6 +239,7 @@ export class World {
     this._genRings();
     this._genLakes();
     this._genPois();
+    this._genVillage();
     this._genSmiths();
     this._genPaths();
     this._buildGround();
@@ -752,6 +754,12 @@ export class World {
           pts: [{ x: 0, z: 26 }, ...trail(0, 26, dead.x, dead.z, 30)] });
       }
     }
+    // the village road: camp → the hamlet's street mouth (its guards' gate)
+    if (this.village) {
+      const e = this.village.entry;
+      this.branches.push({ kind: 'deadend',
+        pts: [{ x: 0, z: 26 }, ...trail(0, 26, e.x, e.z, 40)] });
+    }
     // harbor spurs: a trail from each harbor's country down to its pier
     for (const h of this.harbors ?? []) {
       const from = h.id === 'jungle' ? hearts[2] : entered[7];
@@ -787,6 +795,7 @@ export class World {
   pathDistance(x, z) {
     if (worldPatch.pathAt(x, z)) return 0;      // World-Editor painted road
     if (worldPatch.townRoadAt?.(x, z)) return 0; // auto lanes between buildings
+    if (this.villageRoadAt(x, z)) return 0;      // the hamlet's main street
     if (!this._pathBuckets?.size) return Infinity;
     const segs = this._pathBuckets.get(
       Math.floor(x / this._pathCellB) + ',' + Math.floor(z / this._pathCellB));
@@ -940,6 +949,78 @@ export class World {
     return this.pois.filter(p => Math.hypot(p.x - x, p.z - z) < radius);
   }
 
+  // ---- the Verdant village: a hamlet of ten houses on a cobbled street,
+  // a fountain square, THE valley blacksmith and two guards at the gate.
+  // Seeded like every landmark, so all clients build the identical village. ----
+  _genVillage() {
+    const rng = mulberry32(this.seed ^ 0x7a11a6e);
+    this.village = null;
+    for (let t = 0; t < 60; t++) {
+      const a = rng() * Math.PI * 2;
+      const r = 320 + rng() * 260; // well inside the valley, but a real walk
+      const x = Math.sin(a) * r, z = Math.cos(a) * r;
+      const zi = zoneInfoAt(x, z, true);
+      if (zi.idx !== 0 || zi.borderDist < 100) continue;
+      if (this.lakesNear(x, z).some(l => Math.hypot(x - l.x, z - l.z) < l.r + 40)) continue;
+      if (this.pois.some(p => Math.hypot(p.x - x, p.z - z) < 70)) continue;
+
+      // main street points home: the entry (and its guards) face the camp
+      const dl = Math.hypot(x, z) || 1;
+      const dirX = -x / dl, dirZ = -z / dl;       // toward the valley camp
+      const perX = -dirZ, perZ = dirX;
+      const spot = (along, side) =>
+        ({ x: x + dirX * along + perX * side, z: z + dirZ * along + perZ * side });
+
+      // two rows of five houses flanking the street, doors facing it
+      const buildings = [];
+      let wet = false;
+      for (let i = 0; i < 5; i++) {
+        const along = -26 + i * 13 + (rng() - 0.5) * 3;
+        for (const side of [-9.5, 9.5]) {
+          const p = spot(along + (side > 0 ? 6 : 0), side + (rng() - 0.5) * 2);
+          if (this.isWater(p.x, p.z)) { wet = true; break; }
+          buildings.push({ ...p, type: 'house',
+            rot: Math.atan2(perX, perZ) + (side > 0 ? Math.PI : 0) + (rng() - 0.5) * 0.2,
+            seed: (this.seed ^ 0x7a11a6e) + i * 2 + (side > 0 ? 1 : 0) });
+        }
+        if (wet) break;
+      }
+      if (wet || buildings.length < 10) continue;
+      const fountain = { ...spot(0, 0), type: 'fountain', rot: 0, seed: 7 };
+      buildings.push(fountain);
+
+      const smith = spot(-34, 0);                 // the forge anchors the far end
+      if (this.isWater(smith.x, smith.z)) continue;
+      const entry = spot(34, 0);                  // street mouth toward the camp
+      const guards = [spot(31, -3), spot(31, 3)]; // two soldiers flank the gate
+      this.village = { x, z, dirX, dirZ, entry, smith, guards, buildings };
+      break;
+    }
+  }
+
+  // 0 = wild ground · 2 = the village's cobblestone (same look as a patch town)
+  villageGroundAt(x, z) {
+    const v = this.village;
+    if (!v || Math.abs(x - v.x) > 55 || Math.abs(z - v.z) > 55) return 0;
+    for (const b of v.buildings) {
+      if (Math.hypot(x - b.x, z - b.z) < 13) return 2;
+    }
+    if (Math.hypot(x - v.smith.x, z - v.smith.z) < 12) return 2;
+    return 0;
+  }
+
+  // on the village main street (entry → forge)?
+  villageRoadAt(x, z) {
+    const v = this.village;
+    if (!v || Math.abs(x - v.x) > 55 || Math.abs(z - v.z) > 55) return false;
+    const ax = v.entry.x, az = v.entry.z, bx = v.smith.x, bz = v.smith.z;
+    const dx = bx - ax, dz = bz - az;
+    const len2 = dx * dx + dz * dz || 1;
+    let t = ((x - ax) * dx + (z - az) * dz) / len2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(x - (ax + dx * t), z - (az + dz * t)) < 2.4;
+  }
+
   // Blacksmiths camp in ~300 m grid cells (roughly as common as a sheep
   // herd) — weapons & gear can only be forged at one.
   _genSmiths() {
@@ -956,6 +1037,7 @@ export class World {
         const r = radiusOf(x, z);
         if (r < 70 || coastDistAt(x, z) < 45) continue;
         const zi = zoneInfoAt(x, z);
+        if (zi.idx === 0) continue; // the valley smith works in the VILLAGE now
         if (zi.borderDist < 18) continue;
         if (this.lakesNear(x, z).some(l => Math.hypot(x - l.x, z - l.z) < l.r + 6)) continue;
         this.smiths.push({ id: id++, x, z, obstacleAdded: false });
@@ -963,6 +1045,13 @@ export class World {
         // runs before genSmiths and creates it; be safe either way)
         if (zi.idx === 3) (this._dryIslands ??= []).push({ x, z, r: 22 });
       }
+    }
+
+    // the village blacksmith — a fixed id far above the ~200 grid cells so it
+    // can never collide with a generated id (patch smiths start at 100000)
+    if (this.village) {
+      this.smiths.push({ id: 90000, x: this.village.smith.x, z: this.village.smith.z,
+        obstacleAdded: false });
     }
 
     // World-Editor overrides (delete / move / add blacksmith camps)
@@ -1282,8 +1371,9 @@ export class World {
     }
 
     // towns: packed pads around placed buildings; ten-plus buildings make
-    // a real town — cobblestone squares with knitted lanes
-    const tg = worldPatch.buildingGroundAt?.(x, z) ?? 0;
+    // a real town — cobblestone squares with knitted lanes (the generated
+    // Verdant village reads exactly like a full town)
+    const tg = Math.max(worldPatch.buildingGroundAt?.(x, z) ?? 0, this.villageGroundAt(x, z));
     if (tg === 2) {
       out.set(0x8f8c86).lerp(_gcTmp.set(0x7a776f), grassMix);
       const cobble = latticeHash(Math.round(x * 1.3), Math.round(z * 1.3), 77);
@@ -1599,6 +1689,7 @@ export class World {
     this._patchObstacles.clear();
     this.obstacles = this.obstacles.filter(o => !o.tag);
     for (const sm of this.smiths) sm.obstacleAdded = false;
+    for (const b of this.village?.buildings ?? []) b.obstacleAdded = false;
     this._genPois();
     this._genSmiths();
     this._genPaths();
@@ -1862,6 +1953,7 @@ export class World {
         if (this.isWater(ccx, ccz)) continue;               // water / lakes / bog
         if (this.pathDistance(ccx, ccz) < 3.5) continue;    // keep trails clear
         if (worldPatch.buildingGroundAt?.(ccx, ccz)) continue; // town squares
+        if (this.villageGroundAt(ccx, ccz)) continue;       // village cobbles
         // ONE height sample per cell (short grass; a flat cell disc is fine) —
         // per-blade heightAt was the whole cost of the dense fill
         const cy = this.heightAt(ccx, ccz);
@@ -1916,6 +2008,7 @@ export class World {
     if (r < 14 || coastDistAt(x, z) < 8) return false;              // cave + beach/sea
     if (this.isWater(x, z)) return false;                           // nothing grows in water
     if (worldPatch.buildingGroundAt?.(x, z)) return false;          // town squares stay clear
+    if (this.villageGroundAt(x, z)) return false;                   // village cobbles too
     if (x > -13 && x < 16 && z > 8 && z < 24) return false;         // camp building spots
     if (this._hasBorders && zoneInfoAt(x, z).borderDist < 6) return false; // border bands
     if (this.pathDistance(x, z) < 4.5) return false;                // keep trails clear
@@ -2469,12 +2562,33 @@ export class World {
       if (sm.x < cxw || sm.x >= cxw + CHUNK || sm.z < czw || sm.z >= czw + CHUNK) continue;
       const mesh = bakeGroup(makeBlacksmith());
       mesh.position.set(sm.x, this.heightAt(sm.x, sm.z), sm.z);
-      mesh.rotation.y = (sm.id * 1.7) % (Math.PI * 2);
+      // the village smith faces up the street; wanderers spin per their id
+      mesh.rotation.y = (sm.id === 90000 && this.village)
+        ? Math.atan2(this.village.dirX, this.village.dirZ)
+        : (sm.id * 1.7) % (Math.PI * 2);
       group.add(mesh);
       sm.mesh = mesh;
       if (!sm.obstacleAdded) {
         sm.obstacleAdded = true;
         this.obstacles.push({ x: sm.x, z: sm.z, r: 1.4, tag: 'smith:' + sm.id });
+      }
+    }
+
+    // -- the Verdant village's houses & fountain in this chunk --
+    if (this.village) {
+      for (const b of this.village.buildings) {
+        if (b.x < cxw || b.x >= cxw + CHUNK || b.z < czw || b.z >= czw + CHUNK) continue;
+        const raw = b.type === 'fountain'
+          ? makeFountain(mulberry32(b.seed)) : makeTownHouse(mulberry32(b.seed));
+        const mesh = bakeGroup(raw);
+        mesh.position.set(b.x, this.heightAt(b.x, b.z), b.z);
+        mesh.rotation.y = b.rot;
+        group.add(mesh);
+        if (!b.obstacleAdded) {
+          b.obstacleAdded = true;
+          this.obstacles.push({ x: b.x, z: b.z, r: b.type === 'fountain' ? 1.9 : 2.3,
+            tag: 'vlg:' + this.village.buildings.indexOf(b) });
+        }
       }
     }
 
@@ -2577,6 +2691,28 @@ export class World {
       forest.updateMatrix();
       forest.matrixAutoUpdate = false;
       group.add(forest);
+    }
+
+    // the village must not pop in at the near-chunk line: far chunks show the
+    // REAL houses (same seeds → identical builds; ~11 baked meshes, only in
+    // the few chunks the hamlet spans). No obstacles — visuals only out here.
+    if (this.village) {
+      for (const b of this.village.buildings) {
+        if (b.x < cxw || b.x >= cxw + CHUNK || b.z < czw || b.z >= czw + CHUNK) continue;
+        const raw = b.type === 'fountain'
+          ? makeFountain(mulberry32(b.seed)) : makeTownHouse(mulberry32(b.seed));
+        const mesh = bakeGroup(raw);
+        mesh.position.set(b.x, this.heightAt(b.x, b.z), b.z);
+        mesh.rotation.y = b.rot;
+        group.add(mesh);
+      }
+      const sm = this.village.smith;
+      if (sm.x >= cxw && sm.x < cxw + CHUNK && sm.z >= czw && sm.z < czw + CHUNK) {
+        const mesh = bakeGroup(makeBlacksmith());
+        mesh.position.set(sm.x, this.heightAt(sm.x, sm.z), sm.z);
+        mesh.rotation.y = Math.atan2(this.village.dirX, this.village.dirZ);
+        group.add(mesh);
+      }
     }
     this.scene.add(group);
     this.farChunks.set(key, { group });
