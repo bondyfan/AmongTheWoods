@@ -5867,7 +5867,7 @@ function step() {
         canopy = {
           densTex: canopyShade.densTex, metaTex: canopyShade.metaTex,
           cx: canopyShade.cx, cz: canopyShade.cz, size: canopyShade.size,
-          strength: 0.9,
+          strength: 0.3,
         };
       }
     }
