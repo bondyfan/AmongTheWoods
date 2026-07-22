@@ -345,7 +345,7 @@ export class Player {
   // weapon in hand (bare hands don't count). Buffs, spells and heals are free.
   _abilityWeaponError(skill) {
     const BOW = new Set(['beast_arrow_haste', 'beast_ten_arrows', 'beast_arrow_rain',
-      'beast_piercing_shot', 'beast_explosive_arrow', 'beast_stampede']);
+      'beast_piercing_shot', 'beast_explosive_arrow']);
     if (BOW.has(skill.id) || ['multishot', 'markedShot', 'markedVolley'].includes(skill.action)) {
       return this.weapon.kind === 'bow' ? null : 'Equip a bow or crossbow first';
     }
