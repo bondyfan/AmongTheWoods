@@ -1848,6 +1848,20 @@ export class Player {
     return (this._shieldBubble = m);
   }
 
+  // the flaming envelope that engulfs the caster while Combustion burns
+  _ensureFireShell() {
+    if (this._fireShell) return this._fireShell;
+    const geo = new THREE.SphereGeometry(1, 14, 12);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xff5a1e, transparent: true, opacity: 0, side: THREE.DoubleSide,
+      depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    const m = new THREE.Mesh(geo, mat);
+    m.visible = false;
+    this.scene.add(m);
+    return (this._fireShell = m);
+  }
+
   _ensureHalo() {
     if (this._halo) return this._halo;
     const geo = new THREE.TorusGeometry(0.42, 0.06, 8, 20);
@@ -1878,7 +1892,11 @@ export class Player {
       if (this.warCryT > 0) mote(0xffa24a, 1.3, 1.6, 0.16);         // rally sparks
       if (this.arrowHasteT > 0) mote(0xffd24a, 0.7, 2.8, 0.12);     // amber speed motes
       if (this.poisonBladesT > 0) mote(0x9bd94a, 0.7, 1.4, 0.13);   // toxic drips
-      if (this.combustionT > 0) mote(0xff6b2f, 0.8, 2.4, 0.16);     // fire flare
+      if (this.combustionT > 0) {                                    // ENGULFED IN FLAME
+        mote(0xff6b2f, 0.8, 2.9, 0.18);                              // orange blaze
+        mote(0xffc23a, 0.6, 3.3, 0.13);                              // yellow tongues
+        mote(0xff3a12, 1.05, 2.2, 0.15, 0.6);                        // red embers
+      }
       if (this.hotT > 0) mote(0x8ee87f, 0.8, 1.3, 0.13, 0.7);       // green regen
       if (this.guardianSpiritT > 0) mote(0xfff0a5, 0.6, 1.8, 0.12); // holy motes
     }
@@ -1915,6 +1933,21 @@ export class Player {
         bubble.scale.set(s, s * 1.2, s);
         bubble.rotation.y += dt * 0.6;
       } else { bubble.visible = false; this._shieldMax = 0; }
+    }
+    // Combustion: the caster IGNITES — a flickering flame shell wraps the body
+    const shell = this.combustionT > 0 ? this._ensureFireShell() : this._fireShell;
+    if (shell) {
+      if (this.combustionT > 0) {
+        shell.visible = true;
+        this._firePhase = (this._firePhase || 0) + dt * 17;
+        const flick = 0.5 + 0.5 * Math.sin(this._firePhase) * Math.sin(this._firePhase * 0.7 + 1.3);
+        shell.position.set(this.mesh.position.x, this.mesh.position.y + 1.0, this.mesh.position.z);
+        shell.material.opacity = 0.16 + 0.24 * flick;
+        const base = this.mesh.scale.x || 1;
+        const s = base * (1.04 + 0.14 * flick);
+        shell.scale.set(s, s * (1.3 + 0.12 * Math.sin(this._firePhase * 1.3)), s);
+        shell.rotation.y += dt * 1.5;
+      } else shell.visible = false;
     }
     // Guardian Spirit halo
     const halo = this.guardianSpiritT > 0 ? this._ensureHalo() : this._halo;
