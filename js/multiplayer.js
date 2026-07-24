@@ -60,10 +60,13 @@ function setRemoteStealthVisual(root, stealthed) {
 
 // ---------- the other player's avatar ----------
 class RemotePlayer {
-  constructor(scene, world, ui, name) {
+  constructor(scene, world, ui, name, uid = 'partner') {
     this.scene = scene;
     this.world = world;
     this.ui = ui;
+    this.uid = uid;                       // network identity of this peer
+    this.trackerKey = 'mp-' + uid;        // unique HP-bar tracker keys per peer
+    this.name = name;
     this.mesh = makeMan();
     // blue scarf so the partner is recognizable
     const scarf = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.12, 0.34), mat(0x3a6fb5));
@@ -93,7 +96,7 @@ class RemotePlayer {
     this.petWalkT = 0;
     this.lastSeen = 0;
 
-    ui.addTracker('mp-partner',
+    ui.addTracker(this.trackerKey,
       () => this.mesh.visible ? this.mesh.position.clone().setY(this.mesh.position.y + 2.1) : null,
       `<div class="mp-name">${name}</div><div class="hpbar"><div class="hpbar-fill"></div></div>`, 'hpwrap',
       (el) => {
@@ -135,17 +138,16 @@ class RemotePlayer {
       this.petId = pet;
       if (this.petMesh) {
         this.scene.remove(this.petMesh);
-        this.ui.removeTracker('mp-partner-pet');
+        this.ui.removeTracker(this.trackerKey + '-pet');
         this.petMesh = null;
       }
       if (pet) {
-        this.petMesh = makeWolf('tame');
-        if (pet === 'alphaWolf') this.petMesh.scale.multiplyScalar(1.45);
+        this.petMesh = (pet === 'wolf' || pet === true) ? makeWolf('tame') : makeEnemyMesh(pet);
         this.scene.add(this.petMesh);
         this.petTargetPos.set(Number.isFinite(s.px) ? s.px : this.targetPos.x, 0,
           Number.isFinite(s.pz) ? s.pz : this.targetPos.z);
         this.petPos.copy(this.petTargetPos);
-        this.ui.addTracker('mp-partner-pet',
+        this.ui.addTracker(this.trackerKey + '-pet',
           () => this.petMesh?.parent && this.petMesh.visible
             ? this.petMesh.position.clone().setY(this.petMesh.position.y + 1.35) : null,
           '<div class="hpbar"><div class="hpbar-fill"></div></div>', 'hpwrap',
@@ -229,8 +231,8 @@ class RemotePlayer {
   }
 
   dispose() {
-    this.ui.removeTracker('mp-partner');
-    this.ui.removeTracker('mp-partner-pet');
+    this.ui.removeTracker(this.trackerKey);
+    this.ui.removeTracker(this.trackerKey + '-pet');
     this.scene.remove(this.mesh);
     if (this.petMesh) this.scene.remove(this.petMesh);
   }
@@ -611,14 +613,17 @@ export class Multiplayer {
     this.mode = null;          // 'coop' | 'pvp'
     this.isHost = false;
     this.isServer = false;     // true once serverStart() joins the shared server world
-    this.remote = null;        // RemotePlayer
+    // co-op supports up to 20 players: one RemotePlayer per peer, keyed by uid.
+    // pvp/moba stay strictly 1v1 and use the single first entry (this.remote).
+    this.remotes = new Map();  // uid -> RemotePlayer
+    this._peerSeq = 1;         // label counter (I am P1 from my own point of view)
+    this._campSyncedTo = new Set(); // host: peers already sent the camp state
     this.shadow = null;        // ShadowWorld (co-op guest)
     this.meta = null;
     this._snapT = 0;
     this._deadSince = 0;
     this._posHist = []; // my recent positions — lag-compensated hit validation
     this.downedUntil = null; // co-op: I'm down, partner can revive me until then
-    this._campSynced = false;
 
     this.arena = {
       active: false, nextAt: 0, prevPos: null,
@@ -724,6 +729,96 @@ export class Multiplayer {
     };
   }
 
+  // legacy single-peer view: pvp arena & MOBA are strictly 1v1, and a handful
+  // of call sites only care about "the other player" — first remote wins
+  get remote() { return this.remotes.values().next().value ?? null; }
+
+  // minimap: every co-op ally currently rendered
+  mapRemotes() { return [...this.remotes.values()]; }
+
+  // get-or-create the RemotePlayer for a peer uid. In co-op it also carries its
+  // own host-side combat proxies, so enemies simulated HERE can chase/hurt THAT
+  // player (and their pet) and the damage travels to the right inbox.
+  _remoteFor(uid) {
+    let r = this.remotes.get(uid);
+    if (r) return r;
+    r = new RemotePlayer(this.ctx.scene, this.ctx.world, this.ctx.ui, `P${++this._peerSeq}`, uid);
+    r.mesh.visible = this.mode !== 'pvp';
+    const net = () => this.net;
+    r.proxy = {
+      id: uid, // threat-system identity == network identity
+      // combat uses the FRESHEST known position (targetPos), not the smoothed
+      // one — that alone removes ~100 ms of interpolation lag on the host
+      get pos() { return r.targetPos; },
+      get mesh() { return r.mesh; },
+      get dead() { return r.dead; },
+      get stealthed() { return r.stealthed; },
+      ownerUid: uid, // pickups: magnet-collects are granted back to this uid
+      takeDamage: (dmg, src) => net().sendEvent({
+        type: 'pdmg', dmg: Math.round(dmg * 10) / 10,
+        ai: src?.id,
+        ax: src?.pos ? +src.pos.x.toFixed(1) : undefined,
+        az: src?.pos ? +src.pos.z.toFixed(1) : undefined,
+        ar: src?.range != null ? +src.range.toFixed(1) : undefined,
+        sh: src?.shot ? 1 : undefined,
+      }, uid),
+      applyStun: (sec, src) => net().sendEvent({
+        type: 'pdmg', dmg: 0, stun: sec,
+        ai: src?.id,
+        ax: src?.pos ? +src.pos.x.toFixed(1) : undefined,
+        az: src?.pos ? +src.pos.z.toFixed(1) : undefined,
+        ar: src?.range != null ? +src.range.toFixed(1) : undefined,
+        sh: src?.shot ? 1 : undefined,
+      }, uid),
+    };
+    r.petProxy = {
+      id: uid + '#pet', isPet: true, hitR: 0.5, sizeMult: 1, stunT: 0,
+      get pos() { return r.petTargetPos ?? null; },
+      get mesh() { return r.petMesh ?? null; },
+      get hp() { return r.petHp ?? 0; },
+      get maxHp() { return r.petMaxHp ?? 0; },
+      get dead() { return !r.petId || (r.petHp ?? 0) <= 0; },
+      takeDamage: (dmg, src) => net().sendEvent({
+        type: 'petDmg', dmg: Math.round(dmg * 10) / 10,
+        ai: src?.id,
+        ax: src?.pos ? +src.pos.x.toFixed(1) : undefined,
+        az: src?.pos ? +src.pos.z.toFixed(1) : undefined,
+      }, uid),
+      applyStun: () => {},
+    };
+    this.remotes.set(uid, r);
+    return r;
+  }
+
+  // a peer's avatar appeared for the first time (their first state packet)
+  _peerJoined(uid) {
+    if (this.mode !== 'coop') return;
+    // a backgrounded tab stops streaming and gets reaped; don't re-fanfare it
+    this._everSeen ??= new Set();
+    if (!this._everSeen.has(uid)) {
+      this._everSeen.add(uid);
+      this.ctx.ui.toast(`🤝 ${this.remotes.get(uid)?.name ?? 'A player'} joined the world!`, 'level');
+      audio.sfx('spawn', 0.5);
+    }
+    this.ctx.onPartnerJoin?.(); // UI: retire the on-screen join code
+    // Firebase co-op: the host owns the camp state — push it to the newcomer.
+    // (Server worlds replay the last camp event server-side instead.)
+    if (this.isHost && !this._campSyncedTo.has(uid)) {
+      this._campSyncedTo.add(uid);
+      this.sendCampSync(uid);
+    }
+  }
+
+  // a peer disconnected — tear down their avatar/pet/trackers
+  _peerLeft(uid) {
+    const r = this.remotes.get(uid);
+    if (!r) return;
+    this.remotes.delete(uid);
+    this._campSyncedTo.delete(uid);
+    r.dispose();
+    if (this.mode === 'coop') this.ctx.ui.toast(`👋 ${r.name} left the world.`, 'boss');
+  }
+
   // ---------- lobby ----------
   async host(mode, intervalMin) {
     const { code, meta } = await this.net.createGame(mode, intervalMin);
@@ -759,23 +854,35 @@ export class Multiplayer {
     return this.net.code;
   }
 
-  // one meta watcher for both roles: it starts the game, promotes the
+  // one meta watcher for both roles: it starts the game, promotes a
   // survivor to host when the creator vanishes, and greets mid-game joiners
   _watchMeta() {
     this.net.onMeta((m) => {
       if (!m) { this._partnerLeft(); return; } // room truly gone
       this.meta = m;
-      // the creator disappeared → the remaining player TAKES OVER the room
-      if (!m.host && !this.isHost && this.active && !this._promoting) {
+      // the creator disappeared → ONE remaining player takes over the room.
+      // With N co-op players the oldest-seated uid claims (no thundering herd);
+      // if that one is gone too, its roster entry disappears and the next
+      // onMeta fires with a new oldest.
+      if (!m.host && !this.isHost && this.active && !this._promoting && m.host !== 'server') {
+        if (this.mode === 'coop') {
+          const roster = Object.entries(m.players || {}).sort((a, b) => a[1] - b[1]);
+          if (roster.length && roster[0][0] !== this.net.uid) return; // not my claim
+        }
         this._becomeHost();
         return;
       }
-      // a partner joined my room (first time or mid-game)
-      if (this.isHost && m.guest && m.guest !== this.net.partnerUid) {
+      // pvp/moba: the single rival seat filled (first time or mid-game).
+      // Co-op peers attach via their state streams instead (_peerJoined).
+      if (this.isHost && m.mode !== 'coop' && m.guest && m.guest !== this.net.partnerUid) {
         if (this.active && this.mode === 'moba') return; // 1v1 seats don't refill
         this.net.setPartner(m.guest);
         if (!this.active) this._begin(m);
-        else this._attachPartner();
+        else {
+          const r = this.remote;
+          if (r) { r.lastSeen = 0; r.mesh.visible = this.mode !== 'pvp'; }
+          this.ctx.ui.toast('🤝 A new rival joined your world!', 'level');
+        }
       }
     });
   }
@@ -792,45 +899,11 @@ export class Multiplayer {
     try { await this.net.becomeHost(); } catch { /* net hiccup — play on */ }
     this.shadow?.dispose();
     this.shadow = null;
-    this.remote.mesh.visible = false;
-    this.remote.lastSeen = 0;
-    if (this.remote.petMesh) {
-      this.ctx.scene.remove(this.remote.petMesh);
-      this.ctx.ui.removeTracker('mp-partner-pet');
-      this.remote.petMesh = null;
-      this.remote.petId = 0;
-      this.remote.petHp = this.remote.petMaxHp = 0;
-    }
-    this._campSynced = false;
+    // the departed host's avatar is torn down by its own peer-state removal;
+    // everyone still here keeps rendering. Re-push camp state as the new owner.
+    this._campSyncedTo.clear();
     this._promoting = false;
     this.ctx.ui.toast(`👑 The host left — YOU run the world now. Code ${this.net.code} stays open (Settings).`, 'boss');
-  }
-
-  // a NEW player joined my running world
-  _attachPartner() {
-    this.remote.lastSeen = 0;
-    this.remote.mesh.visible = this.mode !== 'pvp';
-    this._campSynced = false; // push them the camp state
-    this.ctx.ui.toast('🤝 A new partner joined your world!', 'level');
-    audio.sfx('spawn', 0.5);
-    this.ctx.onPartnerJoin?.(); // UI: retire the on-screen join code
-  }
-
-  // my partner's presence vanished (disconnect) — free the seat, keep the room
-  _partnerAway() {
-    if (!this.active || !this.isHost) return;
-    this.remote.mesh.visible = false;
-    this.remote.lastSeen = 0;
-    if (this.remote.petMesh) {
-      this.ctx.scene.remove(this.remote.petMesh);
-      this.ctx.ui.removeTracker('mp-partner-pet');
-      this.remote.petMesh = null;
-      this.remote.petId = 0;
-      this.remote.petHp = this.remote.petMaxHp = 0;
-    }
-    this.net.setPartner(null);
-    this.net.updateMeta({ guest: null });
-    this.ctx.ui.toast(`👋 Partner disconnected — room ${this.net.code} stays OPEN for a new player (Settings).`, 'boss');
   }
 
   _begin(meta) {
@@ -858,11 +931,14 @@ export class Multiplayer {
       ctx.game.seed = seed;
     }
 
-    this.remote = new RemotePlayer(ctx.scene, ctx.world, ctx.ui, this.isHost ? 'P2' : 'P1');
-    // MOBA shows both seats at once; a co-op host starts SOLO — the partner
-    // avatar only appears once their first state packet arrives (setState)
-    if (this.mode === 'moba') this.remote.mesh.visible = true;
-    else if (this.mode === 'coop' && meta.guest) this.remote.mesh.visible = true;
+    // pvp/moba are strictly 1v1 — build the single rival avatar eagerly (MOBA
+    // shows both seats at once). Co-op peers materialize lazily, one avatar per
+    // player, when their first state packet arrives.
+    if (this.mode !== 'coop') {
+      const r = this._remoteFor(this.net.partnerUid || 'peer');
+      r.name = this.isHost ? 'P2' : 'P1';
+      r.mesh.visible = this.mode === 'moba';
+    }
 
     if (this.mode === 'coop' && !this.isHost) {
       this.shadow = new ShadowWorld(ctx.scene, ctx.world, ctx.ui, {
@@ -873,11 +949,21 @@ export class Multiplayer {
       this.net.onSnap((snap) => this.shadow.applySnap(snap));
     }
 
-    this.net.onPartnerState((s) => {
-      if (s) { this.remote.setState(s); return; }
-      // their state node vanished → they disconnected
-      if (this.isHost && this.mode === 'coop' && this.remote?.lastSeen) this._partnerAway();
-      else if (this.mode === 'moba' && this.remote?.lastSeen) this._partnerLeft();
+    this.net.onPeerState((uid, s) => {
+      if (s) {
+        // pvp/moba pre-created the rival under a placeholder key — rebind it
+        if (this.mode !== 'coop' && !this.remotes.has(uid)) {
+          const r = this.remote;
+          if (r) { this.remotes.delete(r.uid); r.uid = uid; this.remotes.set(uid, r); }
+        }
+        const isNew = !this.remotes.has(uid);
+        this._remoteFor(uid).setState(s);
+        if (isNew) this._peerJoined(uid);
+        return;
+      }
+      // their state stream ended → they disconnected
+      if (this.mode === 'moba') { if (this.remote?.lastSeen) this._partnerLeft(); return; }
+      if (this.mode === 'coop') this._peerLeft(uid);
     });
     this.net.onEvent((ev) => this._onEvent(ev));
 
@@ -936,35 +1022,39 @@ export class Multiplayer {
       st: p.stealthed ? 1 : 0,
       pet: ((p.hooks.classRulesEnabled?.() === false || p.selectedClass === 'beastmaster')
         && p.pet && !p.petDead && localPet)
-        ? p.equipment.companion : 0,
+        ? (p.pet.type || 'wolf') : 0,
       ...(localPet?.pos ? {
         px: +localPet.pos.x.toFixed(1), pz: +localPet.pos.z.toFixed(1),
         php: Math.max(0, Math.round(localPet.hp)), pmhp: Math.max(1, Math.round(localPet.maxHp)),
       } : {}),
     }, rate);
 
-    this.remote?.update(dt);
+    for (const r of this.remotes.values()) r.update(dt);
     this.shadow?.update(dt, p);
     this.mobaShadow?.update(dt);
+
+    // co-op safety net: a peer whose client crashed (no clean disconnect) stops
+    // streaming state — reap the frozen avatar after 30 s of silence. (30 s, not
+    // less: a merely BACKGROUNDED tab also stops streaming and comes back.)
+    if (this.mode === 'coop') {
+      const now = performance.now();
+      for (const [uid, r] of [...this.remotes]) {
+        if (r.lastSeen && now - r.lastSeen > 30000) this._peerLeft(uid);
+      }
+    }
 
     // downed: live countdown; nobody came → bleed out with the full penalty
     const downedEl = document.getElementById('downed-hint');
     if (this.downedUntil && p.dead) {
       const left = Math.max(0, this.downedUntil - performance.now());
       if (downedEl) {
-        downedEl.textContent = `☠️ DOWNED — partner can revive you (${Math.ceil(left / 1000)} s) · press X to respawn at base now`;
+        downedEl.textContent = `☠️ DOWNED — an ally can revive you (${Math.ceil(left / 1000)} s) · press X to respawn at base now`;
         downedEl.classList.remove('hidden');
       }
       if (left <= 0) this._bleedOut();
     } else downedEl?.classList.add('hidden');
 
-    // a freshly joined guest gets the camp state once
-    if (this.mode === 'coop' && this.isHost && !this._campSynced && this.remote?.lastSeen) {
-      this._campSynced = true;
-      this.sendCampSync();
-    }
-
-    // host: stream the world snapshot. Only entities near EITHER player are
+    // host: stream the world snapshot. Only entities near SOME player are
     // sent — a full-map snapshot grows unbounded (stale pickups, far enemies)
     // and a fat payload at 7 Hz backs up the Firebase write queue, which is
     // exactly what the guest experiences as units lagging seconds behind.
@@ -972,10 +1062,9 @@ export class Multiplayer {
       this._snapT -= dt;
       if (this._snapT <= 0) {
         this._snapT = 0.1;
-        const p1 = ctx.player.pos, p2 = this.remote?.targetPos;
-        const nearAny = (x, z) =>
-          Math.hypot(x - p1.x, z - p1.z) < 130 ||
-          (p2 && Math.hypot(x - p2.x, z - p2.z) < 130);
+        const anchors = [ctx.player.pos];
+        for (const r of this.remotes.values()) if (r.lastSeen) anchors.push(r.targetPos);
+        const nearAny = (x, z) => anchors.some(a => Math.hypot(x - a.x, z - a.z) < 130);
         this.net.sendSnap({
           e: ctx.enemyMgr.snapshot().filter(s => nearAny(s.x, s.z)),
           p: ctx.pickups.snapshot().filter(s => nearAny(s.x, s.z)),
@@ -998,11 +1087,23 @@ export class Multiplayer {
     if (this.mode === 'moba') return; // the MOBA status line owns that element
     const el = document.getElementById('mp-status');
     if (!el) return;
-    const r = this.remote;
-    let line = `${this.isHost ? 'P2' : 'P1'} Lv${r?.level ?? '?'} ❤️${r ? Math.max(0, Math.round(r.hp)) : '?'}/${r?.maxHp ?? '?'}`;
-    if (r?.dead) line = (r.downed ? '☠️ PARTNER DOWN — go revive them! · ' : '💀 partner out · ') + line;
-    const frac = r ? Math.max(0, r.hp) / (r.maxHp || 100) : 1;
-    el.style.color = r?.dead ? '#ff6a5a' : frac > 0.5 ? '#cfe3b8' : frac > 0.25 ? '#ffd23a' : '#ff8a6a';
+    let line, color;
+    const rs = this.mapRemotes().filter(r => r.lastSeen);
+    if (this.mode === 'coop' && rs.length !== 1) {
+      // N-player summary: ally count + the loudest emergency
+      const downed = rs.filter(r => r.dead && r.downed).length;
+      line = rs.length ? `🤝 ${rs.length + 1} players` : '🤝 waiting for allies…';
+      if (downed) line = `☠️ ${downed === 1 ? 'ALLY DOWN' : downed + ' ALLIES DOWN'} — go revive! · ` + line;
+      color = downed ? '#ff6a5a' : '#cfe3b8';
+    } else {
+      // one rival/ally: the classic detailed line
+      const r = rs[0] ?? this.remote;
+      line = `${r?.name ?? 'P2'} Lv${r?.level ?? '?'} ❤️${r ? Math.max(0, Math.round(r.hp)) : '?'}/${r?.maxHp ?? '?'}`;
+      if (r?.dead) line = (r.downed ? '☠️ PARTNER DOWN — go revive them! · ' : '💀 partner out · ') + line;
+      const frac = r ? Math.max(0, r.hp) / (r.maxHp || 100) : 1;
+      color = r?.dead ? '#ff6a5a' : frac > 0.5 ? '#cfe3b8' : frac > 0.25 ? '#ffd23a' : '#ff8a6a';
+    }
+    el.style.color = color;
     if (this.mode === 'pvp' && !this.arena.active && this.meta?.nextArenaAt) {
       const s = Math.max(0, Math.ceil((this.meta.nextArenaAt - Date.now()) / 1000));
       line = `⚔️ Arena in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')} · ` + line;
@@ -1117,12 +1218,17 @@ export class Multiplayer {
     }
     if (this.mode === 'coop') {
       if (this.isHost) {
-        const playerTargets = this.remote.lastSeen ? [ctx.player, this.coopProxy] : [ctx.player];
-        const combatTargets = [...playerTargets];
+        const playerTargets = [ctx.player];
+        const combatTargets = [ctx.player];
         if (ctx.petTarget) combatTargets.push(ctx.petTarget);
-        if (this.remote.lastSeen && !this.coopPetProxy.dead) combatTargets.push(this.coopPetProxy);
+        for (const r of this.remotes.values()) {
+          if (!r.lastSeen) continue;
+          playerTargets.push(r.proxy);
+          combatTargets.push(r.proxy);
+          if (!r.petProxy.dead) combatTargets.push(r.petProxy);
+        }
         ctx.enemyMgr.update(dt, combatTargets, ctx.projectiles);
-        // Pets fight, but never magnet-collect their owner's or partner's loot.
+        // Pets fight, but never magnet-collect their owner's or allies' loot.
         ctx.pickups.update(dt, playerTargets);
         ctx.projectiles.update(dt, ctx.enemyMgr, combatTargets);
       } else {
@@ -1155,12 +1261,14 @@ export class Multiplayer {
     if (this.arena.active) { this._onArenaDeath(); return true; }
     const { ctx } = this;
     const p = ctx.player;
-    if (this.mode === 'coop' && this.remote && !this.remote.dead) {
-      // DOWNED: the partner has 20 s to reach you and press E — a rescue
+    const allyUp = this.mode === 'coop'
+      && [...this.remotes.values()].some(r => r.lastSeen && !r.dead);
+    if (allyUp) {
+      // DOWNED: an ally has 20 s to reach you and press E — a rescue
       // costs you nothing; bleeding out costs the usual level + half loot
       this.downedUntil = performance.now() + 20000;
       p.mesh.rotation.z = Math.PI / 2;
-      ctx.ui.toast('☠️ You are DOWN! Your partner has 20 s to revive you (E)…', 'boss');
+      ctx.ui.toast('☠️ You are DOWN! An ally has 20 s to revive you (E)…', 'boss');
       return true;
     }
     this._bleedOut();
@@ -1198,45 +1306,63 @@ export class Multiplayer {
     return true;
   }
 
-  // E near a downed partner revives them (they get half health, no penalty)
+  // E near a downed ally revives them (they get half health, no penalty).
+  // Returns the nearest revivable RemotePlayer (truthy) or null.
   revivablePartner() {
-    return this.active && this.mode === 'coop' && this.remote?.dead && this.remote?.downed
-      && !this.ctx.player.dead
-      && Math.hypot(this.ctx.player.pos.x - this.remote.targetPos.x,
-                    this.ctx.player.pos.z - this.remote.targetPos.z) < 3.2;
+    if (!this.active || this.mode !== 'coop' || this.ctx.player.dead) return null;
+    const p = this.ctx.player.pos;
+    let best = null, bestD = 3.2;
+    for (const r of this.remotes.values()) {
+      if (!r.dead || !r.downed) continue;
+      const d = Math.hypot(p.x - r.targetPos.x, p.z - r.targetPos.z);
+      if (d < bestD) { best = r; bestD = d; }
+    }
+    return best;
   }
 
   tryRevivePartner() {
-    if (!this.revivablePartner()) return false;
-    this.net.sendEvent({ type: 'revive' });
-    this.ctx.ui.toast('💚 You pull your partner back to their feet!', 'level');
+    const target = this.revivablePartner();
+    if (!target) return false;
+    this.net.sendEvent({ type: 'revive' }, target.uid);
+    this.ctx.ui.toast(`💚 You pull ${target.name} back to their feet!`, 'level');
     audio.sfx('purchase', 0.5, 200);
     return true;
   }
 
   sendClassHeal(amount, radius = 12, center = null) {
-    if (!this.active || this.mode !== 'coop' || !this.remote?.lastSeen || this.remote.dead) return false;
+    if (!this.active || this.mode !== 'coop') return false;
     const from = center || this.ctx.player.pos;
-    const to = this.remote.targetPos || this.remote.pos;
-    if (!to || Math.hypot(from.x - to.x, from.z - to.z) > radius) return false;
-    this.net.sendEvent({ type: 'classHeal', a: Math.max(1, Math.round(amount)) });
-    return true;
+    let healed = false;
+    for (const r of this.remotes.values()) {
+      if (!r.lastSeen || r.dead) continue;
+      const to = r.targetPos || r.pos;
+      if (!to || Math.hypot(from.x - to.x, from.z - to.z) > radius) continue;
+      this.net.sendEvent({ type: 'classHeal', a: Math.max(1, Math.round(amount)) }, r.uid);
+      healed = true;
+    }
+    return healed;
   }
 
   sendClassRevive(hpFrac = 0.5, radius = 14) {
-    if (!this.active || this.mode !== 'coop' || !this.remote?.lastSeen || !this.remote.dead) return false;
+    if (!this.active || this.mode !== 'coop') return false;
     const from = this.ctx.player.pos;
-    const to = this.remote.targetPos || this.remote.pos;
-    if (!to || Math.hypot(from.x - to.x, from.z - to.z) > radius) return false;
-    this.net.sendEvent({ type: 'classRevive', hp: Math.max(0.1, Math.min(1, hpFrac)) });
+    let best = null, bestD = radius;
+    for (const r of this.remotes.values()) {
+      if (!r.lastSeen || !r.dead) continue;
+      const to = r.targetPos || r.pos;
+      const d = to ? Math.hypot(from.x - to.x, from.z - to.z) : Infinity;
+      if (d < bestD) { best = r; bestD = d; }
+    }
+    if (!best) return false;
+    this.net.sendEvent({ type: 'classRevive', hp: Math.max(0.1, Math.min(1, hpFrac)) }, best.uid);
     return true;
   }
 
-  sendCampSync() {
+  sendCampSync(toUid = null) {
     if (!this.active || this.mode !== 'coop' || !this.ctx.camp) return;
     const camp = this.ctx.camp;
     this.net.sendEvent({ type: 'camp', lv: camp.levels, st: camp.storage, pos: camp.positions,
-      ...(camp.gravePos ? { gp: camp.gravePos } : {}) });
+      ...(camp.gravePos ? { gp: camp.gravePos } : {}) }, toUid);
   }
 
   sendPing(x, z) {
@@ -1251,44 +1377,57 @@ export class Multiplayer {
       ...(ownerLock ? { lk: 1 } : {}) });
   }
 
-  // co-op: is the partner eligible for this kill's XP? (within 100 m of the
-  // kill, or they landed the killing blow from beyond it)
-  partnerNearKill(enemy) {
-    if (!this.active || this.mode !== 'coop' || !this.isHost) return false;
-    const r = this.remote;
-    const partnerUp = r?.mesh?.visible && !r.dead;
-    return (partnerUp && Math.hypot(r.pos.x - enemy.pos.x, r.pos.z - enemy.pos.z) < 100)
-      || enemy.lastHitBy === 'partner';
+  // co-op host: every ally eligible for this kill's XP — within 100 m of the
+  // kill, or they landed the killing blow from beyond it. Returns uids.
+  killShareUids(enemy) {
+    if (!this.active || this.mode !== 'coop' || !this.isHost) return [];
+    const out = [];
+    for (const [uid, r] of this.remotes) {
+      const up = r.mesh?.visible && !r.dead;
+      const near = up && Math.hypot(r.pos.x - enemy.pos.x, r.pos.z - enemy.pos.z) < 100;
+      const credit = enemy.lastHitBy === uid || enemy.lastHitBy === uid + '#pet';
+      if (near || credit) out.push(uid);
+    }
+    return out;
   }
 
-  sendKillXp(xp) {
-    this.net.sendEvent({ type: 'xpkill', xp });
+  // did one of my allies (or their pet) land the killing blow?
+  killerIsRemote(enemy) {
+    for (const uid of this.remotes.keys()) {
+      if (enemy.lastHitBy === uid || enemy.lastHitBy === uid + '#pet') return true;
+    }
+    return false;
   }
 
-  // Co-op host: share a slain creature with the partner when they were close
-  // enough at the moment of death. The receiving player still decides whether
-  // their currently active quest matches this creature/boss/biome.
+  sendKillXp(xp, toUid) {
+    this.net.sendEvent({ type: 'xpkill', xp }, toUid);
+  }
+
+  // Co-op host: share a slain creature with every ally close enough at the
+  // moment of death. The receiving player still decides whether their currently
+  // active quest matches this creature/boss/biome.
   shareQuestKill(enemy, radius = 20) {
     if (!this.active || this.mode !== 'coop' || !this.isHost) return;
-    const r = this.remote;
-    if (!r?.mesh?.visible || r.dead || !r.lastSeen) return;
-    const pos = r.targetPos ?? r.pos;
-    if (Math.hypot(pos.x - enemy.pos.x, pos.z - enemy.pos.z) > radius) return;
-    this.net.sendEvent({
-      type: 'questKill',
-      t: enemy.type,
-      b: enemy.bossRank || 0,
-      x: +enemy.pos.x.toFixed(1),
-      z: +enemy.pos.z.toFixed(1),
-      bi: this.ctx.game.dungeon?.poi && enemy.lairId
-        ? this.ctx.game.dungeon.poi.ring : undefined,
-      pa: enemy.cfg?.passive ? 1 : 0,
-    });
+    for (const r of this.remotes.values()) {
+      if (!r.mesh?.visible || r.dead || !r.lastSeen) continue;
+      const pos = r.targetPos ?? r.pos;
+      if (Math.hypot(pos.x - enemy.pos.x, pos.z - enemy.pos.z) > radius) continue;
+      this.net.sendEvent({
+        type: 'questKill',
+        t: enemy.type,
+        b: enemy.bossRank || 0,
+        x: +enemy.pos.x.toFixed(1),
+        z: +enemy.pos.z.toFixed(1),
+        bi: this.ctx.game.dungeon?.poi && enemy.lairId
+          ? this.ctx.game.dungeon.poi.ring : undefined,
+        pa: enemy.cfg?.passive ? 1 : 0,
+      }, r.uid);
+    }
   }
 
-  // co-op host: a pickup was magnet-collected by the partner's proxy
-  onRemoteCollect(pickup) {
-    this.net.sendEvent({ type: 'grant', kind: pickup.kind, payload: pickup.payload });
+  // co-op host: a pickup was magnet-collected by an ally's proxy
+  onRemoteCollect(pickup, toUid) {
+    this.net.sendEvent({ type: 'grant', kind: pickup.kind, payload: pickup.payload }, toUid);
   }
 
   sendChop(tree, power) {
@@ -1379,10 +1518,11 @@ export class Multiplayer {
         });
         break;
       }
-      case 'ehit': { // co-op host: partner damaged enemy #id
+      case 'ehit': { // co-op host: ally damaged enemy #id
         const e = ctx.enemyMgr.list.find(x => x.id === ev.id);
         if (e) {
-          if (ev.dmg > 0) ctx.enemyMgr.damage(e, ev.dmg, null, ev.ps ? 'partnerPet' : 'partner', {
+          const srcId = ev.ps ? `${ev.from}#pet` : (ev.from || 'partner');
+          if (ev.dmg > 0) ctx.enemyMgr.damage(e, ev.dmg, null, srcId, {
             crit: !!ev.cr, weakPoint: !!ev.wp,
             ...(ev.ap ? { armorPierce: ev.ap } : {}),
             ...(ev.ab ? { armorBreak: ev.ab, breakDur: ev.ad || 6 } : {}),
@@ -1395,12 +1535,12 @@ export class Multiplayer {
         }
         break;
       }
-      case 'collect': { // co-op host: partner wants pickup #id
+      case 'collect': { // co-op host: an ally wants pickup #id
         const cand = ctx.pickups.list.find(x => x.id === ev.id);
-        if (cand && cand.lockT > 0 && cand.lockId === 'partner') break; // still theirs-locked
+        if (cand && cand.lockT > 0 && cand.lockId && cand.lockId !== ev.from) break; // reserved for someone else
         if (cand && !ctx.pickups.collectible(ev.id)) break; // mob-loot pop still running
         const pk = ctx.pickups.removeById(ev.id);
-        if (pk) this.onRemoteCollect(pk);
+        if (pk) this.onRemoteCollect(pk, ev.from);
         break;
       }
       case 'grant': // co-op guest: host confirmed my pickup
@@ -1455,9 +1595,9 @@ export class Multiplayer {
       }
       case 'camp': ctx.onCampSync?.(ev.lv, ev.st, ev.gp, ev.pos); break; // shared base
       case 'ping': ctx.showPing?.(ev.x, ev.z); break;
-      case 'drop': // partner dropped loot — the host materializes it
+      case 'drop': // an ally dropped loot — the host materializes it
         if (this.isHost) ctx.pickups.spawn(ev.k, ev.p, { x: ev.x, z: ev.z }, 0.5,
-          ev.lk ? { id: 'partner', t: 10 } : null);
+          ev.lk ? { id: ev.from || 'partner', t: 10 } : null);
         break;
       case 'win': ctx.onCoopWin?.(); break;
 
@@ -1489,7 +1629,9 @@ export class Multiplayer {
     this.active = false;
     this.arena.active = false;
     this.ctx.world.removeArena();
-    this.remote?.dispose(); this.remote = null;
+    for (const r of this.remotes.values()) r.dispose();
+    this.remotes.clear();
+    this._campSyncedTo.clear();
     this.shadow?.dispose(); this.shadow = null;
     this.mobaShadow?.dispose(); this.mobaShadow = null;
     document.getElementById('mp-status')?.classList.add('hidden');

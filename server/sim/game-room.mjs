@@ -35,6 +35,8 @@ export class GameRoom {
     this.world = world; this.scene = scene;
     world.time = 0;
     this.pickups = new Pickups(scene, world, { onCollect: noop });
+    // felled trees drop wood server-side (the client host used to mint these)
+    world.onWoodLog = (pos) => this.pickups.spawn('wood', 1, pos, 0.15);
     this.projectiles = new Projectiles(scene);
     this._onKill = makeOnKill({ pickups: this.pickups, awardKill: (e) => this._awardKill(e) });
     const hooks = new Proxy({ onKill: (e) => this._onKill(e) },

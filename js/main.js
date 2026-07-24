@@ -402,6 +402,7 @@ const player = new Player(scene, {
   },
   onLevelUp: (level) => {
     requestAutosave(); // a new level is worth saving promptly
+    player.essence = roundResource((player.essence || 0) + 1); // +1 Ethereal Essence per level
     audio.sfx('evolve', 0.55);
     player.spawnLevelUpEffect();
     ui.banner('⭐ LEVEL UP!');
@@ -425,6 +426,7 @@ const player = new Player(scene, {
     survivalRespawn();                                      // solo: wake at the cabin
   },
   onEquipChange: () => companions.sync(player),
+  onPetChange: () => { companions.sync(player); panels.refresh?.(); },
   onClassWorldAction: (action, skill, rank, ctx) => handleClassWorldAction(action, skill, rank, ctx),
   onChop: (tree, power) => mp?.sendChop(tree, power),
   onBerry: (key) => mp?.sendBerry(key),
@@ -1141,7 +1143,7 @@ function drawFlightMap() {
   minimap.bigZoom = zoom;
   minimap.bigPanX = (minX + maxX) / 2 - player.pos.x;
   minimap.bigPanZ = (minZ + maxZ) / 2 - player.pos.z;
-  minimap.drawBig(canvas, player, mp?.mode === 'coop' ? mp.remote : null);
+  minimap.drawBig(canvas, player, mp?.mode === 'coop' ? mp.mapRemotes() : null);
   const ox = minimap._bigOx, oz = minimap._bigOz, scale = minimap.bigScale;
   minimap.bigZoom = saveZoom; minimap.bigPanX = savePX; minimap.bigPanZ = savePZ;
   const ctx = canvas.getContext('2d');
@@ -1907,7 +1909,7 @@ function grantPickup(kind, payload) {
 const pickups = new Pickups(scene, world, {
   onCollect: (p, target) => {
     if (target === player) grantPickup(p.kind, p.payload);
-    else mp?.onRemoteCollect(p); // co-op host: the partner's proxy grabbed it
+    else mp?.onRemoteCollect(p, target.ownerUid); // co-op host: an ally's proxy grabbed it
   },
 });
 // fallen logs become wood pickups — host-side only, like island treasure,
@@ -1949,14 +1951,15 @@ const enemyMgr = new EnemyManager(scene, world, {
     // quest credit); killing the law is its own punishment
     if (enemy.cfg?.friendly) return;
     // kill XP is SHARED: every player within 100 m of the kill is rewarded —
-    // 75% each when both share, the full amount when only one collects. The
-    // +XP counter pops above the CHARACTER, not the corpse.
-    const partnerGot = mp?.active && mp.partnerNearKill?.(enemy);
+    // 75% each when two or more share, the full amount when only one collects.
+    // The +XP counter pops above the CHARACTER, not the corpse.
+    const shareUids = (mp?.active && mp.killShareUids?.(enemy)) || [];
     const nearMe = !player.dead
       && Math.hypot(player.pos.x - enemy.pos.x, player.pos.z - enemy.pos.z) < 100;
-    const meGot = nearMe || (!partnerGot && enemy.lastHitBy !== 'partner');
-    const xp = Math.max(1, Math.round(enemy.xp * (meGot && partnerGot ? 0.75 : 1)));
-    if (partnerGot) mp.sendKillXp(xp);
+    const meGot = nearMe || (!shareUids.length && !mp?.killerIsRemote?.(enemy));
+    const sharers = shareUids.length + (meGot ? 1 : 0);
+    const xp = Math.max(1, Math.round(enemy.xp * (sharers >= 2 ? 0.75 : 1)));
+    for (const uid of shareUids) mp.sendKillXp(xp, uid);
     if (meGot) {
       player.kills++;
       player.addXp(xp);
@@ -2988,6 +2991,8 @@ function serializeState() {
     stats: { ...p.stats },
     selectedClass: p.selectedClass,
     classTraining: { ...p.classTraining },
+    tamedPet: p.tamedPet ? { ...p.tamedPet } : null,
+    petDead: !!p.petDead,
     spellsOwned: [...p.spellsOwned],
     spellSlots: p.spellSlots.map(s => s ?? null),
     upgrades: { ...p.upgrades },
@@ -3155,6 +3160,10 @@ function applyLoadedState(d) {
       }
     }
   }
+  // the tamed beast companion (validated so a corrupt type can't crash the mesh)
+  p.petDead = !!d.petDead;
+  p.tamedPet = (d.tamedPet && typeof d.tamedPet.type === 'string' && ENEMY_TYPES[d.tamedPet.type])
+    ? { type: d.tamedPet.type, name: d.tamedPet.name || d.tamedPet.type } : null;
   p.spellsOwned = new Set(d.spellsOwned || []);
   p.spellSlots = Array.isArray(d.spellSlots) ? d.spellSlots.slice(0, 6).map(s => s ?? undefined) : [];
   p.spellSlots = p.spellSlots.map(id => {
@@ -3730,7 +3739,7 @@ function toggleBigMap(force) {
     minimap.bigPanX = minimap.bigPanZ = 0; // reopen centered on the player
     // admin mode only: the one-click full-map reveal
     $id('bigmap-discover').classList.toggle('hidden', !game.adminMode);
-    minimap.drawBig($id('bigmap-canvas'), player, mp?.mode === 'coop' ? mp.remote : null);
+    minimap.drawBig($id('bigmap-canvas'), player, mp?.mode === 'coop' ? mp.mapRemotes() : null);
   } else if (discoveryMode) {
     // closing the map cancels an unused scroll draw — refund it
     discoveryMode = null;
@@ -3755,7 +3764,7 @@ $id('bigmap-discover').addEventListener('click', () => {
   if (!game.adminMode) return;
   minimap.discovered.fill(1);
   minimap.redrawT = 0;
-  minimap.drawBig($id('bigmap-canvas'), player, mp?.mode === 'coop' ? mp.remote : null);
+  minimap.drawBig($id('bigmap-canvas'), player, mp?.mode === 'coop' ? mp.mapRemotes() : null);
   audio.sfx('map_reveal', 0.7);
   ui.toast('🔍 The whole world lies bare.', 'level');
 });
@@ -3785,7 +3794,7 @@ $id('bigmap-discover').addEventListener('click', () => {
   bigCanvas.addEventListener('pointermove', (e) => {
     // while a scroll is open, draw the 300 m reveal ring under the cursor
     if (discoveryMode) {
-      minimap.drawBig(bigCanvas, player, mp?.mode === 'coop' ? mp.remote : null);
+      minimap.drawBig(bigCanvas, player, mp?.mode === 'coop' ? mp.mapRemotes() : null);
       const { cx, cy } = canvasPx(e);
       const rpx = discoveryMode.radius * (minimap.bigScale || 1);
       const ctx = bigCanvas.getContext('2d');
@@ -3805,7 +3814,7 @@ $id('bigmap-discover').addEventListener('click', () => {
     minimap.bigPanX -= ((e.clientX - dragFrom.x) * css2px) / s;
     minimap.bigPanZ -= ((e.clientY - dragFrom.y) * css2px) / s;
     dragFrom = { x: e.clientX, y: e.clientY };
-    minimap.drawBig(bigCanvas, player, mp?.mode === 'coop' ? mp.remote : null);
+    minimap.drawBig(bigCanvas, player, mp?.mode === 'coop' ? mp.mapRemotes() : null);
   });
   const stopDrag = () => { dragFrom = null; bigCanvas.classList.remove('dragging'); };
   bigCanvas.addEventListener('pointerup', stopDrag);
@@ -3828,7 +3837,7 @@ $id('bigmap-discover').addEventListener('click', () => {
     const pulse = () => {
       if (!bigmapOpen) return;
       t += 1 / 60;
-      minimap.drawBig(bigCanvas, player, mp?.mode === 'coop' ? mp.remote : null);
+      minimap.drawBig(bigCanvas, player, mp?.mode === 'coop' ? mp.mapRemotes() : null);
       const ctx = bigCanvas.getContext('2d');
       const k = Math.min(1, t / 0.7);
       ctx.save();
@@ -3842,7 +3851,7 @@ $id('bigmap-discover').addEventListener('click', () => {
       ctx.fill();
       ctx.restore();
       if (t < 0.7) requestAnimationFrame(pulse);
-      else minimap.drawBig(bigCanvas, player, mp?.mode === 'coop' ? mp.remote : null);
+      else minimap.drawBig(bigCanvas, player, mp?.mode === 'coop' ? mp.mapRemotes() : null);
     };
     requestAnimationFrame(pulse);
   }
@@ -3861,7 +3870,7 @@ $id('bigmap-discover').addEventListener('click', () => {
       audio.sfx('click', 0.4);
     }
     minimap.redrawT = 0;
-    minimap.drawBig(bigCanvas, player, mp?.mode === 'coop' ? mp.remote : null);
+    minimap.drawBig(bigCanvas, player, mp?.mode === 'coop' ? mp.mapRemotes() : null);
   });
 }
 
@@ -4177,9 +4186,10 @@ input.onKey('KeyE', () => {
   }
   if (player.mounted) { dismountHorse(); return; } // E or X gets you off the horse
   if (boatMounted) { dismountBoat(); return; }
-  if (mp?.revivablePartner?.()) { // co-op: helping a downed friend wins
-    const t = mp.remote.targetPos;
-    startChannel(2, '💚 Reviving partner…', { x: t.x, z: t.z }, () => mp.tryRevivePartner());
+  const downedAlly = mp?.revivablePartner?.(); // co-op: helping a downed friend wins
+  if (downedAlly) {
+    const t = downedAlly.targetPos;
+    startChannel(2, '💚 Reviving ally…', { x: t.x, z: t.z }, () => mp.tryRevivePartner());
     return;
   }
   if (nearChest()) panels.toggle('chest');
@@ -4599,23 +4609,22 @@ function nearGrave() {
     && Math.hypot(player.pos.x - camp.gravePos.x, player.pos.z - camp.gravePos.z) < 6;
 }
 
-// resurrection costs 10% of everything invested in the pet (item + training)
+// bringing a fallen tamed pet back costs a modest level-scaled toll plus 10% of
+// everything sunk into Pet Training (you can also just tame a NEW beast instead).
 function petResurrectCost() {
-  const item = itemById(player.equipment.companion);
-  if (!item) return null;
-  const total = { ...item.cost };
+  if (!player.tamedPet) return null;
+  const total = { meat: 40 + player.level * 4, essence: 2 + Math.floor(player.level / 8) };
   const track = STAT_TRACKS.find(t => t.id === 'pet');
-  for (let t = 1; t <= player.stats.pet; t++) {
-    for (const [k, v] of Object.entries(track.cost(t))) total[k] = (total[k] || 0) + v;
+  if (track) for (let t = 1; t <= player.stats.pet; t++) {
+    for (const [k, v] of Object.entries(track.cost(t))) total[k] = (total[k] || 0) + v * 0.1;
   }
   const out = {};
-  for (const [k, v] of Object.entries(total)) out[k] = Math.max(1, Math.ceil(v * 0.1));
+  for (const [k, v] of Object.entries(total)) out[k] = Math.max(1, Math.ceil(v));
   return out;
 }
 
 function canResurrectPetHere() {
-  return game.kind === 'survival' && player.petDead
-    && itemById(player.equipment.companion)?.pet
+  return game.kind === 'survival' && player.petDead && player.tamedPet
     && !player.dead && (nearHome() || nearGrave());
 }
 
@@ -4666,7 +4675,7 @@ const PET_MODE_LABEL = {
   passive: '💤 Passive — never attacks',
 };
 input.onKey('KeyP', () => {
-  if (!inPlay() || !itemById(player.equipment.companion)?.pet) return;
+  if (!inPlay() || !player.tamedPet) return;
   player.petMode = PET_MODES[(PET_MODES.indexOf(player.petMode) + 1) % PET_MODES.length];
   ui.toast(`🐺 Pet mode: ${PET_MODE_LABEL[player.petMode]}`, 'level');
   audio.sfx('click', 0.4);
@@ -4701,7 +4710,7 @@ $id('flightmap-canvas').addEventListener('wheel', (e) => {
 for (const [btnId, d] of [['bigmap-zoomin', 1], ['bigmap-zoomout', -1]]) {
   $id(btnId).addEventListener('click', () => {
     minimap.bigZoomBy?.(d);
-    minimap.drawBig($id('bigmap-canvas'), player, mp?.mode === 'coop' ? mp.remote : null);
+    minimap.drawBig($id('bigmap-canvas'), player, mp?.mode === 'coop' ? mp.mapRemotes() : null);
   });
 }
 $id('respawn-cave').addEventListener('click', () => reviveAt('cave'));
@@ -5717,7 +5726,7 @@ function step() {
       // minimap turns together with the auto-rotated camera (RPG: north-up)
       minimap.rotation = game.rpgView ? Math.atan2(-player.facing.x, -player.facing.z) : camYaw;
       minimap.update(dt, player, em,
-        mp?.active && mp.mode === 'coop' ? mp.remote : null);
+        mp?.active && mp.mode === 'coop' ? mp.mapRemotes() : null);
       tickDayNight(dt);
       updateAtmosphere(dt);
       updateWaypoint(dt);
@@ -5856,7 +5865,7 @@ function step() {
         bigmapT -= dt;
         if (bigmapT <= 0) {
           bigmapT = 0.5;
-          minimap.drawBig($id('bigmap-canvas'), player, mp?.mode === 'coop' ? mp.remote : null);
+          minimap.drawBig($id('bigmap-canvas'), player, mp?.mode === 'coop' ? mp.mapRemotes() : null);
         }
       }
 

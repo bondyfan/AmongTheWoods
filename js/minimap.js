@@ -238,22 +238,25 @@ export class Minimap {
   }
 
   update(dt, player, enemyMgr, partner = null) {
+    // partner: one RemotePlayer, an ARRAY of them (co-op N players), or null
+    const partners = (Array.isArray(partner) ? partner : partner ? [partner] : [])
+      .filter(r => r?.mesh?.visible);
     this.reveal(player.pos.x, player.pos.z);
-    if (partner?.mesh?.visible) this.reveal(partner.pos.x, partner.pos.z);
+    for (const r of partners) this.reveal(r.pos.x, r.pos.z);
     this.pings = this.pings.filter(p => (p.t -= dt) > 0);
     this.redrawT -= dt;
     // while the camera is turning, redraw every frame so the map spins smoothly
     if (Math.abs((this.rotation || 0) - this._drawnRot) > 0.045) this.redrawT = 0;
     if (this.redrawT <= 0) {
       this.redrawT = 0.25;
-      this._draw(player, enemyMgr, partner);
+      this._draw(player, enemyMgr, partners);
     }
   }
 
   // The minimap is a ZOOMED-IN local view centered on the player — it never
   // betrays how big the world really is or where the next ring begins; you
   // only see what you've discovered.
-  _draw(player, enemyMgr, partner = null) {
+  _draw(player, enemyMgr, partners = []) {
     const { ctx, canvas } = this;
     const W = canvas.width, H = canvas.height;
     const SPAN = this.viewSpans[this.zoom]; // world meters shown across the minimap
@@ -507,9 +510,9 @@ export class Minimap {
       text('⚰️', x, y);
     }
 
-    // co-op partner: blue dot
-    if (partner?.mesh?.visible) {
-      const tp = toC(partner.pos.x, partner.pos.z);
+    // co-op allies: blue dots
+    for (const r of partners) {
+      const tp = toC(r.pos.x, r.pos.z);
       if (inView(tp)) {
         ctx.fillStyle = '#5fa8e0';
         ctx.beginPath(); ctx.arc(tp.x, tp.y, 3, 0, Math.PI * 2); ctx.fill();
@@ -724,9 +727,10 @@ export class Minimap {
       ctx.font = '15px sans-serif';
       ctx.fillText('⚰️', toX(this.deathAt.x), toY(this.deathAt.z) + 5);
     }
-    if (partner?.mesh?.visible && inView(partner.pos.x, partner.pos.z)) {
+    for (const r of (Array.isArray(partner) ? partner : partner ? [partner] : [])) {
+      if (!r?.mesh?.visible || !inView(r.pos.x, r.pos.z)) continue;
       ctx.fillStyle = '#5fa8e0';
-      ctx.beginPath(); ctx.arc(toX(partner.pos.x), toY(partner.pos.z), 4, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(toX(r.pos.x), toY(r.pos.z), 4, 0, Math.PI * 2); ctx.fill();
     }
     // player: a bold green heading arrow (no map rotation on the big map)
     this._drawPlayerArrow(ctx, toX(player.pos.x), toY(player.pos.z),

@@ -26,6 +26,7 @@ export class Room {
     this.players = new Map();     // uid -> { uid, ws, lastState, joinedAt }
     this.authorityUid = null;     // M1 relay only: the player running the sim
     this.lastSnap = null;         // most recent world snapshot (for late joiners)
+    this.lastCamp = null;         // most recent shared-camp event (replayed to joiners)
     this.sim = null;              // M2: the server-side GameRoom (server IS authority)
     this.createdAt = Date.now();
     this.lastActivity = Date.now();
@@ -53,6 +54,9 @@ export class Room {
     if (!this.sim && this.lastSnap && uid !== this.authorityUid) {
       this.sendTo(uid, { t: MSG.SNAP_UP, snap: this.lastSnap });
     }
+    // late joiners inherit the shared camp state (there is no host client to
+    // push it in a server-authoritative room)
+    if (this.lastCamp) this.sendTo(uid, { t: MSG.EVENT_UP, ev: this.lastCamp });
     this.broadcast({ t: MSG.PEER, event: 'join', uid }, uid);
     if (!this.sim) this.broadcast({ t: MSG.PEER, event: 'authority', uid: this.authorityUid });
   }
@@ -84,12 +88,16 @@ export class Room {
     this.broadcast({ t: MSG.STATE_UP, from: uid, state }, uid);
   }
 
-  onEvent(uid, ev) {
+  onEvent(uid, ev, to = null) {
     this.lastActivity = Date.now();
     // M2: world-mutating events (ehit/collect/drop/chop/berry) are consumed by
     // the sim, not relayed; peer-relay events (revive/ping/…) fall through.
     if (this.sim && this.sim.onEvent(uid, ev)) return;
-    this.broadcast({ t: MSG.EVENT_UP, ev: { from: uid, ...ev } }, uid);
+    const wire = { from: uid, ...ev };
+    if (ev?.type === 'camp') this.lastCamp = wire; // remembered for late joiners
+    // addressed events (revive/heal/grant…) go to ONE player; rest broadcast
+    if (to) this.sendTo(to, { t: MSG.EVENT_UP, ev: wire });
+    else this.broadcast({ t: MSG.EVENT_UP, ev: wire }, uid);
   }
 
   onSnap(uid, snap) {

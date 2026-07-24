@@ -19,11 +19,13 @@
 import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
     getDatabase, ref, get, set, update, remove, push,
-    onValue, onChildAdded, onDisconnect
+    onValue, onChildAdded, onChildChanged, onChildRemoved, onDisconnect
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { firebaseConfig } from "../firebase-config.js";
 
 export const COOP_WORLD_SEED = 1;
+// co-op rooms hold up to 20 players (pvp/moba stay strictly 1v1)
+export const MAX_COOP_PLAYERS = 20;
 
 let app = null;
 let db = null;
@@ -69,6 +71,8 @@ export const WoodsNet = {
     _unsubs: [],
     _lastStateSend: 0,
 
+    _meta: null, // latest room meta (kept fresh for the co-op event fan-out)
+
     async createGame(mode, interval = null) {
         ensureInit();
         let code = null, meta = null;
@@ -80,6 +84,9 @@ export const WoodsNet = {
                     host: this.uid, guest: null, mode, interval,
                     seed: mode === "coop" ? COOP_WORLD_SEED : Math.floor(Math.random() * 1e9),
                     state: "waiting", created: Date.now(),
+                    // co-op: uid → joinedAt roster (up to MAX_COOP_PLAYERS).
+                    // pvp/moba keep the single `guest` seat instead.
+                    ...(mode === "coop" ? { players: { [this.uid]: Date.now() } } : {}),
                 };
                 await withTimeout(set(ref(db, roomPath(candidate)), { meta }), DB_UNREACHABLE);
                 code = candidate;
@@ -89,9 +96,11 @@ export const WoodsNet = {
         if (!code) throw new Error("Could not allocate a game code, try again.");
         this.role = "host";
         this.code = code;
+        this._meta = meta;
         // host gone → only the HOST SEAT empties; the room survives so the
-        // remaining player can take over and keep the code joinable
+        // remaining players can take over and keep the code joinable
         onDisconnect(ref(db, roomPath(code) + "/meta/host")).remove();
+        onDisconnect(ref(db, roomPath(code) + "/meta/players/" + this.uid)).remove();
         onDisconnect(ref(db, roomPath(code) + "/state/" + this.uid)).remove();
         return { code, meta };
     },
@@ -102,20 +111,46 @@ export const WoodsNet = {
         const snap = await withTimeout(get(ref(db, roomPath(code) + "/meta")), DB_UNREACHABLE);
         if (!snap.exists()) throw new Error("Game " + code + " not found.");
         const meta = snap.val();
-        if (meta.guest && meta.guest !== this.uid) throw new Error("Game " + code + " is already full.");
         this.role = "guest";
         this.code = code;
         this.partnerUid = meta.host;
+        if (meta.mode === "coop") {
+            const roster = meta.players || (meta.host ? { [meta.host]: meta.created } : {});
+            const seats = Object.keys(roster).filter((u) => u !== this.uid).length + 1;
+            if (seats > MAX_COOP_PLAYERS) throw new Error(`Game ${code} is full (${MAX_COOP_PLAYERS} players).`);
+            await withTimeout(update(ref(db, roomPath(code) + "/meta"), {
+                ["players/" + this.uid]: Date.now(), state: "playing",
+            }), DB_UNREACHABLE);
+            this._meta = { ...meta, players: { ...roster, [this.uid]: Date.now() }, state: "playing" };
+            onDisconnect(ref(db, roomPath(code) + "/meta/players/" + this.uid)).remove();
+            onDisconnect(ref(db, roomPath(code) + "/state/" + this.uid)).remove();
+            return this._meta;
+        }
+        // pvp / moba: strictly two seats
+        if (meta.guest && meta.guest !== this.uid) throw new Error("Game " + code + " is already full.");
         await withTimeout(update(ref(db, roomPath(code) + "/meta"), {
             guest: this.uid, state: "playing",
         }), DB_UNREACHABLE);
+        this._meta = { ...meta, guest: this.uid, state: "playing" };
         onDisconnect(ref(db, roomPath(code) + "/state/" + this.uid)).remove();
-        return { ...meta, guest: this.uid, state: "playing" };
+        return this._meta;
     },
 
     onMeta(fn) {
-        const unsub = onValue(ref(db, roomPath(this.code) + "/meta"), (s) => fn(s.exists() ? s.val() : null));
+        const unsub = onValue(ref(db, roomPath(this.code) + "/meta"), (s) => {
+            const m = s.exists() ? s.val() : null;
+            if (m) this._meta = m; // keep the roster fresh for sendEvent's fan-out
+            fn(m);
+        });
         this._unsubs.push(unsub);
+    },
+
+    // co-op roster helper: every OTHER player currently seated in the room
+    _others() {
+        if (this._meta?.mode === "coop") {
+            return Object.keys(this._meta.players || {}).filter((u) => u !== this.uid);
+        }
+        return this.partnerUid ? [this.partnerUid] : [];
     },
 
     updateMeta(patch) {
@@ -130,44 +165,49 @@ export const WoodsNet = {
         set(ref(db, roomPath(this.code) + "/state/" + this.uid), state);
     },
 
-    _partnerStateFn: null,
-    _partnerStateUnsub: null,
-    _subPartnerState() {
-        this._partnerStateUnsub?.();
-        this._partnerStateUnsub = onValue(ref(db, roomPath(this.code) + "/state/" + this.partnerUid),
-            (s) => this._partnerStateFn?.(s.exists() ? s.val() : null));
+    // Per-peer state streams: fn(uid, state|null) — null when that peer's state
+    // node vanishes (disconnect). Child listeners on the state/ parent scale to
+    // N players without re-reading the whole node on every write.
+    _peerStateFn: null,
+    onPeerState(fn) {
+        this._peerStateFn = fn;
+        const parent = ref(db, roomPath(this.code) + "/state");
+        const emit = (child) => {
+            if (child.key === this.uid) return;
+            this._peerStateFn?.(child.key, child.val());
+        };
+        const u1 = onChildAdded(parent, emit);
+        const u2 = onChildChanged(parent, emit);
+        const u3 = onChildRemoved(parent, (child) => {
+            if (child.key === this.uid) return;
+            this._peerStateFn?.(child.key, null);
+        });
+        this._unsubs.push(u1, u2, u3);
     },
 
-    onPartnerState(fn) {
-        this._partnerStateFn = fn;
-        if (this.partnerUid) this._subPartnerState();
-    },
+    setPartner(uid) { this.partnerUid = uid; },
 
-    setPartner(uid) {
-        this.partnerUid = uid;
-        if (uid && this._partnerStateFn) this._subPartnerState();
-    },
-
-    // the old host vanished — the survivor claims the host seat and keeps
+    // the old host vanished — a survivor claims the host seat and keeps
     // the room code alive for the next joiner
     async becomeHost() {
         this.role = "host";
-        this.partnerUid = null;
-        this._partnerStateUnsub?.();
-        this._partnerStateUnsub = null;
-        await update(ref(db, roomPath(this.code) + "/meta"), { host: this.uid, guest: null });
+        const patch = { host: this.uid };
+        if (this._meta?.mode !== "coop") { patch.guest = null; this.partnerUid = null; }
+        await update(ref(db, roomPath(this.code) + "/meta"), patch);
         onDisconnect(ref(db, roomPath(this.code) + "/meta/host")).remove();
         onDisconnect(ref(db, roomPath(this.code) + "/state/" + this.uid)).remove();
     },
 
-    // Events go into the PARTNER's inbox; each side consumes (and deletes) its own.
-    // undefined fields are stripped — Firebase THROWS on undefined values, which
-    // silently killed every event carrying an optional field (e.g. pdmg.sh).
-    sendEvent(obj) {
-        if (!this.partnerUid) return;
+    // Events go into each recipient's inbox; everyone consumes (and deletes) its
+    // own. toUid targets ONE player (revive/heal/grant…); without it the event
+    // fans out to every other seated player. undefined fields are stripped —
+    // Firebase THROWS on undefined values, which silently killed every event
+    // carrying an optional field (e.g. pdmg.sh).
+    sendEvent(obj, toUid = null) {
         const clean = { from: this.uid };
         for (const [k, v] of Object.entries(obj)) if (v !== undefined) clean[k] = v;
-        push(ref(db, roomPath(this.code) + "/ev/" + this.partnerUid), clean);
+        const targets = toUid ? [toUid] : this._others();
+        for (const u of targets) push(ref(db, roomPath(this.code) + "/ev/" + u), clean);
     },
 
     onEvent(fn) {
@@ -192,23 +232,23 @@ export const WoodsNet = {
     leave() {
         this._unsubs.forEach((u) => u());
         this._unsubs = [];
-        this._partnerStateUnsub?.();
-        this._partnerStateUnsub = null;
-        const code = this.code;
+        this._peerStateFn = null;
+        const code = this.code, wasCoop = this._meta?.mode === "coop";
         if (code) {
             remove(ref(db, roomPath(code) + "/state/" + this.uid));
+            if (wasCoop) remove(ref(db, roomPath(code) + "/meta/players/" + this.uid));
             if (this.role === "host") {
-                // hand the room over if a guest is still in it, else tear it down
+                // hand the room over if anyone is still in it, else tear it down
                 get(ref(db, roomPath(code) + "/meta")).then((s) => {
                     const m = s.exists() ? s.val() : null;
-                    if (m && m.guest && m.guest !== this.uid) {
-                        remove(ref(db, roomPath(code) + "/meta/host"));
-                    } else {
-                        remove(ref(db, roomPath(code)));
-                    }
+                    const othersLeft = m && (wasCoop
+                        ? Object.keys(m.players || {}).some((u) => u !== this.uid)
+                        : (m.guest && m.guest !== this.uid));
+                    if (othersLeft) remove(ref(db, roomPath(code) + "/meta/host"));
+                    else remove(ref(db, roomPath(code)));
                 }).catch(() => {});
             }
         }
-        this.role = null; this.code = null; this.partnerUid = null;
+        this.role = null; this.code = null; this.partnerUid = null; this._meta = null;
     },
 };

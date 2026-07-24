@@ -28,11 +28,12 @@ export const WoodsNetWS = {
   role: null,          // 'host' (server authority) | 'guest'
   code: null,
   partnerUid: null,
+  peers: new Set(),    // every OTHER uid currently in the room
   _ws: null,
   _uid: null,
   _lastStateSend: 0,
   _ping: null,
-  _handlers: { meta: null, partnerState: null, event: null, snap: null, peer: null },
+  _handlers: { meta: null, peerState: null, event: null, snap: null, peer: null },
 
   uid() {
     if (this._uid) return this._uid;
@@ -61,7 +62,8 @@ export const WoodsNetWS = {
           settled = true; clearTimeout(failTimer);
           this.code = m.code;
           this.role = m.role === 'authority' ? 'host' : 'guest';
-          if (Array.isArray(m.peers) && m.peers.length) this.partnerUid = m.peers[0];
+          this.peers = new Set(Array.isArray(m.peers) ? m.peers : []);
+          if (this.peers.size) this.partnerUid = [...this.peers][0];
           this._startPing();
           resolve({ code: m.code, meta: m.meta });
           return;
@@ -83,12 +85,16 @@ export const WoodsNetWS = {
   _dispatch(m) {
     switch (m.t) {
       case MSG.META:  this._handlers.meta?.(m.meta); break;
-      case MSG.STATE: if (m.from === this.partnerUid || this.partnerUid == null) this._handlers.partnerState?.(m.state); break;
+      case MSG.STATE: this._handlers.peerState?.(m.from, m.state); break;
       case MSG.EVENT: this._handlers.event?.(m.ev); break;
       case MSG.SNAP:  this._handlers.snap?.(m.snap); break;
       case MSG.PEER:
-        if (m.event === 'join') this.partnerUid = m.uid;
-        else if (m.event === 'leave' && m.uid === this.partnerUid) this.partnerUid = null;
+        if (m.event === 'join') { this.peers.add(m.uid); this.partnerUid ??= m.uid; }
+        else if (m.event === 'leave') {
+          this.peers.delete(m.uid);
+          if (m.uid === this.partnerUid) this.partnerUid = [...this.peers][0] ?? null;
+          this._handlers.peerState?.(m.uid, null); // their avatar goes away
+        }
         else if (m.event === 'authority') this.role = (m.uid === this.uid()) ? 'host' : 'guest';
         this._handlers.peer?.(m);
         break;
@@ -118,13 +124,14 @@ export const WoodsNetWS = {
     this._lastStateSend = now;
     this._send({ t: MSG.STATE, state });
   },
-  onPartnerState(fn) { this._handlers.partnerState = fn; },
+  onPeerState(fn) { this._handlers.peerState = fn; },
   setPartner(uid) { this.partnerUid = uid; },
 
-  sendEvent(obj) {
+  // toUid: server routes the event to that ONE player; omitted = broadcast
+  sendEvent(obj, toUid = null) {
     const clean = {};
     for (const [k, v] of Object.entries(obj)) if (v !== undefined) clean[k] = v;
-    this._send({ t: MSG.EVENT, ev: clean });
+    this._send({ t: MSG.EVENT, ev: clean, ...(toUid ? { to: toUid } : {}) });
   },
   onEvent(fn) { this._handlers.event = fn; },
 
@@ -141,6 +148,7 @@ export const WoodsNetWS = {
     this._send({ t: MSG.BYE });
     try { this._ws?.close(); } catch {}
     this._ws = null; this.role = null; this.code = null; this.partnerUid = null;
-    this._handlers = { meta: null, partnerState: null, event: null, snap: null, peer: null };
+    this.peers = new Set();
+    this._handlers = { meta: null, peerState: null, event: null, snap: null, peer: null };
   },
 };

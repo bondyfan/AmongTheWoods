@@ -19,6 +19,7 @@ const PORT = Number(process.env.PORT || 8080);
 // ONE shared server world: every "Server" player joins THE SAME room, so there
 // are no per-room codes to create or join. (Set MAIN_ROOM_CODE to rename it.)
 const MAIN_ROOM = (process.env.MAIN_ROOM_CODE || 'WOODS').toUpperCase();
+const MAX_PLAYERS = Number(process.env.MAX_PLAYERS || 20); // shared-world seat cap
 // M2: run the authoritative simulation server-side for co-op rooms. Default ON;
 // set WOODS_SIM=0 to fall back to the M1 client-authority relay.
 const SIM = process.env.WOODS_SIM !== '0';
@@ -102,7 +103,7 @@ wss.on('connection', (ws) => {
     const room = ws.room;
     switch (m.t) {
       case MSG.STATE: room.onState(ws.uid, m.state); break;
-      case MSG.EVENT: room.onEvent(ws.uid, m.ev); break;
+      case MSG.EVENT: room.onEvent(ws.uid, m.ev, m.to || null); break;
       case MSG.SNAP:  room.onSnap(ws.uid, m.snap); break;
       case MSG.META:  room.onMeta(ws.uid, m.patch); break;
       case MSG.PING:  safeSend(ws, { t: MSG.PONG }); break;
@@ -120,6 +121,10 @@ function handleHello(ws, m) {
   if (!uid) { fail(ws, 'Missing uid.', true); return; }
   // ONE shared world: ignore want/code entirely — everyone lands in the same room.
   const room = mainRoom();
+  if (!room.players.has(uid) && room.size >= MAX_PLAYERS) {
+    fail(ws, `Server world is full (${MAX_PLAYERS} players) — try again later.`, true);
+    return;
+  }
 
   // one uid can't be in two seats — kick the stale socket
   if (room.players.has(uid)) {
