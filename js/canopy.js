@@ -13,9 +13,13 @@ const MAP_PX = 512;      // texel resolution of the shade map
 const MAP_SIZE = 400;    // meters covered (±200 m around the player)
 const RECENTER = 32;     // rebuild once the player strays this far off-center
 
-// canopy footprint radius + darkness by tree size (sapling → forest giant)
-const CANOPY_R = [1.6, 2.4, 3.2, 4.2, 5.4];
-const CANOPY_A = [0.16, 0.22, 0.30, 0.36, 0.42];
+// canopy footprint radius + darkness by tree size (sapling → forest giant).
+// Radii run well PAST the visual crown: a crown occludes sky for a wide patch
+// of floor around it, and in a spaced forest the blobs must overlap or the
+// ground BETWEEN trees (most of what the camera sees) never darkens — tight
+// per-trunk rings read as "AO does nothing".
+const CANOPY_R = [3.0, 4.5, 6.0, 7.5, 9.5];
+const CANOPY_A = [0.28, 0.35, 0.42, 0.50, 0.58];
 // canopy TOP height by size, world meters (trees bake with scale.y = 3)
 const CANOPY_TOP = [6, 9, 13, 17, 22];
 
@@ -83,9 +87,10 @@ export class CanopyShade {
         const topEnc = Math.min(255, Math.round(CANOPY_TOP[size] / CANOPY_TOP_RANGE * 255));
         gm.fillStyle = `rgb(${hEnc},${topEnc},0)`;
         gm.beginPath(); gm.arc(gx, gz, rp + 2, 0, Math.PI * 2); gm.fill();
-        // the shade blob itself: soft radial pool of darkness
+        // the shade blob itself: a soft, WIDE pool of darkness — full strength
+        // out to ~45% of the radius, then a gentle falloff
         const a = CANOPY_A[size];
-        const grad = gd.createRadialGradient(gx, gz, rp * 0.25, gx, gz, rp);
+        const grad = gd.createRadialGradient(gx, gz, rp * 0.45, gx, gz, rp);
         grad.addColorStop(0, `rgba(0,0,0,${a})`);
         grad.addColorStop(1, 'rgba(0,0,0,0)');
         gd.fillStyle = grad;

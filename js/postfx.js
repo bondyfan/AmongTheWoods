@@ -144,6 +144,10 @@ const COMPOSITE_FRAG = /* glsl */`
     if (uv2.x <= 0.0 || uv2.x >= 1.0 || uv2.y <= 0.0 || uv2.y >= 1.0) return 1.0;
     float dens = 1.0 - texture2D(tCanopy, uv2).r;      // 0 open … →1 thick woods
     if (dens < 0.004) return 1.0;
+    // response curve: moderate crown coverage (the forest floor BETWEEN
+    // trees) still reads as real shade, instead of hiding in the low end —
+    // tuned to ~10% at blob edges, ~33% typical floor, ~49% in thick stands
+    dens = smoothstep(0.1, 1.0, dens);
     vec2 meta = texture2D(tCanopyMeta, uv2).rg;
     float groundH = meta.r * 176.0 - 16.0;
     float topH = meta.g * 32.0;

@@ -134,6 +134,7 @@ const _folStepPos = { x: 0, z: 0 };  // last footfall drop (every ~0.35 m)
 const _folDir = { x: 0, z: -1 };     // smoothed walk direction
 let _folMoveK = 0;                    // 0 idle → 1 moving (lay-over strength)
 const _waterSunDir = new THREE.Vector3();
+const _sunDir = new THREE.Vector3(0.704, 0.557, 0.440); // live time-of-day sun direction
 
 // Automatic graphics downgrade REMOVED (user request): the game never lowers
 // quality on its own any more — shadows, resolution and view distance stay
@@ -5160,18 +5161,18 @@ function updateWaypoint() {
 // ---------- day / night cycle ----------
 // game.tod runs 0..1 over one in-game day. One in-game HOUR = one real
 // minute, so a full day is 24 real minutes. The day opens at 08:00. Night is
-// 22:00-05:00; nightK is a smooth 0 (day) .. 1 (deep night).
+// 23:00-05:00; nightK is a smooth 0 (day) .. 1 (deep night).
 const DAY_LENGTH = 24 * 60; // 24 real minutes per day (1 game hour = 1 real minute)
 const START_TOD = 8 / 24;   // the game opens at 08:00
 const nightFlies = [];
 let fireflyGeo = null, fireflyMat = null, starField = null;
 
-// darkness by the hour: full night 22:00-05:00, day 07:00-20:00, smooth
+// darkness by the hour: full night 23:00-05:00, day 07:00-21:00, smooth
 // dawn (05-07) and dusk (20-22) between
 function nightAtHour(h) {
-  if (h >= 22 || h < 5) return 1;
-  if (h >= 7 && h < 20) return 0;
-  const t = (h >= 5 && h < 7) ? 1 - (h - 5) / 2 : (h - 20) / 2; // dawn down / dusk up
+  if (h >= 23 || h < 5) return 1;                                // full night 23:00–05:00 (1 h shorter)
+  if (h >= 7 && h < 21) return 0;
+  const t = (h >= 5 && h < 7) ? 1 - (h - 5) / 2 : (h - 21) / 2;  // dawn down / dusk up
   return t * t * (3 - 2 * t); // smoothstep
 }
 
@@ -5325,9 +5326,15 @@ function updateAtmosphere(dt) {
   // which would flatten the torchlight too.)
   hemi.intensity = (0.74 - 0.5 * caveK) * biomeLightK * (1 - 0.86 * nightK);
   sun.intensity = 1.8 * (1 - 0.8 * caveK) * biomeLightK * (1 - 0.94 * nightK);
-  // warm the sun at dawn/dusk, silver it at deep night
-  const dusk = Math.max(0, 1 - Math.abs(nightK - 0.5) * 4); // peaks at the twilight band
-  sun.color.setRGB(1 - 0.25 * nightK, 0.95 - 0.2 * nightK + 0.05 * dusk, 0.87 - 0.15 * nightK - 0.15 * dusk);
+  // golden hour: the LOWER the sun hangs, the warmer its light — clean
+  // white-warm at noon, deep sunset gold as it nears the horizon (the sky
+  // dome's sun disc and the clouds' silver lining pick this color up too);
+  // deep night silvers whatever is left of it
+  const gold = Math.pow(Math.max(0, Math.min(1, (0.72 - _sunDir.y) / 0.5)), 1.6) * (1 - nightK);
+  sun.color.setRGB(
+    1 - 0.25 * nightK,
+    (0.95 - 0.26 * gold) - 0.2 * nightK,
+    (0.87 - 0.49 * gold) - 0.15 * nightK);
   // the camera sits ~30 m away — keep the fog behind the hero so the cave
   // interior stays dimly visible while the outside world is swallowed.
   // RPG view looks along the ground, so it gets a much deeper fog wall —
@@ -5592,12 +5599,26 @@ function updateCamera(dt = 0) {
     camera.position.set(player.pos.x + fx * OFF + sx, py + H, player.pos.z + fz * OFF + sz);
     camera.lookAt(player.pos.x - fx * 2 + sx, py, player.pos.z - fz * 2 + sz);
   }
-  // lower sun = longer, more dramatic shadows AND a disc you actually see
-  // in the sky when looking toward it (elevation ~34°). Stand-off scales with
-  // the shadow distance so the whole ortho frustum stays inside near/far.
+  // time-driven sun: rises in the east (+x) around 05:00, arcs through the
+  // southern sky and sets in the west around 23:00. Noon sun stands nearly
+  // overhead (short, tucked-in shadows); morning/evening sun hangs low, so
+  // shadows stretch long and dramatic toward sunset. The same _sunDir feeds
+  // the sky dome's sun disc and the water glints, so they always agree.
+  const h24 = (game.tod ?? START_TOD) * 24;
+  const dayT = Math.min(1, Math.max(0, (h24 - 5) / 18)); // 05:00 → 23:00
+  const elev = (14 + 61 * Math.sin(Math.PI * dayT)) * (Math.PI / 180); // 14°…75°
+  const az = Math.PI * dayT; // east → south → west
+  _sunDir.set(
+    Math.cos(elev) * Math.cos(az),
+    Math.sin(elev),
+    Math.cos(elev) * Math.sin(az));
+  // stand-off scales with the shadow distance so the whole ortho frustum
+  // stays inside near/far
   const sdist = Math.max(35, _shadowB * 2);
-  // unit of (24,19,15) — matches _waterSunDir so shadows agree with the sky
-  sun.position.set(player.pos.x + 0.704 * sdist, 0.557 * sdist, player.pos.z + 0.440 * sdist);
+  sun.position.set(
+    player.pos.x + _sunDir.x * sdist,
+    _sunDir.y * sdist,
+    player.pos.z + _sunDir.z * sdist);
   sun.target.position.set(player.pos.x, 0, player.pos.z);
 }
 
@@ -5690,7 +5711,7 @@ function step() {
   // ugly grid over the whole screen; keep the layer permanently off
   $id('underwater').classList.remove('on');
   // water surfaces (ocean/lakes/rivers) share the same clock + sun direction
-  _waterSunDir.set(24, 19, 15).normalize(); // matches the fixed sun offset in updateCamera
+  _waterSunDir.copy(_sunDir); // the live time-of-day sun (updateCamera drives it)
   if (WATER_SHADERS.length) {
     const waterFx = settings.waterFx !== false ? 1 : 0;
     for (const sh of WATER_SHADERS) {
@@ -6014,10 +6035,13 @@ function step() {
         canopy = {
           densTex: canopyShade.densTex, metaTex: canopyShade.metaTex,
           cx: canopyShade.cx, cz: canopyShade.cz, size: canopyShade.size,
-          strength: 0.55,
+          strength: 0.65,
         };
       }
     }
+    // TEMP debug hook (AO diagnosis) — remove once canopy shade is confirmed
+    window.__aoDbg = { ssao: !!settings.ssao, ready: canopyShade?.ready, canopy: !!canopy,
+      shade: canopyShade, postfx };
     postfx.render(scene, camera, {
       ssao: false, bloom: !!settings.bloom, // no screen-space contact term
       canopy,
