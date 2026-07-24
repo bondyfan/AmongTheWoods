@@ -138,7 +138,8 @@ class GuardianSphere {
           dmg: orb.dmg,
           color: orb.boltColor,
           onHit: () => {
-            enemyMgr.damage(e, orb.dmg, null);
+            enemyMgr.damage(e, orb.dmg, null, 'local',
+              orb.burn ? { burn: { dps: orb.burn, dur: 6 } } : null);
             if (orb.freeze) enemyMgr.stun?.(e, orb.freeze);
           },
         });

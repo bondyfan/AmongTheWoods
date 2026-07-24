@@ -1297,18 +1297,21 @@ export class Player {
       // same sphere refreshes it, and the different kinds coexist.
       const dmg = rv('dmg') * this.levelSpellMult * this._classMagicMultiplier(skill.element || null);
       const frost = skill.element === 'frost';
+      const fire = skill.element === 'fire';
       const orb = {
         count: rv('orbCount', 1),
         targets: rv('targets', 1),
         dmg,
         freeze: skill.freeze ? rv('freeze') : 0,
-        sphereColor: frost ? 0x7fe0ff : 0x38c0ff,
-        boltColor: frost ? 0xbfe6ff : 0x7fe0ff,
+        // fire summons (Fire Imp) leave a burning DoT — pre-scaled like Fireball
+        burn: skill.burn ? rv('burn') * this.levelSpellMult * this._classMagicMultiplier('fire') : 0,
+        sphereColor: frost ? 0x7fe0ff : fire ? 0xff6a2a : 0x38c0ff,
+        boltColor: frost ? 0xbfe6ff : fire ? 0xffb060 : 0x7fe0ff,
       };
       this.orbSummons = this.orbSummons.filter(s => s.id !== skill.id);
       this.orbSummons.push({ id: skill.id, t: rv('duration'), orb });
       // arcane conjuring flourish: a rune ring per sphere + a rising spark column
-      const runeCol = frost ? 0xbfe6ff : 0x8ed8ff;
+      const runeCol = frost ? 0xbfe6ff : fire ? 0xffa050 : 0x8ed8ff;
       for (let i = 0; i < orb.count; i++) this._spawnClassRing(this.pos, 1.8 + i * 0.5, runeCol, 0.55);
       this._fxBurst(this.mesh.position.clone().setY(this.mesh.position.y + 1.4), runeCol, 10 * orb.count, 4, 0.5);
       this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
