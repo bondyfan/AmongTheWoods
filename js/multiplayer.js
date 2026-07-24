@@ -18,14 +18,14 @@
 import * as THREE from 'three';
 import { COOP_WORLD_SEED, WoodsNet } from './net.js';
 import { WoodsNetWS } from './netws.js';
-import { ARENA, ARENA_RETURN_DELAY, arenaReward, ENEMY_TYPES, BOSS_RANKS,
+import { ARENA, ARENA_RETURN_DELAY, arenaReward, ENEMY_TYPES, BOSS_RANKS, BIOMES,
          MOBA_BUILDINGS, roundResource, itemById, enemyLevelFor } from './config.js';
 import { makeMan, makeAxe, makeBow, makePickaxe, makeClub, makeSword, makeHandSpear,
          makeCrossbow, makeShield, makeEnemyMesh, makeMeatDrop, makeWoodDrop,
          makeStoneDrop, makeHideDrop, makeIronDrop, makeBerryDrop, makeSalveDrop, makeRoastDrop,
          makeEssenceDrop, makeWoolDrop, makeItemDrop,
          makeEnemyShot, makeSpear, makeWolf, makeMobaTower, makeMobaBase,
-         makeTeamFlag, TEAM_COLORS, mat } from './models.js';
+         makeTeamFlag, TEAM_COLORS, mat, makeTorchMesh } from './models.js';
 import { audio } from './audio.js';
 import { MOB_INFO_RADIUS, mobLevelBadge } from './ui.js';
 
@@ -98,8 +98,10 @@ class RemotePlayer {
 
     ui.addTracker(this.trackerKey,
       () => this.mesh.visible ? this.mesh.position.clone().setY(this.mesh.position.y + 2.1) : null,
-      `<div class="mp-name">${name}</div><div class="hpbar"><div class="hpbar-fill"></div></div>`, 'hpwrap',
+      `<div class="mp-name"></div><div class="hpbar"><div class="hpbar-fill"></div></div>`, 'hpwrap',
       (el) => {
+        // textContent (not innerHTML) — the name arrives over the network
+        if (el.children[0].textContent !== this.name) el.children[0].textContent = this.name;
         const pct = Math.max(0, this.hp / this.maxHp);
         const fill = el.children[1].firstChild;
         fill.style.width = (pct * 100) + '%';
@@ -110,6 +112,12 @@ class RemotePlayer {
   setState(s) {
     if (!s) return;
     this.lastSeen = performance.now();
+    // the peer's chosen username replaces the P2/P3 fallback label. Sanitized
+    // here because it lands in tracker DOM — textContent keeps it inert.
+    if (typeof s.nm === 'string') {
+      const nm = s.nm.replace(/[<>&"'`]/g, '').trim().slice(0, 14);
+      if (nm) this.name = nm;
+    }
     const jump = Math.hypot(s.x - this.targetPos.x, s.z - this.targetPos.z) > 20;
     this.targetPos.set(s.x, 0, s.z);
     if (jump) this.pos.copy(this.targetPos); // teleport, don't glide across the map
@@ -172,28 +180,61 @@ class RemotePlayer {
   _refreshWeapon() {
     const { rightSocket, leftSocket } = this.mesh.userData;
     rightSocket.clear(); leftSocket.clear();
+    this.torchMesh = null; this.torchLight = null;
     const w = itemById(this.weaponId)?.weapon;
-    const shield = itemById(this.offhandId)?.shield;
-    if (!w) return;
-    if (w.kind === 'melee' && w.tier > 0) {
-      const makers = { club: makeClub, sword: makeSword, spear: makeHandSpear, pick: makePickaxe, axe: makeAxe };
-      const tool = (makers[w.style] || makeAxe)(w.tier);
-      tool.rotation.x = -0.2;
-      rightSocket.add(tool);
-    } else if (w.kind === 'bow') {
-      leftSocket.add(w.style === 'crossbow' ? makeCrossbow(w.tier) : makeBow(w.tier));
+    const offItem = itemById(this.offhandId);
+    if (w) {
+      if (w.kind === 'melee' && w.tier > 0) {
+        const makers = { club: makeClub, sword: makeSword, spear: makeHandSpear, pick: makePickaxe, axe: makeAxe };
+        const tool = (makers[w.style] || makeAxe)(w.tier);
+        tool.rotation.x = -0.2;
+        rightSocket.add(tool);
+      } else if (w.kind === 'bow') {
+        leftSocket.add(w.style === 'crossbow' ? makeCrossbow(w.tier) : makeBow(w.tier));
+      }
     }
-    if (shield) {
-      const mesh = makeShield(shield.block >= 0.7 ? 2 : 1);
+    // a held torch: the burning stick AND its light, so allies see each other's
+    // torches glowing at night exactly like their own (bow → torch in the right)
+    const offhandSocket = (w?.kind === 'bow') ? rightSocket : leftSocket;
+    if (offItem?.torch) {
+      const t = makeTorchMesh();
+      t.rotation.x = 0.3;
+      this.torchRadius = offItem.torch.radius ?? 5;
+      this.torchLight = new THREE.PointLight(0xffc06a, 2, this.torchRadius * 2.8, 1.0);
+      this.torchLight.position.y = 0.6;
+      t.add(this.torchLight);
+      offhandSocket.add(t);
+      this.torchMesh = t;
+    } else if (offItem?.shield) {
+      const mesh = makeShield(offItem.shield.block >= 0.7 ? 2 : 1);
       mesh.rotation.z = -0.3;
-      (w.kind === 'bow' ? rightSocket : leftSocket).add(mesh);
+      offhandSocket.add(mesh);
     }
   }
 
-  update(dt) {
+  update(dt, torchDark = false) {
     if (!this.mesh.visible) {
       if (this.petMesh) this.petMesh.visible = false;
       return;
+    }
+    // held torch: mirror the local flame flicker + light so allies' torches
+    // genuinely light up the night for everyone
+    if (this.torchMesh) {
+      this._torchT = (this._torchT || 0) + dt;
+      const tt = this._torchT;
+      const k = 1 + Math.sin(tt * 11) * 0.16 + Math.sin(tt * 27.3) * 0.1;
+      const u = this.torchMesh.userData;
+      u.flame.scale.set(k, 1 + (k - 1) * 1.7, k);
+      u.flameCore.scale.set(k, k, k);
+      u.glow.scale.setScalar(1.25 + (k - 1) * 1.4);
+      if (this.torchLight) {
+        if (this.dead || this.stealthed) this.torchLight.intensity = 0;
+        else {
+          const flick = Math.sin(tt * 9) * 0.9 + Math.sin(tt * 23.7) * 0.6 + Math.sin(tt * 3.1) * 0.4;
+          const base = torchDark ? 9 + (this.torchRadius ?? 5) * 0.7 : 1.6;
+          this.torchLight.intensity = Math.max(0.5, base + flick * (torchDark ? 1.4 : 0.4));
+        }
+      }
     }
     this.pos.lerp(this.targetPos, Math.min(1, dt * 10));
     this.mesh.position.set(this.pos.x, this.world.heightAt(this.pos.x, this.pos.z), this.pos.z);
@@ -1020,6 +1061,7 @@ export class Multiplayer {
       atk: p.attackT > 0 ? 1 : 0, dead: p.dead ? 1 : 0,
       dn: (p.dead && this.downedUntil) ? 1 : 0,
       st: p.stealthed ? 1 : 0,
+      ...(ctx.playerName ? { nm: ctx.playerName } : {}),
       pet: ((p.hooks.classRulesEnabled?.() === false || p.selectedClass === 'beastmaster')
         && p.pet && !p.petDead && localPet)
         ? (p.pet.type || 'wolf') : 0,
@@ -1029,7 +1071,11 @@ export class Multiplayer {
       } : {}),
     }, rate);
 
-    for (const r of this.remotes.values()) r.update(dt);
+    // allies' torch lights burn bright in darkness, faint by day (mirrors tickTorch)
+    const torchDark = !!ctx.game.dungeon
+      || (BIOMES[ctx.game.biomeIndex]?.darkness ?? 0) >= 0.35
+      || (ctx.game.nightK || 0) > 0.55;
+    for (const r of this.remotes.values()) r.update(dt, torchDark);
     this.shadow?.update(dt, p);
     this.mobaShadow?.update(dt);
 

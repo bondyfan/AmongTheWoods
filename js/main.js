@@ -203,7 +203,10 @@ const combatMgr = () => {
 
 const ui = new UI({
   // the Single Player button starts whichever mode is selected in the menu
-  onStart: () => (selectedMode === 'moba' ? startMobaSolo() : startGame()),
+  onStart: () => {
+    if (!requireName()) return;
+    (selectedMode === 'moba' ? startMobaSolo() : startGame());
+  },
   onCastSpell: (i) => useBarSlot(i),
 });
 
@@ -2475,6 +2478,28 @@ function buildBase(id, lane) {
 // ---------- multiplayer lobby ----------
 const $id = (id) => document.getElementById(id);
 
+// ---------- username (required before entering any game) ----------
+// Shown above your head to every other player instead of P1/P2/P3 labels.
+const nameInput = $id('username');
+function sanitizeName(s) { return String(s || '').replace(/[<>&"'`]/g, '').trim().slice(0, 14); }
+function playerName() { return sanitizeName(nameInput?.value); }
+if (nameInput) {
+  nameInput.value = sanitizeName(localStorage.getItem('atw-name') || '');
+  nameInput.addEventListener('input', () => {
+    nameInput.classList.remove('name-missing');
+    localStorage.setItem('atw-name', sanitizeName(nameInput.value));
+  });
+}
+function requireName() {
+  if (playerName()) return true;
+  nameInput?.classList.remove('name-missing');
+  void nameInput?.offsetWidth; // restart the shake animation
+  nameInput?.classList.add('name-missing');
+  nameInput?.focus();
+  ui.toast('🧑 Choose a username first!', 'boss');
+  return false;
+}
+
 // ?devmode-only left-side tools: a world-space ruler and free RPG flight.
 // Opening the ruler panel turns its terrain-following circle on.
 // main-menu shortcut into the World Editor. Idempotent, so it can be added
@@ -2903,6 +2928,11 @@ function passGate() { $id('auth-gate').classList.add('gone'); }
 // reflect the signed-in identity in the menu (top-right badge) so you can
 // always see WHO you are — and sign out to switch accounts.
 function renderUserBadge(u) {
+  // a signed-in player with no username yet inherits their Google first name
+  if (u && nameInput && !nameInput.value) {
+    nameInput.value = sanitizeName((u.name || '').split(' ')[0]);
+    if (nameInput.value) localStorage.setItem('atw-name', nameInput.value);
+  }
   const badge = $id('user-badge');
   if (!badge) return;
   if (DEVMODE || !u) { badge.classList.add('hidden'); return; }
@@ -3282,6 +3312,7 @@ async function ensureMp() {
       get world() { return world; }, // MOBA swaps the world object at begin
       get camp() { return camp; },
       get petTarget() { return (companions.wolf && !player.petDead) ? petProxy : null; },
+      get playerName() { return playerName(); },
       popup: (pos, text, color, cls) => ui.popup(pos, text, color, cls),
       onDiscover: discoverType,
       onSharedQuestKill: (enemy) => trackQuestKill(enemy, false),
@@ -3393,6 +3424,7 @@ function stopServerStatusWatch() {
 $id('mp-server-btn')?.addEventListener('click', async () => {
   const btn = $id('mp-server-btn');
   if (btn.disabled) return;
+  if (!requireName()) return;
   btn.disabled = true;
   try {
     stopServerStatusWatch();
@@ -3418,6 +3450,7 @@ $id('mode-back-btn').addEventListener('click', () => {
   $id('mode-select').classList.remove('hidden');
 });
 $id('mp-moba-btn').addEventListener('click', async () => {
+  if (!requireName()) return;
   try {
     const session = await ensureMp();
     showWaiting(await session.host('moba', null));
@@ -3435,6 +3468,7 @@ function showWaiting(code) {
   $id('start-btn').classList.add('hidden'); // no solo start while hosting
 }
 $id('mp-coop-btn').addEventListener('click', async () => {
+  if (!requireName()) return;
   const btn = $id('mp-coop-btn');
   btn.disabled = true;
   try {
@@ -3462,6 +3496,7 @@ $id('mp-joincode')?.addEventListener('click', async () => {
   try { await navigator.clipboard.writeText(mpCode); ui.toast('📋 Join code copied!', 'level'); } catch {}
 });
 $id('mp-pvp-btn').addEventListener('click', async () => {
+  if (!requireName()) return;
   try {
     const session = await ensureMp();
     const interval = Number($id('mp-interval').value);
@@ -3469,6 +3504,7 @@ $id('mp-pvp-btn').addEventListener('click', async () => {
   } catch (e) { mpError(e); }
 });
 $id('mp-join-btn').addEventListener('click', async () => {
+  if (!requireName()) return;
   const btn = $id('mp-join-btn');
   const label = btn.textContent;
   btn.disabled = true;

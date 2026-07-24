@@ -814,6 +814,25 @@ body.slotting .spell-slot.empty {
 }
 #start-btn:hover, #restart-btn:hover { filter: brightness(1.15); transform: translateY(-1px); }
 
+/* ---------- username (shown above your head to other players) ---------- */
+#name-row {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  margin: 4px auto 16px;
+}
+#name-row .name-icon { font-size: 20px; }
+#username {
+  width: 240px; padding: 9px 14px; font-size: 16px; text-align: center;
+  background: rgba(20, 30, 14, 0.75); color: #f2f0e0;
+  border: 2px solid #5d7a44; border-radius: 10px; outline: none;
+}
+#username:focus { border-color: #86b45e; }
+#username.name-missing { border-color: #d8574a; animation: nameShake 0.3s; }
+@keyframes nameShake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-6px); }
+  75% { transform: translateX(6px); }
+}
+
 /* ---------- mode selection ---------- */
 #mode-select { display: flex; gap: 16px; justify-content: center; margin-top: 10px; }
 #mode-select button {
