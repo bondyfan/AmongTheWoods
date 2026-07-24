@@ -582,7 +582,7 @@ export const ITEMS = [
       combo: [1, 1.2] },
     desc: "Safe, narrow reach that keeps dangerous foes at spear's length; strikes from behind bite into weak points." },
   // -- weapons: ranged (invented with the Wooden Cabin era; train Range to extend) --
-  { id: 'huntingBow', slot: 'weapon', level: 7, icon: '🏹', name: 'Hunting Bow',   cost: { wood: 25, hide: 4 }, needs: 'cabin',
+  { id: 'huntingBow', slot: 'weapon', level: 7, icon: '🏹', name: 'Hunting Bow',   cost: { wood: 25, hide: 4 },
     weapon: { kind: 'bow', style: 'bow', dmg: 32, cd: 2.14, range: 3.5, pierce: false, tier: 1 },
     desc: 'A quick, accurate shot straight to the mark. Supports special arrows.' },
   { id: 'longbow',    slot: 'weapon', level: 12, icon: '🎯', name: 'Longbow',       cost: { wood: 40, hide: 8, iron: 4 }, needs: 'furnace',
@@ -1087,7 +1087,7 @@ export const CLASS_TREES = [
       P('priest_fortitude', '❤️', 'Fortitude', 10, '+3.5% maximum health per rank.', { hpPct: 0.035 }),
       P('priest_renewal', '🌿', 'Renewal Mastery', 14, 'Healing-over-time +12% per rank.', { hotPower: 0.12 }),
       P('priest_shields', '🛡️', 'Divine Aegis', 18, 'Holy shields +12% per rank.', { shieldPower: 0.12 }),
-      P('priest_purity', '✨', 'Purity', 22, 'Poison damage -12% per rank.', { poisonCut: 0.12 }),
+      P('priest_purity', '🔥', 'Righteous Fury', 22, 'Holy conviction sharpens your strikes — the only Priest passive that boosts weapon damage.', { meleeDmg: [0.06, 0.13, 0.22] }),
       P('priest_mercy', '🕊️', 'Mercy', 27, 'Healing on targets below half health +10% per rank.', { lowHpHeal: 0.1 }),
       P('priest_radiance', '☀️', 'Radiance', 31, 'Healing and holy areas +10% per rank.', { healRadius: 0.1 }),
       P('priest_guardian', '👼', 'Guardian Faith', 37, 'Guardian miracles +15% per rank.', { guardianPower: 0.15 }),
