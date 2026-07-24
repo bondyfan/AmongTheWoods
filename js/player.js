@@ -1305,6 +1305,7 @@ export class Player {
         freeze: skill.freeze ? rv('freeze') : 0,
         // fire summons (Fire Imp) leave a burning DoT — pre-scaled like Fireball
         burn: skill.burn ? rv('burn') * this.levelSpellMult * this._classMagicMultiplier('fire') : 0,
+        imp: !!skill.imp, // a ground-running Fire Imp rather than an orbiting sphere
         sphereColor: frost ? 0x7fe0ff : fire ? 0xff6a2a : 0x38c0ff,
         boltColor: frost ? 0xbfe6ff : fire ? 0xffb060 : 0x7fe0ff,
       };

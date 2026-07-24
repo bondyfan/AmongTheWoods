@@ -1,7 +1,7 @@
 // ---- Companions driven by equipment: pet slot (wolf) & orb slot (spheres) ----
 
 import * as THREE from 'three';
-import { makeWolf, makeGuardianSphere, makeEnemyMesh } from './models.js';
+import { makeWolf, makeGuardianSphere, makeEnemyMesh, makeFireImp } from './models.js';
 import { audio } from './audio.js';
 
 let nextCompanionId = 1;
@@ -148,6 +148,76 @@ class GuardianSphere {
   }
 }
 
+// A ground-running Fire Imp (Mage summon): trots along near the caster, keeps a
+// caster's distance from foes, and hurls burning bolts. Purely a timed summon —
+// no HP/death; its lifetime is the orbSummons timer.
+class FireImp {
+  constructor(scene, orb) {
+    this.id = nextCompanionId++;
+    this.mesh = makeFireImp();
+    scene.add(this.mesh);
+    this.pos = new THREE.Vector3(0, 0, 0);
+    this.walkT = 0;
+    this.shootCd = 0.4;
+    this.bobT = Math.random() * 6;
+    this._placed = false;
+  }
+
+  update(dt, player, enemyMgr, projectiles, orb, world) {
+    if (!this._placed) { this.pos.copy(player.pos).add(new THREE.Vector3(-1.4, 0, 1.4)); this._placed = true; }
+    this.bobT += dt;
+
+    // nearest hostile within 16 m of the caster (never the village guards)
+    let target = null, best = 16 * 16;
+    for (const e of enemyMgr.alive()) {
+      if (e.cfg?.friendly || e.cfg?.passive) continue;
+      const d2 = e.pos.distanceToSquared(player.pos);
+      if (d2 < best) { best = d2; target = e; }
+    }
+
+    // hold ~6 m from the target (a caster's distance); else pad along by the owner
+    let dest;
+    if (target) {
+      const away = new THREE.Vector3().subVectors(this.pos, target.pos);
+      const d = away.length() || 1;
+      dest = d < 6 ? this.pos.clone() : target.pos.clone().add(away.multiplyScalar(6 / d));
+    } else {
+      dest = player.pos.clone().add(new THREE.Vector3(-1.4, 0, 1.4));
+    }
+    if (this.pos.distanceTo(player.pos) > 40) this.pos.copy(player.pos); // owner teleported
+
+    const to = new THREE.Vector3().subVectors(dest, this.pos);
+    const dist = to.length();
+    const speed = 6.4;
+    if (dist > 0.4) {
+      this.pos.addScaledVector(to, Math.min(1, (speed * dt) / dist));
+      this.walkT += dt * speed;
+      world?.collide?.(this.pos, 0.3);
+    }
+
+    const gy = world?.heightAt ? world.heightAt(this.pos.x, this.pos.z) : 0;
+    this.mesh.position.set(this.pos.x, gy + Math.sin(this.bobT * 3) * 0.04, this.pos.z);
+    const faceTo = target ? new THREE.Vector3().subVectors(target.pos, this.pos) : to;
+    if (faceTo.lengthSq() > 0.04) this.mesh.rotation.y = Math.atan2(faceTo.x, faceTo.z) + Math.PI;
+    (this.mesh.userData.legs || []).forEach((leg, li) => {
+      leg.rotation.x = Math.sin(this.walkT * 2.0 + (li % 2) * Math.PI) * 0.6;
+    });
+
+    // hurl a burning bolt
+    this.shootCd -= dt;
+    if (target && this.shootCd <= 0 && best < 15 * 15) {
+      this.shootCd = 1.1 * Math.max(0.4, 1 - (player.classEffects?.classCdReduction || 0));
+      audio.sfx('attack_ranged', 0.2, 220);
+      const from = this.mesh.position.clone().setY(gy + 1.0);
+      projectiles.spawnBolt(from, target, {
+        dmg: orb.dmg, color: orb.boltColor || 0xffb060,
+        onHit: () => enemyMgr.damage(target, orb.dmg, null, 'local',
+          orb.burn ? { burn: { dps: orb.burn, dur: 6 } } : null),
+      });
+    }
+  }
+}
+
 export class Companions {
   constructor(scene, hooks = {}) {
     this.scene = scene;
@@ -214,13 +284,14 @@ export class Companions {
       });
     }
     if (player.orb) for (const s of this.spheres) s.update(dt, player, enemyMgr, projectiles, player.orb);
-    this._syncSummons(dt, player, enemyMgr, projectiles);
+    this._syncSummons(dt, player, enemyMgr, projectiles, world);
   }
 
-  // Mage sphere summons live on player.orbSummons ([{ id, t, orb }]). Rebuild
-  // the visible spheres only when the active set (kind + count) changes; each
-  // sphere then homes bolts using its own summon's orb spec every frame.
-  _syncSummons(dt, player, enemyMgr, projectiles) {
+  // Mage summons live on player.orbSummons ([{ id, t, orb }]). Rebuild the
+  // visible minions only when the active set (kind + count) changes; each then
+  // acts from its own summon's orb spec every frame. Orbs orbit-and-shoot;
+  // a Fire Imp (orb.imp) runs on the ground and hurls burning bolts.
+  _syncSummons(dt, player, enemyMgr, projectiles, world) {
     const summons = (player.orbSummons || []).filter(s => s.t > 0);
     const sig = summons.map(s => `${s.id}:${s.orb.count}`).join('|');
     if (sig !== this._summonSig) {
@@ -228,7 +299,9 @@ export class Companions {
       this.summonSpheres = [];
       for (const su of summons) {
         for (let i = 0; i < su.orb.count; i++) {
-          const sp = new GuardianSphere(this.scene, i, su.orb.count, su.orb.sphereColor);
+          const sp = su.orb.imp
+            ? new FireImp(this.scene, su.orb)
+            : new GuardianSphere(this.scene, i, su.orb.count, su.orb.sphereColor);
           sp.summonId = su.id;
           this.summonSpheres.push(sp);
         }
@@ -237,7 +310,7 @@ export class Companions {
     }
     for (const sp of this.summonSpheres) {
       const su = summons.find(s => s.id === sp.summonId);
-      if (su) sp.update(dt, player, enemyMgr, projectiles, su.orb);
+      if (su) sp.update(dt, player, enemyMgr, projectiles, su.orb, world);
     }
   }
 

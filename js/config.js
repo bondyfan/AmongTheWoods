@@ -1073,8 +1073,8 @@ export const CLASS_TREES = [
       // refreshes it; the three kinds can orbit together.
       A('mage_guardian_sphere', '🔮', 'Guardian Sphere', 10, 'Summon an arcane sphere that orbits you and fires bolts at nearby enemies.', 'summon',
         { cd: 26, duration: [16, 20, 26], orbCount: 1, targets: 1, dmg: [16, 26, 38] }),
-      A('mage_fire_imp', '👺', 'Fire Imp', 12, 'Conjure a blazing imp-apparition that hovers at your side for a FULL 10 minutes, hurling fireballs that set foes alight. A lasting companion: long lifetime, long cooldown.', 'summon',
-        { cd: 600, element: 'fire', duration: 600, orbCount: 1, targets: 1, dmg: [20, 30, 44], burn: [5, 9, 14] }),
+      A('mage_fire_imp', '👺', 'Fire Imp', 12, 'Conjure a blazing little imp that scampers at your side for a FULL 10 minutes, hurling fireballs that set foes alight. A lasting companion: long lifetime, long cooldown.', 'summon',
+        { cd: 600, element: 'fire', duration: 600, orbCount: 1, targets: 1, imp: true, dmg: [20, 30, 44], burn: [5, 9, 14] }),
       A('mage_frost_sphere', '❄️', 'Frost Sphere', 20, 'Summon a cold sphere: heavy single bolts that briefly freeze what they strike.', 'summon',
         { cd: 34, element: 'frost', duration: [16, 20, 26], orbCount: 1, targets: 1, dmg: [30, 48, 70], freeze: [0.3, 0.4, 0.5] }),
       A('mage_gemini_spheres', '🌐', 'Gemini Spheres', 35, 'Summon TWO spheres, each striking two enemies at once.', 'summon',

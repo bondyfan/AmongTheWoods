@@ -2315,6 +2315,33 @@ export function makeThornling() {
   return g;
 }
 
+// A little fire imp: a small horned biped with glowing eyes, a whippy tail and
+// a smouldering ember in its chest. Summoned by the Mage's Fire Imp spell.
+export function makeFireImp() {
+  const g = humanoid({ fur: 0x7a2412, face: 0x3a1206, eyes: 0xffe060, width: 0.5, height: 0.55 });
+  const head = g.userData.head;
+  // two little curved horns
+  for (const side of [-1, 1]) {
+    const horn = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.24, 6), mat(0x241008));
+    horn.position.set(side * 0.16, 0.32, 0);
+    horn.rotation.z = side * -0.5;
+    head.add(horn);
+  }
+  // a whippy tail with a burning tip
+  const tail = box(0.09, 0.09, 0.5, 0x7a2412);
+  tail.position.set(0, 0.55, 0.42); tail.rotation.x = 0.8;
+  g.add(tail);
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.22, 6),
+    new THREE.MeshBasicMaterial({ color: 0xff7a2a }));
+  tip.position.set(0, 0.78, 0.66); tip.rotation.x = -Math.PI * 0.5;
+  g.add(tip);
+  // a glowing ember in the chest
+  const ember = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6),
+    new THREE.MeshBasicMaterial({ color: 0xff5a1e }));
+  ember.position.set(0, 0.72, -0.22); g.add(ember);
+  return g;
+}
+
 export function makeTreant() {
   const g = humanoid({ fur: 0x5a4426, face: 0x3a2c18, eyes: 0xc9ff5f, width: 1.15, height: 1.1 });
   const crown = new THREE.Mesh(new THREE.SphereGeometry(0.55, 7, 6), mat(0x2d6a2d));
@@ -3318,84 +3345,256 @@ function pickTreeType(weights, rng) {
 
 // size: 0 sapling … 4 forest giant (five tiers — bigger tree, more wood and
 // far more hidden trunk health). Returns { mesh, radius } — radius = collision.
-// --- tree-detail helpers (detail 0 = low / 1 = medium / 2 = high) ---
-// clothe a canopy blob in small shade-varied leaf bumps that HUG its surface,
-// so the crown reads as a rich bushy mass of foliage — never floating balls
-function _canopyLeaves(g, cx, cy, cz, r, color, detail, rng) {
-  const n = detail >= 2 ? 12 : 6;
-  const base = new THREE.Color(color);
-  for (let i = 0; i < n; i++) {
-    const a = rng() * Math.PI * 2;
-    const e = rng() * 1.5 - 0.2;               // biased to the upper hemisphere
-    const rr = r * (0.86 + rng() * 0.16);      // sit ON the blob surface
-    const lx = cx + Math.cos(a) * Math.cos(e) * rr;
-    const ly = cy + Math.sin(e) * rr * 0.85;
-    const lz = cz + Math.sin(a) * Math.cos(e) * rr;
-    const shade = base.clone().multiplyScalar(0.84 + rng() * 0.3).getHex();
-    const s = sphere(r * (0.2 + rng() * 0.14), shade, 5);
-    s.castShadow = false;
-    s.position.set(lx, ly, lz);
-    s.scale.y = 0.82;
-    g.add(s);
-  }
+// --- HIGH tree detail (the "High" graphics setting; detail 0 = low, 2 = high) ---
+// High trees are built from scratch as REAL trees: a trunk splitting into
+// boughs and twigs, every branch tip carrying a dense cloud of individual
+// leaves wrapped over a darker inner core, so crowns read as lush solid
+// masses of foliage — never bare blobs. They are built at TRUE proportions
+// (scale.y stays 1, no ×3 stretch, so leaves keep their shape) with heights
+// matched to the low silhouettes — the far-LOD impostor swap stays pop-free.
+// Everything bakes into the shared template with the canopy sway band.
+
+const _leafDir = new THREE.Vector3();
+const _leafUp = new THREE.Vector3(0, 1, 0);
+const _leafCol = new THREE.Color();
+
+// quantized shade of a base color — few distinct hexes, so the shared
+// color-keyed material cache stays small while the foliage still shimmers
+function _shadeOf(base, f) {
+  f = Math.round(f * 16) / 16;
+  _leafCol.setRGB(Math.min(1, base.r * f), Math.min(1, base.g * f), Math.min(1, base.b * f));
+  return _leafCol.getHex();
 }
 
-// a clump of INDIVIDUAL leaves — small flat shade-varied quads scattered
-// through a small volume, so up close it reads as real foliage (distinct
-// leaves) instead of a smooth ball
-function _leafClump(g, cx, cy, cz, r, color, rng, count) {
+// a dense cloud of individual leaves hugging the surface of an ellipsoid,
+// with a darker core inside that reads as the crown's shaded interior — the
+// leaves lie tangent to the crown (like a real canopy) with jittered tilt
+function _leafBall(g, cx, cy, cz, rx, ry, rz, color, rng, leaves, leafS) {
   const base = new THREE.Color(color);
-  for (let i = 0; i < count; i++) {
-    const shade = base.clone().multiplyScalar(0.74 + rng() * 0.42).getHex();
-    const leaf = box(0.11 + rng() * 0.08, 0.02, 0.075 + rng() * 0.05, shade);
-    leaf.castShadow = false;
-    const a = rng() * Math.PI * 2, e = rng() * Math.PI - Math.PI / 2;
-    const rr = Math.cbrt(rng()) * r;
-    leaf.position.set(cx + Math.cos(a) * Math.cos(e) * rr,
-      cy + Math.sin(e) * rr, cz + Math.sin(a) * Math.cos(e) * rr);
-    leaf.rotation.set(rng() * Math.PI, rng() * Math.PI, rng() * Math.PI);
+  const core = sphere(1, _shadeOf(base, 0.55), 7);
+  core.scale.set(rx * 0.9, ry * 0.9, rz * 0.9);
+  core.position.set(cx, cy, cz);
+  g.add(core);
+  for (let i = 0; i < leaves; i++) {
+    const a = rng() * Math.PI * 2, e = Math.asin(rng() * 2 - 1);
+    _leafDir.set(Math.cos(a) * Math.cos(e), Math.sin(e), Math.sin(a) * Math.cos(e));
+    const puff = 0.84 + rng() * 0.3;                       // shell thickness
+    const f = 0.68 + rng() * 0.48 + Math.max(0, _leafDir.y) * 0.14; // sunlit tops
+    const leaf = box((0.3 + rng() * 0.24) * leafS, 0.04 * leafS,
+      (0.19 + rng() * 0.15) * leafS, _shadeOf(base, f));
+    leaf.position.set(cx + _leafDir.x * rx * puff, cy + _leafDir.y * ry * puff,
+      cz + _leafDir.z * rz * puff);
+    leaf.quaternion.setFromUnitVectors(_leafUp, _leafDir);  // lie ON the crown
+    leaf.rotateY(rng() * Math.PI * 2);
+    leaf.rotateX((rng() - 0.5) * 0.9);
     g.add(leaf);
   }
 }
 
-// HIGH-detail leafy tree, built the real way: a trunk splitting into several
-// boughs (some splitting again), each ending in a leaf CLUMP of individual
-// leaves — an actual branched, leafy tree, not a cone with blobs on it. It
-// bakes with the canopy sway band, so the leaves ride the wind.
-function _highLeafyTree(g, size, scale, foliageColor, trunkColor, rng) {
-  const trunkH = 2.4 * scale;                    // tall trunk (matches the others)
-  const trunk = cyl(0.1 * scale, 0.2 * scale, trunkH, trunkColor, 6);
+// a limb: tapered branch segment along local +Y, pivot at its base — nest
+// them (rotate + offset) to grow boughs that kink and fork like real wood
+function _limb(len, rBase, rTip, color, seg = 5) {
+  const b = new THREE.Group();
+  const c = cyl(rTip, rBase, len, color, seg);
+  c.position.y = len / 2;
+  b.add(c);
+  return b;
+}
+
+// HIGH broadleaf (leafy oak / birch): a flared trunk splitting into kinked
+// boughs, each tipped with a leaf cloud, stacked under a tall central crown
+// column — one lush continuous canopy with real wood showing through
+function _highBroadleaf(g, size, s, foliageColor, trunkColor, rng, birch) {
+  const trunkH = (birch ? 6.6 + 0.7 * size : 6.4 + size) * s;
+  const trunk = cyl((birch ? 0.08 : 0.11) * s, (birch ? 0.18 : 0.26) * s,
+    trunkH, trunkColor, 7);
   trunk.position.y = trunkH / 2;
-  trunk.rotation.z = (rng() - 0.5) * 0.06;
+  trunk.rotation.z = (rng() - 0.5) * 0.07;
   g.add(trunk);
-  const nMain = 4 + size;
-  const clumpR = (0.6 + rng() * 0.22) * scale;   // wide lush clumps
-  for (let i = 0; i < nMain; i++) {
-    const len = (0.9 + rng() * 0.7) * scale;
-    const br = new THREE.Group();
-    const c = cyl(0.03 * scale, 0.065 * scale, len, trunkColor, 5);
-    c.position.y = len / 2; c.castShadow = false;
-    br.add(c);
-    if (rng() < 0.6) {                    // a secondary fork with its own leaves
-      const len2 = len * (0.5 + rng() * 0.3);
-      const b2 = new THREE.Group();
-      const c2 = cyl(0.018 * scale, 0.035 * scale, len2, trunkColor, 5);
-      c2.position.y = len2 / 2; c2.castShadow = false;
-      b2.add(c2);
-      _leafClump(b2, 0, len2 + clumpR * 0.4, 0, clumpR * 0.85, foliageColor, rng, 10 + size * 3);
-      b2.position.y = len * (0.55 + rng() * 0.3);
-      b2.rotation.y = rng() * Math.PI * 2; b2.rotation.x = 0.5 + rng() * 0.4;
-      br.add(b2);
+  if (birch) { // dark bark flecks up the white trunk
+    for (let i = 0; i < 6; i++) {
+      const fl = box(0.2 * s, 0.09 * s, 0.2 * s, 0x3a3a34);
+      fl.position.set(trunk.rotation.z * -trunkH * 0.4 * (i / 6),
+        trunkH * (0.1 + i * 0.13 + rng() * 0.06), 0);
+      fl.rotation.y = rng() * Math.PI;
+      g.add(fl);
     }
-    _leafClump(br, 0, len + clumpR * 0.4, 0, clumpR, foliageColor, rng, 16 + size * 4);
-    br.position.y = trunkH * (0.68 + rng() * 0.28);
-    br.rotation.y = (i / nMain) * Math.PI * 2 + rng() * 0.5;
-    br.rotation.x = 0.45 + rng() * 0.5;   // up-and-out
-    g.add(br);
+  } else { // root flare at the base
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * Math.PI * 2 + rng();
+      const r = box(0.1 * s, 0.55 * s, 0.3 * s, trunkColor);
+      r.position.set(Math.cos(a) * 0.22 * s, 0.2 * s, Math.sin(a) * 0.22 * s);
+      r.rotation.y = -a;
+      r.rotation.x = 0.35;
+      g.add(r);
+    }
   }
-  // a lush central crown crowning the top
-  _leafClump(g, 0, trunkH + clumpR * 1.3, 0, clumpR * 1.7, foliageColor, rng, 26 + size * 7);
-  return 0.4 * scale + 0.16;
+  const k = 1 + 0.07 * size;                  // crowns swell with tree tier
+  const density = 0.75 + size * 0.12;         // leaf counts too
+  const leafS = (0.55 + 0.45 * s) * (birch ? 0.8 : 1);
+  const boughs = 4 + Math.min(2, size);
+  for (let i = 0; i < boughs; i++) {
+    const len1 = (1.5 + rng() * 0.9) * s * k;
+    const b1 = _limb(len1, 0.09 * s, 0.045 * s, trunkColor);
+    b1.position.y = trunkH * (0.62 + rng() * 0.26);
+    b1.rotation.y = (i / boughs) * Math.PI * 2 + rng() * 0.9;
+    b1.rotation.x = (birch ? 0.3 : 0.5) + rng() * 0.35;    // up-and-out
+    g.add(b1);
+    const len2 = len1 * (0.5 + rng() * 0.25);              // kinked upper segment
+    const b2 = _limb(len2, 0.045 * s, 0.018 * s, trunkColor);
+    b2.position.y = len1;
+    b2.rotation.x = 0.2 + rng() * 0.35;
+    b2.rotation.y = rng() * 1.2 - 0.6;
+    b1.add(b2);
+    const br = (0.9 + rng() * 0.3) * s;
+    _leafBall(b2, 0, len2 + br * 0.45, 0, br, br * 0.78, br, foliageColor, rng,
+      Math.round(30 * density), leafS);
+    if (rng() < 0.55) {                                    // a side twig fork
+      const len3 = len1 * (0.35 + rng() * 0.2);
+      const b3 = _limb(len3, 0.03 * s, 0.012 * s, trunkColor);
+      b3.position.y = len1 * (0.5 + rng() * 0.3);
+      b3.rotation.x = 0.7 + rng() * 0.4;
+      b3.rotation.y = rng() * Math.PI * 2;
+      b1.add(b3);
+      const br3 = br * 0.6;
+      _leafBall(b3, 0, len3 + br3 * 0.5, 0, br3, br3 * 0.8, br3, foliageColor, rng,
+        Math.round(16 * density), leafS);
+    }
+  }
+  // the central crown column — three stacked clouds filling the top
+  for (const [dy, cr, n] of [[0.4, 1.3, 48], [1.5, 1.1, 38], [2.5, 0.82, 28]]) {
+    _leafBall(g, (rng() - 0.5) * 0.5 * s, trunkH + dy * s * k, (rng() - 0.5) * 0.5 * s,
+      cr * s * k, cr * 0.8 * s * k, cr * s * k, foliageColor, rng,
+      Math.round(n * density), leafS);
+  }
+  return (birch ? 0.28 : 0.4) * s + (birch ? 0.13 : 0.16);
+}
+
+// HIGH conifer: a full-height leader trunk with whorls of drooping branches,
+// each carrying flat needle fronds — long skirts low, short spire tips high.
+// Dense overlapping fronds give the bushy layered silhouette of a real pine.
+function _highPine(g, size, s, foliageColor, trunkColor, rng, snowy) {
+  const H = (10.5 + 1.7 * size) * s;
+  const trunk = cyl(0.05 * s, 0.24 * s, H, trunkColor, 7);
+  trunk.position.y = H / 2;
+  g.add(trunk);
+  const base = new THREE.Color(foliageColor);
+  const crown0 = H * 0.2;                        // bare trunk below the skirt
+  const whorls = 8 + size;
+  for (let w = 0; w < whorls; w++) {
+    const t = w / (whorls - 1);
+    const y = crown0 + t * (H * 0.96 - crown0) + (rng() - 0.5) * 0.2 * s;
+    const L = (1.75 * (1 - 0.78 * t) + 0.22) * s;
+    const nb = t > 0.9 ? 3 : 5 + ((rng() < 0.5) ? 1 : 0);
+    const phase = rng() * Math.PI * 2;
+    for (let i = 0; i < nb; i++) {
+      const a = phase + (i / nb) * Math.PI * 2 + rng() * 0.5;
+      const dx = Math.cos(a), dz = Math.sin(a);
+      const droop = 0.06 + rng() * 0.16;         // tips dip below horizontal
+      const br = _limb(L, 0.05 * s, 0.014 * s, trunkColor, 4);
+      br.position.y = y;
+      _leafDir.set(dx, -Math.sin(droop), dz).normalize();
+      br.quaternion.setFromUnitVectors(_leafUp, _leafDir);
+      g.add(br);
+      // flat needle fronds laid along the branch — the actual foliage
+      for (const kk of [0.45, 0.78, 1.06]) {
+        const wid = (0.52 - 0.3 * t) * s * (1.3 - kk * 0.5);
+        const fr = box(L * 0.55, 0.05 * s, wid,
+          _shadeOf(base, 0.72 + rng() * 0.42 + kk * 0.1));
+        fr.position.set(dx * L * kk, y - Math.sin(droop) * L * kk + 0.04 * s,
+          dz * L * kk);
+        fr.rotation.y = -a;
+        fr.rotation.x = (rng() - 0.5) * 0.25;
+        g.add(fr);
+        if (snowy && t > 0.35 && kk < 1) {       // snow resting on upper fronds
+          const sn = box(L * 0.45, 0.045 * s, wid * 0.8, 0xf0f5f9);
+          sn.position.set(fr.position.x, fr.position.y + 0.055 * s, fr.position.z);
+          sn.rotation.y = -a;
+          g.add(sn);
+        }
+      }
+    }
+    // a short inner frond near the trunk keeps the core dense
+    const a2 = rng() * Math.PI * 2;
+    const inn = box(L * 0.4, 0.05 * s, 0.4 * s * (1 - 0.4 * t),
+      _shadeOf(base, 0.6 + rng() * 0.25));
+    inn.position.set(Math.cos(a2) * L * 0.2, y + 0.1 * s, Math.sin(a2) * L * 0.2);
+    inn.rotation.y = -a2;
+    g.add(inn);
+  }
+  const tip = cone(0.34 * s, 1.3 * s, foliageColor, 6);    // dense leader tip
+  tip.position.y = H * 0.98 + 0.5 * s;
+  g.add(tip);
+  if (snowy) {
+    const cap = cone(0.3 * s, 0.5 * s, 0xf0f5f9, 6);
+    cap.position.y = H * 0.98 + 1.05 * s;
+    g.add(cap);
+  }
+  return 0.4 * s + 0.16;
+}
+
+// HIGH jungle canopy giant: buttressed trunk, arched umbrella arms each
+// ending in a broad flat leaf pad (big tropical leaves), lianas trailing
+// off the canopy rim with leaf tufts at their tips
+function _highJungle(g, size, s, foliageColor, rng) {
+  const trunkH = (7.4 + rng() * 2.6) * s;
+  const trunk = cyl(0.09 * s, 0.22 * s, trunkH, 0x6a5638, 7);
+  trunk.position.y = trunkH / 2;
+  trunk.rotation.z = (rng() - 0.5) * 0.05;
+  g.add(trunk);
+  for (let i = 0; i < 4; i++) {                  // buttress roots
+    const a = (i / 4) * Math.PI * 2 + rng();
+    const b = box(0.09 * s, 1.6 * s, 0.5 * s, 0x5c4a30);
+    b.position.set(Math.cos(a) * 0.26 * s, 0.6 * s, Math.sin(a) * 0.26 * s);
+    b.rotation.y = -a;
+    b.rotation.x = 0.28;
+    g.add(b);
+  }
+  const density = 0.75 + size * 0.12;
+  const leafS = (0.55 + 0.45 * s) * 1.35;        // big tropical leaves
+  const crownR = (1.7 + rng() * 0.5) * s * (1 + 0.05 * size);
+  const arms = 5 + Math.min(2, size);
+  for (let i = 0; i < arms; i++) {
+    const a = (i / arms) * Math.PI * 2 + rng() * 0.7;
+    const dx = Math.cos(a), dz = Math.sin(a);
+    const reach = crownR * (0.55 + rng() * 0.3);
+    const lift = 0.3 + rng() * 0.2;              // arms arch gently upward
+    const br = _limb(reach, 0.07 * s, 0.03 * s, 0x6a5638, 4);
+    br.position.y = trunkH * (0.9 + rng() * 0.05);
+    _leafDir.set(dx * Math.cos(lift), Math.sin(lift), dz * Math.cos(lift));
+    br.quaternion.setFromUnitVectors(_leafUp, _leafDir);
+    g.add(br);
+    const padR = (0.9 + rng() * 0.35) * s;
+    _leafBall(g, dx * reach * Math.cos(lift), br.position.y + reach * Math.sin(lift) + 0.15 * s,
+      dz * reach * Math.cos(lift), padR, padR * 0.35, padR, foliageColor, rng,
+      Math.round(26 * density), leafS);
+  }
+  // the central pad crowns the trunk top
+  _leafBall(g, 0, trunkH + 0.5 * s, 0, crownR * 0.75, crownR * 0.28, crownR * 0.75,
+    foliageColor, rng, Math.round(42 * density), leafS);
+  const lianas = 4 + Math.floor(rng() * 4);
+  for (let i = 0; i < lianas; i++) {             // lianas off the canopy rim
+    const a = rng() * Math.PI * 2;
+    const len = (3 + rng() * 4) * s;
+    const lx = Math.cos(a) * crownR * 0.7, lz = Math.sin(a) * crownR * 0.7;
+    const l = cyl(0.025, 0.035, len, 0x3f7a2c, 4);
+    l.position.set(lx, trunkH - len / 2 + 0.2 * s, lz);
+    l.rotation.z = (rng() - 0.5) * 0.12;
+    g.add(l);
+    if (rng() < 0.6) {                           // a leaf tuft at the tip
+      const tipY = trunkH - len + 0.2 * s;
+      const bc = new THREE.Color(foliageColor);
+      for (let j = 0; j < 3; j++) {
+        const t = box(0.35 * leafS, 0.04 * leafS, 0.22 * leafS,
+          _shadeOf(bc, 0.75 + rng() * 0.4));
+        t.position.set(lx + (rng() - 0.5) * 0.3, tipY + (rng() - 0.5) * 0.3,
+          lz + (rng() - 0.5) * 0.3);
+        t.rotation.set(rng() * Math.PI, rng() * Math.PI, rng() * 0.6);
+        g.add(t);
+      }
+    }
+  }
+  return 0.3 * s + 0.14;
 }
 
 // a DENSE patch of many TINY grass blades spread over a small area — the
@@ -3490,12 +3689,21 @@ export function makeTree(size, biome, rng, detail = 0) {
   const foliageColor = biome.foliage[Math.floor(rng() * biome.foliage.length)];
   const type = pickTreeType(biome.trees, rng);
 
-  // HIGH detail, leafy or birch: a real branched, leafy tree (not blobs)
-  if (detail >= 2 && (type === 'leafy' || type === 'birch')
-      && !(biome.jungleFlora && type !== 'dead')) {
-    const tc = type === 'birch' ? 0xdcd8cc : biome.trunk;
-    const fc = type === 'birch' ? 0x8fb75e : foliageColor;
-    return { mesh: g, radius: _highLeafyTree(g, size, scale, fc, tc, rng) };
+  // HIGH detail: real branched trees with dense individual-leaf crowns,
+  // built at true proportions (no ×3 stretch — leaves keep their shape)
+  if (detail >= 2 && type !== 'dead') {
+    g.scale.y = 1;
+    let radius;
+    if (biome.jungleFlora && rng() < 0.85) {
+      radius = _highJungle(g, size, scale, foliageColor, rng);
+    } else if (type === 'pine') {
+      radius = _highPine(g, size, scale, foliageColor, biome.trunk, rng, biome.snowy);
+    } else if (type === 'birch') {
+      radius = _highBroadleaf(g, size, scale, 0x8fb75e, 0xdcd8cc, rng, true);
+    } else {
+      radius = _highBroadleaf(g, size, scale, foliageColor, biome.trunk, rng, false);
+    }
+    return { mesh: g, radius };
   }
 
   // Jungle canopy giants: tall smooth trunk with buttress roots, a wide
@@ -3516,14 +3724,13 @@ export function makeTree(size, biome, rng, detail = 0) {
       g.add(b);
     }
     const crownR = (1.45 + rng() * 0.6) * scale;   // wider, lusher crown
-    const pads = 3 + size + (detail >= 2 ? 2 : detail);
+    const pads = 3 + size;
     for (let i = 0; i < pads; i++) { // flat umbrella crown pads
       const c = sphere(crownR * (1 - i * 0.16), foliageColor, 7);
       c.scale.y = 0.34;
       const cy = trunkH + i * 0.3 * scale;
       c.position.set((rng() - 0.5) * 0.7 * scale, cy, (rng() - 0.5) * 0.7 * scale);
       g.add(c);
-      if (detail >= 1) _canopyLeaves(g, c.position.x, cy, c.position.z, crownR * (1 - i * 0.16), foliageColor, detail, rng);
     }
     const lianas = 4 + Math.floor(rng() * 4);
     for (let i = 0; i < lianas; i++) { // hanging lianas off the crown rim
@@ -3579,7 +3786,6 @@ export function makeTree(size, biome, rng, detail = 0) {
       s.position.set((rng() - 0.5) * 0.5 * scale, cy, (rng() - 0.5) * 0.5 * scale);
       s.scale.y = 0.82;
       g.add(s);
-      if (detail >= 1) _canopyLeaves(g, s.position.x, cy, s.position.z, r, 0x8fb75e, detail, rng);
     }
     return { mesh: g, radius: 0.28 * scale + 0.13 };
   }
@@ -3590,15 +3796,13 @@ export function makeTree(size, biome, rng, detail = 0) {
   g.add(trunk);
 
   if (type === 'pine') {
-    const layers = 3 + size + (detail >= 2 ? 1 : 0);
+    const layers = 3 + size;
     for (let i = 0; i < layers; i++) {
       const r = (1.45 - i * 0.19) * scale;   // wider, lusher conifer
-      const c = cone(r, 1.15 * scale, foliageColor, detail >= 1 ? 8 : 7);
+      const c = cone(r, 1.15 * scale, foliageColor, 7);
       const cy = trunkH + i * 0.66 * scale;
       c.position.y = cy;
       g.add(c);
-      // needle clumps break up the smooth cone into a bushy silhouette
-      if (detail >= 1) _canopyLeaves(g, 0, cy + 0.3 * scale, 0, r * 0.9, foliageColor, detail, rng);
     }
     if (biome.snowy) {
       const cap = cone((1.45 - (layers - 1) * 0.19) * scale * 0.9, 0.5 * scale, 0xf0f5f9, 7);
@@ -3606,7 +3810,7 @@ export function makeTree(size, biome, rng, detail = 0) {
       g.add(cap);
     }
   } else {
-    // leafy (low / medium): wider lusher blobs with leaf bumps
+    // leafy (low): wide lush canopy blobs
     const blobs = 2 + size;
     for (let i = 0; i < blobs; i++) {
       const r = (1.05 - i * 0.12) * scale;   // wider, lusher crown
@@ -3615,7 +3819,6 @@ export function makeTree(size, biome, rng, detail = 0) {
       s.position.set((rng() - 0.5) * 0.5 * scale, cy, (rng() - 0.5) * 0.5 * scale);
       s.scale.y = 0.88;
       g.add(s);
-      if (detail >= 1) _canopyLeaves(g, s.position.x, cy, s.position.z, r, foliageColor, detail, rng);
     }
   }
   return { mesh: g, radius: 0.4 * scale + 0.16 };
