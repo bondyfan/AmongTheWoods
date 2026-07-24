@@ -3371,17 +3371,23 @@ function _shadeOf(base, f) {
 // leaves lie tangent to the crown (like a real canopy) with jittered tilt
 function _leafBall(g, cx, cy, cz, rx, ry, rz, color, rng, leaves, leafS) {
   const base = new THREE.Color(color);
-  const core = sphere(1, _shadeOf(base, 0.55), 7);
-  core.scale.set(rx * 0.9, ry * 0.9, rz * 0.9);
-  core.position.set(cx, cy, cz);
-  g.add(core);
-  for (let i = 0; i < leaves; i++) {
+  for (let j = 0; j < 3; j++) {          // lumpy shaded core — never one
+    const a = rng() * Math.PI * 2;       // smooth ball peeking through
+    const core = sphere(1, _shadeOf(base, 0.48 + rng() * 0.14), 6);
+    core.scale.set(rx * (0.52 + rng() * 0.2), ry * (0.55 + rng() * 0.2),
+      rz * (0.52 + rng() * 0.2));
+    core.position.set(cx + Math.cos(a) * rx * 0.3, cy + (rng() - 0.5) * ry * 0.5,
+      cz + Math.sin(a) * rz * 0.3);
+    g.add(core);
+  }
+  const n = Math.round(leaves * 1.7);
+  for (let i = 0; i < n; i++) {
     const a = rng() * Math.PI * 2, e = Math.asin(rng() * 2 - 1);
     _leafDir.set(Math.cos(a) * Math.cos(e), Math.sin(e), Math.sin(a) * Math.cos(e));
-    const puff = 0.84 + rng() * 0.3;                       // shell thickness
+    const puff = 0.6 + 0.42 * Math.pow(rng(), 0.55);       // a THICK outer shell
     const f = 0.68 + rng() * 0.48 + Math.max(0, _leafDir.y) * 0.14; // sunlit tops
-    const leaf = box((0.3 + rng() * 0.24) * leafS, 0.04 * leafS,
-      (0.19 + rng() * 0.15) * leafS, _shadeOf(base, f));
+    const leaf = box((0.34 + rng() * 0.26) * leafS, 0.045 * leafS,
+      (0.21 + rng() * 0.16) * leafS, _shadeOf(base, f));
     leaf.position.set(cx + _leafDir.x * rx * puff, cy + _leafDir.y * ry * puff,
       cz + _leafDir.z * rz * puff);
     leaf.quaternion.setFromUnitVectors(_leafUp, _leafDir);  // lie ON the crown
@@ -3448,7 +3454,7 @@ function _highBroadleaf(g, size, s, foliageColor, trunkColor, rng, birch) {
     b1.add(b2);
     const br = (0.9 + rng() * 0.3) * s;
     _leafBall(b2, 0, len2 + br * 0.45, 0, br, br * 0.78, br, foliageColor, rng,
-      Math.round(30 * density), leafS);
+      Math.round(44 * density), leafS);
     if (rng() < 0.55) {                                    // a side twig fork
       const len3 = len1 * (0.35 + rng() * 0.2);
       const b3 = _limb(len3, 0.03 * s, 0.012 * s, trunkColor);
@@ -3458,11 +3464,11 @@ function _highBroadleaf(g, size, s, foliageColor, trunkColor, rng, birch) {
       b1.add(b3);
       const br3 = br * 0.6;
       _leafBall(b3, 0, len3 + br3 * 0.5, 0, br3, br3 * 0.8, br3, foliageColor, rng,
-        Math.round(16 * density), leafS);
+        Math.round(24 * density), leafS);
     }
   }
   // the central crown column — three stacked clouds filling the top
-  for (const [dy, cr, n] of [[0.4, 1.3, 48], [1.5, 1.1, 38], [2.5, 0.82, 28]]) {
+  for (const [dy, cr, n] of [[0.4, 1.3, 66], [1.5, 1.1, 52], [2.5, 0.82, 38]]) {
     _leafBall(g, (rng() - 0.5) * 0.5 * s, trunkH + dy * s * k, (rng() - 0.5) * 0.5 * s,
       cr * s * k, cr * 0.8 * s * k, cr * s * k, foliageColor, rng,
       Math.round(n * density), leafS);
@@ -3479,47 +3485,55 @@ function _highPine(g, size, s, foliageColor, trunkColor, rng, snowy) {
   trunk.position.y = H / 2;
   g.add(trunk);
   const base = new THREE.Color(foliageColor);
-  const crown0 = H * 0.2;                        // bare trunk below the skirt
-  const whorls = 8 + size;
+  const crown0 = H * 0.14;                       // bare trunk below the skirt
+  const whorls = 13 + size;
   for (let w = 0; w < whorls; w++) {
     const t = w / (whorls - 1);
-    const y = crown0 + t * (H * 0.96 - crown0) + (rng() - 0.5) * 0.2 * s;
-    const L = (1.75 * (1 - 0.78 * t) + 0.22) * s;
-    const nb = t > 0.9 ? 3 : 5 + ((rng() < 0.5) ? 1 : 0);
+    const yw = crown0 + t * (H * 0.96 - crown0) + (rng() - 0.5) * 0.2 * s;
+    const L = (1.85 * (1 - 0.75 * t) + 0.28) * s;
+    const nb = t > 0.9 ? 4 : 7;
     const phase = rng() * Math.PI * 2;
     for (let i = 0; i < nb; i++) {
-      const a = phase + (i / nb) * Math.PI * 2 + rng() * 0.5;
+      const a = phase + (i / nb) * Math.PI * 2 + rng() * 0.4;
       const dx = Math.cos(a), dz = Math.sin(a);
-      const droop = 0.06 + rng() * 0.16;         // tips dip below horizontal
+      const y = yw + (rng() - 0.5) * 0.3 * s;    // stagger breaks the shelf look
+      const droop = 0.08 + rng() * 0.18;         // tips dip below horizontal
       const br = _limb(L, 0.05 * s, 0.014 * s, trunkColor, 4);
       br.position.y = y;
       _leafDir.set(dx, -Math.sin(droop), dz).normalize();
       br.quaternion.setFromUnitVectors(_leafUp, _leafDir);
       g.add(br);
-      // flat needle fronds laid along the branch — the actual foliage
-      for (const kk of [0.45, 0.78, 1.06]) {
-        const wid = (0.52 - 0.3 * t) * s * (1.3 - kk * 0.5);
-        const fr = box(L * 0.55, 0.05 * s, wid,
+      // needle fronds along the branch: flat crossed pairs that overlap into
+      // one full bough — the actual foliage mass of the tree
+      for (const kk of [0.35, 0.68, 1.0]) {
+        const wid = (0.72 - 0.34 * t) * s * (1.45 - kk * 0.55);
+        const fy = y - Math.sin(droop) * L * kk + 0.05 * s;
+        const f1 = box(L * 0.72, 0.065 * s, wid,
           _shadeOf(base, 0.72 + rng() * 0.42 + kk * 0.1));
-        fr.position.set(dx * L * kk, y - Math.sin(droop) * L * kk + 0.04 * s,
-          dz * L * kk);
-        fr.rotation.y = -a;
-        fr.rotation.x = (rng() - 0.5) * 0.25;
-        g.add(fr);
+        f1.position.set(dx * L * kk, fy, dz * L * kk);
+        f1.rotation.y = -a;
+        f1.rotation.x = (rng() - 0.5) * 0.25;
+        g.add(f1);
+        if (kk < 1) {                            // crossed second blade
+          const f2 = box(L * 0.5, 0.06 * s, wid * 0.85,
+            _shadeOf(base, 0.64 + rng() * 0.35));
+          f2.position.set(dx * L * kk, fy - 0.04 * s, dz * L * kk);
+          f2.rotation.y = -a + 0.55 + rng() * 0.3;
+          g.add(f2);
+        }
         if (snowy && t > 0.35 && kk < 1) {       // snow resting on upper fronds
-          const sn = box(L * 0.45, 0.045 * s, wid * 0.8, 0xf0f5f9);
-          sn.position.set(fr.position.x, fr.position.y + 0.055 * s, fr.position.z);
+          const sn = box(L * 0.6, 0.05 * s, wid * 0.8, 0xf0f5f9);
+          sn.position.set(dx * L * kk, fy + 0.065 * s, dz * L * kk);
           sn.rotation.y = -a;
           g.add(sn);
         }
       }
     }
-    // a short inner frond near the trunk keeps the core dense
+    // a dense collar around the trunk closes the whorl's core
     const a2 = rng() * Math.PI * 2;
-    const inn = box(L * 0.4, 0.05 * s, 0.4 * s * (1 - 0.4 * t),
-      _shadeOf(base, 0.6 + rng() * 0.25));
-    inn.position.set(Math.cos(a2) * L * 0.2, y + 0.1 * s, Math.sin(a2) * L * 0.2);
-    inn.rotation.y = -a2;
+    const inn = sphere(1, _shadeOf(base, 0.55 + rng() * 0.2), 6);
+    inn.scale.set(L * 0.34, 0.14 * s, L * 0.34);
+    inn.position.set(Math.cos(a2) * 0.1 * s, yw + 0.06 * s, Math.sin(a2) * 0.1 * s);
     g.add(inn);
   }
   const tip = cone(0.34 * s, 1.3 * s, foliageColor, 6);    // dense leader tip
@@ -3566,12 +3580,12 @@ function _highJungle(g, size, s, foliageColor, rng) {
     g.add(br);
     const padR = (0.9 + rng() * 0.35) * s;
     _leafBall(g, dx * reach * Math.cos(lift), br.position.y + reach * Math.sin(lift) + 0.15 * s,
-      dz * reach * Math.cos(lift), padR, padR * 0.35, padR, foliageColor, rng,
-      Math.round(26 * density), leafS);
+      dz * reach * Math.cos(lift), padR, padR * 0.42, padR, foliageColor, rng,
+      Math.round(38 * density), leafS);
   }
   // the central pad crowns the trunk top
-  _leafBall(g, 0, trunkH + 0.5 * s, 0, crownR * 0.75, crownR * 0.28, crownR * 0.75,
-    foliageColor, rng, Math.round(42 * density), leafS);
+  _leafBall(g, 0, trunkH + 0.5 * s, 0, crownR * 0.75, crownR * 0.32, crownR * 0.75,
+    foliageColor, rng, Math.round(62 * density), leafS);
   const lianas = 4 + Math.floor(rng() * 4);
   for (let i = 0; i < lianas; i++) {             // lianas off the canopy rim
     const a = rng() * Math.PI * 2;

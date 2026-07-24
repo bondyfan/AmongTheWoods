@@ -178,7 +178,7 @@ export class World {
     this._woodLogDrops = new Set();
     this.time = 0;               // world clock (drives berry regrowth)
     this.foliageMult = 1;        // graphics setting: scatter-density multiplier
-    this.treeDetail = 0;         // graphics setting: 0 low / 1 med / 2 high canopies
+    this.treeDetail = 0;         // graphics setting: 0 low / 2 high (real branches+leaves)
     this.qualityVeg = false;     // graphics setting: swap to the glTF nature kit
     this.vegDrawDist = Infinity; // graphics setting: metres past which ground
                                  // vegetation (grass carpet + baked scatter) is

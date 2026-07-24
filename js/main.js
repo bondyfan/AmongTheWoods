@@ -110,7 +110,7 @@ let _fpsSmooth = 60, _fpsMeterT = 0;
 // foliage-density graphics setting → scatter-count multiplier in _genChunk
 // high = "lush" (the classic look); ultra switches on the dense grass-fill
 const FOLIAGE_MULT = { low: 0.35, normal: 1, high: 1.7, ultra: 3.2 };
-const TREE_DETAIL = { low: 0, medium: 1, high: 2 };
+const TREE_DETAIL = { low: 0, high: 2 };
 // vegetation draw distance: metres past which ground vegetation (grass carpet +
 // baked scatter) is culled per chunk. "furthest" = everything that's generated
 // (the old behaviour); the shorter tiers trade far grass for fill-rate.
@@ -2680,6 +2680,7 @@ const settings = Object.assign(
   settings.resScale ??= 'auto';
   settings.drawDist ??= onMobile ? 'short' : 'far';
   settings.treeDetail ??= 'low';
+  if (settings.treeDetail === 'medium') settings.treeDetail = 'low'; // tier removed
   settings.shadowDist ??= 'low';
   settings.ssao ??= false;
   settings.showFps ??= false;
