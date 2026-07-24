@@ -183,12 +183,13 @@ export class UI {
 
     // pet status line — the P/R controls are invisible without it
     const petEl = $('pet-display');
-    if (itemById(player.equipment.companion)?.pet) {
+    if (player.tamedPet) {
       petEl.classList.remove('hidden');
       const MODES = { aggressive: '🗡️ Aggressive', defensive: '🛡️ Defensive', passive: '💤 Passive' };
+      const nm = player.tamedPet.name || 'Pet';
       petEl.innerHTML = player.petDead
-        ? '🐺 💀 <i>down</i> — revive at home/graveyard <kbd>R</kbd>'
-        : `🐺 ${MODES[player.petMode] ?? player.petMode} <kbd>P</kbd>`;
+        ? `🐾 ${nm} 💀 <i>down</i> — revive at home/graveyard <kbd>R</kbd>`
+        : `🐾 ${nm} · ${MODES[player.petMode] ?? player.petMode} <kbd>P</kbd>`;
     } else petEl.classList.add('hidden');
 
     // carried supplies (F/G consumables)

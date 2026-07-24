@@ -715,6 +715,15 @@ export class EnemyManager {
     return burst;
   }
 
+  // Remove a live enemy WITHOUT a kill (no XP, no loot) — used when a Tame Beast
+  // channel completes and the wild beast becomes a persistent companion instead.
+  despawnQuiet(enemy) {
+    if (!enemy || enemy.dying) return;
+    enemy.dying = 0.0001;         // triggers the normal fade-out + list cleanup
+    enemy.tamedT = 0;
+    this.hooks.onRemove?.(enemy); // drop its health-bar tracker
+  }
+
   // Beastmaster charm: the beast fights at your side for a while, then reverts.
   tameBeast(enemy, dur = 20) {
     if (!enemy || enemy.dying || enemy.dead) return false;

@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { WORLD, XP_LEVELS, MAX_LEVEL, itemById, spellById, consumableById,
          biomeIndexAt, RESOURCES, MAX_SPELL_SLOTS, classSkillById,
-         classEffectsFor, requiredClassForItem, isTameableBeast,
+         classEffectsFor, requiredClassForItem, isTameableBeast, ENEMY_TYPES,
          PLAYER_HP, OOC_DELAY, oocRegenFor, weaponDurabilityFor } from './config.js';
 import { makeMan, makeAxe, makeBow, makePickaxe, makeTorchMesh, makeClub,
          makeSword, makeHandSpear, makeCrossbow, makeShield } from './models.js';
@@ -161,6 +161,7 @@ export class Player {
     this.chargeT = 0;
     this.castWindup = null;   // { skill, rank, id, t, dur } — ability charging up
     this.tameChannel = null;  // { beast, skill, rank, t, dur, heartT } — Tame Beast
+    this.tamedPet = null;     // { type, name } — the persistent tamed companion
     this.spinT = 0;           // Whirlwind body-spin animation timer
     this.spinDur = 0.55;
     this.classAuraT = 0;      // particle-aura emit accumulator (Blood Fury etc.)
@@ -580,12 +581,15 @@ export class Player {
       .sort((a, b) => a.score - b.score)[0]?.e || null;
   }
 
-  // the tameable beast most directly in front of the player, within range
-  _findTameTarget(enemyMgr, range = 7) {
+  // the tameable beast most directly in front of the player, within range.
+  // `ignoreLevel` finds a target even if it's too high-level (so the caller can
+  // explain WHY it can't be tamed instead of just "nothing there").
+  _findTameTarget(enemyMgr, range = 7, ignoreLevel = false) {
     let best = null, bestDot = 0.15; // must be roughly ahead of you
     for (const e of enemyMgr?.alive?.() || []) {
       if (e.dying || e.dead || e.bossRank > 0 || e.tamedT > 0 || !e.pos) continue;
       if (!isTameableBeast(e.type)) continue;
+      if (!ignoreLevel && (e.level || 1) > this.level) continue; // can't tame above your level
       const dx = e.pos.x - this.pos.x, dz = e.pos.z - this.pos.z;
       const d = Math.hypot(dx, dz);
       if (d > range + (e.hitR || 0)) continue;
@@ -634,7 +638,10 @@ export class Player {
         0.35, 0.1 + prog * 0.12, 0.5 + prog * 0.4);
     }
     if (tc.t <= 0) {
-      enemyMgr.tameBeast?.(beast, tc.skill.tameDur || 20);
+      // The beast joins you PERMANENTLY: capture its kind, remove it from the
+      // wild, and rebuild the companion from the new pet (replacing any old one).
+      this.tamedPet = { type: beast.type, name: beast.cfg?.name || 'Beast' };
+      this.petDead = false;
       this.cancelTame(true);
       this.spellCds[tc.skill.id] = this.classAbilityCooldown(tc.skill.id);
       // charm succeeds: a bright green ring + heart-burst on the new ally
@@ -642,7 +649,12 @@ export class Player {
       this._fxBurst(beast.mesh.position.clone(), 0x8ee87f, 16, 5, 0.6);
       for (let i = 0; i < 5; i++) this._fxHeart(beast.mesh.position.clone()
         .add(new THREE.Vector3((Math.random() - 0.5), 1 + Math.random(), (Math.random() - 0.5))));
+      this.hooks.popup(beast.mesh.position.clone().setY(beast.mesh.position.y + 2.2),
+        `💚 ${beast.cfg?.name || 'Beast'} tamed!`, '#8ee87f', 'big');
       audio.sfx('chime', 0.7, 0);
+      enemyMgr.despawnQuiet?.(beast); // it vanishes from the wild — now your companion
+      this.recompute();               // build player.pet from the new tamedPet
+      this.hooks.onPetChange?.();      // spawn the companion mesh + HP tracker
     }
   }
 
@@ -1323,11 +1335,15 @@ export class Player {
     if (skill.action === 'tame') {
       const beast = this._findTameTarget(enemyMgr, skill.range || 7);
       if (!beast) {
+        // is there a beast ahead that's simply too high-level to tame?
+        const tooStrong = this._findTameTarget(enemyMgr, skill.range || 7, true);
         this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
-          'No beast to tame ahead of you', '#ffcc66');
+          tooStrong ? `🔒 ${tooStrong.cfg?.name || 'That beast'} (Lv ${tooStrong.level}) is too fierce — level up first`
+                    : 'No beast to tame ahead of you', '#ffcc66');
         return false;
       }
-      this.tameChannel = { beast, skill, rank, t: skill.channel || 20, dur: skill.channel || 20, heartT: 0 };
+      const chan = rv('channel', 5);
+      this.tameChannel = { beast, skill, rank, t: chan, dur: chan, heartT: 0 };
       this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.4),
         `🐾 Taming ${beast.cfg?.name || 'the beast'}…`, '#8ee87f');
       return true;
@@ -2060,21 +2076,31 @@ export class Player {
     if (charm?.stats?.aspd) this.weapon.cd *= 1 - charm.stats.aspd;
     this.weapon.dmg += this.levelDamage; // flat +1/level, added after every multiplier
     this.attackRange = this.weapon.range; // aim marker clamps to this
-    // ONE companion slot: a wolf (pet) or a sphere (orb), never both.
-    // Pets scale with training AND the owner's level; orbs with Power.
-    const comp = (this.hooks.classRulesEnabled?.() === false || this.selectedClass === 'beastmaster')
-      ? equipped('companion') : null;
-    const petBase = comp?.pet;
+    // The pet is now a TAMED wild beast (Tame Beast), not a bought item. Its
+    // stats come from the beast's archetype (a bear tanks, a cheetah bites)
+    // scaled to the owner's level + Pet Training. Only the Beastmaster keeps one
+    // (or anyone when class rules are off).
+    const canPet = this.hooks.classRulesEnabled?.() === false || this.selectedClass === 'beastmaster';
+    const tp = (canPet && !this.petDead && this.tamedPet) ? this.tamedPet : null;
     const petPower = this.classEffects.petPower || 0;
-    this.pet = petBase
-      ? { dmg: petBase.dmg * (1 + 0.25 * s.pet) * (1 + 0.06 * this.level) * this.gearMult * (1 + petPower),
-          maxHp: Math.round((100 + 100 * s.pet + 60 * Math.floor(this.level / 2)) * this.gearMult * (1 + petPower)),
-          classPowerApplied: true }
-      : null;
-    const orbBase = comp?.orb;
-    this.orb = orbBase
-      ? { ...orbBase, dmg: orbBase.dmg * (1 + 0.05 * s.power) * this.gearMult * (1 + petPower) }
-      : null;
+    if (tp) {
+      // Same proven flat curve the bought wolves used (level + Pet Training),
+      // MODULATED by the tamed beast's archetype: a bear tanks & hits hard, a
+      // cheetah bites, a rabbit is a frail scout. Clamped so nothing explodes.
+      const arch = ENEMY_TYPES[tp.type] || {};
+      const dmgMult = Math.max(0.4, Math.min(1.6, arch.meleeDmgMult ?? arch.dmgMult ?? 0.7));
+      const hpFactor = Math.max(0.6, Math.min(1.9, arch.hpMult ?? 0.9));
+      const baseDmg = 12 + 24 * dmgMult; // wolf ≈ 36, matching the old Alpha Wolf
+      this.pet = {
+        type: tp.type,
+        dmg: baseDmg * (1 + 0.25 * s.pet) * (1 + 0.06 * this.level) * this.gearMult * (1 + petPower),
+        maxHp: Math.round((100 + 100 * s.pet + 60 * Math.floor(this.level / 2)) * hpFactor * this.gearMult * (1 + petPower)),
+        classPowerApplied: true,
+      };
+    } else {
+      this.pet = null;
+    }
+    this.orb = null; // arcane spheres are Mage summon abilities now, not a companion item
 
     // cursed-statue pact: a strong boon lashed to a bane, until it expires
     if (this.boon) {

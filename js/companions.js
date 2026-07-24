@@ -1,16 +1,18 @@
 // ---- Companions driven by equipment: pet slot (wolf) & orb slot (spheres) ----
 
 import * as THREE from 'three';
-import { makeWolf, makeGuardianSphere } from './models.js';
+import { makeWolf, makeGuardianSphere, makeEnemyMesh } from './models.js';
 import { audio } from './audio.js';
 
 let nextCompanionId = 1;
 
 class PetWolf {
-  constructor(scene, alpha, maxHp) {
+  constructor(scene, type, maxHp) {
     this.id = nextCompanionId++;
-    this.mesh = makeWolf('tame');
-    if (alpha) this.mesh.scale.multiplyScalar(1.45);
+    this.type = type || 'wolf';
+    // a tamed WOLF keeps its friendly green tint; any other tamed beast uses its
+    // own creature mesh (bear, boar, cheetah…), tinted nothing special.
+    this.mesh = (this.type === 'wolf') ? makeWolf('tame') : makeEnemyMesh(this.type);
     scene.add(this.mesh);
     this.pos = new THREE.Vector3(0, 0, 0);
     this.biteCd = 0;
@@ -157,21 +159,22 @@ export class Companions {
     this._summonSig = '';
   }
 
-  // Rebuild companions to match the player's pet/orb equipment.
+  // Rebuild the pet companion to match the player's TAMED beast (player.pet).
   sync(player) {
-    const compItem = player.equipment.companion;
     const classAllowsCompanion = player.hooks.classRulesEnabled?.() === false
       || player.selectedClass === 'beastmaster';
-    const petId = (classAllowsCompanion && !player.petDead && player.pet) ? compItem : null;
-    if (petId !== this.wolfItem) {
+    // identity = the tamed beast's TYPE, so re-taming a different creature
+    // re-spawns the companion, while a same-type re-tame just keeps it.
+    const petType = (classAllowsCompanion && !player.petDead && player.pet) ? player.pet.type : null;
+    if (petType !== this.wolfItem) {
       if (this.wolf) {
         this.scene.remove(this.wolf.mesh);
         this.hooks.removeTracker?.('pet' + this.wolf.id);
         this.wolf = null;
       }
-      this.wolfItem = petId;
-      if (petId) {
-        this.wolf = new PetWolf(this.scene, petId === 'alphaWolf', player.pet?.maxHp ?? 100);
+      this.wolfItem = petType;
+      if (petType) {
+        this.wolf = new PetWolf(this.scene, petType, player.pet?.maxHp ?? 100);
         this.wolf.pos.copy(player.pos).add(new THREE.Vector3(1.5, 0, 1.5));
         audio.sfx('spawn', 0.5);
         const w = this.wolf;
@@ -182,6 +185,7 @@ export class Companions {
       }
     }
 
+    const compItem = null; // no companion items anymore (mage spheres are summon abilities)
     const orbId = classAllowsCompanion && player.orb ? compItem : null;
     if (orbId !== this.orbItem) {
       for (const s of this.spheres) this.scene.remove(s.mesh);

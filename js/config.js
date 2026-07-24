@@ -674,17 +674,12 @@ export const ITEMS = [
     cost: { hide: 15, iron: 10, essence: 10 }, needs: 'furnace', stats: { regen: 1.2, hp: 40 },
     desc: '+1.2 ❤️/s regeneration, +40 max health.' },
   // -- companions --
-  // The arcane spheres (Guardian / Frost / Gemini) became learnable MAGE
-  // abilities (see CLASS_TREES → mage actives), but the PERSISTENT wolf pet
-  // stays a Beastmaster item: it is the ONLY thing that sets player.pet, which
-  // the whole pet pillar (Pet Training track + Mend Companion / Hunt Command /
-  // Stampede + Pack Tactics / Animal Handler) is built on. Tame Beast is a
-  // separate 20-second battlefield charm, not this permanent companion. Any
-  // 'companion'-slot item is auto-locked to the Beastmaster (requiredClassForItem).
-  { id: 'tamedWolf', slot: 'companion', level: 7, icon: '🐺', name: 'Tamed Wolf', cost: { meat: 165, essence: 3 }, pet: { dmg: 14 },
-    desc: 'A loyal wolf raised at your side. It fights nearby enemies and grows with Pet Training. Beastmaster only.' },
-  { id: 'alphaWolf', slot: 'companion', level: 16, icon: '👑', name: 'Alpha Wolf', cost: { meat: 360, essence: 8 }, pet: { dmg: 32 },
-    desc: 'A massive pack leader — far tougher and deadlier than a tamed wolf, and the anchor for every pet skill. Beastmaster only.' },
+  // Pets are NO LONGER bought. The Beastmaster TAMES a wild beast (Tame Beast)
+  // and it becomes a PERSISTENT companion (player.pet) whose kind is whatever
+  // you charmed — bear, boar, wolf, cheetah… The whole pet pillar (Pet Training
+  // track + Mend / Hunt Command / Stampede + Pack Tactics / Animal Handler) runs
+  // off that tamed pet. The arcane spheres (Guardian / Frost / Gemini) are
+  // learnable MAGE abilities. No 'companion'-slot items exist anymore.
   // -- expedition gear (Supplies tab): wearable comfort items, each with its
   // own WoW-style slot. supply: true keeps them out of the weapon/gear shops.
   // torches BURN: one stick lasts ~5 real minutes (5 in-game hours), then it
@@ -959,8 +954,8 @@ export const CLASS_TREES = [
       P('beast_handler', '🫶', 'Animal Handler', 44, 'Your companion regenerates rapidly.', { petRegen: [0.30, 0.65, 1.10] }),
     ],
     actives: [
-      A('beast_bond', '🐾', 'Tame Beast', 18, 'Channel for 20 s on a wild beast ahead of you — one with four or more legs, or with wings. It is charmed to fight at your side for 20 s. The channel will not start with no beast in front of you.', 'tame',
-        { cd: 60, channel: 20, tameDur: 20, range: 7 }),
+      A('beast_bond', '🐾', 'Tame Beast', 18, 'Channel on a wild beast ahead of you (four or more legs, or wings) to make it your PERMANENT companion. You cannot tame a beast of higher level than yourself, and taming a new one releases your current pet. Higher ranks tame faster.', 'tame',
+        { cd: 45, channel: [5, 3.5, 2.5], range: 7 }),
       A('beast_snare', '🪤', 'Snare Trap', 3, 'Place a trap that damages, bleeds and stuns its first victim.', 'world',
         { cd: 60, worldAction: 'trap', count: [1, 1, 2], power: [1.5, 2.2, 3.0], trapDmgPct: 0.55, trapStun: 3.5 }),
       A('beast_arrow_haste', '⚡', 'Arrow Haste', 7, 'Greatly increases ranged attack speed.', 'buff',
@@ -1279,7 +1274,7 @@ export function classActiveInfo(skill, rank) {
   if (skill.action === 'cone' || skill.action === 'magicCone') out.push(`${num1(rv('range'))} m cone`);
   else if (skill.range && ['target', 'execute', 'magicTarget', 'shadowstep'].includes(skill.action))
     out.push(`${num1(rv('range'))} m range`);
-  if (skill.action === 'tame') out.push(`channel ${skill.channel} s`, `tamed for ${skill.tameDur} s`, `${skill.range} m reach`);
+  if (skill.action === 'tame') out.push(`${num1(rv('channel'))} s channel`, 'permanent companion', `${skill.range} m reach`);
   if (skill.distance) out.push(`charges ${num1(rv('distance'))} m`);
   if (skill.castRange) out.push(`cast up to ${Math.min(20, rv('castRange'))} m away`);
   if (skill.count && (Array.isArray(skill.count) || skill.count > 1)) out.push(`×${rv('count')}`);
@@ -1462,8 +1457,7 @@ export const isForgeItem = (i) =>
 // and combat bonus, so there is no parallel progression to buy here.
 export const SHOP_GROUPS = [
   { key: 'weapons',  label: '⚔️ Arsenal', items: () => ITEMS.filter(i =>
-      (i.slot === 'companion' || (i.slot === 'weapon' && !isForgeItem(i)))
-      && !i.free && !i.unique) },
+      i.slot === 'weapon' && !isForgeItem(i) && !i.free && !i.unique) },
 ];
 
 export const SMITH_GROUPS = [
