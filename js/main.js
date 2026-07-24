@@ -2664,6 +2664,13 @@ const settings = Object.assign(
   settings.bloom = false;
   settings.hiShadows = false;
   settings.filmic = false;
+  // retired options (removed from the UI): vivid grading is always ON, the
+  // quality-vegetation kit and the experimental human avatar are always OFF,
+  // and "distant terrain" is no longer a toggle — it derives from draw
+  // distance (on for far/furthest, off below).
+  settings.vivid = true;
+  settings.vegQuality = false;
+  settings.humanModel = false;
   // phones/tablets default to lighter graphics (short draw distance) — they
   // can raise it in Settings; desktops keep the generous default
   const onMobile = window.matchMedia?.('(pointer: coarse)').matches
@@ -2677,17 +2684,26 @@ const settings = Object.assign(
   settings.ssao ??= false;
   settings.showFps ??= false;
   settings.fpsCap ??= 0; // 0 = unlimited
-  settings.humanModel ??= false; // experimental rigged-human avatar
-  settings.vegQuality ??= false; // quality-vegetation glTF kit
   settings.vegDist ??= 'furthest'; // ground-vegetation draw distance
-  $id('set-texdetail').value = String(settings.texDetail);
-  $id('set-shadows').checked = settings.shadows !== false;
-  $id('set-resscale').value = String(settings.resScale);
-  $id('set-drawdist').value = String(settings.drawDist);
-  $id('set-treedetail').value = String(settings.treeDetail);
-  $id('set-shadowdist').value = String(settings.shadowDist);
-  $id('set-vegdist').value = String(settings.vegDist);
-  $id('set-ssao').checked = !!settings.ssao;
+  // "distant terrain" follows draw distance now (no standalone toggle)
+  const syncFarTerrain = () => {
+    settings.farTerrain = settings.drawDist === 'far' || settings.drawDist === 'furthest';
+  };
+  syncFarTerrain();
+  const syncGfxControls = () => {
+    $id('set-texdetail').value = String(settings.texDetail);
+    $id('set-shadows').checked = settings.shadows !== false;
+    $id('set-resscale').value = String(settings.resScale);
+    $id('set-drawdist').value = String(settings.drawDist);
+    $id('set-treedetail').value = String(settings.treeDetail);
+    $id('set-shadowdist').value = String(settings.shadowDist);
+    $id('set-vegdist').value = String(settings.vegDist);
+    $id('set-ssao').checked = !!settings.ssao;
+    $id('set-foliage').value = String(settings.foliage);
+    $id('set-foliagemove').checked = settings.foliageMove !== false;
+    $id('set-clouds').checked = settings.clouds !== false;
+    $id('set-waterfx').checked = settings.waterFx !== false;
+  };
   applyGraphics();
 
   // FPS meter toggle
@@ -2699,42 +2715,6 @@ const settings = Object.assign(
     $id('fps-meter').classList.toggle('hidden', !settings.showFps);
     localStorage.setItem('atw-settings', JSON.stringify(settings));
     audio.sfx('click', 0.4);
-  });
-
-  // Experimental rigged-human avatar — applied on the next page load (the player
-  // mesh is built once, during early boot).
-  const humanBox = $id('set-humanmodel');
-  humanBox.checked = !!settings.humanModel;
-  humanBox.addEventListener('change', () => {
-    settings.humanModel = humanBox.checked;
-    localStorage.setItem('atw-settings', JSON.stringify(settings));
-    audio.sfx('click', 0.4);
-    ui.toast(humanBox.checked
-      ? '🧍 Human avatar ON — reload the page to apply'
-      : '🧍 Human avatar OFF — reload the page to apply', 'info');
-  });
-
-  // Quality vegetation — the Quaternius glTF nature kit for the Verdant Forest.
-  // Applied live: the kit loads on demand, then the near ring is rebuilt so the
-  // greenery swaps in without a reload.
-  const vegBox = $id('set-vegquality');
-  vegBox.checked = !!settings.vegQuality;
-  const rebuildVeg = () => {
-    world.qualityVeg = !!settings.vegQuality && vegKit.ready();
-    world.regenChunks();
-    for (let i = 0; i < 24 && world.warmUp(player.pos, 30) > 0; i++) { /* fill */ }
-  };
-  vegBox.addEventListener('change', async () => {
-    settings.vegQuality = vegBox.checked;
-    localStorage.setItem('atw-settings', JSON.stringify(settings));
-    audio.sfx('click', 0.4);
-    if (vegBox.checked && !vegKit.ready()) {
-      ui.toast('🌿 Loading quality vegetation…', 'info');
-      try { await vegKit.preload(); }
-      catch (e) { console.warn('[vegekit] preload failed', e); ui.toast('🌿 Vegetation kit failed to load', 'warn'); return; }
-    }
-    rebuildVeg();
-    ui.toast(vegBox.checked ? '🌿 Quality vegetation ON' : '🌿 Quality vegetation OFF', 'info');
   });
 
   // FPS cap slider (150 on the track = unlimited → stored as 0)
@@ -2750,7 +2730,14 @@ const settings = Object.assign(
     fpsCapLabel();
     localStorage.setItem('atw-settings', JSON.stringify(settings));
   });
+  // any hand-tweak in Advanced options flips the quality preset to Custom
+  // (preset application itself sets this flag so it doesn't self-demote)
+  let applyingPreset = false;
   const saveGfx = () => {
+    if (!applyingPreset && settings.gfxPreset !== 'custom') {
+      settings.gfxPreset = 'custom';
+      $id('set-gfxpreset').value = 'custom';
+    }
     localStorage.setItem('atw-settings', JSON.stringify(settings));
     applyGraphics();
     audio.sfx('click', 0.4);
@@ -2771,6 +2758,7 @@ const settings = Object.assign(
   });
   $id('set-drawdist').addEventListener('change', () => {
     settings.drawDist = $id('set-drawdist').value;
+    syncFarTerrain(); // distant terrain rides the draw distance
     saveGfx();
     applyViewMode(); // fog baseline shifts with the new distance
   });
@@ -2798,11 +2786,12 @@ const settings = Object.assign(
 
   // foliage: density regenerates the world's decoration meshes; motion just
   // flips the wind/trample shader uniforms (free, no rebuild). Desktops get
-  // the lush "Ultra" grass by default; phones stay lighter.
+  // the lush grass by default; phones stay lighter. The UI now offers just
+  // two tiers — Low (internal 'high') and High (internal 'ultra') — so any
+  // older stored value below 'high' migrates up to the new floor.
   settings.foliage ??= onMobile ? 'high' : 'ultra';
+  if (settings.foliage !== 'high' && settings.foliage !== 'ultra') settings.foliage = 'high';
   settings.foliageMove ??= true;
-  $id('set-foliage').value = String(settings.foliage);
-  $id('set-foliagemove').checked = settings.foliageMove !== false;
   world.foliageMult = FOLIAGE_MULT[settings.foliage] ?? 1;
   $id('set-foliage').addEventListener('change', () => {
     settings.foliage = $id('set-foliage').value;
@@ -2820,22 +2809,64 @@ const settings = Object.assign(
   });
 
   // sky/world extras — each is a straight uniform or radius gate, so
-  // toggling is instant (no chunk rebuilds except distant terrain's tiles)
+  // toggling is instant (no chunk rebuilds)
   settings.clouds ??= true;
-  settings.farTerrain ??= true;
   settings.waterFx ??= true;
-  settings.vivid ??= true;
-  $id('set-clouds').checked = settings.clouds !== false;
-  $id('set-farterrain').checked = settings.farTerrain !== false;
-  $id('set-waterfx').checked = settings.waterFx !== false;
-  $id('set-vivid').checked = settings.vivid !== false;
-  for (const [id, key] of [['set-clouds', 'clouds'], ['set-farterrain', 'farTerrain'],
-                           ['set-waterfx', 'waterFx'], ['set-vivid', 'vivid']]) {
+  for (const [id, key] of [['set-clouds', 'clouds'], ['set-waterfx', 'waterFx']]) {
     $id(id).addEventListener('change', () => {
       settings[key] = $id(id).checked;
       saveGfx();
     });
   }
+
+  // ---- graphics quality presets ----
+  // One dropdown drives the whole Advanced grid. Picking a preset stamps its
+  // values over the settings and rebuilds what needs rebuilding; touching any
+  // Advanced control afterwards renames the preset to Custom (see saveGfx).
+  const GFX_PRESETS = {
+    low:    { shadows: false, texDetail: 1, resScale: '1',    drawDist: 'normal',
+              vegDist: 'medium',   shadowDist: 'low',    foliage: 'high',
+              foliageMove: true, clouds: true, waterFx: false },
+    medium: { shadows: true,  texDetail: 2, resScale: '1',    drawDist: 'normal',
+              vegDist: 'furthest', shadowDist: 'medium', foliage: 'ultra',
+              foliageMove: true, clouds: true, waterFx: true },
+    high:   { shadows: true,  texDetail: 2, resScale: 'auto', drawDist: 'far',
+              vegDist: 'furthest', shadowDist: 'high',   foliage: 'ultra',
+              foliageMove: true, clouds: true, waterFx: true },
+  };
+  settings.gfxPreset ??= 'custom';
+  if (!GFX_PRESETS[settings.gfxPreset] && settings.gfxPreset !== 'custom') settings.gfxPreset = 'custom';
+  const presetSel = $id('set-gfxpreset');
+  presetSel.value = settings.gfxPreset;
+  presetSel.addEventListener('change', () => {
+    const p = GFX_PRESETS[presetSel.value];
+    settings.gfxPreset = p ? presetSel.value : 'custom';
+    if (!p) { localStorage.setItem('atw-settings', JSON.stringify(settings)); return; }
+    applyingPreset = true;
+    Object.assign(settings, p);
+    syncFarTerrain();
+    world.foliageMult = FOLIAGE_MULT[settings.foliage] ?? 1;
+    syncGfxControls();
+    saveGfx();
+    applyViewMode(); // fog baseline follows the preset's draw distance
+    world.vegDrawDist && world.refreshVegVisibility?.(player.pos);
+    // texture/foliage/tree changes bake into chunk meshes → rebuild the near
+    // ring now (the sim is paused while Settings is open)
+    world.regenChunks();
+    for (let i = 0; i < 24 && world.warmUp(player.pos, 30) > 0; i++) { /* fill */ }
+    applyingPreset = false;
+  });
+
+  // Advanced options fold out under the preset picker
+  const advBtn = $id('gfx-advanced-btn'), advBox = $id('gfx-advanced');
+  advBtn.addEventListener('click', () => {
+    advBox.classList.toggle('hidden');
+    advBtn.textContent = advBox.classList.contains('hidden')
+      ? 'Advanced options ▾' : 'Advanced options ▴';
+    audio.sfx('click', 0.35);
+  });
+
+  syncGfxControls(); // stamp every Advanced control from the (migrated) settings
 
   // volume sliders (persisted); music slider maps 100% → volume 0.7
   const sfxSlider = $id('set-sfx'), musicSlider = $id('set-music');
@@ -5982,7 +6013,7 @@ function step() {
         canopy = {
           densTex: canopyShade.densTex, metaTex: canopyShade.metaTex,
           cx: canopyShade.cx, cz: canopyShade.cz, size: canopyShade.size,
-          strength: 0.3,
+          strength: 0.55,
         };
       }
     }

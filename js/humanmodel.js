@@ -43,13 +43,10 @@ export async function preloadHumanModel() {
 
 export function humanReady() { return !!_template; }
 
-// Experimental "real rigged human" avatar — off by default, gated behind a
-// Graphics checkbox. Read straight from localStorage so it's available before
-// the settings object is constructed (the player is built during early boot).
-export function humanModelEnabled() {
-  try { return !!JSON.parse(localStorage.getItem('atw-settings') || '{}').humanModel; }
-  catch { return false; }
-}
+// Experimental "real rigged human" avatar — RETIRED. The Graphics checkbox is
+// gone and the classic blocky hero is the only avatar; the rig code stays for
+// a possible future return.
+export function humanModelEnabled() { return false; }
 
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();

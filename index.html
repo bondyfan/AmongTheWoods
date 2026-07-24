@@ -298,7 +298,21 @@
 
       <!-- ========== GRAPHICS ========== -->
       <div class="settings-page active" data-page="graphics">
-        <div class="settings-grid">
+        <div class="settings-grid" style="margin-bottom:10px">
+          <label class="opt-field">
+            <span class="opt-label">⚡ Quality preset</span>
+            <select id="set-gfxpreset">
+              <option value="low">Low (fast)</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+        </div>
+        <button id="gfx-advanced-btn" type="button"
+          style="background:none;border:none;color:inherit;opacity:.75;cursor:pointer;font:inherit;padding:2px 0 8px">
+          Advanced options ▾</button>
+        <div class="settings-grid hidden" id="gfx-advanced">
           <label class="opt-field">
             <span class="opt-label">Texture detail</span>
             <select id="set-texdetail">
@@ -360,10 +374,8 @@
           <label class="opt-field">
             <span class="opt-label">Foliage density</span>
             <select id="set-foliage">
-              <option value="low">Low (sparse)</option>
-              <option value="normal">Normal</option>
-              <option value="high">High (lush)</option>
-              <option value="ultra" selected>Ultra</option>
+              <option value="high">Low</option>
+              <option value="ultra" selected>High (lush)</option>
             </select>
           </label>
           <label class="opt-field opt-toggle">
@@ -371,40 +383,25 @@
             <input type="checkbox" id="set-foliagemove" checked>
           </label>
           <label class="opt-field opt-toggle">
-            <span class="opt-label opt-warn">🌿 Quality vegetation <small style="opacity:.6;font-weight:normal">(3D nature models · heavier)</small></span>
-            <input type="checkbox" id="set-vegquality">
-          </label>
-          <label class="opt-field opt-toggle">
             <span class="opt-label">☁️ Clouds</span>
             <input type="checkbox" id="set-clouds" checked>
-          </label>
-          <label class="opt-field opt-toggle">
-            <span class="opt-label">🏔 Distant terrain <small style="opacity:.6;font-weight:normal">(land out to the fog)</small></span>
-            <input type="checkbox" id="set-farterrain" checked>
           </label>
           <label class="opt-field opt-toggle">
             <span class="opt-label">💧 Water effects <small style="opacity:.6;font-weight:normal">(waves&nbsp;+&nbsp;glints)</small></span>
             <input type="checkbox" id="set-waterfx" checked>
           </label>
           <label class="opt-field opt-toggle">
-            <span class="opt-label">🌈 Vivid colors <small style="opacity:.6;font-weight:normal">(richer contrast)</small></span>
-            <input type="checkbox" id="set-vivid" checked>
-          </label>
-          <label class="opt-field opt-toggle">
             <span class="opt-label">Show FPS</span>
             <input type="checkbox" id="set-showfps">
-          </label>
-          <label class="opt-field opt-toggle">
-            <span class="opt-label">🧍 Human avatar <small style="opacity:.6;font-weight:normal">(experimental · reload to apply)</small></span>
-            <input type="checkbox" id="set-humanmodel">
           </label>
           <label class="opt-field">
             <span class="opt-label">Limit FPS <output id="set-fpscap-out" style="opacity:.7;font-weight:normal">∞</output></span>
             <input type="range" id="set-fpscap" min="30" max="150" step="10" value="150" style="width:130px">
           </label>
         </div>
-        <p class="settings-note">Lower these if the 3D view stutters — resolution and shadows
-          have the biggest impact on framerate. Limit FPS caps the framerate (∞ = unlimited).</p>
+        <p class="settings-note">Pick a preset, or open Advanced options to fine-tune —
+          changing anything there switches the preset to Custom. Resolution and shadows
+          have the biggest framerate impact. Limit FPS caps the framerate (∞ = unlimited).</p>
       </div>
 
       <!-- ========== CONTROLS ========== -->

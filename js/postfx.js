@@ -148,9 +148,11 @@ const COMPOSITE_FRAG = /* glsl */`
     float groundH = meta.r * 176.0 - 16.0;
     float topH = meta.g * 32.0;
     if (topH < 0.5) return 1.0;
-    // full shade from the ground up through the trunks, fading out as the
-    // surface approaches the canopy top (the crown itself catches the sun)
-    float fade = 1.0 - smoothstep(topH * 0.5, topH * 0.9, world.y - groundH);
+    // full shade from the ground up through the trunks; the crown itself
+    // KEEPS a partial share — from the top-down camera the ground under a
+    // crown is hidden BY that crown, so this is what makes a thick wood
+    // visibly darker from above (a lone tree's crown barely registers).
+    float fade = mix(1.0, 0.35, smoothstep(topH * 0.5, topH * 0.95, world.y - groundH));
     return 1.0 - min(dens * fade * uCanopyStrength, 0.5);
   }
   vec3 s2l(vec3 c){ return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
@@ -223,8 +225,10 @@ export class PostFX {
   constructor(renderer) {
     this.renderer = renderer;
     const w = renderer.domElement.width, h = renderer.domElement.height;
-    // colour + DEPTH target (non-MSAA so the depth is sampleable for SSAO)
-    this.rtScene = new THREE.WebGLRenderTarget(w, h);
+    // colour + DEPTH target. MSAA (samples) keeps the offscreen path as crisp
+    // as the direct canvas — without it, distant detail (tree lines!) had to
+    // be FXAA-smeared, which read as "the fog moved closer" when AO went on.
+    this.rtScene = new THREE.WebGLRenderTarget(w, h, { samples: 4 });
     this.rtScene.texture.colorSpace = THREE.SRGBColorSpace;
     this.rtScene.depthTexture = new THREE.DepthTexture(w, h);
     this.rtScene.depthTexture.type = THREE.UnsignedIntType;
@@ -317,7 +321,8 @@ export class PostFX {
     c.texel.value.set(1 / this.rtScene.width, 1 / this.rtScene.height);
     c.useAO.value = !!opts.ssao;
     c.useBloom.value = !!opts.bloom;
-    c.useFXAA.value = true;
+    // the scene target is MSAA-resolved — FXAA on top only smears fine detail
+    c.useFXAA.value = false;
     c.aoStrength.value = opts.aoStrength ?? 0.25;
     c.aoFloor.value = opts.aoFloor ?? 0.30;
     const cp = opts.canopy;
