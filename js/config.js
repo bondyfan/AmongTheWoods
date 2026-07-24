@@ -1057,21 +1057,21 @@ export const CLASS_TREES = [
         { cd: 18, element: 'fire', range: [7, 9, 11], damage: [65, 100, 145], burn: [6, 10, 15], detonate: true }),
       A('mage_ice_barrier', '🔷', 'Ice Barrier', 33, 'Gain a large frost shield.', 'shield',
         { cd: 45, amount: [100, 170, 250] }),
-      A('mage_combustion', '🔥', 'Combustion', 41, 'Greatly empower fire spells for a short time.', 'buff',
+      A('mage_combustion', '🔥', 'Combustion', 10, 'Erupt into a burning form that greatly empowers your fire spells for a short time — and lets you cast Pyroblast instantly.', 'buff',
         { cd: 65, buff: 'combustion', duration: [10, 13, 16], power: [0.35, 0.5, 0.7] }),
       // Pyroblast — a colossal Fireball with a long 6 s wind-up. Same targeted
       // fire bolt as Fireball (element/burn/range), but its damage array is 3×
       // Fireball's [45,75,110] → [135,225,330]; burn is tripled to match. The
       // shared `windup` machinery raises a cast bar + ground telegraph and lands
       // the hit when it fills (interrupted only by a stun).
-      A('mage_pyroblast', '💥', 'Pyroblast', 45, 'Channel a colossal fireball for 6 s, then unleash it for triple Fireball damage.', 'magicTarget',
+      A('mage_pyroblast', '💥', 'Pyroblast', 13, 'Channel a colossal fireball for 6 s, then unleash it for triple Fireball damage — or cast it INSTANTLY while Combustion burns.', 'magicTarget',
         { cd: 18, element: 'fire', range: 20, windup: 6, damage: [135, 225, 330], burn: [15, 27, 42] }),
       A('mage_elemental_storm', '🌩️', 'Elemental Storm', 50, 'Fire and ice ravage a huge aimed area.', 'zone',
         { cd: 90, zone: 'elemental', castRange: 20, radius: [7, 8.5, 10], duration: [9, 12, 15], damage: [35, 52, 72], interval: 1, stun: 0.5 }),
       // Summoned arcane spheres (formerly buyable companions): they orbit the
       // Mage and auto-fire bolts for a while. Re-casting the SAME sphere
       // refreshes it; the three kinds can orbit together.
-      A('mage_guardian_sphere', '🔮', 'Guardian Sphere', 10, 'Summon an arcane sphere that orbits you and fires bolts at nearby enemies.', 'summon',
+      A('mage_guardian_sphere', '🔮', 'Guardian Sphere', 40, 'Summon an arcane sphere that orbits you and fires bolts at nearby enemies.', 'summon',
         { cd: 26, duration: [16, 20, 26], orbCount: 1, targets: 1, dmg: [16, 26, 38] }),
       A('mage_fire_imp', '👺', 'Fire Imp', 12, 'Conjure a blazing little imp that scampers at your side for a FULL 10 minutes, hurling fireballs that set foes alight. A lasting companion: long lifetime, long cooldown.', 'summon',
         { cd: 600, element: 'fire', duration: 600, orbCount: 1, targets: 1, imp: true, dmg: [20, 30, 44], burn: [5, 9, 14] }),

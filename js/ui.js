@@ -183,9 +183,13 @@ export class UI {
 
     // pet status line — the P/R controls are invisible without it
     const petEl = $('pet-display');
-    if (player.tamedPet) {
+    const MODES = { aggressive: '🗡️ Aggressive', defensive: '🛡️ Defensive', passive: '💤 Passive' };
+    if (player.impActive) {
+      // the Mage's Fire Imp: a stance-obeying combat pet (no resurrect — recast)
       petEl.classList.remove('hidden');
-      const MODES = { aggressive: '🗡️ Aggressive', defensive: '🛡️ Defensive', passive: '💤 Passive' };
+      petEl.innerHTML = `👺 Fire Imp · ${MODES[player.petMode] ?? player.petMode} <kbd>P</kbd>`;
+    } else if (player.tamedPet) {
+      petEl.classList.remove('hidden');
       const nm = player.tamedPet.name || 'Pet';
       petEl.innerHTML = player.petDead
         ? `🐾 ${nm} 💀 <i>down</i> — revive at home/graveyard <kbd>R</kbd>`

@@ -162,6 +162,7 @@ export class Player {
     this.castWindup = null;   // { skill, rank, id, t, dur } — ability charging up
     this.tameChannel = null;  // { beast, skill, rank, t, dur, heartT } — Tame Beast
     this.tamedPet = null;     // { type, name } — the persistent tamed companion
+    this.impActive = false;   // a Mage Fire Imp currently occupies the pet slot
     this.spinT = 0;           // Whirlwind body-spin animation timer
     this.spinDur = 0.55;
     this.classAuraT = 0;      // particle-aura emit accumulator (Blood Fury etc.)
@@ -1292,20 +1293,35 @@ export class Player {
     }
 
     if (skill.action === 'summon') {
-      // Arcane spheres (Mage): orbit the caster and auto-fire bolts for a while.
-      // Damage is baked in now (level + spell/element mastery); re-casting the
-      // same sphere refreshes it, and the different kinds coexist.
       const dmg = rv('dmg') * this.levelSpellMult * this._classMagicMultiplier(skill.element || null);
       const frost = skill.element === 'frost';
       const fire = skill.element === 'fire';
+      const burn = skill.burn ? rv('burn') * this.levelSpellMult * this._classMagicMultiplier('fire') : 0;
+
+      // The Fire Imp is a REAL combat pet (HP, stances, enemies attack it) that
+      // lives in the shared pet slot — not an orbiting sphere. Its HP scales
+      // with the caster's own pool and it lasts for its (long) lifetime.
+      if (skill.imp) {
+        this.hooks.onSummonImp?.({
+          dmg, burn, boltColor: 0xffb060,
+          maxHp: Math.max(60, Math.round(this.maxHp * 0.6)),
+          lifeT: rv('duration'),
+        });
+        this._spawnClassRing(this.pos, 2.0, 0xffa050, 0.6);
+        this._fxBurst(this.mesh.position.clone().setY(this.mesh.position.y + 1.0), 0xff7a2a, 16, 5, 0.6);
+        this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
+          `${skill.icon} ${skill.name}`, '#ffb060');
+        audio.sfx('chime', 0.55, 0);
+        return true;
+      }
+
+      // Arcane spheres (Mage): orbit the caster and auto-fire bolts for a while.
+      // Re-casting the same sphere refreshes it; the different kinds coexist.
       const orb = {
         count: rv('orbCount', 1),
         targets: rv('targets', 1),
         dmg,
         freeze: skill.freeze ? rv('freeze') : 0,
-        // fire summons (Fire Imp) leave a burning DoT — pre-scaled like Fireball
-        burn: skill.burn ? rv('burn') * this.levelSpellMult * this._classMagicMultiplier('fire') : 0,
-        imp: !!skill.imp, // a ground-running Fire Imp rather than an orbiting sphere
         sphereColor: frost ? 0x7fe0ff : fire ? 0xff6a2a : 0x38c0ff,
         boltColor: frost ? 0xbfe6ff : fire ? 0xffb060 : 0x7fe0ff,
       };

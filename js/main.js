@@ -431,6 +431,7 @@ const player = new Player(scene, {
   },
   onEquipChange: () => companions.sync(player),
   onPetChange: () => { companions.sync(player); panels.refresh?.(); },
+  onSummonImp: (spec) => { companions.spawnImp(player, spec); panels.refresh?.(); },
   onClassWorldAction: (action, skill, rank, ctx) => handleClassWorldAction(action, skill, rank, ctx),
   onChop: (tree, power) => mp?.sendChop(tree, power),
   onBerry: (key) => mp?.sendBerry(key),
@@ -4744,9 +4745,9 @@ const PET_MODE_LABEL = {
   passive: '💤 Passive — never attacks',
 };
 input.onKey('KeyP', () => {
-  if (!inPlay() || !player.tamedPet) return;
+  if (!inPlay() || !(player.tamedPet || player.impActive)) return;
   player.petMode = PET_MODES[(PET_MODES.indexOf(player.petMode) + 1) % PET_MODES.length];
-  ui.toast(`🐺 Pet mode: ${PET_MODE_LABEL[player.petMode]}`, 'level');
+  ui.toast(`🐾 Pet mode: ${PET_MODE_LABEL[player.petMode]}`, 'level');
   audio.sfx('click', 0.4);
 });
 $id('bigmap').querySelector('.panel-close').addEventListener('click', () => toggleBigMap(false));

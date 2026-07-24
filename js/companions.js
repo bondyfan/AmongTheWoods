@@ -22,9 +22,11 @@ class PetWolf {
     this.regenPause = 0;
   }
 
-  // hooks: { popup, onDeath }
-  update(dt, player, enemyMgr, dmg, world, hooks) {
+  // hooks: { popup, onDeath }. `projectiles` is unused by the melee wolf (the
+  // shared pet signature carries it for the ranged Fire Imp).
+  update(dt, player, enemyMgr, projectiles, world, hooks) {
     this.biteCd -= dt;
+    const dmg = player.pet.dmg;
     const classEffects = player.selectedClass === 'beastmaster'
       ? (player.classEffects || {})
       : {};
@@ -148,34 +150,49 @@ class GuardianSphere {
   }
 }
 
-// A ground-running Fire Imp (Mage summon): trots along near the caster, keeps a
-// caster's distance from foes, and hurls burning bolts. Purely a timed summon —
-// no HP/death; its lifetime is the orbSummons timer.
+// A ground-running Fire Imp (Mage summon) — a REAL combat pet, exactly like the
+// Beastmaster's: it has HP, obeys the aggressive/defensive/passive stance, and
+// enemies attack it as if it were the player (it lives in the SHARED pet slot,
+// so petProxy / combatTargets / projectile-hits all cover it). Despawns when
+// slain or when its 10-minute lifetime runs out. Ranged: hurls burning bolts.
 class FireImp {
-  constructor(scene, orb) {
+  constructor(scene, spec) {
     this.id = nextCompanionId++;
+    this.isImp = true;
     this.mesh = makeFireImp();
     scene.add(this.mesh);
     this.pos = new THREE.Vector3(0, 0, 0);
+    this.dmg = spec.dmg;
+    this.burn = spec.burn || 0;
+    this.boltColor = spec.boltColor || 0xffb060;
+    this.maxHp = spec.maxHp;
+    this.hp = spec.maxHp;
+    this.lifeT = spec.lifeT || 600;
     this.walkT = 0;
     this.shootCd = 0.4;
     this.bobT = Math.random() * 6;
-    this._placed = false;
+    this.regenPause = 0;
   }
 
-  update(dt, player, enemyMgr, projectiles, orb, world) {
-    if (!this._placed) { this.pos.copy(player.pos).add(new THREE.Vector3(-1.4, 0, 1.4)); this._placed = true; }
+  update(dt, player, enemyMgr, projectiles, world, hooks) {
+    this.lifeT -= dt;
     this.bobT += dt;
+    if (!this._placed) { this.pos.copy(player.pos).add(new THREE.Vector3(-1.4, 0, 1.4)); this._placed = true; }
 
-    // nearest hostile within 16 m of the caster (never the village guards)
+    // stance (shared petMode): aggressive hunts anything, defensive only what's
+    // already angry, passive never fights — just pads along at your side.
+    const mode = player.petMode || 'aggressive';
     let target = null, best = 16 * 16;
-    for (const e of enemyMgr.alive()) {
-      if (e.cfg?.friendly || e.cfg?.passive) continue;
-      const d2 = e.pos.distanceToSquared(player.pos);
-      if (d2 < best) { best = d2; target = e; }
+    if (mode !== 'passive') {
+      for (const e of enemyMgr.alive()) {
+        if (e.cfg?.friendly || e.cfg?.passive) continue;
+        if (mode === 'defensive' && !e.aggroed) continue;
+        const d2 = e.pos.distanceToSquared(player.pos);
+        if (d2 < best) { best = d2; target = e; }
+      }
     }
 
-    // hold ~6 m from the target (a caster's distance); else pad along by the owner
+    // hold a caster's ~6 m from the target; else pad along by the owner
     let dest;
     if (target) {
       const away = new THREE.Vector3().subVectors(this.pos, target.pos);
@@ -203,17 +220,23 @@ class FireImp {
       leg.rotation.x = Math.sin(this.walkT * 2.0 + (li % 2) * Math.PI) * 0.6;
     });
 
-    // hurl a burning bolt
+    // hurl a burning bolt — threat lands on the 'pet' id so foes turn on the IMP
     this.shootCd -= dt;
     if (target && this.shootCd <= 0 && best < 15 * 15) {
       this.shootCd = 1.1 * Math.max(0.4, 1 - (player.classEffects?.classCdReduction || 0));
       audio.sfx('attack_ranged', 0.2, 220);
-      const from = this.mesh.position.clone().setY(gy + 1.0);
-      projectiles.spawnBolt(from, target, {
-        dmg: orb.dmg, color: orb.boltColor || 0xffb060,
-        onHit: () => enemyMgr.damage(target, orb.dmg, null, 'local',
-          orb.burn ? { burn: { dps: orb.burn, dur: 6 } } : null),
+      const tgt = target, from = this.mesh.position.clone().setY(gy + 1.0);
+      projectiles.spawnBolt(from, tgt, {
+        dmg: this.dmg, color: this.boltColor,
+        onHit: () => enemyMgr.damage(tgt, this.dmg, null, 'pet',
+          this.burn ? { burn: { dps: this.burn, dur: 6 } } : null),
       });
+    }
+
+    // lick its wounds out of combat
+    this.regenPause -= dt;
+    if (this.regenPause <= 0 && this.hp < this.maxHp) {
+      this.hp = Math.min(this.maxHp, this.hp + Math.max(4, this.maxHp * 0.05) * dt);
     }
   }
 }
@@ -230,29 +253,37 @@ export class Companions {
     this._summonSig = '';
   }
 
+  // build the pet HP-bar tracker (shared by the tamed beast and the Fire Imp)
+  _trackPet(w) {
+    this.hooks.addTracker?.('pet' + w.id,
+      () => w.mesh.parent ? w.mesh.position.clone().setY(w.mesh.position.y + 1.35) : null,
+      '<div class="hpbar"><div class="hpbar-fill"></div></div>', 'hpwrap',
+      (el) => { el.firstChild.firstChild.style.width = Math.max(0, (w.hp / w.maxHp) * 100) + '%'; });
+  }
+
   // Rebuild the pet companion to match the player's TAMED beast (player.pet).
+  // A Mage's Fire Imp also lives in this slot but is spawned/despawned by its
+  // summon spell, NOT by this tame-driven sync — so leave it untouched here.
   sync(player) {
-    const classAllowsCompanion = player.hooks.classRulesEnabled?.() === false
-      || player.selectedClass === 'beastmaster';
-    // identity = the tamed beast's TYPE, so re-taming a different creature
-    // re-spawns the companion, while a same-type re-tame just keeps it.
-    const petType = (classAllowsCompanion && !player.petDead && player.pet) ? player.pet.type : null;
-    if (petType !== this.wolfItem) {
-      if (this.wolf) {
-        this.scene.remove(this.wolf.mesh);
-        this.hooks.removeTracker?.('pet' + this.wolf.id);
-        this.wolf = null;
-      }
-      this.wolfItem = petType;
-      if (petType) {
-        this.wolf = new PetWolf(this.scene, petType, player.pet?.maxHp ?? 100);
-        this.wolf.pos.copy(player.pos).add(new THREE.Vector3(1.5, 0, 1.5));
-        audio.sfx('spawn', 0.5);
-        const w = this.wolf;
-        this.hooks.addTracker?.('pet' + w.id,
-          () => w.mesh.parent ? w.mesh.position.clone().setY(w.mesh.position.y + 1.35) : null,
-          '<div class="hpbar"><div class="hpbar-fill"></div></div>', 'hpwrap',
-          (el) => { el.firstChild.firstChild.style.width = Math.max(0, (w.hp / w.maxHp) * 100) + '%'; });
+    if (!this.wolf?.isImp) {
+      const classAllowsCompanion = player.hooks.classRulesEnabled?.() === false
+        || player.selectedClass === 'beastmaster';
+      // identity = the tamed beast's TYPE, so re-taming a different creature
+      // re-spawns the companion, while a same-type re-tame just keeps it.
+      const petType = (classAllowsCompanion && !player.petDead && player.pet) ? player.pet.type : null;
+      if (petType !== this.wolfItem) {
+        if (this.wolf) {
+          this.scene.remove(this.wolf.mesh);
+          this.hooks.removeTracker?.('pet' + this.wolf.id);
+          this.wolf = null;
+        }
+        this.wolfItem = petType;
+        if (petType) {
+          this.wolf = new PetWolf(this.scene, petType, player.pet?.maxHp ?? 100);
+          this.wolf.pos.copy(player.pos).add(new THREE.Vector3(1.5, 0, 1.5));
+          audio.sfx('spawn', 0.5);
+          this._trackPet(this.wolf);
+        }
       }
     }
 
@@ -269,6 +300,36 @@ export class Companions {
     }
   }
 
+  // Summon (or replace) the Mage's Fire Imp into the shared pet slot, so all the
+  // pet plumbing (HP bar, petProxy, stances, enemy threat) applies to it too.
+  spawnImp(player, spec) {
+    if (this.wolf) {
+      this.scene.remove(this.wolf.mesh);
+      this.hooks.removeTracker?.('pet' + this.wolf.id);
+      this.wolf = null;
+    }
+    this.wolfItem = null;
+    player.petDead = false;
+    const imp = new FireImp(this.scene, spec);
+    imp.pos.copy(player.pos).add(new THREE.Vector3(-1.4, 0, 1.4));
+    imp.mesh.position.copy(imp.pos);
+    imp._placed = true;
+    this.wolf = imp;
+    player.impActive = true;
+    audio.sfx('spawn', 0.5);
+    this._trackPet(imp);
+  }
+
+  _despawnImp(player, msg) {
+    if (!this.wolf) return;
+    if (msg) this.hooks.popup?.(this.wolf.mesh.position.clone().setY(this.wolf.mesh.position.y + 1.5), msg, '#ffb060');
+    this.hooks.removeTracker?.('pet' + this.wolf.id);
+    this.scene.remove(this.wolf.mesh);
+    this.wolf = null;
+    this.wolfItem = null;
+    player.impActive = false;
+  }
+
   update(dt, player, enemyMgr, projectiles, world) {
     if (player.petCommandT > 0) {
       player.petCommandT = Math.max(0, player.petCommandT - dt);
@@ -277,20 +338,21 @@ export class Companions {
         player.petCommandPower = 0;
       }
     }
-    if (this.wolf && player.pet) {
-      this.wolf.update(dt, player, enemyMgr, player.pet.dmg, world, {
+    if (this.wolf && (this.wolf.isImp || player.pet)) {
+      this.wolf.update(dt, player, enemyMgr, projectiles, world, {
         popup: this.hooks.popup,
         onDeath: () => this._onWolfDeath(player),
       });
+      // the imp is a timed summon — it fades once its lifetime runs out
+      if (this.wolf?.isImp && this.wolf.lifeT <= 0) this._despawnImp(player, '✨ Your imp fades away');
     }
     if (player.orb) for (const s of this.spheres) s.update(dt, player, enemyMgr, projectiles, player.orb);
     this._syncSummons(dt, player, enemyMgr, projectiles, world);
   }
 
-  // Mage summons live on player.orbSummons ([{ id, t, orb }]). Rebuild the
-  // visible minions only when the active set (kind + count) changes; each then
-  // acts from its own summon's orb spec every frame. Orbs orbit-and-shoot;
-  // a Fire Imp (orb.imp) runs on the ground and hurls burning bolts.
+  // Mage arcane spheres live on player.orbSummons ([{ id, t, orb }]) and orbit-
+  // and-shoot. Rebuild them only when the active set (kind + count) changes.
+  // (The Fire Imp is NOT here — it's a real pet in the shared pet slot.)
   _syncSummons(dt, player, enemyMgr, projectiles, world) {
     const summons = (player.orbSummons || []).filter(s => s.t > 0);
     const sig = summons.map(s => `${s.id}:${s.orb.count}`).join('|');
@@ -299,9 +361,7 @@ export class Companions {
       this.summonSpheres = [];
       for (const su of summons) {
         for (let i = 0; i < su.orb.count; i++) {
-          const sp = su.orb.imp
-            ? new FireImp(this.scene, su.orb)
-            : new GuardianSphere(this.scene, i, su.orb.count, su.orb.sphereColor);
+          const sp = new GuardianSphere(this.scene, i, su.orb.count, su.orb.sphereColor);
           sp.summonId = su.id;
           this.summonSpheres.push(sp);
         }
@@ -327,6 +387,13 @@ export class Companions {
   }
 
   _onWolfDeath(player) {
+    // a slain Fire Imp simply vanishes (recast after its cooldown) — no corpse
+    // to resurrect, unlike the Beastmaster's permanent tamed pet.
+    if (this.wolf?.isImp) {
+      audio.sfx('death', 0.45, 70);
+      this._despawnImp(player, '💀 Your imp is destroyed');
+      return;
+    }
     this.hooks.popup?.(this.wolf.mesh.position.clone().setY(this.wolf.mesh.position.y + 1.5), '💀', '#ffffff');
     this.hooks.toast?.('💀 Your pet has fallen! Resurrect it at the graveyard or your home.', 'boss');
     audio.sfx('death', 0.5, 60);
