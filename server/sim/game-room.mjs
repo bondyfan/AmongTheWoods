@@ -106,7 +106,9 @@ export class GameRoom {
       }
       case 'collect': {
         const cand = this.pickups.list.find(x => x.id === ev.id);
-        if (cand && cand.lockT > 0 && cand.lockId && cand.lockId !== uid) return true; // reserved for another
+        // lock semantics (pickups.js): the DROPPER can't take their own drop
+        // back for lockT seconds — everyone else may grab it right away
+        if (cand && cand.lockT > 0 && cand.lockId === uid) return true;
         const pk = this.pickups.removeById(ev.id);
         if (pk) this.io.sendTo(uid, { t: 'event', ev: { type: 'grant', kind: pk.kind, payload: pk.payload } });
         return true;

@@ -350,7 +350,9 @@ class ShadowWorld {
         this.pickups.set(p.i, s);
       }
       s.x = p.x; s.z = p.z;
-      s.locked = !!p.o; // my own drop — hands off for a few seconds
+      // o carries the dropper's uid — only THAT player keeps hands off while
+      // the lock runs; everyone else may grab the drop immediately
+      s.locked = !!p.o && p.o === this.hooks.myUid;
       // mob-loot pop still running on the host: mirror the oversized shrink
       // locally (burstT counts down in the bob loop) and don't grab it yet
       if (p.b !== undefined) s.burstT = Math.max(s.burstT ?? 0, p.b);
@@ -986,6 +988,8 @@ export class Multiplayer {
         sendEvent: (e) => this.net.sendEvent(e),
         popup: ctx.popup,
         discover: (t) => ctx.onDiscover(t),
+        // own network identity — a drop tagged with MY uid is untouchable for me
+        myUid: typeof this.net.uid === 'function' ? this.net.uid() : this.net.uid,
       });
       this.net.onSnap((snap) => this.shadow.applySnap(snap));
     }
@@ -1583,7 +1587,9 @@ export class Multiplayer {
       }
       case 'collect': { // co-op host: an ally wants pickup #id
         const cand = ctx.pickups.list.find(x => x.id === ev.id);
-        if (cand && cand.lockT > 0 && cand.lockId && cand.lockId !== ev.from) break; // reserved for someone else
+        // the DROPPER can't take their own drop back while the lock runs;
+        // everyone else may (matches the magnet rule in pickups.js)
+        if (cand && cand.lockT > 0 && cand.lockId === ev.from) break;
         if (cand && !ctx.pickups.collectible(ev.id)) break; // mob-loot pop still running
         const pk = ctx.pickups.removeById(ev.id);
         if (pk) this.onRemoteCollect(pk, ev.from);

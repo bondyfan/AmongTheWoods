@@ -113,7 +113,9 @@ export class Pickups {
     return this.list.map(p => ({
       i: p.id, k: p.kind, pl: p.payload,
       x: +p.mesh.position.x.toFixed(1), z: +p.mesh.position.z.toFixed(1),
-      ...(p.lockT > 0 && p.lockId === 'partner' ? { o: 1 } : {}),
+      // o = who dropped it (uid): THAT client must not auto-grab it back while
+      // the lock runs; everyone else may take it immediately
+      ...(p.lockT > 0 && p.lockId ? { o: p.lockId } : {}),
       // still popping out of the corpse: guest mirrors the shrink locally
       ...(p.burst && p.age < BURST_T ? { b: +(BURST_T - p.age).toFixed(2) } : {}),
     }));
