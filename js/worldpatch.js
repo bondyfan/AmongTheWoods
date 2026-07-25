@@ -37,7 +37,7 @@ class WorldPatch {
     this.entities = [];        // { id, kind:'poi'|'smith'|'pack'|'tree'|'rock'|'meadow', type, x, z, … }
     this.removed = new Set();  // 'poi:<genId>' | 'smith:<genId>'
     this.moved = new Map();    // 'poi:<genId>' -> { x, z }
-    this.tweaks = { enemies: {}, items: {}, biomes: {} }; // object-editor overrides
+    this.tweaks = { enemies: {}, items: {}, biomes: {}, skills: {} }; // object-editor overrides
     this._nextId = 1;
     this._bbox = null;         // {x0,x1,z0,z1} of ALL cell layers, world meters
     this._townFlag = new Map();
@@ -354,7 +354,7 @@ class WorldPatch {
     this.entities = data.entities ?? [];
     this.removed = new Set(data.removed ?? []);
     this.moved = new Map(data.moved ?? []);
-    this.tweaks = { enemies: {}, items: {}, biomes: {}, ...(data.tweaks ?? {}) };
+    this.tweaks = { enemies: {}, items: {}, biomes: {}, skills: {}, ...(data.tweaks ?? {}) };
     // rebuild the bbox from every stored cell + entity
     for (const map of [this.height, this.terrain, this.water, this.path]) {
       for (const k of map.keys()) {
@@ -388,7 +388,7 @@ export async function loadWorldPatch(url = 'assets/world-patch.json') {
 // ---- object editor: stat overrides for enemy types and items ----
 // A restricted field list is snapshotted once, so overrides can always be
 // re-applied from pristine values (and removed cleanly).
-import { ENEMY_TYPES, ITEMS, BIOMES } from './config.js';
+import { ENEMY_TYPES, ITEMS, BIOMES, allClassSkills } from './config.js';
 
 export const ENEMY_TWEAK_FIELDS = ['hpMult', 'dmgMult', 'meleeDmgMult', 'xpMult', 'speed', 'range', 'attackCd', 'aggro', 'spellCd'];
 // per-biome globals: numbers + colors (colors edited as hex in the editor)
@@ -397,6 +397,9 @@ export const BIOME_COLOR_FIELDS = ['ground', 'ground2', 'dirt', 'grass', 'fog', 
 export const ITEM_TWEAK_FIELDS = ['level', 'weapon.dmg', 'weapon.cd', 'weapon.range',
   'weapon.energy', 'weapon.draw',
   'stats.hp', 'stats.regen', 'stats.speed', 'stats.dmgPct'];
+// Class abilities & passives. Only SCALAR fields — the per-rank arrays
+// (weaponMult, damage, stun…) stay in code; `level` is the required level.
+export const SKILL_TWEAK_FIELDS = ['level', 'cd', 'energy', 'mana', 'range', 'radius', 'windup'];
 
 const getPath = (obj, path) => path.split('.').reduce((o, k) => o?.[k], obj);
 const setPath = (obj, path, v) => {
@@ -407,7 +410,7 @@ const setPath = (obj, path, v) => {
   o[last] = v;
 };
 
-let _origEnemies = null, _origItems = null, _origBiomes = null;
+let _origEnemies = null, _origItems = null, _origBiomes = null, _origSkills = null;
 function snapshotOriginals() {
   if (_origEnemies) return;
   _origEnemies = {};
@@ -423,6 +426,11 @@ function snapshotOriginals() {
       if (v !== undefined) _origItems[it.id][f] = v;
     }
   }
+  _origSkills = {};
+  for (const sk of allClassSkills()) {
+    _origSkills[sk.id] = {};
+    for (const f of SKILL_TWEAK_FIELDS) if (sk[f] !== undefined) _origSkills[sk.id][f] = sk[f];
+  }
   _origBiomes = BIOMES.map((b) => {
     const o = {};
     for (const f of [...BIOME_TWEAK_FIELDS, ...BIOME_COLOR_FIELDS]) {
@@ -436,6 +444,7 @@ export function tweakOriginal(kind, id, field) {
   snapshotOriginals();
   if (kind === 'enemy') return _origEnemies[id]?.[field];
   if (kind === 'biome') return _origBiomes[id]?.[field];
+  if (kind === 'skill') return _origSkills[id]?.[field];
   return _origItems[id]?.[field];
 }
 
@@ -457,6 +466,10 @@ export function applyTweaks() {
       if (o[f] !== undefined) setPath(it, f, o[f]);
     }
   }
+  for (const sk of allClassSkills()) {
+    const o = _origSkills[sk.id] ?? {};
+    for (const f of SKILL_TWEAK_FIELDS) if (o[f] !== undefined) sk[f] = o[f];
+  }
   const BIOME_ALL = [...BIOME_TWEAK_FIELDS, ...BIOME_COLOR_FIELDS];
   BIOMES.forEach((b, i) => {
     const o = _origBiomes[i] ?? {};
@@ -474,6 +487,12 @@ export function applyTweaks() {
     const it = ITEMS.find(i => i.id === id);
     if (!it) continue;
     for (const f of ITEM_TWEAK_FIELDS) if (ov[f] !== undefined) setPath(it, f, ov[f]);
+  }
+  const skillById = new Map(allClassSkills().map(sk => [sk.id, sk]));
+  for (const [id, ov] of Object.entries(worldPatch.tweaks.skills ?? {})) {
+    const sk = skillById.get(id);
+    if (!sk) continue;
+    for (const f of SKILL_TWEAK_FIELDS) if (ov[f] !== undefined) sk[f] = ov[f];
   }
   for (const [idx, ov] of Object.entries(worldPatch.tweaks.biomes ?? {})) {
     const b = BIOMES[+idx];

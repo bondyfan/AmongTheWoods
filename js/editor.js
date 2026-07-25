@@ -14,9 +14,9 @@
 
 import * as THREE from 'three';
 import { worldPatch, TERRAIN_PAINTS, applyTweaks, tweakOriginal,
-         ENEMY_TWEAK_FIELDS, ITEM_TWEAK_FIELDS, BIOME_TWEAK_FIELDS,
+         ENEMY_TWEAK_FIELDS, ITEM_TWEAK_FIELDS, SKILL_TWEAK_FIELDS, BIOME_TWEAK_FIELDS,
          BIOME_COLOR_FIELDS } from './worldpatch.js';
-import { ENEMY_TYPES, ITEMS, BIOMES } from './config.js';
+import { ENEMY_TYPES, ITEMS, BIOMES, allClassSkills } from './config.js';
 import { saveVersion, listVersions, makeCurrent, fetchCurrent } from './worldsync.js';
 import { makeTree, makeBoulder, makeEnemyMesh, makeTownHouse, makeChurch,
          makeFountain, makeShrine, makeMonolith, makeCrypt, makeFarm,
@@ -1203,7 +1203,7 @@ export class WorldEditor {
         <div style="display:flex; gap:16px; align-items:flex-end">
           <div class="we-group"><span class="we-cap">Category</span>
             <div class="we-ctl"><select data-we="okind">
-              <option value="enemy">Enemy types</option><option value="item">Items</option>
+              <option value="enemy">Enemy types</option><option value="item">Items</option><option value="skill">Class abilities</option>
             </select></div></div>
           <div class="we-group"><span class="we-cap">Object</span>
             <div class="we-ctl"><select data-we="oid"></select></div></div>
@@ -1434,6 +1434,7 @@ export class WorldEditor {
     // ---- stats tab ----
     const objIds = () => this._objKind === 'item'
       ? ITEMS.filter(i => i.weapon || i.stats || i.unique).map(i => i.id)
+      : this._objKind === 'skill' ? allClassSkills().map(sk => sk.id)
       : Object.keys(ENEMY_TYPES);
     this._objKind = 'enemy';
     const fillObjIds = () => {
@@ -1450,13 +1451,15 @@ export class WorldEditor {
       this._objId = id;
       const kind = this._objKind;
       $('f-title').textContent = `🧬 ${id}`;
-      const fields = kind === 'enemy' ? ENEMY_TWEAK_FIELDS : ITEM_TWEAK_FIELDS;
+      const fields = kind === 'enemy' ? ENEMY_TWEAK_FIELDS
+        : kind === 'skill' ? SKILL_TWEAK_FIELDS : ITEM_TWEAK_FIELDS;
       const box = $('f-body');
       box.innerHTML = '';
       for (const f of fields) {
         const orig = tweakOriginal(kind, id, f);
         if (orig === undefined) continue;
-        const store = kind === 'enemy' ? worldPatch.tweaks.enemies : worldPatch.tweaks.items;
+        const store = kind === 'enemy' ? worldPatch.tweaks.enemies
+          : kind === 'skill' ? (worldPatch.tweaks.skills ??= {}) : worldPatch.tweaks.items;
         const cur = store[id]?.[f];
         const row = document.createElement('label');
         row.innerHTML = `${f} <input type="number" step="any" placeholder="${orig}" value="${cur ?? ''}">`;

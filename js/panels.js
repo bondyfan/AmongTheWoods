@@ -9,7 +9,7 @@ import { SHOP_GROUPS, SMITH_GROUPS, questFor, repeatableQuestFor, questXpFor,
          classSkillMeatCost, classSkillEssenceCost, classPathSkills, firstClassSkillId, CLASS_CHOOSE_COST,
          classActiveInfo, classPassiveInfo, requiredClassForItem,
          PLAYER_HP, ENEMY_HP, ENEMY_DMG, xpKillFor, meatForLevel,
-         enemyTypicalLevel, attackEnergyFor } from './config.js';
+         enemyTypicalLevel, attackEnergyFor, swingTimeFor } from './config.js';
 
 import { itemIcon, resIcon, skillArt } from './icons.js';
 import { attachTip } from './tooltip.js';
@@ -170,6 +170,7 @@ export class Panels {
     if (w) {
       if (w.dmg) stats.push(['Damage', Math.round(w.dmg)]);
       const wCost = attackEnergyFor(w);
+      stats.push(['⏱ Attack time', `${swingTimeFor(w).toFixed(2)}s`]);
       stats.push(['⚡ Cost / hit', wCost]);
       if (w.dmg) stats.push(['Dmg / energy', (w.dmg / wCost).toFixed(1)]);
       if (w.range) stats.push(['Range', w.range + ' m']);
@@ -874,6 +875,8 @@ export class Panels {
         ['Dmg / energy', (p.weapon.dmg / cost).toFixed(1),
           'how much punch you get out of the bar — the real comparison between weapons'],
         ['Reach', `${Math.round(p.weapon.range * 10) / 10} m`, rgParts.join(' · ')],
+        ...(base.kind === 'bow' ? [['Draw time', `${p.swingTime.toFixed(2)}s`,
+          'a bow must be drawn — Quick Draw and Arrow Haste shorten it (a melee swing is a flat 0.50s)']] : []),
       ] },
       { icon: '🏃', title: 'Mobility', tone: 'move', rows: [
         ['Speed', Math.round(shownSpeed * 10) / 10, spParts.join(' · ')],

@@ -1162,6 +1162,9 @@ export const CLASS_TREES = [
 ];
 
 export const classTreeById = (id) => CLASS_TREES.find(c => c.id === id);
+// The LIVE skill objects (not copies) — the world editor mutates these in
+// place, so classSkillById below picks the tweaks up on its next call.
+export const allClassSkills = () => CLASS_TREES.flatMap(t => [...t.passives, ...t.actives]);
 export const classSkillById = (id) => {
   for (const tree of CLASS_TREES) {
     const skill = [...tree.passives, ...tree.actives].find(s => s.id === id);
