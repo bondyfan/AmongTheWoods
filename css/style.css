@@ -1501,6 +1501,17 @@ body.slotting .spell-slot.empty {
   width: 54px; height: 54px; font-size: 22px; margin-bottom: 6px;
   background: radial-gradient(circle at 40% 35%, #43678f, #29405f);
 }
+/* the E stand-in: only appears when there is actually something to interact
+   with, so it never competes with attack/block for the thumb */
+#tc-action {
+  width: 58px; height: 58px; font-size: 24px; margin-bottom: 4px;
+  background: radial-gradient(circle at 40% 35%, #5f8a3f, #3a5626);
+  animation: actionPulse 1.4s ease-in-out infinite;
+}
+@keyframes actionPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(150, 220, 110, 0.55); }
+  50% { box-shadow: 0 0 0 9px rgba(150, 220, 110, 0); }
+}
 #tc-actions button.held { filter: brightness(1.35); transform: scale(0.92); }
 
 /* burger — top-left in touch mode (clear of the bottom controls) */

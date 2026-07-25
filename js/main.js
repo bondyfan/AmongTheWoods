@@ -2498,7 +2498,6 @@ function enterGhost(corpseAt) {
   setGhostVisual(true);
   ui.banner('👻 You are a ghost');
   ui.toast(`👻 You rise at ${grave.name}. Run to your body (👻 2.5× speed) and press E to return — or resurrect here and lose this level's XP.`, 'boss');
-  $id('respawn-choice').classList.remove('hidden');
 }
 
 // the ghost look on your OWN body: the same spectral wash every other player
@@ -2559,10 +2558,19 @@ function tickGhost() {
     ghost.mesh.userData.ring.material.opacity = 0.5 * k;
     ghost.mesh.userData.ring.scale.setScalar(k);
   }
-  if (!ghost.active || !ghost.corpse) { hint?.classList.add('hidden'); return; }
+  if (!ghost.active || !ghost.corpse) {
+    hint?.classList.add('hidden');
+    $id('respawn-choice')?.classList.add('hidden');
+    return;
+  }
   // hold the spectral look: the class-visual system owns these same materials
   // and resets their opacity, so a one-shot application silently wore off
   setGhostVisual(true);
+  // "Resurrect here" is a GRAVEYARD service — it only makes sense while you are
+  // standing at one, not the whole way across the map
+  const g = ghost.grave;
+  const atGrave = !!g && Math.hypot(player.pos.x - g.x, player.pos.z - g.z) < GRAVE_SERVICE_R;
+  $id('respawn-choice')?.classList.toggle('hidden', !atGrave);
   const d = Math.hypot(player.pos.x - ghost.corpse.x, player.pos.z - ghost.corpse.z);
   if (hint) {
     if (d < GHOST_CORPSE_R) {
@@ -2575,6 +2583,8 @@ function tickGhost() {
   }
 }
 const GHOST_CORPSE_R = 3.2;
+// a graveyard's resurrection is only offered while you stand at one
+const GRAVE_SERVICE_R = 50;
 
 function mobaRespawn() {
   ui.toast('☠️ You fell — respawning at your base…', 'boss');
@@ -4628,7 +4638,9 @@ function digTreasure() {
   audio.sfx('victory', 0.5);
 }
 
-input.onKey('KeyE', () => {
+// The one context action. Bound to E on a keyboard and to the on-screen
+// action button on a phone, so touch players can do everything E does.
+function interactE() {
   if (!inPlay()) return;
   // as a ghost the ONLY interaction is climbing back into your own body
   if (ghost.active) {
@@ -4669,7 +4681,48 @@ input.onKey('KeyE', () => {
   }
   else if (nearPoi()) claimPoi(nearPoi());
   else if (nearTreasure()) digTreasure();
-});
+  // ripe berries are PICKED, not punched
+  else if (nearBerryBush()) pickBerryBush(nearBerryBush());
+}
+input.onKey('KeyE', interactE);
+$id('tc-action')?.addEventListener('click', () => { if (game.touch) interactE(); });
+
+// Touch players get a button instead of E. It only appears when E would
+// actually do something, and its icon says WHAT — so the phone build never
+// shows a 'press E' prompt with no key to press.
+function tickTouchAction() {
+  const btn = $id('tc-action');
+  if (!btn) return;
+  if (!game.touch || !inPlay()) { btn.classList.add('hidden'); return; }
+  let icon = null;
+  if (ghost.active) {
+    if (ghost.corpse && Math.hypot(player.pos.x - ghost.corpse.x,
+        player.pos.z - ghost.corpse.z) < GHOST_CORPSE_R) icon = '\u2728';
+  }
+  else if (mp?.revivablePartner?.()) icon = '\ud83d\udc9a';
+  else if (nearBerryBush()) icon = '\ud83e\uded0';
+  else if (nearChest?.()) icon = '\ud83d\udce6';
+  else if (nearHome?.()) icon = '\ud83c\udfe0';
+  else if (nearPoi?.()) icon = '\ud83d\udea9';
+  else if (nearTreasure?.()) icon = '\ud83d\udcb0';
+  btn.textContent = icon ?? '';
+  btn.classList.toggle('hidden', !icon);
+}
+
+// the nearest bush with fruit on it, within arm's reach
+const BERRY_REACH = 2.6;
+function nearBerryBush() {
+  for (const b of (world.bushesNear?.(player.pos, BERRY_REACH) ?? [])) {
+    if (b.berries) return b;
+  }
+  return null;
+}
+function pickBerryBush(bush) {
+  if (!bush || !world.pickBerries(bush)) return;
+  pickups.spawn('berry', bush.mult ?? 1, new THREE.Vector3(bush.x, 0, bush.z), 0.7);
+  mp?.sendBerry?.(bush.key);   // co-op: the partner's bush empties too
+  audio.sfx('click', 0.4, 120);
+}
 
 // F2 — the admin World Editor: a top-down god view with brushes (DEVMODE)
 let edPopT = 0;
@@ -6276,6 +6329,7 @@ function step() {
       updatePings(dt);
       tickGhost();
       tickGhostFade(dt);
+      tickTouchAction();
       // ?devmode debug handle (same pattern as window.audio) — lets a console
       // or an automated check drive death/ghost states without a real fight
       if (DEVMODE && !window.WOODS) {

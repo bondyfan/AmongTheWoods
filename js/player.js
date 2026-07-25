@@ -3402,14 +3402,8 @@ export class Player {
       break; // one dwelling per swing
     }
 
-    // berry bushes: any melee swing knocks ripe berries to the ground
-    for (const bush of (world.bushesNear?.(this.pos, w.range + 0.6) ?? [])) {
-      if (!bush.berries || !this._inArc(bush.x, bush.z, w.range, bush.radius)) continue;
-      if (world.pickBerries(bush)) {
-        pickups.spawn('berry', bush.mult ?? 1, new THREE.Vector3(bush.x, 0, bush.z), 0.7);
-        this.hooks.onBerry?.(bush.key); // co-op: the partner's bush empties too
-      }
-    }
+    // (berry bushes are PICKED with E now — see interactE in main.js. Swinging
+    // a weapon at fruit was never the intent, and it fought the harvest loop.)
 
     // ---- harvesting: the RIGHT tool for the job ----
     // trees need chop power (club slowly, axes fast); rocks need a PICKAXE

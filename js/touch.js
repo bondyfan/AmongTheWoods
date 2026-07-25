@@ -99,6 +99,46 @@ export function initTouch(game) {
   holdBtn(attackBtn, (v) => { input.touchAttack = v; });
   holdBtn(blockBtn, (v) => { input.touchBlock = v; });
 
+  // ---- look-drag: a finger anywhere on the world turns the camera ----
+  // Feeds the SAME input.dragX/dragY the desktop mouse-look writes, so the
+  // chase camera needs no mobile branch. It tracks its own touch id, so the
+  // left thumb can keep steering the stick while the right thumb looks around.
+  const UI_SEL = 'button, .panel, .spell-slot, #minimap, #minimap-zoom, #tc-stick,'
+    + ' #tc-actions, #touch-ui, #hud-buttons, input, select, textarea, a';
+  let lookId = null, lx = 0, ly = 0, lookMoved = 0;
+
+  const lookStart = (e) => {
+    if (lookId !== null) return;
+    for (const t of e.changedTouches) {
+      if (t.target?.closest?.(UI_SEL)) continue;   // never steal a UI tap
+      reveal();
+      lookId = t.identifier; lx = t.clientX; ly = t.clientY; lookMoved = 0;
+      break;
+    }
+  };
+  const lookMove = (e) => {
+    if (lookId === null) return;
+    const t = [...e.changedTouches].find(c => c.identifier === lookId);
+    if (!t) return;
+    const dx = t.clientX - lx, dy = t.clientY - ly;
+    lx = t.clientX; ly = t.clientY;
+    lookMoved += Math.abs(dx) + Math.abs(dy);
+    // same units as mouse movementX/Y, so the existing sensitivity applies
+    input.dragX += dx;
+    input.dragY += dy;
+    // once it is a genuine drag, swallow it so the browser neither scrolls nor
+    // synthesises a mousedown (which would land as an attack)
+    if (lookMoved > 6) e.preventDefault();
+  };
+  const lookEnd = (e) => {
+    if (![...e.changedTouches].some(c => c.identifier === lookId)) return;
+    lookId = null;
+  };
+  window.addEventListener('touchstart', lookStart, { passive: true });
+  window.addEventListener('touchmove', lookMove, { passive: false });
+  window.addEventListener('touchend', lookEnd, { passive: true });
+  window.addEventListener('touchcancel', lookEnd, { passive: true });
+
   // ---- burger: toggle the HUD button column ----
   if (burger) {
     burger.addEventListener('click', () => document.body.classList.toggle('menu-open'));

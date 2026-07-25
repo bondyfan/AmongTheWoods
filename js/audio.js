@@ -117,7 +117,12 @@ class AudioManager {
     if (this.music) {
       const old = this.music, oldName = this.musicName;
       this._musicPos.set(oldName, old.currentTime || 0);
+      this.music = null;                     // the watchdog must stop reviving it
+      // belt and braces: the fade pauses it, and a hard deadline pauses it even
+      // if that fade is superseded — a track left rolling here is the "menu
+      // music never stops" bug, and it is worse than a clipped crossfade
       this._fade(old, 0, 1.2, () => old.pause());
+      setTimeout(() => { try { old.pause(); } catch {} }, 1500);
     }
     this.musicName = name;
     this._startMusic(name);
@@ -143,6 +148,10 @@ class AudioManager {
     a.addEventListener('stalled', () => setTimeout(kick, 1000));
     a.addEventListener('error',   () => setTimeout(reload, 1500));
     this.music = a;
+    // registered, but NOT reaped here — the outgoing track is still crossfading
+    // and the watchdog is what guarantees it eventually goes quiet
+    this._allMusic ??= new Set();
+    this._allMusic.add(a);
     kick();
     this._fade(a, this.muted ? 0 : this.musicVolume, 1.2);
     this._ensureMusicWatchdog();
@@ -155,6 +164,7 @@ class AudioManager {
   _ensureMusicWatchdog() {
     if (this._musicWatch) return;
     this._musicWatch = setInterval(() => {
+      this._reapStrayMusic();          // never let two tracks overlap
       const a = this.music;
       if (!a) return;
       if (a.error) { try { a.load(); } catch {} }
@@ -162,20 +172,63 @@ class AudioManager {
     }, 4000);
   }
 
-  // linear volume fade using a small interval; onDone fires at the end
+  // The definitive fix for "the menu music never stops". Fading a track out and
+  // pausing it in the fade's callback is fragile: the callback is skipped if
+  // that fade is superseded, timers throttle in a backgrounded PWA, and iOS
+  // ignores volume writes altogether — on every one of those paths the old
+  // element just keeps playing. So every music element ever created is tracked,
+  // and anything that is not the CURRENT track is paused outright, here and
+  // from the watchdog every few seconds.
+  _reapStrayMusic() {
+    if (!this._allMusic) return;
+    for (const el of this._allMusic) {
+      if (el === this.music) continue;
+      try { el.pause(); el.src = ''; } catch {}
+      this._allMusic.delete(el);
+    }
+  }
+
+  // iOS refuses to let script set HTMLMediaElement.volume (hardware buttons
+  // only). Detected once, because a fade that watches el.volume can never
+  // converge there — which is exactly how the menu track used to keep playing
+  // for ever underneath a biome track: its fade-out never finished, so the
+  // pause() in its completion callback never ran.
+  _volumeControllable() {
+    if (this._volOK !== undefined) return this._volOK;
+    try {
+      const probe = new Audio();
+      probe.volume = 0.42;
+      this._volOK = Math.abs(probe.volume - 0.42) < 0.01;
+    } catch { this._volOK = false; }
+    return this._volOK;
+  }
+
+  // linear volume fade using a small interval; onDone fires at the end.
+  // Progress is driven by a TICK COUNT, not by reading el.volume back, so the
+  // fade always completes in `dur` seconds even if the volume write is ignored.
   _fade(el, target, dur, onDone) {
     this._fades ??= new Map();
     clearInterval(this._fades.get(el));
+    const clamp = (v) => Math.max(0, Math.min(1, v));
+    // no volume control (iOS): make it a clean cut instead of a crossfade,
+    // otherwise both tracks would blare at full volume for the whole duration
+    if (!this._volumeControllable()) {
+      try { el.volume = clamp(target); } catch {}
+      onDone?.();
+      return;
+    }
     const step = 60;                       // ms per tick
-    const delta = (target - el.volume) / (dur * 1000 / step);
+    const ticks = Math.max(1, Math.round(dur * 1000 / step));
+    const from = el.volume;
+    let i = 0;
     const iv = setInterval(() => {
-      const v = el.volume + delta;
-      if ((delta >= 0 && v >= target) || (delta < 0 && v <= target)) {
-        el.volume = Math.max(0, Math.min(1, target));
+      i++;
+      try { el.volume = clamp(from + (target - from) * (i / ticks)); } catch {}
+      if (i >= ticks) {
         clearInterval(iv);
         this._fades.delete(el);
         onDone?.();
-      } else el.volume = Math.max(0, Math.min(1, v));
+      }
     }, step);
     this._fades.set(el, iv);
   }
