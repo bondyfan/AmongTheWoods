@@ -93,6 +93,27 @@
         <input id="dev-distance-slider" type="range" min="1" max="200" step="1" value="25">
         <div class="dev-distance-scale"><span>1 m</span><span>200 m</span></div>
       </div>
+      <button id="dev-time-toggle" type="button" aria-expanded="false" aria-controls="dev-time-panel">
+        🕑 Time of day
+      </button>
+      <div id="dev-time-panel" class="hidden">
+        <label id="dev-time-lock">
+          <input id="dev-time-lock-toggle" type="checkbox">
+          <span><b>⏸ Lock time</b><small>freeze the day/night clock</small></span>
+        </label>
+        <label for="dev-time-set">
+          <span>Set time</span>
+          <output id="dev-time-value" for="dev-time-set">08:00</output>
+        </label>
+        <input id="dev-time-set" type="range" min="0" max="1435" step="5" value="480">
+        <div class="dev-distance-scale"><span>00:00</span><span>24:00</span></div>
+        <label for="dev-time-speed">
+          <span>Speed</span>
+          <output id="dev-time-speed-value" for="dev-time-speed">1&times;</output>
+        </label>
+        <input id="dev-time-speed" type="range" min="0" max="8" step="1" value="2">
+        <div class="dev-distance-scale"><span>0.25&times;</span><span>64&times;</span></div>
+      </div>
       <label id="dev-fly-control">
         <input id="dev-fly-toggle" type="checkbox">
         <span><b>🪽 Fly mode</b><small>RPG view · W/S follow camera pitch</small></span>
@@ -215,14 +236,6 @@
   </div>
 
   <!-- E at your home -->
-  <div id="basepanel" class="panel hidden">
-    <div class="panel-head">
-      <h2>Your Home</h2>
-      <span id="base-res" class="panel-res"></span>
-      <button class="panel-close">✕</button>
-    </div>
-    <div id="base-items" class="card-grid"></div>
-  </div>
 
   <!-- keybind legend (H) -->
   <div id="helppanel" class="panel hidden">

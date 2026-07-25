@@ -160,6 +160,7 @@ const DEVMODE = /(?:^|[?&])devmode/i.test(location.search); // admin tools only 
 const ADMIN_EMAIL = 'bondyfanfrankwild@gmail.com';
 function isAdmin() { return DEVMODE || authUser?.email === ADMIN_EMAIL; }
 const devDistanceRadius = DEVMODE ? new DevDistanceRadius(scene) : null;
+let devTimeSync = null; // set by the ?devmode panel: mirrors the clock into its slider
 let worldEditor = null; // created lazily on first F2 (admin only)
 let openingEditor = false; // true while the menu shortcut is diving into the editor
                            // — suppresses the survival New/Load character prompt
@@ -170,6 +171,8 @@ const game = {
   time: 0,
   tod: 8 / 24,    // time of day 0..1 (0 = midnight) — the day opens at 08:00
   nightK: 0,      // 0 = full day, 1 = deep night (drives lights/spawns/fireflies)
+  devTimeLock: false, // ?devmode: freeze the clock where it stands
+  devTimeScale: 1,    // ?devmode: clock multiplier (0.25× … 64×)
   biomeIndex: 0,
   touch: false,   // set once the player uses the on-screen touch controls
   guest: false,   // playing without a Google account (no cloud save)
@@ -274,7 +277,6 @@ const panels = new Panels({
     ui.updateSpellbar(player); // repaint the 1–9 bar NOW — the loop is paused
   },
   onBuild: (id, lane) => buildBase(id, lane),
-  onCampBuild: (id) => campBuild(id),
   onBuyConsumable: (id) => { buyConsumable(id); requestAutosave(); },
   onChestChange: () => mp?.sendCampSync?.(),
   onAssignSlot: (i, id) => {
@@ -1411,8 +1413,7 @@ let torchLight = null, torchT = 0;
 function tickTorch(dt) {
   const dark = !!game.dungeon // lair dungeons are always torch-dark
     || (BIOMES[game.biomeIndex]?.darkness ?? 0) >= 0.35
-    || (game.nightK || 0) > 0.55
-    || radiusOf(player.pos.x, player.pos.z) < WORLD.caveR + 6;
+    || (game.nightK || 0) > 0.55;   // home is an open yard now, never torch-dark
   const on = game.kind === 'survival' && inPlay()
     && player.torchGear && !player.dead;
   if (on && !torchLight) {
@@ -2326,17 +2327,6 @@ function startGame() {
 }
 
 // Camp buildings: pay, build, apply effects (home hp bonus, era unlocks).
-function campBuild(id) {
-  if (!camp) return;
-  const info = camp.buildingInfo(id);
-  if (info.maxed || player.level < info.reqLevel) return;
-  if (!Object.entries(info.cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
-  for (const [k, v] of Object.entries(info.cost)) player[k] = roundResource(player[k] - v);
-  camp.build(id);
-  applyCampPerks();
-  panels.refresh();
-  mp?.sendCampSync?.();
-}
 
 // era perks: hp bonus + magnet reach + chop power + XP gain
 function applyCampPerks() {
@@ -2589,6 +2579,55 @@ if (DEVMODE) {
       ? '🪽 Fly mode ON — W/S follow the camera pitch'
       : '🪽 Fly mode off', 'level');
   });
+
+  // ---- time of day: freeze it, run it fast, or jump straight to an hour.
+  // Lighting work (night darkness, god rays, canopy shade) needs a specific
+  // hour on demand — waiting out 24 real minutes for dusk is not a workflow.
+  const timeToggle = $id('dev-time-toggle');
+  const timePanel = $id('dev-time-panel');
+  const timeLock = $id('dev-time-lock-toggle');
+  const timeSet = $id('dev-time-set');
+  const timeValue = $id('dev-time-value');
+  const timeSpeed = $id('dev-time-speed');
+  const timeSpeedValue = $id('dev-time-speed-value');
+  const SPEEDS = [0.25, 0.5, 1, 2, 4, 8, 16, 32, 64]; // slider index → multiplier
+  let timeDragging = false;
+  const hhmm = (tod) => {
+    const mins = ((Math.round(tod * 1440) % 1440) + 1440) % 1440;
+    return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+  };
+  // the clock keeps running under the open panel, so mirror it back into the
+  // slider — but never while it is being dragged, which would fight the drag
+  devTimeSync = () => {
+    if (timePanel.classList.contains('hidden') || timeDragging) return;
+    timeSet.value = String(Math.round(game.tod * 1440 / 5) * 5 % 1440);
+    timeValue.textContent = hhmm(game.tod);
+  };
+
+  timeToggle.addEventListener('click', () => {
+    const open = timePanel.classList.contains('hidden');
+    timePanel.classList.toggle('hidden', !open);
+    timeToggle.classList.toggle('active', open);
+    timeToggle.setAttribute('aria-expanded', String(open));
+    if (open) devTimeSync();
+  });
+  timeLock.addEventListener('change', () => {
+    game.devTimeLock = timeLock.checked;
+    timeLock.closest('label')?.classList.toggle('active', timeLock.checked);
+    ui.toast(timeLock.checked
+      ? `⏸ Time locked at ${hhmm(game.tod)}`
+      : '▶ Time running again', 'level');
+  });
+  timeSpeed.addEventListener('input', () => {
+    game.devTimeScale = SPEEDS[Number(timeSpeed.value)] ?? 1;
+    timeSpeedValue.textContent = `${game.devTimeScale}×`;
+  });
+  timeSet.addEventListener('input', () => {
+    game.tod = (Number(timeSet.value) / 1440) % 1;
+    timeValue.textContent = hhmm(game.tod);
+  });
+  timeSet.addEventListener('pointerdown', () => { timeDragging = true; });
+  window.addEventListener('pointerup', () => { timeDragging = false; });
 }
 
 // ---------- settings (persisted in localStorage) ----------
@@ -4503,7 +4542,6 @@ input.onKey('KeyE', () => {
   if (nearChest()) panels.toggle('chest');
   else if (nearPlacedBoat()) mountBoat();
   else if (shipTryBoard()) { /* ship line boarding handled */ }
-  else if (nearHome()) panels.toggle('base');
   else if (nearWildHorse()) tameHorse(nearWildHorse());
   else if (nearParkedHorse()) { mountUp(); audio.sfx('click', 0.5); }
   else if (nearSmith()) { // the forge: quests + weapons & gear live HERE
@@ -5422,11 +5460,15 @@ function tickDayNight(dt) {
   // the exact same time of day, no messages needed
   if (mp?.active && mp.mode === 'coop' && mp.meta?.created) {
     game.tod = (START_TOD + (Date.now() - mp.meta.created) / 1000 / DAY_LENGTH) % 1;
-  } else {
-    game.tod = (game.tod + dt / DAY_LENGTH) % 1;
+  } else if (!game.devTimeLock) {
+    // devTimeScale is 1 for everyone but ?devmode, where the panel can freeze
+    // the clock or run the day in fast-forward. Co-op keeps the shared epoch
+    // above, so neither knob can desync a room.
+    game.tod = (game.tod + dt * game.devTimeScale / DAY_LENGTH) % 1;
   }
   game.nightK = nightAtHour(game.tod * 24);
   if (enemyMgr) enemyMgr.nightK = game.nightK;
+  devTimeSync?.();
 
   // HUD clock: a sun that sets into a moon
   const clock = $id('tod-clock');
@@ -5550,11 +5592,9 @@ function updateAtmosphere(dt) {
   envSpeedMult *= 1 - 0.3 * coldK;
   const biome = BIOMES[game.biomeIndex];
 
-  // the cave is dark; light floods in as you walk toward the mouth
+  // home is a fenced yard under open sky now, not a cave — no darkening
   const r = radiusOf(player.pos.x, player.pos.z);
-  // the cave is pitch dark — but once a home is BUILT over it, it's lit
-  const caveK = (camp?.levels.home ?? 0) > 0 ? 0
-    : Math.max(0, Math.min(1, (WORLD.caveR + 6 - r) / (WORLD.caveR + 3)));
+  const caveK = 0;
   atmoCaveK = caveK;
   // gloomy biomes (Dark Forest, Haunted Forest, swamp) dim the world lights
   // themselves — the screen overlay alone left the geometry too bright
