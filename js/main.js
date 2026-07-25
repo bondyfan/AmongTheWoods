@@ -436,7 +436,11 @@ const player = new Player(scene, {
     if (mp?.active && mp.handleLocalDeath()) return;       // MP: arena loss / respawn
     survivalRespawn();                                      // solo: wake at the cabin
   },
-  onEquipChange: () => companions.sync(player),
+  // EVERY equip change repaints the open panels — not just the ones triggered
+  // from the Character modal. Equipping off the 1–9 bar, a torch burning out or
+  // an item being consumed all land here, and used to leave an open gear modal
+  // showing stale slots until you closed and reopened it.
+  onEquipChange: () => { companions.sync(player); panels.refresh?.(); },
   onPetChange: () => { companions.sync(player); panels.refresh?.(); },
   onSummonImp: (spec) => { companions.spawnImp(player, spec); panels.refresh?.(); },
   onClassWorldAction: (action, skill, rank, ctx) => handleClassWorldAction(action, skill, rank, ctx),
