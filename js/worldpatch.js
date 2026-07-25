@@ -395,6 +395,7 @@ export const ENEMY_TWEAK_FIELDS = ['hpMult', 'dmgMult', 'meleeDmgMult', 'xpMult'
 export const BIOME_TWEAK_FIELDS = ['treeDensity', 'darkness', 'light'];
 export const BIOME_COLOR_FIELDS = ['ground', 'ground2', 'dirt', 'grass', 'fog', 'sky'];
 export const ITEM_TWEAK_FIELDS = ['level', 'weapon.dmg', 'weapon.cd', 'weapon.range',
+  'weapon.energy', 'weapon.draw',
   'stats.hp', 'stats.regen', 'stats.speed', 'stats.dmgPct'];
 
 const getPath = (obj, path) => path.split('.').reduce((o, k) => o?.[k], obj);

@@ -406,7 +406,13 @@ export const oocRegenFor = (level) => (7 + 1.5 * level) * 0.25;
 // back, not by a per-weapon cooldown. You can burst several blows back to
 // back, then you have to breathe — Black Desert / TERA style.
 // Energy: 100 at level 1, +1 per level. Mana: casters (mage/priest) only. ----
-export const SWING_TIME = 0.5;                       // seconds per basic attack, all weapons
+export const SWING_TIME = 0.5;                       // melee & fists: one fixed swing
+// A bow has to be DRAWN, so it is slower than a melee swing. This is the one
+// place attack speed still lives: Quick Draw and Arrow Haste shorten the draw
+// (melee instead gets cheaper swings). Per-bow `draw` overrides the default.
+export const BOW_DRAW_TIME = 1.0;
+export const swingTimeFor = (weapon) => weapon?.kind === 'bow'
+  ? (weapon.draw ?? BOW_DRAW_TIME) : SWING_TIME;
 export const PLAYER_ENERGY = (level) => 99 + level;  // 100 @ L1 … 149 @ L50
 export const PLAYER_MANA = (level) => Math.round(100 + 12 * level);
 // Energy is a REAL resource: a full bar is ~5 bare-handed blows. It only
@@ -618,7 +624,7 @@ export const ITEMS = [
       combo: [1, 1.2] },
     desc: "Safe, narrow reach that keeps dangerous foes at spear's length; strikes from behind bite into weak points." },
   // -- weapons: ranged (invented with the Wooden Cabin era; train Range to extend) --
-  { id: 'huntingBow', slot: 'weapon', level: 7, icon: '🏹', name: 'Hunting Bow',   cost: { wood: 25, hide: 4 },
+  { id: 'huntingBow', slot: 'weapon', level: 5, icon: '🏹', name: 'Hunting Bow',   cost: { wood: 25, hide: 4 },
     weapon: { kind: 'bow', style: 'bow', dmg: 32, cd: 2.14, range: 3.5, pierce: false, tier: 1 },
     desc: 'A quick, accurate shot straight to the mark. Supports special arrows.' },
   { id: 'longbow',    slot: 'weapon', level: 12, icon: '🎯', name: 'Longbow',       cost: { wood: 40, hide: 8, iron: 4 }, 
@@ -979,7 +985,7 @@ export const CLASS_TREES = [
   { id: 'beastmaster', icon: '🏹', name: 'Beastmaster', color: '#9bc56b',
     summary: 'The only class able to equip bows, crossbows and companions; controls traps and arrow storms.',
     passives: [
-      P('beast_ranged_license', '🏹', 'Ranged Discipline', 7, 'Sharpens every bow and crossbow shot. Unlocks alongside your first bow.', { rangedDmg: [0.03, 0.06, 0.10] }),
+      P('beast_ranged_license', '🏹', 'Ranged Discipline', 5, 'Sharpens every bow and crossbow shot. Unlocks alongside your first bow.', { rangedDmg: [0.03, 0.06, 0.10] }),
       P('beast_marksman', '🎯', 'Marksman', 8, 'Extends the reach of your bows and crossbows.', { rangedRange: [3, 7, 15] }),
       P('beast_quickdraw', '⚡', 'Quick Draw', 10, 'Loose arrows far faster.', { rangedSpeed: [0.08, 0.16, 0.26] }),
       P('beast_trapper', '🪤', 'Trapper', 14, 'Your traps hit much harder.', { trapPower: [0.30, 0.60, 1.00] }),

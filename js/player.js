@@ -8,7 +8,7 @@ import { WORLD, XP_LEVELS, MAX_LEVEL, itemById, spellById, consumableById,
          biomeIndexAt, RESOURCES, MAX_SPELL_SLOTS, classSkillById,
          classEffectsFor, requiredClassForItem, isTameableBeast, ENEMY_TYPES,
          PLAYER_HP, OOC_DELAY, oocRegenFor, weaponDurabilityFor,
-         SWING_TIME, PLAYER_ENERGY, PLAYER_MANA, energyRegenFor, manaRegenFor,
+         SWING_TIME, swingTimeFor, PLAYER_ENERGY, PLAYER_MANA, energyRegenFor, manaRegenFor,
          attackEnergyFor, abilityEnergyFor, abilityManaFor, CASTER_CLASSES } from './config.js';
 import { makeMan, makeAxe, makeBow, makePickaxe, makeTorchMesh, makeClub,
          makeSword, makeHandSpear, makeCrossbow, makeShield } from './models.js';
@@ -2150,10 +2150,9 @@ export class Player {
       : (equipped('weapon')?.weapon || itemById('fists').weapon);
     const s = this.stats;
     this.levelDamage = lvl; // flat +1 weapon damage per level (lvl = this.level - 1)
-    // Attack SPEED no longer exists — every swing takes a fixed SWING_TIME.
-    // Everything that used to make you swing faster now makes each swing
-    // CHEAPER in energy, so the same gear/passives still raise your damage
-    // output: Swift Hands training, Quick Draw / Combo Mastery, charm aspd.
+    // Melee has no attack speed: a swing takes a fixed SWING_TIME, and the
+    // perks that used to speed it up make it CHEAPER instead (Swift Hands,
+    // Combo Mastery, charm aspd). Bows keep a real draw time — see swingTime.
     let energyCut = 0.04 * s.swift + 0.004 * lvl;
     this.weapon = {
       ...base,
@@ -2163,7 +2162,9 @@ export class Player {
     };
     if (base.kind === 'bow') {
       this.weapon.dmg *= 1 + (this.classEffects.rangedDmg || 0);
-      energyCut += this.classEffects.rangedSpeed || 0;
+      // NOTE: rangedSpeed (Quick Draw) is NOT an energy discount for bows — it
+      // shortens the draw instead (see get swingTime), so archers gain rate of
+      // fire while melee gains cheaper swings. Applying both would double-dip.
       this.weapon.range += this.classEffects.rangedRange || 0; // Marksman reach
     } else {
       this.weapon.dmg *= 1 + (this.classEffects.meleeDmg || 0);
@@ -2303,6 +2304,18 @@ export class Player {
     if (this.weapon?.kind === 'bow' && this.arrowHasteT > 0) mult *= Math.max(0.2, 1 - this.arrowHastePower);
     if (this.weapon?.kind !== 'bow' && this.bloodFuryT > 0) mult *= Math.max(0.35, 1 - this.bloodFuryPower);
     return mult;
+  }
+
+  // How long the next basic attack takes. Melee is a flat SWING_TIME; a BOW has
+  // to be drawn, and that draw is what Quick Draw / Arrow Haste / Haste speed
+  // up — so a hasted archer really does loose arrows faster.
+  get swingTime() {
+    if (this.weapon?.kind !== 'bow') return SWING_TIME;
+    let t = swingTimeFor(this.weapon);
+    t *= Math.max(0.4, 1 - (this.classEffects.rangedSpeed || 0)); // Quick Draw
+    if (this.arrowHasteT > 0) t *= Math.max(0.3, 1 - this.arrowHastePower);
+    if (this.hasteT > 0) t *= 0.6;
+    return Math.max(0.25, t);
   }
 
   // what the NEXT basic attack will cost, after buffs
@@ -3067,7 +3080,7 @@ export class Player {
       if (this.energy >= swingCost) {
         this.energy -= swingCost;     // paid on commit, refunded if interrupted
         this.energySpentT = 0;
-        const dur = SWING_TIME * 0.36; // wind up, then the strike lands
+        const dur = this.swingTime * 0.36; // wind up, then the strike lands
         this.swingWindup = { t: dur, dur, cost: swingCost };
         // no sound on the raise — the swoosh fires when the blow actually cuts
       } else if (this.noEnergyWarnT <= 0) {
@@ -3319,7 +3332,7 @@ export class Player {
     const mountMult = mounted ? 1.28 : 1;
     const impactMult = comboMult * chargeMult * runMult * mountMult;
     // fixed cadence: the swing animation itself is the rate limiter now
-    this.attackDur = SWING_TIME * 0.64;
+    this.attackDur = this.swingTime * 0.64;
     this.attackT = this.attackDur;
     this.attackSide = this.swingSide; // this strike cuts from the raised side
     this.swingSide = -this.swingSide; // …and the next one winds up opposite
@@ -3452,7 +3465,7 @@ export class Player {
     this.breakStealth();
     const crossbow = w.style === 'crossbow';
     const charged = charge >= 0.42;
-    this.attackDur = SWING_TIME * 0.64;
+    this.attackDur = this.swingTime * 0.64;
     this.attackT = this.attackDur;
     audio.sfx('attack_ranged', 0.4);
     const speed = crossbow ? 31 : 23 + charge * 9;

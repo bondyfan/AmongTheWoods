@@ -130,12 +130,22 @@ export class Panels {
     });
   }
 
+  // Every open panel repaints independently. If one section throws, the rest
+  // MUST still repaint: renderCharacter() draws the paper doll first and the
+  // inventory last, so a mid-render error used to leave the modal half-updated
+  // (gear moved on the doll, bag unchanged) until you closed and reopened it.
+  _safeRender(name, fn) {
+    try { fn.call(this); } catch (err) {
+      console.error(`[panels] ${name} render failed`, err);
+    }
+  }
+
   refresh() {
-    if (this.openSet.has('shop')) this.renderShop();
-    if (this.openSet.has('smith')) this.renderSmith();
-    if (this.openSet.has('character')) this.renderCharacter();
-    if (this.openSet.has('bestiary')) this.renderBestiary();
-    if (this.openSet.has('chest')) this.renderChest();
+    if (this.openSet.has('shop')) this._safeRender('shop', this.renderShop);
+    if (this.openSet.has('smith')) this._safeRender('smith', this.renderSmith);
+    if (this.openSet.has('character')) this._safeRender('character', this.renderCharacter);
+    if (this.openSet.has('bestiary')) this._safeRender('bestiary', this.renderBestiary);
+    if (this.openSet.has('chest')) this._safeRender('chest', this.renderChest);
   }
 
   _resLine() {
@@ -160,8 +170,8 @@ export class Panels {
     if (w) {
       if (w.dmg) stats.push(['Damage', Math.round(w.dmg)]);
       const wCost = attackEnergyFor(w);
-      stats.push(['⚡ Energy / swing', wCost]);
-      if (w.dmg) stats.push(['Damage per energy', (w.dmg / wCost).toFixed(1)]);
+      stats.push(['⚡ Cost / hit', wCost]);
+      if (w.dmg) stats.push(['Dmg / energy', (w.dmg / wCost).toFixed(1)]);
       if (w.range) stats.push(['Range', w.range + ' m']);
       if (w.chop > 0) stats.push(['🪓 Cutting power', w.chop]);
       if (w.mine > 0) stats.push(['⛏️ Mining power', w.mine]);
@@ -934,7 +944,7 @@ export class Panels {
       }));
     }
 
-    this.renderInventory();
+    this._safeRender('inventory', this.renderInventory);
 
     // quests: the active one (with abandon) + completed history
     const qWrap = $('char-quests');
