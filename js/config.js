@@ -1294,6 +1294,20 @@ export function classActiveInfo(skill, rank) {
     if (skill.trapStun) out.push(`stuns ${num1(skill.trapStun)} s`);
     out.push('bleeds the victim');
   }
+  // summons (arcane spheres + the Fire Imp): say what the minion actually DOES,
+  // otherwise the card only shows its burn and duration and reads as a mystery
+  if (skill.action === 'summon') {
+    const orbs = rv('orbCount', 1), tg = rv('targets', 1);
+    out.push(`${Math.round(rv('dmg'))} damage per bolt (grows with level & mastery)`);
+    out.push('a bolt about every 1.1 s');
+    if (orbs > 1) out.push(`${orbs} orbs`);
+    if (tg > 1) out.push(`hits ${tg} enemies at once`);
+    if (skill.imp) {
+      out.push('a REAL pet: has its own health (60% of yours)');
+      out.push('enemies attack it instead of you');
+      out.push('obeys the P stance (aggressive / defensive / passive)');
+    }
+  }
   if (skill.weaponMult) out.push(`${Math.round(rv('weaponMult') * 100)}% weapon damage`);
   if (skill.damage) out.push(`${Math.round(rv('damage'))} damage`);
   if (skill.bleedPct) out.push(`bleeds ${pctStr(rv('bleedPct'))} of max HP over ${skill.bleedDur} s`);

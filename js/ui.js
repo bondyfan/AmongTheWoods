@@ -36,7 +36,9 @@ export class UI {
 
     $('start-btn').addEventListener('click', () => {
       audio.sfx('click', 0.5);
-      this.hideMenu();
+      // the menu stays up until the run actually begins: onStart may first ask
+      // WHICH character to play (and the player can still back out).
+      // startPlaying() → hideMenu() does the swap for every mode.
       hooks.onStart();
     });
     $('restart-btn').addEventListener('click', () => location.reload());
