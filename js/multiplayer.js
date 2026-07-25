@@ -433,7 +433,9 @@ class ShadowWorld {
       ...(opts?.poison ? { po: opts.poison.dps, pt: opts.poison.dur } : {}),
       ...(srcId === 'pet' ? { ps: 1 } : {}),
     });
-    audio.sfx('hit', 0.25, 90);
+    // same per-weapon flesh impact the solo path plays (hitSfx never goes over
+    // the wire — it's a local cue picked from whatever YOU are swinging)
+    audio.sfx(opts?.hitSfx || 'hit', opts?.crit ? 0.85 : 0.7, 35);
   }
   stun(e, sec) { this.hooks.sendEvent({ type: 'ehit', id: e.id, dmg: 0, stun: sec }); }
 
@@ -600,10 +602,10 @@ class MobaShadow {
 
   // combat seam for the guest hero (hostile = host's team + neutrals)
   alive() { return this.units.filter(u => !u.dying && u.team !== 'enemy'); }
-  damage(u, dmg) {
+  damage(u, dmg, knockDir = null, srcId = 'local', opts = null) {
     this.hooks.popup(u.mesh.position.clone().setY(u.mesh.position.y + 1.4), Math.round(dmg).toString(), '#ffffff');
     this.hooks.sendEvent({ type: 'mhit', id: u.id, dmg: Math.round(dmg * 10) / 10 });
-    audio.sfx('hit', 0.25, 90);
+    audio.sfx(opts?.hitSfx || 'hit', opts?.crit ? 0.85 : 0.7, 35);
   }
   stun(u, sec) { this.hooks.sendEvent({ type: 'mhit', id: u.id, dmg: 0, stun: sec }); }
 
@@ -723,7 +725,7 @@ export class Multiplayer {
           this.coopPetProxy.takeDamage(dmg, ctx.player);
           ctx.popup(this.remote.petMesh.position.clone().setY(this.remote.petMesh.position.y + 1.4),
             Math.round(dmg).toString(), '#ffb3b3');
-          audio.sfx('hit', 0.3, 110);
+          audio.sfx(opts?.hitSfx || 'hit', 0.7, 40);
           return;
         }
         this.net.sendEvent({
@@ -735,7 +737,7 @@ export class Multiplayer {
           ...(opts?.poison ? { po: opts.poison.dps, pt: opts.poison.dur } : {}),
         });
         ctx.popup(this.remote.mesh.position.clone().setY(this.remote.mesh.position.y + 2), Math.round(dmg).toString(), '#ffb3b3');
-        audio.sfx('hit', 0.3, 90);
+        audio.sfx(opts?.hitSfx || 'hit', 0.7, 40);
       },
       stun: (e, sec) => {
         if (e?.id === 'partnerPet') return;
@@ -1793,7 +1795,7 @@ export class Multiplayer {
         }, this.duel.oppUid);
         const m = proxy.mesh;
         if (m) this.ctx.popup(m.position.clone().setY(m.position.y + 2), Math.round(dmg).toString(), '#ffb3b3');
-        audio.sfx('hit', 0.3, 90);
+        audio.sfx(opts?.hitSfx || 'hit', 0.7, 40);
       },
       stun: (e, sec) => {
         if (e?.id !== 'duel-rival') return base.stun?.(e, sec);

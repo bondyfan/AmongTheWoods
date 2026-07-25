@@ -214,19 +214,19 @@ export class Moba {
     const self = this;
     return {
       alive: () => self.units.filter(u => !u.dying && u.team !== heroTeam),
-      damage: (u, dmg, dir, src = 'local') => self.damageUnit(u, dmg, src),
+      damage: (u, dmg, dir, src = 'local', opts = null) => self.damageUnit(u, dmg, src, opts),
       stun: (u, sec) => { if (u.kind === 'creep' || u.kind === 'neutral') u.stunT = Math.max(u.stunT, sec); },
       list: this.units, // for event lookup by id
     };
   }
 
-  damageUnit(u, dmg, src = null) {
+  damageUnit(u, dmg, src = null, opts = null) {
     if (u.dying) return;
     u.hp -= dmg;
     if (src) u.lastHitBy = src;
     this.hooks.popup(u.mesh.position.clone().setY(u.mesh.position.y + (u.kind === 'tower' ? 4.5 : 1.4)),
       Math.round(dmg).toString(), '#ffffff');
-    audio.sfx('hit', 0.2, 120);
+    audio.sfx(opts?.hitSfx || 'hit', opts?.crit ? 0.85 : 0.7, 35);
     if (u.hp <= 0) this._killUnit(u);
   }
 
