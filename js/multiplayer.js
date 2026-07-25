@@ -239,6 +239,9 @@ class RemotePlayer {
       if (this.petMesh) this.petMesh.visible = false;
       return;
     }
+    // hold the spectral look (idempotent) — gear swaps rebuild sockets and
+    // would otherwise hand a ghost solid limbs again
+    if (this.isGhost) setSpectralLook(this.mesh, true);
     // held torch: mirror the local flame flicker + light so allies' torches
     // genuinely light up the night for everyone
     if (this.torchMesh) {

@@ -404,8 +404,8 @@ export const isSharedMaterial = (mat) =>
 // so everyone sees the same thing. Materials are cloned on first use because
 // the model factories deliberately share materials — tinting in place would
 // turn every living body blue too.
-const GHOST_TINT = 0x7fc4ff;
-const GHOST_OPACITY = 0.38;
+const GHOST_TINT = 0x9fd8ff;
+const GHOST_OPACITY = 0.22;   // you should clearly see the world THROUGH a spirit
 
 export function setSpectralLook(root, on) {
   root.traverse(part => {
@@ -419,30 +419,84 @@ export function setSpectralLook(root, on) {
         _baseOpacity: src.opacity ?? 1,
         _baseTransparent: !!src.transparent,
         _baseDepthWrite: src.depthWrite,
-        _baseEmissive: src.emissive ? src.emissive.getHex() : null };
+        _baseEmissive: src.emissive ? src.emissive.getHex() : null,
+        _baseSide: src.side, _baseAlphaTest: src.alphaTest,
+        _baseBlending: src.blending,
+        _baseMetal: ('metalness' in src) ? src.metalness : null,
+        _baseRough: ('roughness' in src) ? src.roughness : null };
       return m;
     });
     part.material = Array.isArray(part.material) ? owned : owned[0];
     for (const m of owned) {
       const d = m.userData;
+      // Idempotent: this is re-applied every frame while a ghost (the class
+      // visual system also owns these materials and resets opacity behind us),
+      // so bail out when it is already right. Writing needsUpdate every frame
+      // would force a shader recompile per frame.
+      const wantOpacity = on ? GHOST_OPACITY : d._baseOpacity;
+      const wantTransparent = on ? true : d._baseTransparent;
+      if (m.opacity === wantOpacity && m.transparent === wantTransparent) continue;
+      const recompile = m.transparent !== wantTransparent;
       if (on) {
         // wash the body's own colour out to a cold blue-white, then let it glow
         // faintly so a ghost still reads at night
         if (d._baseColor !== null) m.color.setHex(GHOST_TINT);
-        if (d._baseEmissive !== null) m.emissive.setHex(0x22506e);
+        if (d._baseEmissive !== null) m.emissive.setHex(0x2f6e96);
         m.transparent = true;
         m.opacity = GHOST_OPACITY;
         m.depthWrite = false;      // no z-fighting between overlapping limbs
+        m.alphaTest = 0;           // a cutout material would ignore opacity entirely
+        m.blending = THREE.NormalBlending;
+        if ('metalness' in m) m.metalness = 0;   // a metallic spirit reads as solid
+        if ('roughness' in m) m.roughness = 1;
+        m.side = THREE.DoubleSide; // see the far side of the shell through the near one
       } else {
         if (d._baseColor !== null) m.color.setHex(d._baseColor);
         if (d._baseEmissive !== null) m.emissive.setHex(d._baseEmissive);
         m.transparent = d._baseTransparent;
         m.opacity = d._baseOpacity;
         m.depthWrite = d._baseDepthWrite;
+        m.side = d._baseSide; m.alphaTest = d._baseAlphaTest;
+        m.blending = d._baseBlending;
+        if (d._baseMetal !== null) m.metalness = d._baseMetal;
+        if (d._baseRough !== null) m.roughness = d._baseRough;
       }
-      m.needsUpdate = true;
+      if (recompile) m.needsUpdate = true;   // only a transparency flip needs it
     }
   });
+}
+
+// Your body, left lying where you fell. A ghost has to be able to FIND it, so
+// besides the sprawled figure there is a soft column of light standing over it —
+// visible across the valley, which is the whole point of the corpse run.
+export function makeCorpse() {
+  const g = new THREE.Group();
+  const body = makeMan();
+  body.rotation.z = Math.PI / 2;        // sprawled on its back
+  body.position.y = 0.28;
+  // drained of colour — clearly a body, not a living player
+  body.traverse(p => {
+    if (!p.material) return;
+    const list = Array.isArray(p.material) ? p.material : [p.material];
+    p.material = list.map(s => { const m = s.clone(); m.color?.multiplyScalar(0.55); return m; });
+    if (!Array.isArray(p.material)) p.material = p.material[0];
+  });
+  g.add(body);
+  // the beacon: a tall, soft shaft you can see from far off
+  const beam = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.45, 0.75, 9, 14, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0x9fd8ff, transparent: true, opacity: 0.13,
+      side: THREE.BackSide, depthWrite: false, blending: THREE.AdditiveBlending }));
+  beam.position.y = 4.5;
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.7, 1.15, 30),
+    new THREE.MeshBasicMaterial({ color: 0x9fd8ff, transparent: true, opacity: 0.5,
+      side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.06;
+  g.add(beam, ring);
+  g.userData = { beam, ring };
+  return g;
 }
 
 export function mat(color) {

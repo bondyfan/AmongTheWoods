@@ -10,7 +10,7 @@ import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOB
          CLASS_CHOOSE_COST, firstClassSkillId, MAX_SPELL_SLOTS } from './config.js';
 import { makeAimArc, updateAimArc, makeRaft, makeBlacksmith, makeHorse, makeWisp, makeMan,
          makeGriffin, makeGriffinRoost, makeTumbleweed, BAKED_MAT, WATER_SHADERS,
-         makeSkyDome, setSpectralLook } from './models.js';
+         makeSkyDome, setSpectralLook, makeCorpse } from './models.js';
 import { PostFX } from './postfx.js';
 import { CanopyShade } from './canopy.js';
 import { Camp } from './camp.js';
@@ -2444,7 +2444,7 @@ function dropHalfMeat(pos) {
 // nearest graveyard you know and run — at 2.5× speed — back to your corpse.
 // Reaching it restores you intact; giving up and resurrecting at the graveyard
 // costs this level's XP progress. Your loot still spills where you fell.
-const ghost = { active: false, corpse: null, grave: null };
+const ghost = { active: false, corpse: null, grave: null, mesh: null };
 
 // every graveyard the player may wake at: the world's own, plus a grave they
 // placed themselves
@@ -2488,6 +2488,10 @@ function enterGhost(corpseAt) {
   ghost.active = true;
   ghost.corpse = { x: corpseAt.x, z: corpseAt.z };
   ghost.grave = grave;
+  // leave the actual BODY behind — without it there is nothing to run back to
+  ghost.mesh = makeCorpse();
+  ghost.mesh.position.set(corpseAt.x, world.heightAt(corpseAt.x, corpseAt.z), corpseAt.z);
+  scene.add(ghost.mesh);
   player.ghost = true;
   player.revive(1);                                // upright and moving, but dead
   player.pos.set(grave.x, 0, grave.z);
@@ -2512,6 +2516,7 @@ function tickGhostFade(dt) {
 function leaveGhost() {
   ghost.active = false;
   ghost.corpse = null;
+  if (ghost.mesh) { scene.remove(ghost.mesh); ghost.mesh = null; }
   player.ghost = false;
   setGhostVisual(false);
   $id('respawn-choice').classList.add('hidden');
@@ -2547,7 +2552,17 @@ function resurrectAtGraveyard() {
 // per-frame ghost bookkeeping: offer the body when you reach it
 function tickGhost() {
   const hint = $id('ghost-hint');
+  // the beacon over the body breathes so it catches the eye across the valley
+  if (ghost.mesh) {
+    const k = 0.85 + 0.15 * Math.sin(game.time * 2.2);
+    ghost.mesh.userData.beam.material.opacity = 0.13 * k;
+    ghost.mesh.userData.ring.material.opacity = 0.5 * k;
+    ghost.mesh.userData.ring.scale.setScalar(k);
+  }
   if (!ghost.active || !ghost.corpse) { hint?.classList.add('hidden'); return; }
+  // hold the spectral look: the class-visual system owns these same materials
+  // and resets their opacity, so a one-shot application silently wore off
+  setGhostVisual(true);
   const d = Math.hypot(player.pos.x - ghost.corpse.x, player.pos.z - ghost.corpse.z);
   if (hint) {
     if (d < GHOST_CORPSE_R) {
