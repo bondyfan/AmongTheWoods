@@ -596,20 +596,31 @@ body.slotting .spell-slot.empty {
 
 #pet-hint { bottom: 174px; border-color: #c9a4ff; }
 
-/* ---------- respawn choice ---------- */
+/* ---------- ghost: corpse run + the give-up button ----------
+   This sits in a CORNER, not the middle: as a ghost you are still playing —
+   running back to your body — so it must never cover the world. */
 #respawn-choice {
-  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-  z-index: 50; text-align: center; padding: 26px 34px;
-  background: rgba(12, 20, 10, 0.92); border: 2px solid #5d7442; border-radius: 16px;
+  position: fixed; left: 18px; top: 50%; transform: translateY(-50%);
+  z-index: 50; width: 268px; text-align: left; padding: 16px 18px;
+  background: rgba(12, 20, 10, 0.88); border: 2px solid #5d7442; border-radius: 14px;
 }
-#respawn-choice h2 { font-size: 26px; margin-bottom: 8px; }
-#respawn-choice p { opacity: 0.8; margin-bottom: 16px; }
+#respawn-choice h2 { font-size: 19px; margin-bottom: 6px; }
+#respawn-choice p { opacity: 0.8; font-size: 13px; line-height: 1.35; margin-bottom: 12px; }
 #respawn-choice button {
-  display: block; width: 100%; margin-top: 10px; font-size: 17px; padding: 12px 22px;
-  cursor: pointer; background: linear-gradient(#4c6b35, #34491f); color: #f0ead8;
-  border: 2px solid #6d8f4c; border-radius: 10px;
+  display: block; width: 100%; font-size: 14px; padding: 10px 14px;
+  cursor: pointer; background: linear-gradient(#5a4038, #3a2721); color: #f0ead8;
+  border: 2px solid #8a5a4a; border-radius: 10px;
 }
 #respawn-choice button:hover { filter: brightness(1.15); }
+
+/* how far you still have to run, pinned above the hotbar */
+#ghost-hint {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: 150px;
+  z-index: 30; padding: 9px 16px; pointer-events: none;
+  font-size: 15px; font-weight: bold; color: #cfe6ff;
+  background: rgba(10, 18, 26, 0.82); border: 1px solid rgba(150, 200, 255, 0.5);
+  border-radius: 11px; text-shadow: 0 1px 3px rgba(0,0,0,0.85);
+}
 .card {
   background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);
   border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;

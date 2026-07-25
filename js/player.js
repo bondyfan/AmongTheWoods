@@ -56,6 +56,8 @@ const NEEDS_TARGET = new Set(['target', 'execute', 'magicTarget', 'shadowstep', 
 // windup spell the lock is captured when the cast begins (see castWindup) so
 // it survives the player releasing Shift during the channel.
 const SHIFT_LOCK_ONLY = new Set(['magicTarget']);
+// a ghost sprints back to its corpse — the run of shame is meant to be quick
+export const GHOST_SPEED_MULT = 2.5;
 
 export class Player {
   constructor(scene, hooks) {
@@ -447,6 +449,7 @@ export class Player {
   }
 
   castSpell(slotIndex, ctx) {
+    if (this.ghost) return false;   // the dead cast nothing
     const id = this.spellSlots[slotIndex];
     const classSkill = id ? classSkillById(id) : null;
     const canCleanseStun = classSkill?.action === 'cleanse';
@@ -2498,6 +2501,7 @@ export class Player {
   }
 
   takeDamage(dmg, src = null) {
+    if (this.ghost) return;         // you cannot kill what is already dead
     if (this.dead) return;
     if (this.flying) return; // riding a griffin — far out of anyone's reach
     if (this.evadeT > 0) {
@@ -2942,7 +2946,8 @@ export class Player {
           : 1;
         const speed = (this.speed + this.moveSpeedBonus + mountBonus) * terrainMult
           * guardSlow * (this.tameChannel ? 0 : this.castWindup ? 0.5 : 1)
-          * (this.roastT > 0 ? 1.1 : 1) * (ctx.devFly ? 1 : (ctx.envSpeedMult ?? 1));
+          * (this.roastT > 0 ? 1.1 : 1) * (ctx.devFly ? 1 : (ctx.envSpeedMult ?? 1))
+          * (this.ghost ? GHOST_SPEED_MULT : 1);   // the dead run fast
         // cliffs are walls: block any step that climbs too steeply (walking
         // DOWN or falling off is always allowed); sliding along one is fine.
         // Deep swamp water is a wall too unless you carry the boat — but
@@ -3042,7 +3047,8 @@ export class Player {
     const swingCost = this.swingEnergyCost;
     input.takeLeftPressed();          // consume edge state (charging removed)
     input.takeLeftReleased();
-    const wantAttack = input.attackHeld || input.quickAttack;
+    // a ghost has no hands: it can run and nothing else
+    const wantAttack = !this.ghost && (input.attackHeld || input.quickAttack);
     if (this.swingWindup) {
       if (this.stunT > 0 || this.dashT > 0 || this.blocking) {
         this.energy = Math.min(this.maxEnergy, this.energy + (this.swingWindup.cost || 0));

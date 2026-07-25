@@ -21,6 +21,7 @@ import { makeTree, makeRock, makeGrassTuft, makeGrassBlades, makeGrassField,
          makeLairEntrance, makeCage, makeFern, makeTownHouse, makeChurch,
          makeFountain, makeWheatTuft, makeJunglePlant, makeReeds, makePebbles,
          makeFenceRun, makeFenceGate, makeHayPile, makeGraveSingle, makeCottage,
+         makeVillageGraveyard,
          makePalm, makeGroundLeaves, impostorTemplate } from './models.js';
 import { makePier } from './ship.js';
 import { bakeGroup, bakeAccumulator, buildBakedMesh, bakeAt, BAKED_MAT,
@@ -1016,9 +1017,46 @@ export class World {
         addRun(a, HALF_WID, true);
       }
       const gate = { ...spot(HALF_LEN, 0), rot: Math.atan2(perX, perZ) };
-      this.village = { x, z, dirX, dirZ, entry, smith, guards, buildings, fence, gate };
+      // the burial ground sits off the street behind the houses — and doubles as
+      // a respawn point once you have found the village
+      // past the last house row (which ends at -26) so its 3.4 m footprint never
+      // collides with a cottage, but still well inside the fence
+      const graveyard = { ...spot(-33, -12), rot: Math.atan2(perX, perZ) };
+      // farm props so the hamlet reads as a place people actually live in
+      const props = [];
+      props.push({ ...spot(12, -13), type: 'hay' });
+      props.push({ ...spot(-6, 13.5), type: 'hay' });
+      for (let i = 0; i < 22; i++) {
+        const along = 2 + rng() * 22, side = 11.5 + rng() * 4.5;
+        props.push({ ...spot(along, side), type: 'wheat', rot: rng() * Math.PI });
+      }
+      this.village = { x, z, dirX, dirZ, entry, smith, guards, buildings,
+        fence, gate, graveyard, props, seen: false };
       break;
     }
+  }
+
+  // Every graveyard the player may wake up at. The homestead always counts; the
+  // village burial ground only once they have actually been there (you cannot
+  // resurrect somewhere you have never seen). A grave the player placed himself
+  // is added by the caller, which owns that state.
+  graveyards() {
+    const out = [{ x: 0, z: 4, name: 'your homestead' }];
+    const v = this.village;
+    if (v?.seen && v.graveyard) {
+      out.push({ x: v.graveyard.x, z: v.graveyard.z + 4, name: 'the village burial ground' });
+    }
+    return out;
+  }
+
+  // called each frame from the main loop: standing near the hamlet unlocks it
+  // as a respawn point for good
+  noteVillageSeen(x, z) {
+    const v = this.village;
+    if (!v || v.seen) return false;
+    if (Math.hypot(x - v.x, z - v.z) > 70) return false;
+    v.seen = true;
+    return true;
   }
 
   // 0 = wild ground · 2 = the village's cobblestone (same look as a patch town)
@@ -2670,6 +2708,31 @@ export class World {
         mesh.position.set(gt.x, this.heightAt(gt.x, gt.z), gt.z);
         mesh.rotation.y = gt.rot;
         group.add(mesh);   // no obstacle — the gateway must stay walkable
+      }
+      // -- the burial ground (a respawn point) --
+      const gy = this.village.graveyard;
+      if (gy && gy.x >= cxw && gy.x < cxw + CHUNK && gy.z >= czw && gy.z < czw + CHUNK) {
+        const mesh = bakeGroup(makeVillageGraveyard(mulberry32(this.seed ^ 0x6a4e)));
+        mesh.position.set(gy.x, this.heightAt(gy.x, gy.z), gy.z);
+        mesh.rotation.y = gy.rot;
+        group.add(mesh);
+        if (!gy.obstacleAdded) {
+          gy.obstacleAdded = true;
+          this.obstacles.push({ x: gy.x, z: gy.z, r: 3.4, tag: 'vgrave' });
+        }
+      }
+      // -- hay & wheat, the props that make it a farming hamlet --
+      for (const p of this.village.props || []) {
+        if (p.x < cxw || p.x >= cxw + CHUNK || p.z < czw || p.z >= czw + CHUNK) continue;
+        const prng = mulberry32(Math.round(p.x * 31 + p.z * 17));
+        const mesh = bakeGroup(p.type === 'hay' ? makeHayPile(prng) : makeWheatTuft(prng));
+        mesh.position.set(p.x, this.heightAt(p.x, p.z), p.z);
+        mesh.rotation.y = p.rot ?? 0;
+        group.add(mesh);
+        if (p.type === 'hay' && !p.obstacleAdded) {
+          p.obstacleAdded = true;
+          this.obstacles.push({ x: p.x, z: p.z, r: 1.2, tag: 'vprop' });
+        }
       }
     }
 

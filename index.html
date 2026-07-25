@@ -593,13 +593,15 @@
     <div id="flightmap-body"><canvas id="flightmap-canvas" width="620" height="620"></canvas></div>
   </div>
 
-  <!-- respawn choice (dies with a graveyard built) -->
+  <!-- while a ghost: run back to your body, or give up and take the XP hit -->
   <div id="respawn-choice" class="hidden">
-    <h2>☠️ You fell…</h2>
-    <p>Where do you want to wake up?</p>
-    <button id="respawn-cave">🕳️ The Cave (home)</button>
-    <button id="respawn-grave">🪦 The Graveyard</button>
+    <h2>👻 You are a ghost</h2>
+    <p>Run back to your body and press <kbd>E</kbd> to return whole — you move
+       2.5× faster as a spirit.</p>
+    <button id="respawn-grave">⚰️ Resurrect here — lose this level's XP</button>
   </div>
+  <!-- distance to the corpse while running back -->
+  <div id="ghost-hint" class="hidden"></div>
 
   <!-- main menu -->
   <!-- boot loading screen: assets preload before the menu unlocks -->

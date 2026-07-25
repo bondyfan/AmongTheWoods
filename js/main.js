@@ -6270,6 +6270,14 @@ function step() {
       updateWaypoint(dt);
       updatePings(dt);
       tickGhost();
+      // ?devmode debug handle (same pattern as window.audio) — lets a console
+      // or an automated check drive death/ghost states without a real fight
+      if (DEVMODE && !window.WOODS) {
+        window.WOODS = { game, get player() { return player; }, get world() { return world; },
+          get camp() { return camp; }, get ghost() { return ghost; },
+          kill: () => { player.hp = 0; player.dead = true; player.killedBy = 'a test'; survivalRespawn(); },
+          graveyards: () => knownGraveyards() };
+      }
       world.noteVillageSeen?.(player.pos.x, player.pos.z); // unlocks its graveyard
 
       // the horse carries you: mesh rides under the player, legs trot
