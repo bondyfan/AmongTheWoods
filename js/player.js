@@ -2550,7 +2550,7 @@ export class Player {
       this.poisonDps = (src.poison.dps ?? 2) * (1 - this.poisonCut);
       this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2), '☠️ poisoned', '#8aff3a');
     }
-    audio.sfx('hit', 0.45, 120);
+    audio.sfx('player_hurt', 0.75, 110); // YOUR pain — deliberately unlike your own impacts
     this.hooks.onHurt?.();
     if (this.hp <= 0) {
       if (this.guardianSpiritT > 0) {
@@ -3318,7 +3318,7 @@ export class Player {
     this.attackSide = this.swingSide; // this strike cuts from the raised side
     this.swingSide = -this.swingSide; // …and the next one winds up opposite
     this._spawnSlash();
-    audio.sfx(SWING_SFX[w.style] || 'swing_light', 0.3); // cutting AIR — quieter than the impact
+    audio.sfx(SWING_SFX[w.style] || 'swing_light', 0.45); // cutting AIR — still under the impact
 
     // (No attack lunge — a forward hop on every moving swing read as a jerky
     // stutter. Attacks now land in place while you keep moving smoothly.)

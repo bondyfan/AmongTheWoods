@@ -15,6 +15,9 @@ const OUT = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'sound
 
 // [filename, prompt, duration seconds]
 const SOUNDS = [
+  // ---- YOU getting hit. Must be instantly distinguishable from your own
+  // outgoing impacts, or a fight turns into one indistinct mush of thuds. ----
+  ['player_hurt', 'A man taking a heavy blow to the body: a sharp pained male grunt with a dull impact thud against leather armour, short, close, dry, no music, no words', 0.6],
   // ---- swinging through EMPTY AIR: a pure whoosh, no impact, no thud.
   // This plays on every swing (hit or miss); the impacts above layer on top. ----
   ['swing_light', 'A fast blade slicing through empty air: a short sharp airy whoosh, clean swoosh of something cutting wind, no impact, no thud, no hit, no music, no voice', 0.5],

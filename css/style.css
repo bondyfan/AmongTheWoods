@@ -832,6 +832,9 @@ body.slotting .spell-slot.empty {
 #start-btn:hover, #restart-btn:hover { filter: brightness(1.15); transform: translateY(-1px); }
 
 /* ---------- character select ---------- */
+/* it opens ON THE MENU (z-index 40), so it has to sit above it */
+#coopstart { z-index: 50; }
+#cs-cancel { display: block; margin: 10px auto 0; }
 #charselect-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px;
   max-height: 46vh; overflow-y: auto; }
 .char-row {

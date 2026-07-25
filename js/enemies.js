@@ -745,7 +745,7 @@ export class EnemyManager {
     // popups, hooks and knockback all run below, and none of them may delay or
     // swallow the one cue that tells the player "that connected".
     if (srcId === 'local' || srcId === 'pet') {
-      audio.sfx(opts?.hitSfx || 'hit', opts?.crit ? 1 : 0.95, 30);
+      audio.sfx(opts?.hitSfx || 'hit', opts?.crit ? 0.8 : 0.76, 30);
     }
     if (opts?.armorBreak) {
       enemy.armorBreak = Math.min(0.65, Math.max(enemy.armorBreak || 0, opts.armorBreak));

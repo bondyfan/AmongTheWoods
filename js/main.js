@@ -207,9 +207,12 @@ const combatMgr = () => {
 
 const ui = new UI({
   // the Single Player button starts whichever mode is selected in the menu
-  onStart: () => {
+  onStart: async () => {
     if (!requireName()) return;
-    (selectedMode === 'moba' ? startMobaSolo() : startGame());
+    if (selectedMode === 'moba') { startMobaSolo(); return; }
+    // pick WHO you are before a single chunk is generated
+    if (!await chooseCharacter(false)) return;
+    startGame();
   },
   onCastSpell: (i) => useBarSlot(i),
 });
@@ -2303,9 +2306,13 @@ function startPlaying() {
   if (DEVMODE && !mp?.active) player.setLevel(MAX_LEVEL);
   // build the world around the spawn behind the overlay, then reveal
   warmUpAndReveal();
-  // survival: once the world is revealed, offer New-vs-Load — but only if there
-  // are saves worth bringing back (co-op → cloud, solo → this device)
-  maybeOfferStartChoice();
+  // become the character picked on the menu (the world is ready for it now)
+  if (game.kind === 'survival') applyPendingCharacter();
+  // You never wake up winded: whichever way you got here — new run, loaded
+  // save, co-op join, MOBA — the action bars start full.
+  player.recompute();
+  player.energy = player.maxEnergy;
+  player.mana = player.maxMana;
 }
 
 function startGame() {
@@ -3255,8 +3262,10 @@ function applyLoadedState(d) {
   p.enforceClassEquipment();
   p.recompute();
   p.hp = Math.min(p.maxHp, d.hp ?? p.maxHp);
-  p.energy = Math.min(p.maxEnergy, d.energy ?? p.maxEnergy);
-  p.mana = Math.min(p.maxMana, d.mana ?? p.maxMana);
+  // You always start a session ready to fight — loading a save never drops you
+  // into the world on an empty bar (the saved value is deliberately ignored).
+  p.energy = p.maxEnergy;
+  p.mana = p.maxMana;
   companions.sync(player);
   syncQuestResidents();
   resetAutosaveBaseline(); // don't let the loaded state trigger an instant re-save
@@ -3272,19 +3281,45 @@ function applyLoadedState(d) {
 // restores it; the new one starts fresh at level 1. There are no manual saves.
 const CLASS_ICON = { warrior: '⚔️', ranger: '🏹', mage: '🔮', priest: '✨', beastmaster: '🐺' };
 
-async function maybeOfferStartChoice() {
-  if (openingEditor || game.editorView) return; // World Editor is not a play session
-  if (!saveAvailable()) return;                 // pvp/moba have no characters
-  const cloud = saveIsCloud();
-  if (cloud && !authUser) { player.charId ??= newCharId(); return; } // guest co-op: unsaved run
+// The character screen runs ON THE MENU, before a single chunk is generated:
+// you pick who you are, THEN the world loads as that character. The chosen
+// save is parked in pendingCharLoad and applied once the world exists.
+let pendingCharLoad = null;
+
+// Resolves true once a character is chosen (or none exist / none is needed),
+// false if the player backs out to the menu.
+async function chooseCharacter(cloud) {
+  pendingCharLoad = null;
+  if (openingEditor || game.editorView) return true;   // the editor is not a play session
+  // guests (and anyone the store is unreachable for) simply play an unsaved run
+  if (cloud && !authUser) { player.charId = newCharId(); return true; }
   let chars = [];
   try { chars = await (await saveBackend(cloud)).listChars(); } catch { /* offline → new char */ }
-  if (!chars.length) { player.charId ??= newCharId(); return; }  // first time: just play
-  renderCharSelect(chars, cloud);
-  showCharSelectWhenRevealed();
+  if (!chars.length) { player.charId = newCharId(); return true; }  // first time: just play
+  return new Promise((resolve) => {
+    renderCharSelect(chars, cloud, resolve);
+    $id('coopstart').classList.remove('hidden');
+  });
 }
 
-function renderCharSelect(chars, cloud) {
+// pick handlers call this: park the save, remember the slot, let the game start
+async function pickCharacter(id, cloud, resolve) {
+  try {
+    const data = await (await saveBackend(cloud)).loadChar(id);
+    if (!data) { ui.toast('That character is empty.', 'boss'); player.charId = newCharId(); }
+    else {
+      pendingCharLoad = data;
+      player.charId = id === 'autosave' ? newCharId() : id; // legacy slot graduates
+    }
+  } catch (e) {
+    ui.toast('Could not load that character: ' + (e?.message || e), 'boss');
+    player.charId = newCharId();
+  }
+  closeCharSelect();
+  resolve(true);
+}
+
+function renderCharSelect(chars, cloud, resolve) {
   $id('cs-lead-note').textContent = cloud
     ? 'Your cloud characters — pick one to continue, or roll a new one.'
     : 'Your characters on this device — pick one to continue, or roll a new one.';
@@ -3301,49 +3336,50 @@ function renderCharSelect(chars, cloud) {
     row.querySelector('.char-name').textContent = c.name || 'Adventurer';
     row.querySelector('.char-sub').textContent =
       `${cls} · ${c.biome ?? 'the woods'} · ${new Date(c.at || 0).toLocaleString()}`;
-    row.addEventListener('click', async (e) => {
+    row.addEventListener('click', (e) => {
       if (e.target.classList.contains('char-del')) return;   // the bin has its own job
       audio.sfx('click', 0.4);
-      closeCharSelect();
-      await loadCharacter(c.id, cloud);
+      pickCharacter(c.id, cloud, resolve);
     });
     row.querySelector('.char-del').addEventListener('click', async (e) => {
       e.stopPropagation();
       if (!confirm(`Delete "${c.name || 'Adventurer'}" (level ${c.level ?? 1})? This cannot be undone.`)) return;
       try { await (await saveBackend(cloud)).deleteChar(c.id); row.remove(); } catch {}
-      if (!list.children.length) closeCharSelect();
+      // deleting the last one leaves nothing to pick — roll a fresh character
+      if (!list.children.length) { player.charId = newCharId(); closeCharSelect(); resolve(true); }
     });
     list.appendChild(row);
   }
+  // "＋ New character" and "← Back" are re-bound per open so they resolve THIS
+  // prompt (cloning drops any listener left over from a previous run)
+  const newBtn = $id('cs-new'), fresh = newBtn.cloneNode(true);
+  newBtn.replaceWith(fresh);
+  fresh.addEventListener('click', () => {
+    audio.sfx('click', 0.4);
+    player.charId = newCharId();
+    pendingCharLoad = null;
+    closeCharSelect();
+    resolve(true);
+  });
+  const backBtn = $id('cs-cancel'), backFresh = backBtn.cloneNode(true);
+  backBtn.replaceWith(backFresh);
+  backFresh.addEventListener('click', () => {
+    audio.sfx('click', 0.35);
+    closeCharSelect();
+    resolve(false);          // back to the menu, nothing started
+  });
 }
 
-function showCharSelectWhenRevealed() {
-  const ov = $id('enter-overlay');
-  if (ov && !ov.classList.contains('hidden')) { setTimeout(showCharSelectWhenRevealed, 150); return; }
-  $id('coopstart').classList.remove('hidden');
-}
 function closeCharSelect() { $id('coopstart').classList.add('hidden'); }
 
-async function loadCharacter(id, cloud) {
-  try {
-    const data = await (await saveBackend(cloud)).loadChar(id);
-    if (!data) { ui.toast('That character is empty.', 'boss'); player.charId ??= newCharId(); return; }
-    applyLoadedState(data);
-    player.charId = id === 'autosave' ? newCharId() : id; // legacy slot graduates to a real id
-  } catch (e) {
-    ui.toast('Could not load that character: ' + (e?.message || e), 'boss');
-    player.charId ??= newCharId();
-  }
+// called once the world exists: become the character that was chosen on the menu
+function applyPendingCharacter() {
+  if (!pendingCharLoad) return;
+  const data = pendingCharLoad;
+  pendingCharLoad = null;
+  try { applyLoadedState(data); }
+  catch (e) { ui.toast('Could not restore that character: ' + (e?.message || e), 'boss'); }
 }
-
-// "+ New character" — a fresh charId means the autosave writes to a NEW slot,
-// leaving every existing character untouched
-$id('cs-new').addEventListener('click', () => {
-  audio.sfx('click', 0.4);
-  player.charId = newCharId();
-  closeCharSelect();
-  ui.toast('✨ A new life begins in the woods.', 'level');
-});
 
 // ==================== social UI: group, duel, inspect ====================
 // Shift-locking another player raises an action bar; the bar stays up after you
@@ -3654,6 +3690,7 @@ $id('mp-server-btn')?.addEventListener('click', async () => {
   const btn = $id('mp-server-btn');
   if (btn.disabled) return;
   if (!requireName()) return;
+  if (!await chooseCharacter(true)) return;   // pick a character before connecting
   btn.disabled = true;
   try {
     stopServerStatusWatch();
@@ -3698,6 +3735,7 @@ function showWaiting(code) {
 }
 $id('mp-coop-btn').addEventListener('click', async () => {
   if (!requireName()) return;
+  if (!await chooseCharacter(true)) return;   // pick a character before hosting
   const btn = $id('mp-coop-btn');
   btn.disabled = true;
   try {
@@ -3734,6 +3772,7 @@ $id('mp-pvp-btn').addEventListener('click', async () => {
 });
 $id('mp-join-btn').addEventListener('click', async () => {
   if (!requireName()) return;
+  if (!await chooseCharacter(true)) return;   // pick a character before joining
   const btn = $id('mp-join-btn');
   const label = btn.textContent;
   btn.disabled = true;
