@@ -1505,14 +1505,6 @@ export class Multiplayer {
     return Math.hypot(myPos.x - enemy.pos.x, myPos.z - enemy.pos.z) < XP_SHARE_RADIUS;
   }
 
-  // did one of my allies (or their pet) land the killing blow?
-  killerIsRemote(enemy) {
-    for (const uid of this.remotes.keys()) {
-      if (enemy.lastHitBy === uid || enemy.lastHitBy === uid + '#pet') return true;
-    }
-    return false;
-  }
-
   sendKillXp(xp, toUid) {
     this.net.sendEvent({ type: 'xpkill', xp }, toUid);
   }
@@ -1771,8 +1763,10 @@ export class Multiplayer {
   }
 
   // combat adapter: the duel opponent becomes a targetable "enemy" ON TOP of the
-  // real world, so mobs stay fully playable during a duel
+  // real world, so mobs stay fully playable during a duel. Cached per base —
+  // combatMgr() runs many times a frame and must not allocate.
   _duelAdapter(base) {
+    if (this._duelAdapterFor === base) return this._duelAdapterCache;
     const self = this;
     const proxy = this.duelProxy ??= {
       id: 'duel-rival', hitR: 0.6, sizeMult: 1, stunT: 0, cfg: { hitR: 0.6 },
@@ -1786,7 +1780,8 @@ export class Multiplayer {
       get name() { return self.duel.oppName; },
       takeDamage: () => {}, applyStun: () => {},
     };
-    return {
+    this._duelAdapterFor = base;
+    return this._duelAdapterCache = {
       alive: () => (this.duelLive() && proxy.pos ? [proxy, ...base.alive()] : base.alive()),
       damage: (e, dmg, knockDir = null, srcId = 'local', opts = null) => {
         if (e?.id !== 'duel-rival') return base.damage(e, dmg, knockDir, srcId, opts);

@@ -3262,7 +3262,6 @@ function applyLoadedState(d) {
   ui.toast('☁️ Your character has been restored into this game.', 'level');
   audio.sfx('victory', 0.4);
 }
-$id('loadgame').querySelector('.panel-close').addEventListener('click', () => $id('loadgame').classList.add('hidden'));
 
 // ---------- character select (WoW-style) ----------
 // Entering a survival world opens a character screen listing your autosaved
