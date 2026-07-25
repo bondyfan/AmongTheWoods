@@ -790,82 +790,123 @@ export class Panels {
       }
     }
 
-    // ---- stat breakdown: value first, then base + every named modifier ----
+    // ---- stat breakdown, grouped into cards: each card is one system
+    // (what keeps you alive, what fuels you, what you hit with) so related
+    // numbers sit together instead of one long undifferentiated list. ----
     const s = p.stats;
-    const rows = [];
     const classTree = classTreeById(p.selectedClass);
-    const passiveRanks = classTree?.passives.reduce((sum, skill) => sum + this._classRank(skill.id), 0) ?? 0;
-    const activeRanks = classTree?.actives.reduce((sum, skill) => sum + this._classRank(skill.id), 0) ?? 0;
-    rows.push(['🧬 Class', classTree ? `${classTree.icon} ${classTree.name}` : 'Unchosen', classTree
-      ? `${passiveRanks}/${classTree.passives.length * 3} passive ranks · ${activeRanks}/${classTree.actives.length * 3} active ranks · see the Class tab`
-      : 'Open the Class tab to choose one class']);
-    const base = itemById(p.equipment.weapon)?.weapon ?? itemById('fists').weapon;
-    const charm = itemById(p.equipment.charm);
-    const dmgParts = [`${Math.round(base.dmg)} ${itemById(p.equipment.weapon)?.name ?? 'fists'}`];
-    if (p.levelDamage) dmgParts.push(`+${p.levelDamage} level`);
-    if (s.power) dmgParts.push(`+${s.power * 5}% training`);
     const classEffects = p.classEffects || {};
-    const classDamage = base.kind === 'bow' ? classEffects.rangedDmg : classEffects.meleeDmg;
-    if (classDamage) dmgParts.push(`+${Math.round(classDamage * 100)}% ${classTree?.name ?? 'class'}`);
-    if (p.forgeTier) dmgParts.push(`+${p.forgeTier * 10}% forge`);
-    if (charm?.stats?.dmgPct) dmgParts.push(`+${Math.round(charm.stats.dmgPct * 100)}% ${charm.name}`);
-    rows.push(['⚔️ Attack', Math.round(p.weapon.dmg), dmgParts.join(' · ')]);
+    const base = itemById(p.equipment.weapon)?.weapon ?? itemById('fists').weapon;
+    const weaponName = itemById(p.equipment.weapon)?.name ?? 'fists';
+    const charm = itemById(p.equipment.charm);
+    const GEAR_SLOTS = ['head', 'chest', 'boots', 'charm', 'offhand', 'underlayer', 'legs', 'back', 'mount'];
 
-    // attack SPEED is gone — every swing takes the same time and costs energy
-    const enParts = [`${attackEnergyFor(base)} ${itemById(p.equipment.weapon)?.name ?? 'fists'}`];
-    if (s.swift) enParts.push(`-${s.swift * 4}% training`);
-    if (charm?.stats?.aspd) enParts.push(`-${Math.round(charm.stats.aspd * 100)}% ${charm.name}`);
-    rows.push(['⚡ Energy / swing', p.swingEnergyCost, enParts.join(' · ')]);
-    rows.push(['⚡ Energy pool', `${Math.round(p.energy)} / ${p.maxEnergy}`,
-      `100 base · +${p.level - 1} level · +${(p.energyRegen || 0).toFixed(0)}/s regen`]);
-    if (p.maxMana > 0) rows.push(['💧 Mana pool', `${Math.round(p.mana)} / ${p.maxMana}`,
-      `caster pool · +${(p.manaRegen || 0).toFixed(1)}/s regen`]);
-
+    // ── ❤️ VITALS ─────────────────────────────────────────────────────────
     const hpParts = [`${PLAYER_HP(1)} base`];
     if (p.level > 1) hpParts.push(`+${PLAYER_HP(p.level) - PLAYER_HP(1)} level`);
-    for (const slot of ['head', 'chest', 'boots', 'charm', 'offhand', 'underlayer', 'legs', 'back', 'mount']) {
+    for (const slot of GEAR_SLOTS) {
       const it = itemById(p.equipment[slot]);
       if (it?.stats?.hp) hpParts.push(`+${Math.round(it.stats.hp * p.gearMult)} ${it.name}`);
     }
     if (p.campBonus) hpParts.push(`+${p.campBonus} home`);
     if (p.shrineBonus) hpParts.push(`+${p.shrineBonus} shrines`);
     if (classEffects.hpPct) hpParts.push(`+${Math.round(classEffects.hpPct * 100)}% ${classTree?.name ?? 'class'}`);
-    rows.push(['❤️ Max health', p.maxHp, hpParts.join(' · ')]);
 
+    const regenParts = ['0.3 base'];
+    if (p.level > 1) regenParts.push(`+${((p.level - 1) * 0.06).toFixed(1)} level`);
+    for (const slot of GEAR_SLOTS) {
+      const it = itemById(p.equipment[slot]);
+      if (it?.stats?.regen) regenParts.push(`+${(it.stats.regen * p.gearMult).toFixed(1)} ${it.name}`);
+    }
+    const oocTotal = p.oocRegen + p.hpRegen;
+
+    // ── ⚡ ENERGY ─────────────────────────────────────────────────────────
+    // the two numbers that actually decide how long you can keep swinging
+    const cost = p.swingEnergyCost || 1;
+    const swingsPerBar = Math.floor(p.maxEnergy / cost);
+    const standRegen = p.energyRegen || 0;
+    const sustained = standRegen / cost;
+
+    // ── ⚔️ ATTACK ─────────────────────────────────────────────────────────
+    const dmgParts = [`${Math.round(base.dmg)} ${weaponName}`];
+    if (p.levelDamage) dmgParts.push(`+${p.levelDamage} level`);
+    if (s.power) dmgParts.push(`+${s.power * 5}% training`);
+    const classDamage = base.kind === 'bow' ? classEffects.rangedDmg : classEffects.meleeDmg;
+    if (classDamage) dmgParts.push(`+${Math.round(classDamage * 100)}% ${classTree?.name ?? 'class'}`);
+    if (p.forgeTier) dmgParts.push(`+${p.forgeTier * 10}% forge`);
+    if (charm?.stats?.dmgPct) dmgParts.push(`+${Math.round(charm.stats.dmgPct * 100)}% ${charm.name}`);
+
+    const enParts = [`${attackEnergyFor(base)} ${weaponName}`];
+    if (base.kind === 'bow') enParts.push('ranged — cheaper to loose');
+    if (s.swift) enParts.push(`-${s.swift * 4}% training`);
+    if (charm?.stats?.aspd) enParts.push(`-${Math.round(charm.stats.aspd * 100)}% ${charm.name}`);
+
+    const rgParts = [`${base.range} m ${weaponName}`];
+    if (s.range) rgParts.push(`+${((base.kind === 'bow' ? 2 : 0.1) * s.range).toFixed(1)} m training`);
+
+    // ── 🏃 MOBILITY ───────────────────────────────────────────────────────
     const spParts = ['5.5 base'];
     if (p.level > 1) spParts.push(`+${((p.level - 1) * 0.04).toFixed(1)} level`);
     const boots = itemById(p.equipment.boots);
     if (boots?.stats?.speed) spParts.push(`+${boots.stats.speed} ${boots.name}`);
     if (classEffects.speed) spParts.push(`+${classEffects.speed.toFixed(1)} ${classTree?.name ?? 'class'}`);
     if (p.mounted) spParts.push('+9 🐴 horse');
-    // the +9 mount bonus is added at move time, not baked into p.speed — show the total
     const shownSpeed = p.speed + (p.mounted ? 9 : 0);
-    rows.push(['🏃 Speed', (Math.round(shownSpeed * 10) / 10), spParts.join(' · ')]);
 
-    const rgParts = [`${base.range} m ${itemById(p.equipment.weapon)?.name ?? 'fists'}`];
-    if (s.range) rgParts.push(`+${((base.kind === 'bow' ? 2 : 0.1) * s.range).toFixed(1)} m training`);
-    rows.push(['🎯 Range', (Math.round(p.weapon.range * 10) / 10) + ' m', rgParts.join(' · ')]);
+    const passiveRanks = classTree?.passives.reduce((sum, sk) => sum + this._classRank(sk.id), 0) ?? 0;
+    const activeRanks = classTree?.actives.reduce((sum, sk) => sum + this._classRank(sk.id), 0) ?? 0;
 
-    if (p.pet) rows.push(['🐺 Pet', `${Math.round(p.pet.dmg)} dmg · ${p.pet.maxHp} hp`,
-      `training T${s.pet} · your level ${p.level}`]);
-    if (p.orb) rows.push(['🔮 Orb', `${Math.round(p.orb.dmg)} dmg ×${p.orb.targets}`,
+    const groups = [
+      { icon: '❤️', title: 'Vitals', tone: 'hp', rows: [
+        ['Max health', p.maxHp, hpParts.join(' · ')],
+        ['Health regen', `${Math.round(p.hpRegen * 10) / 10}/s`,
+          `${regenParts.join(' · ')} — out of combat ${Math.round(oocTotal)}/s (~${Math.round(p.maxHp / Math.max(0.1, oocTotal))}s to full)`],
+      ] },
+      { icon: '⚡', title: 'Energy', tone: 'energy', rows: [
+        ['Pool', `${Math.round(p.energy)} / ${p.maxEnergy}`,
+          `100 base · +${p.level - 1} level — every basic attack is paid from here`],
+        ['Regen', `${standRegen.toFixed(1)}/s`,
+          `standing still · ${(standRegen * 0.5).toFixed(1)}/s while moving — plant your feet to recover`],
+        ['Swings per full bar', swingsPerBar,
+          `then ~${sustained.toFixed(1)} swing${sustained === 1 ? '' : 's'}/s sustained at ${cost} energy each`],
+      ] },
+      ...(p.maxMana > 0 ? [{ icon: '💧', title: 'Mana', tone: 'mana', rows: [
+        ['Pool', `${Math.round(p.mana)} / ${p.maxMana}`, 'caster pool — spells are paid from here'],
+        ['Regen', `${(p.manaRegen || 0).toFixed(1)}/s`, 'triples out of combat'],
+      ] }] : []),
+      { icon: '⚔️', title: 'Attack', tone: 'atk', rows: [
+        ['Damage', Math.round(p.weapon.dmg), dmgParts.join(' · ')],
+        ['Energy per attack', cost, enParts.join(' · ')],
+        ['Damage per energy', (p.weapon.dmg / cost).toFixed(1),
+          'how much punch you get out of the bar — the real comparison between weapons'],
+        ['Reach', `${Math.round(p.weapon.range * 10) / 10} m`, rgParts.join(' · ')],
+      ] },
+      { icon: '🏃', title: 'Mobility', tone: 'move', rows: [
+        ['Move speed', Math.round(shownSpeed * 10) / 10, spParts.join(' · ')],
+      ] },
+    ];
+
+    const companionRows = [];
+    if (p.pet) companionRows.push(['Pet damage', Math.round(p.pet.dmg),
+      `${p.pet.maxHp} hp · training T${s.pet} · your level ${p.level}`]);
+    if (p.orb) companionRows.push(['Orb damage', `${Math.round(p.orb.dmg)} ×${p.orb.targets}`,
       s.power ? `+${s.power * 5}% Power training` : 'scales with Power training']);
-    if (classEffects.classCdReduction) rows.push(['✨ Class recovery', `-${Math.round(classEffects.classCdReduction * 100)}%`,
-      `${classTree?.name ?? 'Class'} passive training`]);
+    if (companionRows.length) groups.push({ icon: '🐾', title: 'Companion', tone: 'pet', rows: companionRows });
 
-    // regen row: the small in-combat trickle, plus the fast out-of-combat rate
-    const regenParts = ['0.3 base'];
-    if (p.level > 1) regenParts.push(`+${((p.level - 1) * 0.06).toFixed(1)} level`);
-    for (const slot of ['head', 'chest', 'boots', 'charm', 'offhand', 'underlayer', 'legs', 'back', 'mount']) {
-      const it = itemById(p.equipment[slot]);
-      if (it?.stats?.regen) regenParts.push(`+${(it.stats.regen * p.gearMult).toFixed(1)} ${it.name}`);
-    }
-    regenParts.push(`out of combat: ${Math.round(p.oocRegen + p.hpRegen)}/s (~${Math.round(p.maxHp / (p.oocRegen + p.hpRegen))}s to full)`);
-    rows.push(['💚 Regen', `${(Math.round(p.hpRegen * 10) / 10)}/s`, regenParts.join(' · ')]);
+    const classRows = [['Class', classTree ? `${classTree.icon} ${classTree.name}` : 'Unchosen', classTree
+      ? `${passiveRanks}/${classTree.passives.length * 3} passive ranks · ${activeRanks}/${classTree.actives.length * 3} active ranks · see the Class tab`
+      : 'Open the Class tab to choose one class']];
+    if (classEffects.classCdReduction) classRows.push(['Class recovery',
+      `-${Math.round(classEffects.classCdReduction * 100)}%`, `${classTree?.name ?? 'Class'} passive training`]);
+    groups.push({ icon: '🧬', title: 'Class', tone: 'class', rows: classRows });
 
-    $('char-stats').innerHTML = rows.map(([label, val, parts]) =>
-      `<div class="stat-row"><span class="sr-label">${label}</span>
-        <b>${val}</b><small>${parts}</small></div>`).join('');
+    $('char-stats').innerHTML = groups.map(g =>
+      `<section class="stat-group ${g.tone}">
+        <h4 class="sg-head"><span class="sg-icon">${g.icon}</span>${g.title}</h4>
+        ${g.rows.map(([label, val, parts]) =>
+          `<div class="stat-row"><span class="sr-label">${label}</span>
+            <b>${val}</b><small>${parts}</small></div>`).join('')}
+      </section>`).join('');
 
     // admin mode: type a value to override any stat (blank = back to normal)
     if (this.hooks.isAdmin?.()) {

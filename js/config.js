@@ -414,10 +414,18 @@ export const PLAYER_MANA = (level) => Math.round(100 + 12 * level);
 // you plant your feet to recover, then wade back in.
 export const energyRegenFor = (level) => 6 + 0.036 * level;
 export const manaRegenFor = (level) => 3 + 0.12 * level;
-// Per-swing energy by weapon style — heavy weapons hit hard but drain you, so
-// a two-hander swings less often than bare knuckles even at the same 0.5 s.
-export const WEAPON_ENERGY = { fists: 20, club: 30, axe: 32, pick: 28, spear: 24,
-                               sword: 22, bow: 25, crossbow: 34 };
+// Per-swing energy by weapon style. Two axes here:
+//  · WEIGHT — heaving a two-hander costs far more than a jab, so heavy weapons
+//    hit hard but land fewer blows even at the same fixed 0.5 s swing.
+//  · RANGED vs MELEE — drawing a bow is far less work than swinging a greatsword,
+//    so every ranged weapon is CHEAPER than every melee one. Archers trade that
+//    stamina economy for lower per-hit damage and no armour.
+export const WEAPON_ENERGY = {
+  // ranged — cheap to loose
+  bow: 12, crossbow: 16,
+  // melee — the heavier the swing, the deeper it bites into the bar
+  fists: 20, sword: 22, spear: 24, pick: 28, club: 30, axe: 32,
+};
 export const attackEnergyFor = (weapon) =>
   weapon?.energy ?? WEAPON_ENERGY[weapon?.style] ?? 20;
 // Class abilities cost a resource ON TOP of their cooldown: physical classes

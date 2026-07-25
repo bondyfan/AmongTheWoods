@@ -1125,12 +1125,47 @@ body.slotting .spell-slot.empty {
   font-size: 9px; text-transform: uppercase; letter-spacing: 0.4px; opacity: 0.75;
   background: #1b2417; padding: 0 5px; border-radius: 4px; white-space: nowrap;
 }
+/* ---- character stats, grouped into one card per system ---- */
+#char-stats { display: flex; flex-direction: column; gap: 10px; }
+.stat-group {
+  --tone: #cbb98a;
+  position: relative; border-radius: 10px; padding: 9px 12px 5px 14px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.018));
+  border: 1px solid rgba(255,255,255,0.10);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+}
+/* a coloured spine so each system is identifiable at a glance */
+.stat-group::before {
+  content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px;
+  border-radius: 3px; background: var(--tone); opacity: 0.85;
+}
+.stat-group.hp     { --tone: #d3564a; }
+.stat-group.energy { --tone: #e6c34a; }
+.stat-group.mana   { --tone: #6f9de8; }
+.stat-group.atk    { --tone: #e08a4a; }
+.stat-group.move   { --tone: #7fbf5f; }
+.stat-group.pet    { --tone: #b58ae6; }
+.stat-group.class  { --tone: #8ec6c9; }
+.sg-head {
+  margin: 0 0 4px; font-size: 11px; font-weight: 800;
+  letter-spacing: 1.4px; text-transform: uppercase;
+  color: var(--tone); display: flex; align-items: center; gap: 6px;
+}
+.sg-head .sg-icon { font-size: 13px; filter: saturate(1.1); }
+
 .stat-row {
-  display: grid; grid-template-columns: 110px 60px 1fr; gap: 8px; align-items: baseline;
+  display: grid; grid-template-columns: 138px 96px 1fr; gap: 10px; align-items: baseline;
   padding: 5px 2px; border-bottom: 1px solid rgba(255,255,255,0.07); font-size: 13.5px;
 }
-.stat-row b { color: #ffe9a8; font-size: 15px; }
-.stat-row small { opacity: 0.6; font-size: 11.5px; }
+.stat-group .stat-row:last-child { border-bottom: none; }
+.stat-row .sr-label { opacity: 0.9; }
+.stat-row b { color: #ffe9a8; font-size: 15px; font-variant-numeric: tabular-nums; }
+.stat-row small { opacity: 0.6; font-size: 11.5px; line-height: 1.35; }
+/* narrow panels: let the breakdown wrap under the value instead of squeezing */
+@media (max-width: 720px) {
+  .stat-row { grid-template-columns: 124px 1fr; }
+  .stat-row small { grid-column: 1 / -1; margin-top: -2px; }
+}
 
 /* stackable inventory grid */
 #inv-grid { display: grid; grid-template-columns: repeat(auto-fill, 56px); gap: 8px; }
