@@ -740,6 +740,13 @@ export class EnemyManager {
 
   damage(enemy, dmg, knockDir, srcId = 'local', opts = null) {
     if (enemy.dying || enemy.escaping) return; // a beaten griffin is beyond reach
+    // IMPACT SOUND FIRST. The weapon that landed picks it (knuckles / blade /
+    // axe / club / spear / arrow). Deliberately the very first thing we do:
+    // popups, hooks and knockback all run below, and none of them may delay or
+    // swallow the one cue that tells the player "that connected".
+    if (srcId === 'local' || srcId === 'pet') {
+      audio.sfx(opts?.hitSfx || 'hit', opts?.crit ? 1 : 0.95, 30);
+    }
     if (opts?.armorBreak) {
       enemy.armorBreak = Math.min(0.65, Math.max(enemy.armorBreak || 0, opts.armorBreak));
       enemy.armorBreakT = Math.max(enemy.armorBreakT || 0, opts.breakDur || 6);
@@ -803,12 +810,8 @@ export class EnemyManager {
       enemy.pos.x += knockDir.x * 0.45;
       enemy.pos.z += knockDir.z * 0.45;
     }
-    // IMPACT: the weapon that landed picks the sound (knuckles / blade / arrow),
-    // and a local hit punches the camera. The killing blow still thumps.
-    if (srcId === 'local' || srcId === 'pet') {
-      audio.sfx(opts?.hitSfx || 'hit', opts?.crit ? 0.85 : 0.7, 35);
-      this.hooks.onLocalHit?.(enemy, dmg, opts);
-    } else if (enemy.hp > 0) audio.sfx('hit', 0.25, 90);
+    if (srcId === 'local' || srcId === 'pet') this.hooks.onLocalHit?.(enemy, dmg, opts);
+    else if (enemy.hp > 0) audio.sfx('hit', 0.25, 90);
     if (enemy.hp <= 0) {
       // griffins never truly die — beaten, they drop their nest and fly off
       if (enemy.cfg.griffin) this._griffinEscape(enemy);

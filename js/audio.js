@@ -86,10 +86,20 @@ class AudioManager {
     return this.cache.get(name);
   }
 
+  // ?devmode: window.__sfxLog keeps the last 40 sounds actually played, so a
+  // "why can't I hear X" question can be answered from the console instead of
+  // guessed at. Costs nothing when the flag is off.
+  _log(name) {
+    if (!this.debugLog) return;
+    (window.__sfxLog ||= []).push(name);
+    if (window.__sfxLog.length > 40) window.__sfxLog.shift();
+  }
+
   sfx(name, volume = 0.5, throttleMs = 60) {
     if (this.muted) return;
     const now = performance.now();
     if (now - (this.lastPlayed.get(name) || 0) < throttleMs) return;
+    this._log(name);
     this.lastPlayed.set(name, now);
     const a = this._base(name).cloneNode();
     a.volume = Math.min(1, volume * this.sfxVolume);

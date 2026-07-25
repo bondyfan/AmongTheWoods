@@ -187,6 +187,9 @@ const game = {
   },
 };
 if (DEVMODE) game.adminMode = true; // ?devmode boots straight into admin mode
+// ?devmode also records every sound that plays into window.__sfxLog, so an
+// "I can't hear X" report can be checked from the console.
+if (DEVMODE) { audio.debugLog = true; window.audio = audio; }
 
 // multiplayer session (loaded on demand from the menu; null in solo play)
 let mp = null;

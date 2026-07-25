@@ -22,7 +22,7 @@ const SOUNDS = [
   ['swing_fist',  'A quick punch thrown through empty air: a short soft airy whiff of a fist cutting the air, light fabric-like swoosh, no impact, no thud, no music, no voice', 0.5],
   // ---- weapon impacts: what it sounds like when YOUR blow lands in FLESH.
   // Each weapon family gets its own thud so you can hear what you're swinging. ----
-  ['punch_hit',  'A bare-knuckle punch landing hard on a body: heavy dull fleshy thud, soft leathery slap of skin, a short muffled meaty impact, dry and very close, single hit, no music, no voice, no reverb', 0.5],
+  ['punch_hit',  'A brutal heavyweight boxing punch landing flush on a torso: loud thick meaty SMACK, deep fleshy impact with a solid body thud, close-miked and punchy, single hard hit, dry, no music, no voice', 0.6],
   ['slash_hit',  'A sharp sword blade slicing deep into flesh: crisp metallic shing followed by a wet meaty tear and a spurt, single clean cut, close and dry, no music, no voice, no reverb', 0.6],
   ['chop_hit',   'A heavy battle axe chopping deep into a body: dense wet meaty crunch with cracking bone and a thick blade-in-flesh thunk, brutal and low, single heavy chop, dry, no music, no voice', 0.7],
   ['crush_hit',  'A massive war club smashing into a body: deep heavy blunt thud with a sickening bone crunch and a low meaty splat, powerful and low pitched, single crushing blow, dry, no music, no voice', 0.7],

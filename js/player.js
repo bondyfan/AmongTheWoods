@@ -3318,7 +3318,7 @@ export class Player {
     this.attackSide = this.swingSide; // this strike cuts from the raised side
     this.swingSide = -this.swingSide; // …and the next one winds up opposite
     this._spawnSlash();
-    audio.sfx(SWING_SFX[w.style] || 'swing_light', 0.5); // cutting AIR — impact layers on top
+    audio.sfx(SWING_SFX[w.style] || 'swing_light', 0.3); // cutting AIR — quieter than the impact
 
     // (No attack lunge — a forward hop on every moving swing read as a jerky
     // stutter. Attacks now land in place while you keep moving smoothly.)
