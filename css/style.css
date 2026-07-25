@@ -1147,13 +1147,14 @@ body.slotting .spell-slot.empty {
    The column is ~380 px, so the value sits on the same line as the label and
    the full breakdown lives in the hover tooltip. Cards flow into as many
    columns as the width allows. */
-#char-stats {
-  display: grid; gap: 8px;
-  grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
-  align-items: start;
-}
+/* Newspaper columns rather than a grid: the cards have uneven heights, and
+   CSS columns pack them flush instead of leaving a hole under every short
+   card the way equal-height grid rows do. */
+#char-stats { column-width: 166px; column-gap: 8px; }
 .stat-group {
   --tone: #cbb98a;
+  break-inside: avoid; -webkit-column-break-inside: avoid;
+  display: inline-block; width: 100%; margin: 0 0 8px;
   position: relative; border-radius: 9px; padding: 7px 9px 5px 11px;
   background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
   border: 1px solid rgba(255,255,255,0.10);
@@ -1171,9 +1172,6 @@ body.slotting .spell-slot.empty {
 .stat-group.move   { --tone: #7fbf5f; }
 .stat-group.pet    { --tone: #b58ae6; }
 .stat-group.class  { --tone: #8ec6c9; }
-/* Vitals / Energy / Attack carry the most rows — let them span the full width
-   when the grid has room, so the short cards pair up beside each other */
-.stat-group.atk, .stat-group.energy { grid-column: 1 / -1; }
 .sg-head {
   margin: 0 0 3px; font-size: 9.5px; font-weight: 800;
   letter-spacing: 1.3px; text-transform: uppercase;

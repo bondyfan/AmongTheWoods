@@ -897,7 +897,9 @@ export class Panels {
         const row = document.createElement('div');
         row.className = 'stat-row';
         row.innerHTML = `<span class="sr-label">${label}</span><b>${val}</b>`;
-        if (parts) attachTip(row, `<div class="tt-head">${label}</div><div class="tt-body">${parts}</div>`);
+        // reuse the styled tooltip classes (.tt-head is a flex icon+title row)
+        if (parts) attachTip(row,
+          `<div class="tt-title"><b>${label}</b></div><div class="tt-desc">${parts}</div>`);
         sec.appendChild(row);
       }
       statsEl.appendChild(sec);
