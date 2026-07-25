@@ -3405,6 +3405,15 @@ function _lumpGeo(v) {
   return flat;
 }
 
+// a needle frond / leaf blade: a double-sided quad (8 verts vs a box's 24),
+// so conifers can carry 3x the foliage for the same vertex budget
+function _frond(len, wid, color) {
+  const m = new THREE.Mesh(_leafQuad(), mat(color));
+  m.scale.set(len, 1, wid);
+  m.castShadow = true;
+  return m;
+}
+
 // a dense cloud of individual leaves hugging the surface of an ellipsoid,
 // with a darker core inside that reads as the crown's shaded interior — the
 // leaves lie tangent to the crown (like a real canopy) with jittered tilt
@@ -3550,18 +3559,23 @@ function _highPine(g, size, s, foliageColor, trunkColor, rng, snowy) {
   g.add(trunk);
   const base = new THREE.Color(foliageColor);
   const crown0 = H * 0.14;                       // bare trunk below the skirt
-  const whorls = 13 + size;
+  // many closely-spaced whorls that OVERLAP vertically — a real conifer is a
+  // continuous mass of foliage, not a stack of separated shelves
+  const whorls = 22 + 2 * size;
+  const gap = (H * 0.96 - crown0) / (whorls - 1);
   for (let w = 0; w < whorls; w++) {
     const t = w / (whorls - 1);
     const yw = crown0 + t * (H * 0.96 - crown0) + (rng() - 0.5) * 0.2 * s;
-    const L = (1.85 * (1 - 0.75 * t) + 0.28) * s;
-    const nb = t > 0.9 ? 4 : 7;
+    const L = (2.25 * (1 - 0.78 * t) + 0.3) * s;
+    const nb = t > 0.9 ? 5 : 9;
     const phase = rng() * Math.PI * 2;
     for (let i = 0; i < nb; i++) {
       const a = phase + (i / nb) * Math.PI * 2 + rng() * 0.4;
       const dx = Math.cos(a), dz = Math.sin(a);
-      const y = yw + (rng() - 0.5) * 0.3 * s;    // stagger breaks the shelf look
-      const droop = 0.08 + rng() * 0.18;         // tips dip below horizontal
+      // branches spread across the WHOLE gap to the next whorl, so successive
+      // tiers interleave and no bare band of trunk is ever visible
+      const y = yw + (rng() - 0.5) * 1.5 * gap;
+      const droop = 0.1 + rng() * 0.26;          // tips dip below horizontal
       const br = _limb(L, 0.05 * s, 0.014 * s, trunkColor, 4);
       br.position.y = y;
       _leafDir.set(dx, -Math.sin(droop), dz).normalize();
@@ -3569,25 +3583,24 @@ function _highPine(g, size, s, foliageColor, trunkColor, rng, snowy) {
       g.add(br);
       // needle fronds along the branch: flat crossed pairs that overlap into
       // one full bough — the actual foliage mass of the tree
-      for (const kk of [0.35, 0.68, 1.0]) {
-        const wid = (0.72 - 0.34 * t) * s * (1.45 - kk * 0.55);
+      for (const kk of [0.26, 0.5, 0.74, 0.98]) {
+        const wid = (0.78 - 0.34 * t) * s * (1.45 - kk * 0.5);
         const fy = y - Math.sin(droop) * L * kk + 0.05 * s;
-        const f1 = box(L * 0.72, 0.065 * s, wid,
-          _shadeOf(base, 0.72 + rng() * 0.42 + kk * 0.1));
+        const f1 = _frond(L * 0.62, wid, _shadeOf(base, 0.72 + rng() * 0.42 + kk * 0.1));
         f1.position.set(dx * L * kk, fy, dz * L * kk);
         f1.rotation.y = -a;
-        f1.rotation.x = (rng() - 0.5) * 0.25;
+        f1.rotation.x = (rng() - 0.5) * 0.3;
         g.add(f1);
-        if (kk === 0.35) {                       // crossed inner blade fills the core
-          const f2 = box(L * 0.5, 0.06 * s, wid * 0.85,
-            _shadeOf(base, 0.64 + rng() * 0.35));
-          f2.position.set(dx * L * kk, fy - 0.04 * s, dz * L * kk);
-          f2.rotation.y = -a + 0.55 + rng() * 0.3;
+        if (kk < 0.8) {                          // crossed blades fill the core
+          const f2 = _frond(L * 0.46, wid * 0.85, _shadeOf(base, 0.64 + rng() * 0.35));
+          f2.position.set(dx * L * kk, fy - 0.07 * s, dz * L * kk);
+          f2.rotation.y = -a + 0.55 + rng() * 0.5;
+          f2.rotation.z = (rng() - 0.5) * 0.3;
           g.add(f2);
         }
-        if (snowy && t > 0.35 && kk < 1) {       // snow resting on upper fronds
-          const sn = box(L * 0.6, 0.05 * s, wid * 0.8, 0xf0f5f9);
-          sn.position.set(dx * L * kk, fy + 0.065 * s, dz * L * kk);
+        if (snowy && t > 0.35 && kk < 0.8) {     // snow resting on upper fronds
+          const sn = _frond(L * 0.5, wid * 0.8, 0xf0f5f9);
+          sn.position.set(dx * L * kk, fy + 0.07 * s, dz * L * kk);
           sn.rotation.y = -a;
           g.add(sn);
         }
@@ -3595,17 +3608,18 @@ function _highPine(g, size, s, foliageColor, trunkColor, rng, snowy) {
     }
     // a dense collar around the trunk closes the whorl's core
     const a2 = rng() * Math.PI * 2;
-    const inn = sphere(1, _shadeOf(base, 0.55 + rng() * 0.2), 6);
-    inn.scale.set(L * 0.34, 0.14 * s, L * 0.34);
+    const inn = new THREE.Mesh(_lumpGeo((rng() * 6) | 0),
+      mat(_shadeOf(base, 0.55 + rng() * 0.2)));
+    inn.scale.set(L * 0.4, 0.9 * gap, L * 0.4);
     inn.position.set(Math.cos(a2) * 0.1 * s, yw + 0.06 * s, Math.sin(a2) * 0.1 * s);
     g.add(inn);
   }
-  const tip = cone(0.34 * s, 1.3 * s, foliageColor, 6);    // dense leader tip
-  tip.position.y = H * 0.98 + 0.5 * s;
-  g.add(tip);
+  const tip = cone(0.3 * s, 1.1 * s, foliageColor, 6);     // dense leader tip
+  tip.position.y = H * 0.96 + 0.34 * s;                    // sunk INTO the top
+  g.add(tip);                                              // whorls, not perched
   if (snowy) {
-    const cap = cone(0.3 * s, 0.5 * s, 0xf0f5f9, 6);
-    cap.position.y = H * 0.98 + 1.05 * s;
+    const cap = cone(0.26 * s, 0.44 * s, 0xf0f5f9, 6);
+    cap.position.y = H * 0.96 + 0.82 * s;
     g.add(cap);
   }
   return 0.4 * s + 0.16;
