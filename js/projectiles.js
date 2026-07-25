@@ -119,6 +119,7 @@ export class Projectiles {
             p.hit.add(e.id);
             enemyMgr.damage(e, p.dmg, null, 'local', {
               crit: p.crit, weakPoint: p.weakPoint, ...(p.effects || {}),
+              hitSfx: p.kind === 'arrow' ? 'arrow_hit' : (p.hitSfx || 'hit'),
             });
             if (!(p.kind === 'arrow' && p.pierce)) { consumed = true; break; }
           }

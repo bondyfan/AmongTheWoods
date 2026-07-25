@@ -2680,7 +2680,12 @@ const settings = Object.assign(
 
   // graphics: only ground texture detail is user-facing now. Bloom is OFF by
   // default (it dulled the image), and the shadow/filmic toggles are gone.
-  settings.bloom = false;
+  // bloom is a real option again: it used to "dull the image" only because the
+  // whole post path was writing linear light straight to the canvas (~60% too
+  // dark). With that fixed and the scene rendering to an HDR target, bloom
+  // catches the sun disc, water glints and flames the way it always should have.
+  settings.bloom ??= true;
+  settings.rays ??= true;   // crepuscular shafts through the canopy
   settings.hiShadows = false;
   settings.filmic = false;
   // retired options (removed from the UI): vivid grading is always ON, the
@@ -2723,6 +2728,8 @@ const settings = Object.assign(
     $id('set-foliagemove').checked = settings.foliageMove !== false;
     $id('set-clouds').checked = settings.clouds !== false;
     $id('set-waterfx').checked = settings.waterFx !== false;
+    $id('set-bloom').checked = settings.bloom !== false;
+    $id('set-rays').checked = settings.rays !== false;
   };
   applyGraphics();
 
@@ -2832,7 +2839,8 @@ const settings = Object.assign(
   // toggling is instant (no chunk rebuilds)
   settings.clouds ??= true;
   settings.waterFx ??= true;
-  for (const [id, key] of [['set-clouds', 'clouds'], ['set-waterfx', 'waterFx']]) {
+  for (const [id, key] of [['set-clouds', 'clouds'], ['set-waterfx', 'waterFx'],
+                           ['set-bloom', 'bloom'], ['set-rays', 'rays']]) {
     $id(id).addEventListener('change', () => {
       settings[key] = $id(id).checked;
       saveGfx();
@@ -2846,13 +2854,16 @@ const settings = Object.assign(
   const GFX_PRESETS = {
     low:    { shadows: false, texDetail: 1, resScale: '1',    drawDist: 'normal',
               vegDist: 'medium',   shadowDist: 'low',    foliage: 'high',
-              foliageMove: true, clouds: true, waterFx: false },
+              foliageMove: true, clouds: true, waterFx: false,
+              bloom: false, rays: false },
     medium: { shadows: true,  texDetail: 2, resScale: '1',    drawDist: 'normal',
               vegDist: 'furthest', shadowDist: 'medium', foliage: 'ultra',
-              foliageMove: true, clouds: true, waterFx: true },
+              foliageMove: true, clouds: true, waterFx: true,
+              bloom: true, rays: true },
     high:   { shadows: true,  texDetail: 2, resScale: 'auto', drawDist: 'far',
               vegDist: 'furthest', shadowDist: 'high',   foliage: 'ultra',
-              foliageMove: true, clouds: true, waterFx: true },
+              foliageMove: true, clouds: true, waterFx: true,
+              bloom: true, rays: true },
   };
   settings.gfxPreset ??= 'custom';
   if (!GFX_PRESETS[settings.gfxPreset] && settings.gfxPreset !== 'custom') settings.gfxPreset = 'custom';
@@ -5495,9 +5506,8 @@ function applyGraphics() {
     : settings.resScale === '1.5' ? Math.min(window.devicePixelRatio, 1.5)
     : Math.min(window.devicePixelRatio, 2);
   renderer.setPixelRatio(pr);
-  // the post stack is needed for bloom, ambient occlusion, OR auto-exposure
-  // (which meters the offscreen frame)
-  if ((settings.bloom || settings.ssao) && !postfx) {
+  // the post stack is needed for bloom, ambient occlusion or god rays
+  if ((settings.bloom || settings.ssao || settings.rays) && !postfx) {
     postfx = new PostFX(renderer);
     postfx.setSize(renderer.domElement.width, renderer.domElement.height);
   }
@@ -6053,7 +6063,8 @@ function step() {
   renderCharPreview(dt);
   renderSmithPreview(dt);
   // the World Editor renders CLEAN — no bloom / AO / vignette
-  const usePost = (settings.bloom || settings.ssao) && postfx && !game.editorView;
+  const usePost = (settings.bloom || settings.ssao || settings.rays)
+    && postfx && !game.editorView;
   if (usePost) {
     // "Ambient occlusion" = canopy shade ONLY: soft pools of shade under tree
     // crowns, nothing global. The screen-space SSAO term is gone — THAT was the
@@ -6071,12 +6082,20 @@ function step() {
         };
       }
     }
-    // TEMP debug hook (AO diagnosis) — remove once canopy shade is confirmed
-    window.__aoDbg = { ssao: !!settings.ssao, ready: canopyShade?.ready, canopy: !!canopy,
-      shade: canopyShade, postfx };
+    // God rays: shafts spill through gaps in the canopy toward the sun. They
+    // fade out at night, underground and in a lair, and swell at dawn/dusk
+    // when the low sun rakes through the trees.
+    let rays = null;
+    if (settings.rays && !game.dungeon) {
+      const dayK = (1 - (game.nightK || 0)) * (1 - atmoCaveK);
+      // low sun = long, obvious shafts; overhead noon sun = a subtle wash
+      const lowSun = 1 - Math.min(1, Math.max(0, (_sunDir.y - 0.25) / 0.65));
+      const k = dayK * (0.34 + 0.66 * lowSun);
+      if (k > 0.01) rays = { dir: _sunDir, color: sun.color, strength: k * 0.85 };
+    }
     postfx.render(scene, camera, {
       ssao: false, bloom: !!settings.bloom, // no screen-space contact term
-      canopy,
+      canopy, rays,
     });
   } else { renderer.setRenderTarget(null); renderer.render(scene, camera); }
 }

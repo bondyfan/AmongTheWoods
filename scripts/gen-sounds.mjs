@@ -15,6 +15,17 @@ const OUT = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'sound
 
 // [filename, prompt, duration seconds]
 const SOUNDS = [
+  // ---- weapon impacts: what it sounds like when YOUR blow lands in FLESH.
+  // Each weapon family gets its own thud so you can hear what you're swinging. ----
+  ['punch_hit',  'A bare-knuckle punch landing hard on a body: heavy dull fleshy thud, soft leathery slap of skin, a short muffled meaty impact, dry and very close, single hit, no music, no voice, no reverb', 0.5],
+  ['slash_hit',  'A sharp sword blade slicing deep into flesh: crisp metallic shing followed by a wet meaty tear and a spurt, single clean cut, close and dry, no music, no voice, no reverb', 0.6],
+  ['chop_hit',   'A heavy battle axe chopping deep into a body: dense wet meaty crunch with cracking bone and a thick blade-in-flesh thunk, brutal and low, single heavy chop, dry, no music, no voice', 0.7],
+  ['crush_hit',  'A massive war club smashing into a body: deep heavy blunt thud with a sickening bone crunch and a low meaty splat, powerful and low pitched, single crushing blow, dry, no music, no voice', 0.7],
+  ['pierce_hit', 'A spear point punching through flesh: sharp wet stab, a squelching penetration and a short meaty slide, single thrust, close and dry, no music, no voice', 0.55],
+  ['arrow_hit',  'An arrow slamming into a body: hard sharp thwack of a shaft punching into flesh, a wet meaty thud and a brief woody shudder of the shaft, single impact, dry and close, no music, no voice', 0.5],
+  // ---- two ability casts that never had a sound file ----
+  ['mage_pyroblast', 'A colossal fireball unleashed: deep roaring whoosh of igniting air then a heavy fiery detonation, cinematic, no music, no voice', 1.6],
+  ['mage_fire_imp',  'Summoning a small fire imp: a puff of flame with a mischievous crackling giggle of embers, short, no music, no voice', 1.2],
   ['spider_attack', 'Giant spider attack: sharp chittering hiss and clicking mandibles, dry, aggressive, no music', 1.0],
   ['spider_death',  'Giant spider dying: wet screeching hiss fading out, legs curling, short, no music', 1.2],
   ['snake_attack',  'Snake strike: sharp venomous hiss and quick bite lunge, short, no music', 0.9],
@@ -182,7 +193,13 @@ async function gen([name, text, duration]) {
 }
 
 await mkdir(OUT, { recursive: true });
-for (const s of SOUNDS) {
+// Optional name filter: `node scripts/gen-sounds.mjs punch_hit slash_hit` (or
+// ONLY=punch,slash) regenerates just those, so you don't re-bill the whole set.
+const only = (process.argv.slice(2).join(',') || process.env.ONLY || '')
+  .split(',').map(x => x.trim()).filter(Boolean);
+const wanted = only.length ? SOUNDS.filter(([n]) => only.some(o => n.includes(o))) : SOUNDS;
+if (only.length) console.log(`filter: ${only.join(', ')} → ${wanted.length} sound(s)`);
+for (const s of wanted) {
   try { await gen(s); } catch (e) { console.error(String(e.message || e)); }
 }
 console.log('done.');

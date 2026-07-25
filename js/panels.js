@@ -9,7 +9,7 @@ import { SHOP_GROUPS, SMITH_GROUPS, questFor, repeatableQuestFor, questXpFor,
          classSkillMeatCost, classSkillEssenceCost, classPathSkills, firstClassSkillId, CLASS_CHOOSE_COST,
          classActiveInfo, classPassiveInfo, requiredClassForItem,
          PLAYER_HP, ENEMY_HP, ENEMY_DMG, xpKillFor, meatForLevel,
-         enemyTypicalLevel } from './config.js';
+         enemyTypicalLevel, attackEnergyFor } from './config.js';
 
 const NEED_NAMES = { tent: 'Hide Tent', cabin: 'Wooden Cabin', furnace: 'Stone Furnace',
   keep: 'Medieval Keep', runic: 'Runic Hall', mountain: 'Mountain Fortress',
@@ -163,8 +163,9 @@ export class Panels {
     const w = item.weapon;
     if (w) {
       if (w.dmg) stats.push(['Damage', Math.round(w.dmg)]);
-      if (w.cd) stats.push(['Attack speed', (1 / w.cd).toFixed(2) + '/s']);
-      if (w.dmg && w.cd) stats.push(['DPS', (w.dmg / w.cd).toFixed(1)]);
+      const wCost = attackEnergyFor(w);
+      stats.push(['⚡ Energy / swing', wCost]);
+      if (w.dmg) stats.push(['Damage per energy', (w.dmg / wCost).toFixed(1)]);
       if (w.range) stats.push(['Range', w.range + ' m']);
       if (w.chop > 0) stats.push(['🪓 Cutting power', w.chop]);
       if (w.mine > 0) stats.push(['⛏️ Mining power', w.mine]);
@@ -180,7 +181,7 @@ export class Panels {
     if (st.speed) stats.push(['Move speed', '+' + st.speed]);
     if (st.regen) stats.push(['Regen', '+' + st.regen + '/s']);
     if (st.dmgPct) stats.push(['Damage', '+' + Math.round(st.dmgPct * 100) + '%']);
-    if (st.aspd) stats.push(['Attack speed', '+' + Math.round(st.aspd * 100) + '%']);
+    if (st.aspd) stats.push(['Cheaper swings', '-' + Math.round(st.aspd * 100) + '% energy']);
     if (item.shield?.block) stats.push(['Block', Math.round(item.shield.block * 100) + '%']);
     const slot = SLOT_LABELS[item.slot] || item.slot;
     return `<div class="tt-head"><span class="tt-ico">${itemIcon(item)}</span>
@@ -644,16 +645,21 @@ export class Panels {
       const essenceCost = classSkillEssenceCost(skill, nextRank, isFirst);
       const costLabel = essenceCost > 0
         ? `${fmtResource(essenceCost)} ${essenceIcon}` : `${fmtResource(meatCost)} ${meatIcon}`;
-      const levelLocked = !maxed && p.level < requiredLevel;
+      const owned = rank > 0;
+      // The NEXT rank can be level-gated, but an ability you already OWN must
+      // never render as locked — only its upgrade action is unavailable.
+      const nextLevelLocked = !maxed && p.level < requiredLevel;
+      const levelLocked = nextLevelLocked && !owned;
       const affordable = p.meat >= meatCost && p.essence >= essenceCost;
-      const canTrain = !maxed && !levelLocked && affordable;
+      const canTrain = !maxed && !nextLevelLocked && affordable;
 
       const pips = Array.from({ length: skill.maxRank }, (_, r) =>
         `<i class="pip${r < rank ? ' on' : ''}"></i>`).join('');
 
       let action;
       if (maxed) action = '<span class="node-done">✓ Mastered</span>';
-      else if (levelLocked) action = `<span class="node-lock">🔒 Reach Lv ${requiredLevel}</span>`;
+      else if (nextLevelLocked) action = `<span class="node-lock">🔒 ${owned
+        ? `R${nextRank} at Lv ${requiredLevel}` : `Reach Lv ${requiredLevel}`}</span>`;
       else action = `<button class="buy-btn node-train" data-class-skill="${skill.id}" ${canTrain ? '' : 'disabled'}>
           ${rank ? `Upgrade → R${nextRank}` : 'Train'} · ${costLabel}</button>`;
 
@@ -667,15 +673,17 @@ export class Panels {
       }).join('');
 
       // trained active abilities can be dragged straight from the path onto the
-      // 1–6 bar (or clicked to auto-slot) — no need to switch to the Gear tab
+      // 1–9 bar (or clicked to auto-slot) — no need to switch to the Gear tab
       const slotIdx = p.spellSlots.indexOf(skill.id);
       const draggable = skill.type === 'active' && rank > 0;
       const slotTag = draggable
-        ? `<span class="node-slot${slotIdx >= 0 ? ' on' : ''}">${slotIdx >= 0 ? `⌨ key ${slotIdx + 1}` : '✋ drag to 1–6 bar'}</span>`
+        ? `<span class="node-slot${slotIdx >= 0 ? ' on' : ''}">${slotIdx >= 0 ? `⌨ key ${slotIdx + 1}` : '✋ drag to 1–9 bar'}</span>`
         : '';
 
       const node = document.createElement('div');
-      node.className = `class-node ${skill.type}${rank ? ' trained' : ''}${maxed ? ' maxed' : ''}${levelLocked ? ' lvl-locked' : ''}${draggable ? ' draggable' : ''}`;
+      node.className = `class-node ${skill.type}${rank ? ' trained' : ''}${maxed ? ' maxed' : ''}`
+        + `${levelLocked ? ' lvl-locked' : ''}${owned && nextLevelLocked ? ' next-locked' : ''}`
+        + `${draggable ? ' draggable' : ''}`;
       node.style.setProperty('--i', i);
       node.innerHTML = `<div class="node-art">${skillArt(skill.id, skill.icon)}${draggable ? '<span class="drag-grip">⠿</span>' : ''}</div>
         <div class="node-info">
@@ -803,11 +811,15 @@ export class Panels {
     if (charm?.stats?.dmgPct) dmgParts.push(`+${Math.round(charm.stats.dmgPct * 100)}% ${charm.name}`);
     rows.push(['⚔️ Attack', Math.round(p.weapon.dmg), dmgParts.join(' · ')]);
 
-    const asParts = [`${base.cd.toFixed(2)}s ${itemById(p.equipment.weapon)?.name ?? 'fists'}`];
-    if (p.level > 1) asParts.push(`+${p.levelAttackSpeedBonus.toFixed(2)}/s level`);
-    if (s.swift) asParts.push(`+${s.swift * 4}% training`);
-    if (charm?.stats?.aspd) asParts.push(`+${Math.round(charm.stats.aspd * 100)}% ${charm.name}`);
-    rows.push(['⚡ Attacks/s', (1 / p.weapon.cd).toFixed(2), asParts.join(' · ')]);
+    // attack SPEED is gone — every swing takes the same time and costs energy
+    const enParts = [`${attackEnergyFor(base)} ${itemById(p.equipment.weapon)?.name ?? 'fists'}`];
+    if (s.swift) enParts.push(`-${s.swift * 4}% training`);
+    if (charm?.stats?.aspd) enParts.push(`-${Math.round(charm.stats.aspd * 100)}% ${charm.name}`);
+    rows.push(['⚡ Energy / swing', p.swingEnergyCost, enParts.join(' · ')]);
+    rows.push(['⚡ Energy pool', `${Math.round(p.energy)} / ${p.maxEnergy}`,
+      `100 base · +${p.level - 1} level · +${(p.energyRegen || 0).toFixed(0)}/s regen`]);
+    if (p.maxMana > 0) rows.push(['💧 Mana pool', `${Math.round(p.mana)} / ${p.maxMana}`,
+      `caster pool · +${(p.manaRegen || 0).toFixed(1)}/s regen`]);
 
     const hpParts = [`${PLAYER_HP(1)} base`];
     if (p.level > 1) hpParts.push(`+${PLAYER_HP(p.level) - PLAYER_HP(1)} level`);
@@ -912,7 +924,7 @@ export class Panels {
 
 
 
-    // spellbook: purchased world spells and trained active class abilities share 1–6.
+    // spellbook: purchased world spells and trained active class abilities share 1–9.
     const book = $('spellbook');
     book.innerHTML = '';
     const classActives = classTree?.actives
@@ -930,16 +942,16 @@ export class Panels {
       const div = document.createElement('button');
       div.className = 'inv-item' + (slotIdx >= 0 ? ' slotted' : '') + (spell.type === 'active' ? ' class-ability' : '');
       const icon = spell.type === 'active' ? `<span class="inv-art">${skillArt(id, spell.icon)}</span>` : itemIcon(spell);
-      div.innerHTML = `${icon} <b>${spell.name}</b> ${spell.type === 'active' ? `<span class="ability-rank">R${this._classRank(id)}</span>` : ''}<span class="lv">${slotIdx >= 0 ? `key ${slotIdx + 1}` : 'drag to 1–6'}</span>`;
+      div.innerHTML = `${icon} <b>${spell.name}</b> ${spell.type === 'active' ? `<span class="ability-rank">R${this._classRank(id)}</span>` : ''}<span class="lv">${slotIdx >= 0 ? `key ${slotIdx + 1}` : 'drag to 1–9'}</span>`;
       const tip = spell.type === 'active'
-        ? this._abilityTip(spell, this._classRank(id), { hint: slotIdx >= 0 ? 'Click to unslot' : 'Drag onto the 1–6 bar (or click to auto-slot)' })
+        ? this._abilityTip(spell, this._classRank(id), { hint: slotIdx >= 0 ? 'Click to unslot' : 'Drag onto the 1–9 bar (or click to auto-slot)' })
         : `<div class="tt-head"><span class="tt-ico">${itemIcon(spell)}</span><span class="tt-title"><b>${spell.name}</b></span></div><div class="tt-desc">${spell.desc}</div>`;
       attachTip(div, tip);
       this._wireSpellDrag(div, id);
       book.appendChild(div);
     }
     const usedSlots = p.spellSlots.slice(0, MAX_SPELL_SLOTS).filter(Boolean).length;
-    $('spellbook-note').textContent = `${usedSlots}/${MAX_SPELL_SLOTS} action slots used — drag an ability onto the 1–6 bar (or click to slot/unslot).`;
+    $('spellbook-note').textContent = `${usedSlots}/${MAX_SPELL_SLOTS} action slots used — drag an ability onto the 1–9 bar (or click to slot/unslot).`;
   }
 
   // ---------- inventory: WoW-style slot grid inside the Armory ----------
@@ -987,7 +999,7 @@ export class Panels {
       if (cell.kind === 'item') {
         const requiredClass = this.camp ? requiredClassForItem(cell.itemRef) : null;
         const action = cell.itemRef.nest || cell.itemRef.placeable
-          ? 'Click to place it' : 'Click to equip · drag to a 1–6 slot or out to drop';
+          ? 'Click to place it' : 'Click to equip · drag to a 1–9 slot or out to drop';
         attachTip(div, this._itemTip(cell.itemRef, { requiredClass, action }));
       } else {
         attachTip(div, this._plainTip(cell.title));
@@ -1025,7 +1037,7 @@ export class Panels {
 
   // Inventory cell interactions: click to use/equip, DRAG to hotkey or drop.
   // Dragging out of every panel drops the stack/item on the ground; dragging
-  // onto an action-bar slot (1–6) hotkeys the item there.
+  // onto an action-bar slot (1–9) hotkeys the item there.
   _wireInvCell(div, cell) {
     let ghost = null, dragging = false, sx = 0, sy = 0;
 
@@ -1091,13 +1103,13 @@ export class Panels {
   }
 
   // Spellbook abilities: click toggles in/out of the bar, DRAG drops the
-  // ability onto a specific 1–6 slot (this is what the first-time hint teaches).
+  // ability onto a specific 1–9 slot (this is what the first-time hint teaches).
   _wireSpellDrag(div, id) {
     let ghost = null, dragging = false, sx = 0, sy = 0;
     const onMove = (e) => {
       if (!dragging && Math.hypot(e.clientX - sx, e.clientY - sy) > 8) {
         dragging = true;
-        // lift the 1–6 bar above the modal and enlarge its slots as drop targets
+        // lift the 1–9 bar above the modal and enlarge its slots as drop targets
         document.body.classList.add('slotting');
         ghost = div.cloneNode(true);
         ghost.className = 'inv-item drag-ghost spell-drag-ghost';

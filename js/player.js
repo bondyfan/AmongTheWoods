@@ -7,7 +7,9 @@ import * as THREE from 'three';
 import { WORLD, XP_LEVELS, MAX_LEVEL, itemById, spellById, consumableById,
          biomeIndexAt, RESOURCES, MAX_SPELL_SLOTS, classSkillById,
          classEffectsFor, requiredClassForItem, isTameableBeast, ENEMY_TYPES,
-         PLAYER_HP, OOC_DELAY, oocRegenFor, weaponDurabilityFor } from './config.js';
+         PLAYER_HP, OOC_DELAY, oocRegenFor, weaponDurabilityFor,
+         SWING_TIME, PLAYER_ENERGY, PLAYER_MANA, energyRegenFor, manaRegenFor,
+         attackEnergyFor, abilityEnergyFor, abilityManaFor, CASTER_CLASSES } from './config.js';
 import { makeMan, makeAxe, makeBow, makePickaxe, makeTorchMesh, makeClub,
          makeSword, makeHandSpear, makeCrossbow, makeShield } from './models.js';
 import { audio } from './audio.js';
@@ -29,6 +31,17 @@ const rankValue = (skill, key, rank, fallback = 0) => {
 // fired at nothing, so casting them with no valid target is refused (see
 // castSpell) instead of whiffing into the air. Pet-command Hunt Command is
 // gated the same way in main.js.
+// What each melee style sounds like when it lands IN FLESH. The swing whoosh
+// (attack_melee) plays on every swing including a miss; these only play on a hit,
+// so you can hear the difference between cutting air and cutting meat.
+const MELEE_HIT_SFX = {
+  fists: 'punch_hit',   // bare knuckles — dull fleshy thud
+  sword: 'slash_hit',   // blades — wet slicing cut
+  axe:   'chop_hit',    // heavy chop — bone crunch
+  club:  'crush_hit',   // blunt — deep splat
+  pick:  'crush_hit',
+  spear: 'pierce_hit',  // thrust — squelching stab
+};
 const NEEDS_TARGET = new Set(['target', 'execute', 'magicTarget', 'shadowstep', 'markedShot', 'markedVolley']);
 // Targeted SPELLS (Fireball, Frostbolt, Pyroblast…) that fire ONLY at a
 // Shift-locked unit — they never auto-pick the nearest enemy the way the melee
@@ -152,7 +165,16 @@ export class Player {
     this.combustionT = 0;
     this.combustionPower = 0;
 
-    this.attackCd = 0;
+    // ---- action resources. ENERGY pays for every basic swing (all classes);
+    // MANA pays for spells and only exists for mage/priest. Caps are derived
+    // in recompute(); these are the live values.
+    this.energy = 100;
+    this.maxEnergy = 100;
+    this.mana = 0;
+    this.maxMana = 0;
+    this.energySpentT = 999;  // seconds since the last swing drank energy
+    this.manaSpentT = 999;
+    this.noEnergyWarnT = 0;   // throttles the "out of energy" nag
     this.attackT = 0;
     this.attackDur = 0.3;
     this.swingWindup = null; // { t, dur } — the raise-before-the-strike phase
@@ -267,6 +289,13 @@ export class Player {
   }
 
   // one basic attack fired — spend a use of the equipped weapon
+  // pay for a cast once it actually lands (casters burn mana, others energy)
+  _spendCastCost(cost, useMana) {
+    if (!cost) return;
+    if (useMana) { this.mana = Math.max(0, this.mana - cost); this.manaSpentT = 0; }
+    else { this.energy = Math.max(0, this.energy - cost); this.energySpentT = 0; }
+  }
+
   _spendDurability() {
     if (this.hooks.durabilityOn?.() === false) return;
     const id = this.equipment.weapon;
@@ -426,6 +455,16 @@ export class Player {
         return false;
       }
       const rank = this.classRank(id);
+      // Abilities cost a resource ON TOP of their cooldown: casters burn mana,
+      // everyone else burns energy. Checked before anything commits.
+      const useMana = this.maxMana > 0 && CASTER_CLASSES.has(classSkill.classId);
+      const cost = useMana ? abilityManaFor(classSkill) : abilityEnergyFor(classSkill);
+      if ((useMana ? this.mana : this.energy) < cost) {
+        this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
+          useMana ? '💧 Not enough mana' : '⚡ Not enough energy', useMana ? '#8fb8ff' : '#ffd35a');
+        audio.sfx('error', 0.35, 300);
+        return false;
+      }
       // Designation abilities (Shadowstep, Fireball, Backstab, Execute…) must
       // NOT fire into empty air — refuse the cast (no windup, no cooldown) and
       // tell the player to pick a target. Checked before the windup commits.
@@ -442,7 +481,7 @@ export class Player {
       // become one burst combo instead of two awkward standalones.
       const windupT = (classSkill.id === 'mage_pyroblast' && this.combustionT > 0) ? 0 : classSkill.windup;
       if (windupT) {
-        this.castWindup = { skill: classSkill, rank, id,
+        this.castWindup = { skill: classSkill, rank, id, cost, useMana,
           t: windupT, dur: windupT,
           // lock the Shift-selected enemy in now so a long channel (Pyroblast)
           // still lands even after Shift is released mid-cast
@@ -455,6 +494,7 @@ export class Player {
         audio.sfx('error', 0.35, 300);
         return false;
       }
+      this._spendCastCost(cost, useMana);
       this.spellCds[id] = this.classAbilityCooldown(id);
       audio.sfx(id, 0.55); // each active ability has its own signature cast sound
       return true;
@@ -796,6 +836,13 @@ export class Player {
       // Rupture: flagged AoE pops every active DoT on the target BEFORE the hit,
       // turning remaining bleed/poison/rend/burn ticks into an instant burst.
       if (skill.detonate) enemyMgr.detonateDots?.(enemy);
+      // a weapon-scaled ability (Whirlwind, Cleave, Backstab…) lands with the
+      // sound of the weapon that swung it; pure spells keep the generic thud
+      if (skill.weaponMult && !opts?.hitSfx) {
+        const sfx = this.weapon.kind === 'bow'
+          ? 'arrow_hit' : MELEE_HIT_SFX[this.weapon.style] || 'slash_hit';
+        opts = { ...(opts || {}), hitSfx: sfx };
+      }
       enemyMgr.damage(enemy, amount, this.facing, 'local', opts);
       if (skill.classId === 'warrior' && Math.random() < (this.classEffects.staggerChance || 0)) {
         enemyMgr.stun?.(enemy, 0.8);
@@ -2067,6 +2114,20 @@ export class Player {
     // flat out-of-combat recovery: grows LINEARLY with level, so the bigger
     // your (quadratic) pool gets the longer a full breather takes — WoW style
     this.oocRegen = oocRegenFor(this.level);
+    // ---- ENERGY (everyone) & MANA (mage/priest only). Grown like maxHp: if the
+    // cap rises the current value rises with it, so a level-up feels like a gift.
+    const oldMaxE = this.maxEnergy || 0;
+    this.maxEnergy = PLAYER_ENERGY(this.level);
+    if (this.maxEnergy > oldMaxE) this.energy = (this.energy || 0) + (this.maxEnergy - oldMaxE);
+    this.energy = Math.max(0, Math.min(this.energy ?? this.maxEnergy, this.maxEnergy));
+    const canMana = this.hooks.classRulesEnabled?.() === false
+      || CASTER_CLASSES.has(this.selectedClass);
+    const oldMaxM = this.maxMana || 0;
+    this.maxMana = canMana ? PLAYER_MANA(this.level) : 0;
+    if (this.maxMana > oldMaxM) this.mana = (this.mana || 0) + (this.maxMana - oldMaxM);
+    this.mana = Math.max(0, Math.min(this.mana ?? this.maxMana, this.maxMana));
+    this.energyRegen = energyRegenFor(this.level);
+    this.manaRegen = manaRegenFor(this.level);
 
     // effective weapon = base weapon + training (range/power/swift tracks).
     // A weapon at 0 durability stops working: the hero falls back to bare
@@ -2077,24 +2138,25 @@ export class Player {
     const base = this.weaponBrokenNow ? itemById('fists').weapon
       : (equipped('weapon')?.weapon || itemById('fists').weapon);
     const s = this.stats;
-    // An attack-speed drip over 50 levels (+0.012 att/s per level ≈ +0.6 at
-    // the cap) — noticeable, but gear tiers still carry the damage growth.
-    this.levelAttackSpeedBonus = 0.012 * lvl;
     this.levelDamage = lvl; // flat +1 weapon damage per level (lvl = this.level - 1)
-    const lvlCd = (cd) => 1 / (1 / cd + this.levelAttackSpeedBonus);
+    // Attack SPEED no longer exists — every swing takes a fixed SWING_TIME.
+    // Everything that used to make you swing faster now makes each swing
+    // CHEAPER in energy, so the same gear/passives still raise your damage
+    // output: Swift Hands training, Quick Draw / Combo Mastery, charm aspd.
+    let energyCut = 0.04 * s.swift + 0.004 * lvl;
     this.weapon = {
       ...base,
       dmg: base.dmg * (1 + 0.05 * s.power) * this.gearMult,
-      cd: lvlCd(base.cd * (1 - 0.04 * s.swift)),
+      cd: base.cd, // kept for legacy display/combo timing only, not a rate limit
       range: base.range + (base.kind === 'bow' ? 2.0 : 0.1) * s.range,
     };
     if (base.kind === 'bow') {
       this.weapon.dmg *= 1 + (this.classEffects.rangedDmg || 0);
-      this.weapon.cd *= Math.max(0.35, 1 - (this.classEffects.rangedSpeed || 0));
+      energyCut += this.classEffects.rangedSpeed || 0;
       this.weapon.range += this.classEffects.rangedRange || 0; // Marksman reach
     } else {
       this.weapon.dmg *= 1 + (this.classEffects.meleeDmg || 0);
-      this.weapon.cd *= Math.max(0.35, 1 - (this.classEffects.meleeSpeed || 0));
+      energyCut += this.classEffects.meleeSpeed || 0;
     }
     if (this.upgrades.questPower) this.weapon.dmg *= 1 + this.upgrades.questPower * 0.03;
     this.shield = equipped('offhand')?.shield || null;
@@ -2126,9 +2188,12 @@ export class Player {
     // charm: a single trinket slot with a flat percentage bonus
     const charm = equipped('charm');
     if (charm?.stats?.dmgPct) this.weapon.dmg *= 1 + charm.stats.dmgPct;
-    if (charm?.stats?.aspd) this.weapon.cd *= 1 - charm.stats.aspd;
+    if (charm?.stats?.aspd) energyCut += charm.stats.aspd;
     this.weapon.dmg += this.levelDamage; // flat +1/level, added after every multiplier
     this.attackRange = this.weapon.range; // aim marker clamps to this
+    // the swing's real cost: weapon style, minus every "faster attack" bonus
+    this.weapon.energy = Math.max(4,
+      Math.round(attackEnergyFor(base) * Math.max(0.35, 1 - energyCut)));
     // The pet is now a TAMED wild beast (Tame Beast), not a bought item. Its
     // stats come from the beast's archetype (a bear tanks, a cheetah bites)
     // scaled to the owner's level + Pet Training. Only the Beastmaster keeps one
@@ -2170,7 +2235,7 @@ export class Player {
       if (ov.maxHp != null) { this.maxHp = ov.maxHp; this.hp = Math.min(this.hp, this.maxHp); }
       if (ov.regen != null) this.hpRegen = ov.regen;
       if (ov.attack != null) this.weapon.dmg = ov.attack;
-      if (ov.aspd != null) this.weapon.cd = 1 / Math.max(0.1, ov.aspd);
+      if (ov.aspd != null) this.weapon.energy = Math.max(1, Math.round(20 / Math.max(0.1, ov.aspd)));
       if (ov.range != null) { this.weapon.range = ov.range; this.attackRange = ov.range; }
     }
 
@@ -2219,11 +2284,19 @@ export class Player {
     return mult;
   }
 
+  // "Haste" buffs no longer shorten a cooldown (there isn't one any more) —
+  // they make each swing CHEAPER, which is the same thing now: more blows per
+  // energy bar. Haste halves the cost, Arrow Haste / Blood Fury discount it.
   get cdMult() {
     let mult = this.hasteT > 0 ? 0.5 : 1;
     if (this.weapon?.kind === 'bow' && this.arrowHasteT > 0) mult *= Math.max(0.2, 1 - this.arrowHastePower);
     if (this.weapon?.kind !== 'bow' && this.bloodFuryT > 0) mult *= Math.max(0.35, 1 - this.bloodFuryPower);
     return mult;
+  }
+
+  // what the NEXT basic attack will cost, after buffs
+  get swingEnergyCost() {
+    return Math.max(2, Math.round((this.weapon?.energy ?? 20) * this.cdMult));
   }
 
   get moveSpeedBonus() {
@@ -2357,7 +2430,8 @@ export class Player {
       leveled = true;
     }
     // dinging restores you to FULL health — a level-up is a real breather
-    if (leveled) this.hp = this.maxHp;
+    // a ding is a real breather: full health AND a full action bar
+    if (leveled) { this.hp = this.maxHp; this.energy = this.maxEnergy; this.mana = this.maxMana; }
   }
 
   // jump straight to a level (used by ?devmode and admin overrides) without
@@ -2596,7 +2670,6 @@ export class Player {
     // frame — no walking, no attacks, and (crucially) NO regen while aloft.
     if (this.captured) {
       this.hurtT += dt;
-      this.attackCd = Math.max(0, this.attackCd - dt);
       this._updateSlashes?.(dt);
       return;
     }
@@ -2668,6 +2741,20 @@ export class Player {
       this.fastRegenRate = rate;
       this.hp = Math.min(this.maxHp, this.hp + rate * dt);
     }
+    // ---- ENERGY / MANA. Energy is the fast attack budget: it always ticks and
+    // surges back once you stop swinging, so a burst-then-breathe rhythm keeps
+    // the fight moving. Mana is the slow caster pool and refills hard OOC.
+    this.energySpentT += dt;
+    this.manaSpentT += dt;
+    this.noEnergyWarnT = Math.max(0, this.noEnergyWarnT - dt);
+    if (this.energy < this.maxEnergy) {
+      const rate = this.energyRegen * (this.energySpentT > 1.2 ? 1.7 : 1);
+      this.energy = Math.min(this.maxEnergy, this.energy + rate * dt);
+    }
+    if (this.maxMana > 0 && this.mana < this.maxMana) {
+      const rate = this.manaRegen * (outOfCombat ? 3 : (this.manaSpentT > 3.5 ? 1.6 : 1));
+      this.mana = Math.min(this.maxMana, this.mana + rate * dt);
+    }
     for (const id in this.spellCds) this.spellCds[id] = Math.max(0, this.spellCds[id] - dt);
     // ---- ability wind-up: raise the weapon, then land the strike ----
     if (this.castWindup) {
@@ -2676,12 +2763,19 @@ export class Player {
         audio.sfx('error', 0.3, 300);
       } else {
         this.castWindup.t -= dt;
+        // the world tightens as the cast peaks — a rising tremble right up to
+        // the release, then a hard punch when it goes off
+        const ck = 1 - Math.max(0, this.castWindup.t) / Math.max(0.001, this.castWindup.dur);
+        this.hooks.shake?.(0.07, 0.03 + ck * ck * 0.34);
         if (this.castWindup.t <= 0) {
-          const { skill, rank, id, lockedTarget } = this.castWindup;
+          const { skill, rank, id, lockedTarget, cost, useMana } = this.castWindup;
           this.castWindup = null;
           if (this._castClassAbility(skill, rank, ctx, lockedTarget)) {
+            this._spendCastCost(cost, useMana);
             this.spellCds[id] = this.classAbilityCooldown(id);
             audio.sfx(id, 0.55); // windup abilities land on their own signature sound
+            this.hooks.shake?.(0.22, 0.7);            // the release lands like a hammer
+            this._spawnClassRing(this.pos, 3.2, 0xffffff, 0.32);
           } else audio.sfx('error', 0.3, 300);
         }
       }
@@ -2731,7 +2825,6 @@ export class Player {
       this.blocking = false;
       this.charging = false;
       this.mesh.position.set(this.pos.x, this._updateVertical(dt, world, ctx.devFly), this.pos.z);
-      this.attackCd -= dt;
       this._updateSlashes(dt);
       return;
     }
@@ -2928,33 +3021,43 @@ export class Player {
       + (this.spinT > 0 ? (1 - this.spinT / this.spinDur) * Math.PI * 4 : 0);
 
     // -- attack with the equipped weapon: hold the attack button (LMB, or RMB
-    // in top-down view) to auto-swing repeatedly at the weapon's cadence.
-    // Every strike WINDS UP first — the weapon rises (bow draws), a small bar
-    // fills, then the hit lands. The windup is a slice of the weapon's
-    // cooldown, so faster attack speed shortens it too; it costs no extra
-    // time (it is credited against the cooldown). Stun/dash/block interrupt.
-    this.attackCd -= dt;
+    // in top-down view) to swing repeatedly. There is NO attack-speed stat any
+    // more — every swing takes the same fixed SWING_TIME and costs ENERGY, so
+    // you can chain blows back to back until the bar runs dry, then you have
+    // to breathe. Heavy weapons drink more energy, so they land fewer blows.
+    // Each strike still WINDS UP (weapon rises / bow draws) before it lands;
+    // stun/dash/block interrupt it and refund the energy.
+    const swingCost = this.swingEnergyCost;
     input.takeLeftPressed();          // consume edge state (charging removed)
     input.takeLeftReleased();
     const wantAttack = input.attackHeld || input.quickAttack;
     if (this.swingWindup) {
       if (this.stunT > 0 || this.dashT > 0 || this.blocking) {
-        this.swingWindup = null;      // interrupted — no cooldown burned
+        this.energy = Math.min(this.maxEnergy, this.energy + (this.swingWindup.cost || 0));
+        this.swingWindup = null;      // interrupted — the energy comes back
       } else {
         this.swingWindup.t -= dt;
         if (this.swingWindup.t <= 0) {
-          const wu = this.swingWindup;
           this.swingWindup = null;
           if (this.weapon.kind === 'bow') this._doShoot(projectiles, 0, ctx.mounted);
           else this._doMelee(world, enemyMgr, ctx.pickups, 0, moving, ctx.mounted);
           this._spendDurability();    // after the strike: the last use still lands full
-          this.attackCd -= wu.dur;    // windup time counts into the swing cycle
         }
       }
-    } else if (wantAttack && this.attackCd <= 0 && this.dashT <= 0 && !this.blocking && !this.castWindup && !this.tameChannel) {
-      const dur = Math.max(0.1, Math.min(0.5, this.weapon.cd * 0.25));
-      this.swingWindup = { t: dur, dur };
-      audio.sfx('attack_melee', 0.18, 320); // a light "raise" whoosh
+    } else if (wantAttack && this.attackT <= 0 && this.dashT <= 0 && !this.blocking
+               && !this.castWindup && !this.tameChannel) {
+      if (this.energy >= swingCost) {
+        this.energy -= swingCost;     // paid on commit, refunded if interrupted
+        this.energySpentT = 0;
+        const dur = SWING_TIME * 0.36; // wind up, then the strike lands
+        this.swingWindup = { t: dur, dur, cost: swingCost };
+        audio.sfx('attack_melee', 0.18, 320); // a light "raise" whoosh
+      } else if (this.noEnergyWarnT <= 0) {
+        this.noEnergyWarnT = 1.1;
+        this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
+          '⚡ Out of energy', '#ffd35a');
+        audio.sfx('error', 0.28, 300);
+      }
     }
 
     this._animate(dt, moving);
@@ -2998,6 +3101,8 @@ export class Player {
     this.dead = false;
     this.clearClassCombatState();
     this.hp = Math.max(1, Math.round(this.maxHp * hpFrac));
+    this.energy = this.maxEnergy;   // come back ready to fight
+    this.mana = this.maxMana;
     this.stunT = 0;
     this.dashT = 0;
     this.blocking = false;
@@ -3030,10 +3135,15 @@ export class Player {
   _spawnSlash(wide = false) {
     const r = this.weapon.range;
     const baseRy = Math.atan2(this.facing.x, this.facing.z);
+    // additive so the arc glows like an anime slash trail instead of a flat decal
     const mat = new THREE.MeshBasicMaterial({
       color: this.weapon.tier > 0 ? 0xffd98a : 0xffffff,
-      transparent: true, opacity: 0.78, side: THREE.DoubleSide, depthWrite: false,
+      transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false,
+      blending: THREE.AdditiveBlending,
     });
+    // a fast crescent shockwave rides out with every swing
+    this._fxWave?.(this.pos, this.facing, r * 0.42,
+      this.weapon.style === 'fists' ? 0xffe0a8 : 0xffffff, 0.2);
     if (wide) {
       const geo = new THREE.RingGeometry(r * 0.4, r, 14, 1, Math.PI / 2 - 1.1, 2.2);
       geo.rotateX(Math.PI / 2); // arc lies flat, centered on local +z
@@ -3183,20 +3293,20 @@ export class Player {
     this.breakStealth();
     const combo = w.combo || [1];
     this.comboStep = this.comboT > 0 ? (this.comboStep + 1) % combo.length : 0;
-    this.comboT = Math.max(0.8, w.cd * 1.8);
+    this.comboT = 1.2; // fixed combo window (> SWING_TIME so blows chain)
     const comboMult = combo[this.comboStep] ?? 1;
     const charged = charge >= 0.42;
     const chargeMult = 1 + charge * 1.15;
     const runMult = moving ? 1.16 : 1;
     const mountMult = mounted ? 1.28 : 1;
     const impactMult = comboMult * chargeMult * runMult * mountMult;
-    this.attackCd = w.cd * this.cdMult * (charged ? 1.18 : 1) * (mounted ? 1.25 : 1);
-    this.attackDur = Math.min(0.42, w.cd * 0.8);
+    // fixed cadence: the swing animation itself is the rate limiter now
+    this.attackDur = SWING_TIME * 0.64;
     this.attackT = this.attackDur;
     this.attackSide = this.swingSide; // this strike cuts from the raised side
     this.swingSide = -this.swingSide; // …and the next one winds up opposite
     this._spawnSlash();
-    audio.sfx('attack_melee', 0.4);
+    audio.sfx('attack_melee', 0.22); // whoosh of cutting AIR — impact layers on top
 
     // (No attack lunge — a forward hop on every moving swing read as a jerky
     // stutter. Attacks now land in place while you keep moving smoothly.)
@@ -3223,6 +3333,8 @@ export class Player {
           : this.venomT > 0 ? 4 * (1 + (this.classEffects.poisonPower || 0)) : 0;
         const opts = {
           crit, weakPoint,
+          // knuckles thud, blades bite, blunt weapons crunch
+          hitSfx: MELEE_HIT_SFX[w.style] || 'slash_hit',
           ...(w.armorPierce ? { armorPierce: w.armorPierce } : {}),
           ...(w.armorBreak ? { armorBreak: w.armorBreak * (0.7 + charge * 0.6), breakDur: 6 } : {}),
           ...(w.bleed ? { bleed: { dps: w.bleed * (0.75 + charge * 0.6), dur: 4 } } : {}),
@@ -3322,9 +3434,8 @@ export class Player {
     this.breakStealth();
     const crossbow = w.style === 'crossbow';
     const charged = charge >= 0.42;
-    this.attackCd = w.cd * this.cdMult * (mounted ? 1.2 : 1);
-    this.attackDur = 0.25;
-    this.attackT = 0.25;
+    this.attackDur = SWING_TIME * 0.64;
+    this.attackT = this.attackDur;
     audio.sfx('attack_ranged', 0.4);
     const speed = crossbow ? 31 : 23 + charge * 9;
     const weakPoint = !crossbow && charge >= 0.78;

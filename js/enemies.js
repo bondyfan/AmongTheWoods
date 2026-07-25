@@ -134,7 +134,8 @@ export class EnemyManager {
     this.scene = scene;
     this.world = world;
     // hooks: { popup, onKill(e), onDiscover(type), onBossSpawn(e), onBossDeath(e),
-    //          onSpawn(e), onRemove(e) }  — onSpawn/onRemove drive the HP bars.
+    //          onSpawn(e), onRemove(e), onLocalHit(e, dmg, opts) }
+    //          onSpawn/onRemove drive the HP bars; onLocalHit drives shake + POW fx.
     this.hooks = hooks;
     this.list = [];
     this.webs = []; // decorative cobwebs left around spider packs
@@ -802,12 +803,17 @@ export class EnemyManager {
       enemy.pos.x += knockDir.x * 0.45;
       enemy.pos.z += knockDir.z * 0.45;
     }
+    // IMPACT: the weapon that landed picks the sound (knuckles / blade / arrow),
+    // and a local hit punches the camera. The killing blow still thumps.
+    if (srcId === 'local' || srcId === 'pet') {
+      audio.sfx(opts?.hitSfx || 'hit', opts?.crit ? 0.85 : 0.7, 35);
+      this.hooks.onLocalHit?.(enemy, dmg, opts);
+    } else if (enemy.hp > 0) audio.sfx('hit', 0.25, 90);
     if (enemy.hp <= 0) {
       // griffins never truly die — beaten, they drop their nest and fly off
       if (enemy.cfg.griffin) this._griffinEscape(enemy);
       else this._kill(enemy);
     }
-    else audio.sfx('hit', 0.25, 90);
   }
 
   // A beaten griffin drops its nest where it stands, takes wing and vanishes

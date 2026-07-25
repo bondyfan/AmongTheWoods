@@ -41,6 +41,7 @@ class AudioManager {
       'spear_throw', 'map_reveal',
       'torch_equip', 'aggro', 'equip_gear', 'buy',
       // harvesting: axe biting wood, pick striking stone, a tree keeling over
+      'punch_hit', 'slash_hit', 'chop_hit', 'crush_hit', 'pierce_hit', 'arrow_hit',
       'wood_chop', 'stone_mine', 'tree_fall',
       // ability / UI FX: target lock-on + spell voices (fire/frost/holy/boom/chime)
       'select', 'chime', 'boom', 'flame', 'freeze', 'holy',

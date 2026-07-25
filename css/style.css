@@ -62,7 +62,7 @@ kbd {
 #top-center { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); width: 340px; text-align: center; }
 /* on narrow windows the center column would overlap the HP/XP bars — drop it below them */
 @media (max-width: 1000px) {
-  #top-center { top: 132px; width: min(340px, 70vw); }
+  #top-center { top: 170px; width: min(340px, 70vw); }
 }
 #top-right {
   position: absolute; top: 14px; right: 14px; display: flex; gap: 14px;
@@ -77,6 +77,19 @@ kbd {
 .bar { height: 100%; width: 100%; transition: width 0.15s ease-out; border-radius: 10px; }
 .hp .bar { background: linear-gradient(#d3564a, #a12f26); }
 .xp .bar { background: linear-gradient(#b58ae6, #7c4bc4); width: 0; }
+/* action resources: energy (every class) and mana (mage/priest) read as
+   slimmer strips under the health bar */
+.energy .bar { background: linear-gradient(#ffe07a, #c8930f); }
+.mana .bar { background: linear-gradient(#8fb6ef, #3f5fbd); }
+.bar-wrap.energy, .bar-wrap.mana { height: 13px; border-radius: 7px; }
+.bar-wrap.energy .bar, .bar-wrap.mana .bar { border-radius: 7px; }
+.bar-wrap.energy .bar-label, .bar-wrap.mana .bar-label { font-size: 10px; }
+/* a quick amber flash when a swing is refused for lack of energy */
+.bar-wrap.energy.starved { animation: energyStarve 0.45s ease-out; }
+@keyframes energyStarve {
+  0%, 100% { box-shadow: none; }
+  40% { box-shadow: 0 0 10px 3px rgba(255, 205, 80, 0.85); }
+}
 .bar-label {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   font-size: 12px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.8);
@@ -249,9 +262,10 @@ kbd {
 #spellbar {
   position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
   display: flex; gap: 6px; pointer-events: none;
+  flex-wrap: nowrap; max-width: calc(100vw - 24px);
 }
 .spell-slot { pointer-events: auto; }
-/* one-time drag-and-drop lesson floating above the 1–6 bar. Sits above EVERY
+/* one-time drag-and-drop lesson floating above the 1–9 bar. Sits above EVERY
    panel (z-index 30) so an open modal never hides the lesson. */
 #slot-hint {
   position: absolute; bottom: 84px; left: 50%; transform: translateX(-50%);
@@ -270,14 +284,14 @@ kbd {
 /* while dragging an ability/item, grow the slots so it is obvious they are
    drop targets (the whole bar already lives above the modal in #actionbar) */
 body.slotting .spell-slot {
-  transform: scale(1.22); border-color: #e8c96a;
+  transform: scale(1.14); border-color: #e8c96a;
   box-shadow: 0 0 16px rgba(232, 201, 106, 0.45); transition: transform 0.1s ease;
 }
 body.slotting .spell-slot.empty {
   outline: 2px dashed rgba(232, 201, 106, 0.7); outline-offset: 2px;
 }
 .spell-slot.drop-hot {
-  transform: scale(1.4) !important; border-color: #ffe28a !important;
+  transform: scale(1.28) !important; border-color: #ffe28a !important;
   box-shadow: 0 0 26px rgba(255, 226, 138, 0.85) !important;
 }
 
@@ -686,6 +700,9 @@ body.slotting .spell-slot.empty {
 .class-node.maxed { border-color: color-mix(in srgb, var(--class-color) 85%, transparent);
   box-shadow: 0 0 16px color-mix(in srgb, var(--class-color) 20%, transparent); }
 .class-node.lvl-locked { opacity: 0.6; }
+/* an ability you OWN is never dimmed — only its upgrade action reads as
+   blocked (the 🔒 tag says which level the next rank needs) */
+.class-node.trained { opacity: 1 !important; }
 .class-node.mystery { opacity: 0.8; border-style: dashed; }
 
 .node-art {
@@ -698,7 +715,7 @@ body.slotting .spell-slot.empty {
 .skill-art.noart .art-glyph { display: grid; place-items: center; }
 .class-node.maxed .node-art { border-color: var(--class-color); box-shadow: 0 0 14px color-mix(in srgb, var(--class-color) 45%, transparent); }
 .class-node.lvl-locked .node-art img { filter: grayscale(0.85) brightness(0.68); }
-/* a trained active ability can be grabbed and dropped onto the 1–6 bar */
+/* a trained active ability can be grabbed and dropped onto the 1–9 bar */
 .class-node.draggable .node-art { cursor: grab; }
 .class-node.draggable .node-art:hover { border-color: #ffe28a; box-shadow: 0 0 16px rgba(255, 226, 138, 0.55); }
 .class-node.draggable .node-art:active { cursor: grabbing; }
@@ -712,7 +729,7 @@ body.slotting .spell-slot.empty {
 }
 .node-slot.on { color: #bfe9b0; border-color: rgba(150, 220, 150, 0.6); }
 .node-pips { flex-wrap: wrap; }
-/* the same painted art on the 1–6 action bar */
+/* the same painted art on the 1–9 action bar */
 .spell-icon .skill-art { z-index: 1; }
 .spell-icon .skill-art .art-glyph { font-size: 24px; }
 
@@ -919,6 +936,22 @@ body.slotting .spell-slot.empty {
 
 /* big (crit / enrage) combat popups */
 .popup.big { font-size: 24px; font-weight: 900; text-shadow: 0 2px 5px rgba(0,0,0,0.9); }
+/* anime impact word. NOTE: the popup loop rewrites `transform` and `opacity`
+   every frame, so the punch-in animates the INDIVIDUAL scale/rotate properties
+   (which compose on top of transform) instead. */
+.popup.pow {
+  font-size: 27px; font-weight: 900; letter-spacing: 1px; font-style: italic;
+  -webkit-text-stroke: 2.5px rgba(24, 12, 0, 0.92);
+  paint-order: stroke fill;
+  text-shadow: 0 3px 0 rgba(120, 55, 0, 0.55), 0 0 16px rgba(255, 190, 60, 0.55);
+  transform-origin: 50% 50%;
+  animation: powPunch 0.36s cubic-bezier(0.2, 1.6, 0.35, 1) both;
+}
+@keyframes powPunch {
+  0%   { scale: 0.35; rotate: -13deg; }
+  55%  { scale: 1.22; rotate: 5deg; }
+  100% { scale: 1;    rotate: 0deg; }
+}
 
 /* shop: just-bought confirmation */
 .card.just-bought { animation: bought 0.45s ease-out; }
@@ -1344,9 +1377,10 @@ body.touch #minimap-zoom {
 }
 body.touch #minimap-zoom button { width: 30px; height: 30px; }
 
-/* the 1–6 spell bar sits centred, lifted above the thumbs */
+/* the 1–9 spell bar sits centred, lifted above the thumbs */
 body.touch #spellbar { bottom: calc(20px + var(--sa-b)); gap: 5px; }
-body.touch .spell-slot { width: 42px; height: 42px; }
+body.touch .spell-slot { width: 36px; height: 36px; }
+body.touch #spellbar { gap: 4px; }
 /* keep the weapon read-out from colliding with the spell bar */
 body.touch #weapon-display { bottom: 74px; font-size: 13px; padding: 4px 10px; }
 body.touch #buff-bar { bottom: 108px; }
@@ -1375,7 +1409,7 @@ body.touch #top-left {
   #tc-block { width: 48px; height: 48px; font-size: 20px; }
   #tc-actions { right: calc(14px + var(--sa-r)); bottom: calc(12px + var(--sa-b)); }
   body.touch #spellbar { bottom: calc(14px + var(--sa-b)); }
-  body.touch .spell-slot { width: 38px; height: 38px; }
+  body.touch .spell-slot { width: 34px; height: 34px; }
   body.touch #weapon-display { bottom: 62px; }
   body.touch #minimap { width: 64px; }
 }

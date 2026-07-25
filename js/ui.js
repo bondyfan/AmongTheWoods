@@ -120,6 +120,18 @@ export class UI {
     }
     $('hp-bar').style.width = (player.hp / player.maxHp * 100) + '%';
     $('hp-text').textContent = `${Math.ceil(player.hp)} / ${player.maxHp}`;
+    // energy: every class spends it per swing. mana: casters only.
+    const maxEn = Math.max(1, player.maxEnergy || 100);
+    $('energy-bar').style.width = ((player.energy ?? maxEn) / maxEn * 100) + '%';
+    $('energy-text').textContent = `⚡ ${Math.floor(player.energy ?? maxEn)} / ${maxEn}`;
+    const manaWrap = this._manaWrap ||= document.querySelector('.bar-wrap.mana');
+    const hasMana = (player.maxMana || 0) > 0;
+    manaWrap.classList.toggle('hidden', !hasMana);
+    if (hasMana) {
+      const maxMp = Math.max(1, player.maxMana);
+      $('mana-bar').style.width = ((player.mana ?? maxMp) / maxMp * 100) + '%';
+      $('mana-text').textContent = `💧 ${Math.floor(player.mana ?? maxMp)} / ${maxMp}`;
+    }
     // minimalist windup bar: fills while the weapon rises, gone on impact
     const sw = $('swing-bar-wrap');
     if (sw) {
@@ -356,7 +368,8 @@ export class UI {
     el.style.color = color;
     $('popups').appendChild(el);
     // big popups (crits, ENRAGED!) linger a beat longer
-    this.popups.push({ el, pos: worldPos.clone(), t: 0, life: cls.includes('big') ? 1.5 : 1.1 });
+    this.popups.push({ el, pos: worldPos.clone(), t: 0,
+      life: cls.includes('big') ? 1.5 : cls.includes('pow') ? 0.62 : 1.1 });
   }
 
   // ---------- persistent world-tracking labels (boss skulls, HP bars) ----------

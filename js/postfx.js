@@ -21,6 +21,37 @@ const BRIGHT_FRAG = /* glsl */`
     gl_FragColor = vec4(c * smoothstep(threshold, threshold + 0.25, l), 1.0);
   }`;
 
+// ---- God rays (crepuscular shafts): march each pixel toward the sun's
+// screen position and accumulate how much SKY it passes over. Where the
+// canopy breaks, light spills through in shafts — exactly the forest look.
+// Runs at quarter res on the depth buffer alone (no extra scene pass).
+const GODRAY_FRAG = /* glsl */`
+  #define RAY_SAMPLES 24
+  uniform sampler2D tDepth;
+  uniform vec2 uSunUv;
+  uniform float uDensity;   // how far along the ray we march (screen fraction)
+  uniform float uDecay;     // per-step falloff
+  uniform float uAspect;
+  varying vec2 vUv;
+  float rhash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+  void main() {
+    vec2 delta = (vUv - uSunUv) * (uDensity / float(RAY_SAMPLES));
+    // jitter the start so the low sample count doesn't band into rings
+    vec2 uv = vUv - delta * rhash(vUv * 512.0);
+    float illum = 1.0, sum = 0.0;
+    for (int i = 0; i < RAY_SAMPLES; i++) {
+      uv -= delta;
+      float d = texture2D(tDepth, clamp(uv, 0.0, 1.0)).x;
+      sum += step(0.9999, d) * illum;   // only open sky emits
+      illum *= uDecay;
+    }
+    // radial falloff from the sun: without it every open-sky pixel accumulates
+    // a full march and the ENTIRE sky lifts uniformly (a flat wash, not shafts)
+    float dist = length((vUv - uSunUv) * vec2(uAspect, 1.0));
+    float fall = 1.0 - smoothstep(0.04, 0.8, dist);
+    gl_FragColor = vec4(vec3(sum / float(RAY_SAMPLES) * fall), 1.0);
+  }`;
+
 const BLUR_FRAG = /* glsl */`
   uniform sampler2D tDiffuse; uniform vec2 dir; varying vec2 vUv;
   void main() {
@@ -124,9 +155,13 @@ const COMPOSITE_FRAG = /* glsl */`
   uniform float aoStrength;
   uniform float aoFloor;
   uniform float bloomStrength;
+  uniform sampler2D tRays;
+  uniform vec3 rayColor;
+  uniform float rayStrength;
   uniform bool useAO;
   uniform bool useCanopy;
   uniform bool useBloom;
+  uniform bool useRays;
   uniform bool useFXAA;
   varying vec2 vUv;
   const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
@@ -185,11 +220,12 @@ const COMPOSITE_FRAG = /* glsl */`
     return (lB < lMin || lB > lMax) ? rA : rB;
   }
   void main() {
-    // tScene is an sRGB-tagged target, so sampling DECODES to LINEAR light
-    // here. The whole composite works in linear and encodes back to sRGB at
-    // the very end — a raw ShaderMaterial gets NO automatic output encode, so
-    // writing the linear value straight out (the old bug) darkened the whole
-    // frame ~60% the moment the post path switched on.
+    // tScene is a LINEAR half-float HDR target: sampling gives raw linear
+    // light, values above 1.0 included (that headroom is what makes bloom and
+    // the sun disc glow). The whole composite works in linear and encodes to
+    // sRGB once at the very end — a raw ShaderMaterial gets NO automatic
+    // output encode, so writing linear straight out (the old bug) darkened
+    // the whole frame ~60% the moment the post path switched on.
     vec3 c = useFXAA ? fxaa(vUv) : texture2D(tScene, vUv).rgb;
     if (useAO || useCanopy) {
       float occl = 1.0;
@@ -207,6 +243,10 @@ const COMPOSITE_FRAG = /* glsl */`
       float f = mix(occl, 1.0, hl);
       c *= f;                                       // occlusion is a LINEAR-light multiply
     }
+    // shafts land BEFORE bloom so the brightest ones bloom too (they were
+    // additively lit by the sun, so they take the sun's current colour —
+    // white at noon, deep gold at sunset)
+    if (useRays) c += rayColor * (texture2D(tRays, vUv).r * rayStrength);
     if (useBloom) c += texture2D(tBloom, vUv).rgb * bloomStrength;
     gl_FragColor = vec4(l2s(c), 1.0);              // LINEAR → sRGB for the canvas
   }`;
@@ -232,16 +272,24 @@ export class PostFX {
     // colour + DEPTH target. MSAA (samples) keeps the offscreen path as crisp
     // as the direct canvas — without it, distant detail (tree lines!) had to
     // be FXAA-smeared, which read as "the fog moved closer" when AO went on.
-    this.rtScene = new THREE.WebGLRenderTarget(w, h, { samples: 4 });
-    this.rtScene.texture.colorSpace = THREE.SRGBColorSpace;
+    // HALF-FLOAT LINEAR target: keeps light above 1.0 instead of clamping it,
+    // which is what lets bloom actually catch the sun disc, water glints and
+    // flames (on the old 8-bit sRGB target every highlight flattened to white
+    // first, so bloom had nothing bright left to work with).
+    this.rtScene = new THREE.WebGLRenderTarget(w, h, {
+      samples: 4, type: THREE.HalfFloatType, colorSpace: THREE.LinearSRGBColorSpace,
+    });
     this.rtScene.depthTexture = new THREE.DepthTexture(w, h);
     this.rtScene.depthTexture.type = THREE.UnsignedIntType;
     // AO at half res (+ its blur target)
     this.rtAO = new THREE.WebGLRenderTarget(w >> 1, h >> 1);
     this.rtAOb = new THREE.WebGLRenderTarget(w >> 1, h >> 1);
-    // bloom scratch at quarter res
-    this.rtA = new THREE.WebGLRenderTarget(w >> 2, h >> 2);
-    this.rtB = new THREE.WebGLRenderTarget(w >> 2, h >> 2);
+    // bloom scratch at quarter res (half-float so HDR survives the blur)
+    const hdr = { type: THREE.HalfFloatType, colorSpace: THREE.LinearSRGBColorSpace };
+    this.rtA = new THREE.WebGLRenderTarget(w >> 2, h >> 2, hdr);
+    this.rtB = new THREE.WebGLRenderTarget(w >> 2, h >> 2, hdr);
+    // god-ray shaft mask at quarter res
+    this.rtRay = new THREE.WebGLRenderTarget(w >> 2, h >> 2);
 
     this.quadScene = new THREE.Scene();
     this.quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -257,19 +305,29 @@ export class PostFX {
       uRadius: { value: 1.6 }, uBias: { value: 0.03 }, uKernel: { value: buildKernel(16) },
     });
     this.aoBlurMat = mat(AO_BLUR_FRAG, { tAO: { value: null }, texel: { value: new THREE.Vector2() } });
-    this.brightMat = mat(BRIGHT_FRAG, { tDiffuse: { value: null }, threshold: { value: 0.78 } });
+    // threshold sits at 1.0 = "brighter than white": on the HDR target only
+    // genuinely over-bright light (sun disc, water glints, flames) blooms, so
+    // ordinary lit surfaces come through the post path untouched
+    this.brightMat = mat(BRIGHT_FRAG, { tDiffuse: { value: null }, threshold: { value: 1.0 } });
     this.blurMat = mat(BLUR_FRAG, { tDiffuse: { value: null }, dir: { value: new THREE.Vector2() } });
+    this.rayMat = mat(GODRAY_FRAG, {
+      tDepth: { value: null }, uSunUv: { value: new THREE.Vector2(0.5, 0.5) },
+      uDensity: { value: 0.7 }, uDecay: { value: 0.96 }, uAspect: { value: 1.78 },
+    });
     this.compositeMat = mat(COMPOSITE_FRAG, {
       tScene: { value: null }, tAO: { value: null }, tBloom: { value: null },
       tDepth: { value: null }, tCanopy: { value: null }, tCanopyMeta: { value: null },
+      tRays: { value: null }, rayColor: { value: new THREE.Color(1, 1, 1) },
+      rayStrength: { value: 0 },
       uInvProj: { value: new THREE.Matrix4() }, uCamWorld: { value: new THREE.Matrix4() },
       uCanopyCenter: { value: new THREE.Vector2() }, uCanopyInvSize: { value: 1 / 400 },
       uCanopyStrength: { value: 0.9 },
       texel: { value: new THREE.Vector2() },
       aoStrength: { value: 0.25 }, aoFloor: { value: 0.30 }, bloomStrength: { value: 0.55 },
       useAO: { value: false }, useCanopy: { value: false },
-      useBloom: { value: false }, useFXAA: { value: false },
+      useBloom: { value: false }, useRays: { value: false }, useFXAA: { value: false },
     });
+    this._sunWorld = new THREE.Vector3();
   }
 
   setSize(w, h) {
@@ -278,6 +336,7 @@ export class PostFX {
     this.rtAOb.setSize(Math.max(1, w >> 1), Math.max(1, h >> 1));
     this.rtA.setSize(Math.max(1, w >> 2), Math.max(1, h >> 2));
     this.rtB.setSize(Math.max(1, w >> 2), Math.max(1, h >> 2));
+    this.rtRay.setSize(Math.max(1, w >> 2), Math.max(1, h >> 2));
   }
 
   _pass(material, target) {
@@ -286,13 +345,39 @@ export class PostFX {
     this.renderer.render(this.quadScene, this.quadCam);
   }
 
-  // opts: { ssao, bloom, aoRadius, aoStrength, aoFloor, canopy }
+  // opts: { ssao, bloom, aoRadius, aoStrength, aoFloor, canopy, rays }
   // canopy: { densTex, metaTex, cx, cz, size, strength } — the world-space
   // crown-shade map maintained by canopy.js
+  // rays:   { dir, color, strength } — dir is the world-space direction TO the
+  //         sun; shafts fade out as it leaves the view and vanish behind you
   render(scene, camera, opts = {}) {
     const r = this.renderer;
     r.setRenderTarget(this.rtScene);
     r.render(scene, camera);
+
+    // ---- god rays: only worth a pass when the sun is actually in front ----
+    let rayK = 0;
+    if (opts.rays?.strength > 0) {
+      // a point far along the sun direction, projected to screen UV
+      this._sunWorld.copy(opts.rays.dir).multiplyScalar(900).add(camera.position);
+      const p = this._sunWorld.project(camera);       // NDC (x,y in -1..1, z<1 in front)
+      const facing = this._sunWorld.set(0, 0, -1).applyQuaternion(camera.quaternion)
+        .dot(opts.rays.dir);                          // >0 = sun ahead of the camera
+      if (facing > 0 && p.z < 1) {
+        const su = p.x * 0.5 + 0.5, sv = p.y * 0.5 + 0.5;
+        // fade as the sun slides out of frame (shafts converging on an
+        // off-screen point look wrong long before they leave)
+        const off = Math.max(Math.abs(su - 0.5), Math.abs(sv - 0.5)) * 2; // 0 centre, 1 edge
+        rayK = opts.rays.strength * Math.max(0, 1 - Math.max(0, off - 0.6) / 1.1)
+          * Math.min(1, facing * 2.2);
+        if (rayK > 0.001) {
+          this.rayMat.uniforms.tDepth.value = this.rtScene.depthTexture;
+          this.rayMat.uniforms.uSunUv.value.set(su, sv);
+          this.rayMat.uniforms.uAspect.value = this.rtScene.width / this.rtScene.height;
+          this._pass(this.rayMat, this.rtRay);
+        } else rayK = 0;
+      }
+    }
 
     if (opts.ssao) {
       const u = this.ssaoMat.uniforms;
@@ -329,6 +414,10 @@ export class PostFX {
     c.useFXAA.value = false;
     c.aoStrength.value = opts.aoStrength ?? 0.25;
     c.aoFloor.value = opts.aoFloor ?? 0.30;
+    c.useRays.value = rayK > 0;
+    c.tRays.value = rayK > 0 ? this.rtRay.texture : this.rtAOb.texture;
+    c.rayStrength.value = rayK;
+    if (rayK > 0 && opts.rays.color) c.rayColor.value.copy(opts.rays.color);
     const cp = opts.canopy;
     c.useCanopy.value = !!cp;
     // always bind real textures (unbound samplers trip driver warnings)
@@ -346,7 +435,7 @@ export class PostFX {
   }
 
   dispose() {
-    for (const rt of [this.rtScene, this.rtAO, this.rtAOb, this.rtA, this.rtB]) rt.dispose();
+    for (const rt of [this.rtScene, this.rtAO, this.rtAOb, this.rtA, this.rtB, this.rtRay]) rt.dispose();
     this.rtScene.depthTexture?.dispose();
   }
 }

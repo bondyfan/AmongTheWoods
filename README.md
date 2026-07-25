@@ -43,7 +43,7 @@ no build step, no CDN dependency.
 - **Ctrl / V** — block with a shield or parry with a sword
 - **Z** — cycle unlocked arrow types
 - **Q** — cycle owned weapons (bows and crossbows require Beastmaster)
-- **1–6** — use slotted spells and active class abilities
+- **1–9** — use slotted spells and active class abilities
 - **U** — upgrade shop · **C** — character sheet · **N** — bestiary
 - **Esc** — pause · **M** — mute
 
@@ -72,7 +72,7 @@ no build step, no CDN dependency.
   cloak, mount, charm and one companion.
   Weapons and companions are bought in the shop's **Arsenal** tab (or looted
   from bosses). Manage them in the Character sheet (C).
-- **Trained active class abilities** are dragged onto the 1–6 action bar (a
+- **Trained active class abilities** are dragged onto the 1–9 action bar (a
   one-time hint above the bar teaches this on your first ability; drag between
   slots to reorder, drag off the bar to unslot). Every skill in the path lists
   its exact numbers for each rank — damage, stuns, radii, buff percentages and

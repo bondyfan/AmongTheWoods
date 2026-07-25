@@ -401,6 +401,33 @@ export const OOC_DELAY = 5;
 // did, so a breather takes ~4× as long — full-heal timings roughly quadruple.
 export const oocRegenFor = (level) => (7 + 1.5 * level) * 0.25;
 
+// ---- ACTION RESOURCES. Attack speed is gone: every swing costs ENERGY and
+// takes a fixed SWING_TIME, so the cadence is set by how fast energy comes
+// back, not by a per-weapon cooldown. You can burst several blows back to
+// back, then you have to breathe — Black Desert / TERA style.
+// Energy: 100 at level 1, +1 per level. Mana: casters (mage/priest) only. ----
+export const SWING_TIME = 0.5;                       // seconds per basic attack, all weapons
+export const PLAYER_ENERGY = (level) => 99 + level;  // 100 @ L1 … 149 @ L50
+export const PLAYER_MANA = (level) => Math.round(100 + 12 * level);
+// Energy is a REAL resource: a full bar is ~5 bare-handed blows, and it
+// trickles back, so you burst, disengage, then come back in.
+export const energyRegenFor = (level) => 5 + 0.03 * level;
+export const manaRegenFor = (level) => 3 + 0.12 * level;
+// Per-swing energy by weapon style — heavy weapons hit hard but drain you, so
+// a two-hander swings less often than bare knuckles even at the same 0.5 s.
+export const WEAPON_ENERGY = { fists: 20, club: 30, axe: 32, pick: 28, spear: 24,
+                               sword: 22, bow: 25, crossbow: 34 };
+export const attackEnergyFor = (weapon) =>
+  weapon?.energy ?? WEAPON_ENERGY[weapon?.style] ?? 20;
+// Class abilities cost a resource ON TOP of their cooldown: physical classes
+// spend energy, casters spend mana. Scaled off the skill's unlock level so a
+// starter button stays spammable and a capstone is a real commitment.
+export const CASTER_CLASSES = new Set(['mage', 'priest']);
+export const abilityEnergyFor = (skill) =>
+  skill?.energy ?? Math.max(6, Math.round(12 + (skill?.level || 1) * 0.5));
+export const abilityManaFor = (skill) =>
+  skill?.mana ?? Math.max(8, Math.round(14 + (skill?.level || 1) * 0.9));
+
 // Each zone covers a WoW-style level band (index = difficulty tier). The gap
 // between Verdant and the Desert is intentional — the first border bites.
 export const ZONE_LEVEL_BANDS = [[1, 5], [7, 12], [13, 18], [19, 24],
@@ -835,9 +862,9 @@ export function costFor(cost, mobaMode) {
   return out;
 }
 
-// ---- Spells / skills. Bought in the shop, equipped into max 6 spell slots,
-// cast with keys 1-6. cd in seconds. ----
-export const MAX_SPELL_SLOTS = 6;
+// ---- Spells / skills. Bought in the shop, equipped into max 9 spell slots,
+// cast with keys 1-9. cd in seconds. ----
+export const MAX_SPELL_SLOTS = 9;
 export const SPELLS = [
   { id: 'haste',     level: 7,  icon: '⚡', name: 'Haste',       cost: { meat: 40, essence: 2 }, cd: 90,
     desc: 'Double attack speed for 10 s.' },
