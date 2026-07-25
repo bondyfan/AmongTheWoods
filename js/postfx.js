@@ -1,11 +1,23 @@
-// ---- Post-processing stack (SSAO + bloom + composite) ----
-// The scene renders to an offscreen colour target that ALSO captures depth.
-// From the depth we do screen-space ambient occlusion (SSAO): crevices,
-// contact points and clustered geometry darken while OPEN, flat surfaces stay
-// at exactly 1.0 (an above-plane guard guarantees it — no global dim). Optional
-// hand-rolled bloom rides on top. The composite applies AO in LINEAR light on
-// the ambient term (so it adds depth without crushing contrast), resolves the
-// non-MSAA target with a light FXAA, adds bloom and writes to the canvas.
+// ---- Post-processing stack (canopy AO + god rays + bloom + composite) ----
+// The scene renders to an offscreen MSAA HALF-FLOAT target that also captures
+// depth. Half-float matters: it keeps light above 1.0 instead of clamping, and
+// that headroom is what bloom feeds on (sun disc, water glints, flames).
+//
+// Three optional effects ride on that buffer:
+//   * canopy AO — a world-space crown-shade map (canopy.js) sampled by
+//     reconstructing each pixel's world position from depth, so shade pools
+//     under tree crowns and nowhere else
+//   * god rays  — march each pixel toward the sun's screen position and count
+//     how much open SKY it crosses, giving shafts through gaps in the canopy
+//   * bloom     — threshold at 1.0 ("brighter than white") + separable blur
+//
+// The composite works entirely in LINEAR light and encodes to sRGB exactly
+// once at the end. That last step is easy to lose: a raw ShaderMaterial gets
+// no automatic output encode, and writing linear straight to the canvas
+// darkened every frame ~60% the moment the post path switched on. With it
+// right, pixels that no effect touches come through bit-identical to a direct
+// render — verified by a direct-vs-post pixel diff.
+// (SSAO's screen-space term is still here but unused; canopy AO replaced it.)
 
 import * as THREE from 'three';
 
@@ -358,13 +370,17 @@ export class PostFX {
     // ---- god rays: only worth a pass when the sun is actually in front ----
     let rayK = 0;
     if (opts.rays?.strength > 0) {
-      // a point far along the sun direction, projected to screen UV
-      this._sunWorld.copy(opts.rays.dir).multiplyScalar(900).add(camera.position);
-      const p = this._sunWorld.project(camera);       // NDC (x,y in -1..1, z<1 in front)
-      const facing = this._sunWorld.set(0, 0, -1).applyQuaternion(camera.quaternion)
-        .dot(opts.rays.dir);                          // >0 = sun ahead of the camera
-      if (facing > 0 && p.z < 1) {
-        const su = p.x * 0.5 + 0.5, sv = p.y * 0.5 + 0.5;
+      // Project the sun as a point at INFINITY. Placing a proxy point some
+      // fixed distance away and calling .project() breaks the moment that
+      // distance passes camera.far (the game pulls far in with the fog), so
+      // do the perspective divide on the view-space DIRECTION instead — exact
+      // for a sun, and independent of near/far entirely.
+      const v = this._sunWorld.copy(opts.rays.dir).transformDirection(camera.matrixWorldInverse);
+      const facing = -v.z;                            // >0 = sun ahead of the camera
+      if (facing > 0) {
+        const e = camera.projectionMatrix.elements;
+        const su = (e[0] * v.x / facing) * 0.5 + 0.5;
+        const sv = (e[5] * v.y / facing) * 0.5 + 0.5;
         // fade as the sun slides out of frame (shafts converging on an
         // off-screen point look wrong long before they leave)
         const off = Math.max(Math.abs(su - 0.5), Math.abs(sv - 0.5)) * 2; // 0 centre, 1 edge
