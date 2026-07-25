@@ -1634,7 +1634,11 @@ export class EnemyManager {
       id: e.id, t: e.type, b: e.bossRank, l: e.level,
       x: +e.pos.x.toFixed(1), z: +e.pos.z.toFixed(1),
       hp: Math.round(e.hp), m: Math.round(e.maxHp),
-      ...(this.world.time - (e.atkAt ?? -9) < 0.3 ? { a: 1 } : {}),
+      // `a` is the attack's TIMESTAMP, not a boolean: the 0.3 s window spans
+      // several snapshots, and a plain flag made the guest replay the swing
+      // sound once per packet (2-3x per hit). A stamp lets the guest tell a
+      // repeat of the same swing from a genuinely new one.
+      ...(this.world.time - (e.atkAt ?? -9) < 0.3 ? { a: Math.round(e.atkAt * 100) || 1 } : {}),
       ...(e.bossRank > 0 && e.bossName ? { n: e.bossName } : {}),
     }));
   }

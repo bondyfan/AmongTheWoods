@@ -337,7 +337,9 @@ class ShadowWorld {
       }
       s.target.set(e.x, 0, e.z);
       s.hp = e.hp; s.maxHp = e.m;
-      if (e.a) s.pendingAtk = true; // host says it just attacked — voice it
+      // voice the swing ONCE per attack: `a` carries the attack's timestamp and
+      // the same swing rides several snapshots, so only a changed stamp counts
+      if (e.a && e.a !== s.lastAtk) { s.lastAtk = e.a; s.pendingAtk = true; }
     }
     for (const [id, s] of this.enemies) {
       if (!liveIds.has(id)) this._killShadow(id, s);

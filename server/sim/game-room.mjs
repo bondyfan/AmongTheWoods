@@ -19,7 +19,10 @@ import { makeOnKill } from './onkill.mjs';
 
 audio.muted = true;                    // silence all SFX before anything plays
 
-const SNAP_HZ = 10;                    // 10 Hz world snapshot (matches host's 0.1s)
+// One snapshot per tick. Anything slower shows up as visibly surging enemies:
+// the client smooths toward the last known position, so a long gap means a
+// fast catch-up right after each packet and a crawl before the next one.
+const SNAP_HZ = Number(process.env.SNAP_HZ || 15);
 const NEAR = 130;                      // only stream entities within 130m of a player
 const XP_SHARE_RADIUS = 100;
 const QUEST_KILL_SHARE_RADIUS = 20;
@@ -149,7 +152,12 @@ export class GameRoom {
     this.pickups.update(dt, []);              // NO auto-collect — guests send 'collect'
     this.projectiles.update(dt, this.enemyMgr, targets);
     this._snapAcc += dt;
-    if (this._snapAcc >= 1 / SNAP_HZ) { this._snapAcc = 0; this._broadcastSnap(); }
+    if (this._snapAcc >= 1 / SNAP_HZ) {
+      // subtract the period instead of zeroing it: zeroing threw away the
+      // leftover time every tick, which silently paced 10 Hz down to 7.5 Hz
+      this._snapAcc = Math.min(this._snapAcc - 1 / SNAP_HZ, 1 / SNAP_HZ);
+      this._broadcastSnap();
+    }
   }
 
   // ---- internals ----
