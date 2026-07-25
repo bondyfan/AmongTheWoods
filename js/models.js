@@ -3376,9 +3376,47 @@ function _leafQuad() {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([...q, ...q]), 3));
   geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array([
-    0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0]), 3));
+    0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, ..._leafUnderNormals()]), 3));
   geo.setIndex([0, 2, 1, 2, 3, 1, 4, 5, 6, 6, 5, 7]); // top face + back face
   _leafQuadGeo = geo;
+  return geo;
+}
+
+// LEAF TRANSLUCENCY. A leaf is thin and lets light through, so its underside
+// is dimmer than its top but never black. Geometrically-correct normals do
+// not model that: a downward -Y normal gets zero sun AND the hemisphere
+// light's darkest ground tone, so canopies turn pitch black from below.
+// Fixing it in the normals (rather than the shader) keeps the change local
+// to foliage — BAKED_MAT is shared with rocks, walls and buildings, which
+// SHOULD stay hard-lit. Undersides get splayed, slightly-upward normals:
+// still clearly darker than a sunlit top, but lit and full of variation.
+// vertical component of an underside normal. Negative = still tipped toward
+// the ground (shaded, clearly darker than a sunlit top) but nowhere near the
+// -1.0 that made canopies read as solid black.
+const _LEAF_UNDER_TILT = -0.12;
+function _leafUnderNormals() {
+  const k = Math.sqrt(1 - _LEAF_UNDER_TILT * _LEAF_UNDER_TILT) * Math.SQRT1_2;
+  const n = [];
+  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+    n.push(sx * k, _LEAF_UNDER_TILT, sz * k); // splayed outward per corner, so
+  }                                           // the underside reads dappled
+  return n;
+}
+
+// the same idea for a solid foliage lump: let its downward-facing facets tip
+// back toward the horizon instead of staring straight at the dark ground
+// hemisphere. Anything already level or higher is left untouched.
+function _softenUnderside(geo, floor = _LEAF_UNDER_TILT) {
+  const n = geo.attributes.normal;
+  for (let i = 0; i < n.count; i++) {
+    const y = n.getY(i);
+    if (y >= floor) continue;
+    const x = n.getX(i), z = n.getZ(i);
+    const h = Math.hypot(x, z) || 1e-6;       // keep the compass direction,
+    const s = Math.sqrt(Math.max(0, 1 - floor * floor)) / h;  // raise the tilt
+    n.setXYZ(i, x * s, floor, z * s);
+  }
+  n.needsUpdate = true;
   return geo;
 }
 
@@ -3401,6 +3439,7 @@ function _lumpGeo(v) {
   }
   const flat = geo.toNonIndexed();       // duplicate verts → true flat facets
   flat.computeVertexNormals();
+  _softenUnderside(flat);
   _lumpGeos[v] = flat;
   return flat;
 }
