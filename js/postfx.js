@@ -58,11 +58,12 @@ const GODRAY_FRAG = /* glsl */`
       illum *= uDecay;
     }
     // radial falloff from the sun: without it every open-sky pixel accumulates
-    // a full march and the ENTIRE sky lifts uniformly (a flat wash, not shafts)
-    // reach far enough that a sun sitting just past the top edge still throws
-    // shafts down into frame (0.5 = half the screen height)
+    // a full march and the ENTIRE sky lifts uniformly (a flat wash, not shafts).
+    // The origin now sits just past the top edge rather than a third of a
+    // screen above it, so the reach pulls in to match — shafts stay strongest
+    // where they break through the canopy and fade on the way down.
     float dist = length((vUv - uSunUv) * vec2(uAspect, 1.0));
-    float fall = 1.0 - smoothstep(0.05, 1.15, dist);
+    float fall = 1.0 - smoothstep(0.05, 0.75, dist);
     gl_FragColor = vec4(vec3(sum / float(RAY_SAMPLES) * fall), 1.0);
   }`;
 
@@ -342,6 +343,7 @@ export class PostFX {
       useBloom: { value: false }, useRays: { value: false }, useFXAA: { value: false },
     });
     this._sunWorld = new THREE.Vector3();
+    this._camFwd = new THREE.Vector3();
   }
 
   setSize(w, h) {
@@ -383,17 +385,31 @@ export class PostFX {
         const e = camera.projectionMatrix.elements;
         // CLAMP the shaft origin to just past the frame edge. The third-person
         // camera tilts down, so the real sun sits above the top edge for all
-        // but a few minutes a day — and shafts converging on a point that far
-        // off screen degenerate to nothing. Pinning the origin to the frame
-        // edge makes light stream IN from the sun's side instead, which is
-        // what a high sun through a canopy actually looks like. (An earlier
-        // off-screen FADE was mathematically tidy and left the effect dead
-        // at every sun angle above ~15°.)
-        const M = 0.35;
-        const su = Math.max(-M, Math.min(1 + M, (e[0] * v.x / facing) * 0.5 + 0.5));
-        const sv = Math.max(-M, Math.min(1 + M, (e[5] * v.y / facing) * 0.5 + 0.5));
-        // the only fade left is how squarely the camera faces the sun
-        rayK = opts.rays.strength * Math.min(1, facing * 2.2);
+        // but a few minutes a day (screen v runs 1.4 at dawn to 22 near noon)
+        // and shafts converging on a point that far off screen degenerate to
+        // nothing. Pinning the origin to the edge makes light stream IN from
+        // the sun's side instead. (An earlier off-screen FADE was tidy and
+        // left the effect dead at every sun angle above ~15°.)
+        // The VERTICAL margin is deliberately tiny: the horizon sits ~80% up
+        // the frame, so an origin a hair past the top edge puts the shafts'
+        // source right behind the treetops. A generous margin here reads as
+        // light falling out of the sky high ABOVE the canopy instead.
+        const MU = 0.35, MV = 0.06;
+        const su = Math.max(-MU, Math.min(1 + MU, (e[0] * v.x / facing) * 0.5 + 0.5));
+        const sv = Math.max(-MV, Math.min(1 + MV, (e[5] * v.y / facing) * 0.5 + 0.5));
+        // Shafts belong where the sun ACTUALLY is. Measure how far it sits to
+        // the side as a horizontal AZIMUTH difference — that stays meaningful
+        // at any elevation, while the projected screen x blows up as the sun
+        // climbs toward the zenith (su hits 12+ at noon for a 30° turn). Full
+        // strength while the sun is within the frame's half-FOV, then out over
+        // the next ~23°, so no shafts rake between trees the sun isn't behind.
+        const f = this._camFwd.set(0, 0, -1).transformDirection(camera.matrixWorld);
+        let dAz = Math.abs(Math.atan2(opts.rays.dir.x, opts.rays.dir.z)
+          - Math.atan2(f.x, f.z)) % (Math.PI * 2);
+        if (dAz > Math.PI) dAz = Math.PI * 2 - dAz;
+        const halfH = Math.atan(Math.tan(camera.fov * Math.PI / 360) * camera.aspect);
+        const sideFade = 1 - Math.min(1, Math.max(0, (dAz - halfH) / 0.4));
+        rayK = opts.rays.strength * Math.min(1, facing * 2.2) * sideFade;
         if (rayK > 0.001) {
           this.rayMat.uniforms.tDepth.value = this.rtScene.depthTexture;
           this.rayMat.uniforms.uSunUv.value.set(su, sv);
