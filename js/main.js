@@ -2439,36 +2439,137 @@ function dropHalfMeat(pos) {
 // Survival death is soft: you wake up at the spawn cottage, but you lose a
 // full level (XP resets to that level's start) and half your meat spills where
 // you fell.
+// ---------- death → ghost → resurrection (WoW-style) ----------
+// Dying does NOT cost you the level any more. You rise as a ghost at the
+// nearest graveyard you know and run — at 2.5× speed — back to your corpse.
+// Reaching it restores you intact; giving up and resurrecting at the graveyard
+// costs this level's XP progress. Your loot still spills where you fell.
+const ghost = { active: false, corpse: null, grave: null };
+
+// every graveyard the player may wake at: the world's own, plus a grave they
+// placed themselves
+function knownGraveyards() {
+  const out = world.graveyards ? world.graveyards() : [{ x: 0, z: 4, name: 'your homestead' }];
+  if (camp?.has('grave') && camp.gravePos) {
+    out.push({ x: camp.gravePos.x, z: camp.gravePos.z + 2, name: 'your own grave' });
+  }
+  return out;
+}
+
+function nearestGraveyard(from) {
+  const list = knownGraveyards();
+  let best = list[0], bd = Infinity;
+  for (const g of list) {
+    const d = Math.hypot(g.x - from.x, g.z - from.z);
+    if (d < bd) { bd = d; best = g; }
+  }
+  return best;
+}
+
 function survivalRespawn() {
   if (boatMounted) dismountBoat();
   if (player.mounted) dismountHorse();
-  minimap.deathAt = { x: player.pos.x, z: player.pos.z }; // mark the death spot
-  const dropped = dropHalfMeat(player.pos.clone());
-  player.loseLevel();
-  player.mesh.rotation.z = Math.PI / 2; // lie down while "out"
+  const at = player.pos.clone();
+  minimap.deathAt = { x: at.x, z: at.z };          // the corpse marker on the map
+  const dropped = dropHalfMeat(at);
   audio.sfx('defeat', 0.5);
   const by = player.killedBy || 'the wilds';
-  const surv = Math.floor(game.time / 60), survS = Math.floor(game.time % 60);
   ui.banner(`☠️ Slain by ${by}`);
-  ui.toast(`☠️ Slain by ${by} · Lv ${player.level} · survived ${surv}:${String(survS).padStart(2, '0')} · this level's XP progress is gone, ${dropped} loot spilled. Chest storage is safe.`, 'boss');
+  ui.toast(`☠️ Slain by ${by} · ${dropped} loot spilled. Run back to your body to return whole — or resurrect at the graveyard and lose this level's XP.`, 'boss');
   player.killedBy = null;
-  setTimeout(() => {
-    if (game.mode !== 'play') return;
-    // with a graveyard built you choose where to wake up
-    if (camp?.has('grave') && camp.gravePos) $id('respawn-choice').classList.remove('hidden');
-    else reviveAt('cave');
-  }, 2500);
+  player.mesh.rotation.z = Math.PI / 2;            // lie down while "out"
+  setTimeout(() => { if (game.mode === 'play') enterGhost(at); }, 2000);
 }
 
-function reviveAt(where) {
-  $id('respawn-choice').classList.add('hidden');
-  if (game.mode !== 'play') return;
+function enterGhost(corpseAt) {
   // dying inside a lair throws you back out — your spilled loot waits at the door
   if (game.dungeon) exitLair(false);
-  player.revive(1);
-  if (where === 'grave' && camp?.gravePos) player.pos.set(camp.gravePos.x, 0, camp.gravePos.z + 2);
-  else player.pos.set(0, 0, -2);
+  const grave = nearestGraveyard(corpseAt);
+  ghost.active = true;
+  ghost.corpse = { x: corpseAt.x, z: corpseAt.z };
+  ghost.grave = grave;
+  player.ghost = true;
+  player.revive(1);                                // upright and moving, but dead
+  player.pos.set(grave.x, 0, grave.z);
+  setGhostVisual(true);
+  ui.banner('👻 You are a ghost');
+  ui.toast(`👻 You rise at ${grave.name}. Run to your body (👻 2.5× speed) and press E to return — or resurrect here and lose this level's XP.`, 'boss');
+  $id('respawn-choice').classList.remove('hidden');
 }
+
+// the ghost look: the whole body goes translucent and pale
+function setGhostVisual(on) {
+  player.mesh.traverse(part => {
+    if (!part.material) return;
+    const list = Array.isArray(part.material) ? part.material : [part.material];
+    for (const m of list) {
+      if (on) {
+        m.userData._ghostOpacity ??= m.opacity;
+        m.userData._ghostTransparent ??= m.transparent;
+        m.transparent = true;
+        m.opacity = 0.35;
+      } else if (m.userData._ghostOpacity !== undefined) {
+        m.opacity = m.userData._ghostOpacity;
+        m.transparent = m.userData._ghostTransparent;
+        delete m.userData._ghostOpacity;
+        delete m.userData._ghostTransparent;
+      }
+      m.needsUpdate = true;
+    }
+  });
+}
+
+function leaveGhost() {
+  ghost.active = false;
+  ghost.corpse = null;
+  player.ghost = false;
+  setGhostVisual(false);
+  $id('respawn-choice').classList.add('hidden');
+  $id('ghost-hint')?.classList.add('hidden');
+  minimap.deathAt = null;
+}
+
+// reached the body: you come back where you fell, keeping every scrap of XP
+function resurrectAtCorpse() {
+  if (!ghost.active || !ghost.corpse) return;
+  const { x, z } = ghost.corpse;
+  leaveGhost();
+  player.revive(0.5);
+  player.pos.set(x, 0, z);
+  audio.sfx('evolve_ready', 0.55);
+  ui.banner('✨ Back from the dead');
+  ui.toast('✨ You slip back into your body — your XP is intact.', 'level');
+}
+
+// gave up on the run: full health at the graveyard, but this level's XP is gone
+function resurrectAtGraveyard() {
+  if (!ghost.active) return;
+  const g = ghost.grave || { x: 0, z: 4 };
+  leaveGhost();
+  player.loseLevel();
+  player.revive(1);
+  player.pos.set(g.x, 0, g.z);
+  audio.sfx('defeat', 0.45);
+  ui.banner('⚰️ Resurrected');
+  ui.toast(`⚰️ The spirits rebuild you at ${g.name ?? 'the graveyard'} — this level's XP progress is gone.`, 'boss');
+}
+
+// per-frame ghost bookkeeping: offer the body when you reach it
+function tickGhost() {
+  const hint = $id('ghost-hint');
+  if (!ghost.active || !ghost.corpse) { hint?.classList.add('hidden'); return; }
+  const d = Math.hypot(player.pos.x - ghost.corpse.x, player.pos.z - ghost.corpse.z);
+  if (hint) {
+    if (d < GHOST_CORPSE_R) {
+      hint.innerHTML = '✨ Your body — press <kbd>E</kbd> to return to life';
+      hint.classList.remove('hidden');
+    } else {
+      hint.textContent = `👻 ${Math.round(d)} m to your body`;
+      hint.classList.remove('hidden');
+    }
+  }
+}
+const GHOST_CORPSE_R = 3.2;
 
 function mobaRespawn() {
   ui.toast('☠️ You fell — respawning at your base…', 'boss');
@@ -4524,6 +4625,14 @@ function digTreasure() {
 
 input.onKey('KeyE', () => {
   if (!inPlay()) return;
+  // as a ghost the ONLY interaction is climbing back into your own body
+  if (ghost.active) {
+    if (ghost.corpse && Math.hypot(player.pos.x - ghost.corpse.x,
+                                   player.pos.z - ghost.corpse.z) < GHOST_CORPSE_R) {
+      resurrectAtCorpse();
+    }
+    return;
+  }
   // inside a lair dungeon the only interactions are the two portals
   if (game.dungeon) {
     if (world.atExit?.(player.pos)) { exitLair(true); return; }
@@ -4979,7 +5088,6 @@ input.onKey('KeyX', () => {
   // partner rescue. Co-op downed goes through the MP path (drops loot, etc.).
   if (player.dead) {
     if (mp?.respawnNow?.()) return;
-    if (game.kind === 'survival') { reviveAt('cave'); return; }
   }
   if (player.mounted) dismountHorse();
   else if (boatMounted) dismountBoat();
@@ -5058,8 +5166,7 @@ for (const [btnId, d] of [['bigmap-zoomin', 1], ['bigmap-zoomout', -1]]) {
     minimap.drawBig($id('bigmap-canvas'), player, mp?.mode === 'coop' ? mp.mapRemotes() : null);
   });
 }
-$id('respawn-cave').addEventListener('click', () => reviveAt('cave'));
-$id('respawn-grave').addEventListener('click', () => reviveAt('grave'));
+$id('respawn-grave').addEventListener('click', () => resurrectAtGraveyard());
 for (let i = 0; i < MAX_SPELL_SLOTS; i++) {
   input.onKey('Digit' + (i + 1), () => {
     if (!inPlay() || game.paused) return;
@@ -5445,14 +5552,29 @@ const START_TOD = 8 / 24;   // the game opens at 08:00
 const nightFlies = [];
 let fireflyGeo = null, fireflyMat = null, starField = null;
 
-// darkness by the hour: full night 23:00-05:00, day 07:00-21:00, smooth
-// dawn (05-07) and dusk (20-22) between
-function nightAtHour(h) {
-  if (h >= 23 || h < 5) return 1;                                // full night 23:00–05:00 (1 h shorter)
-  if (h >= 7 && h < 21) return 0;
-  const t = (h >= 5 && h < 7) ? 1 - (h - 5) / 2 : (h - 21) / 2;  // dawn down / dusk up
-  return t * t * (3 - 2 * t); // smoothstep
+// ---- the sun's path, and the darkness that FOLLOWS from it ----
+// The sun rises in the east at SUNRISE, peaks at SUN_PEAK° over noon, sets in
+// the west at SUNSET and then keeps travelling BELOW the horizon until it
+// comes back round. One continuous angle, so elevation genuinely goes negative
+// at night — the old arc floored at 14° and simply parked there, which meant
+// the sun disc hung in the night sky and a real sunset never happened at all.
+const SUNRISE = 5, SUNSET = 21, SUN_PEAK = 75;
+// 0..1 from sunrise to sunset, then 1..2 on through the night
+function solarPhase(h) {
+  if (h >= SUNRISE && h < SUNSET) return (h - SUNRISE) / (SUNSET - SUNRISE);
+  const nh = h < SUNRISE ? h + 24 : h;
+  return 1 + (nh - SUNSET) / (24 - SUNSET + SUNRISE);
 }
+const sunElevAt = h => SUN_PEAK * Math.sin(Math.PI * solarPhase(h));
+const smooth01 = t => { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t); };
+
+// Darkness is derived from the SUN, never from its own hour table: full day
+// while it is well up, twilight as it sinks through the horizon, full night
+// once it is properly under. (The old table declared 22:00 "night" while the
+// sun still stood 24° high — stars over a lit sky, and no sunset in between.)
+const TWILIGHT_TOP = 8, TWILIGHT_BOTTOM = -10; // degrees of elevation
+const nightAtHour = h => smooth01(
+  (TWILIGHT_TOP - sunElevAt(h)) / (TWILIGHT_TOP - TWILIGHT_BOTTOM));
 
 function tickDayNight(dt) {
   // co-op: derive the clock from the shared room epoch so both players see
@@ -5605,16 +5727,26 @@ function updateAtmosphere(dt) {
   // torch is genuinely gloomy. (We darken the LIGHTS, not the screen overlay,
   // which would flatten the torchlight too.)
   hemi.intensity = (0.74 - 0.5 * caveK) * biomeLightK * (1 - 0.86 * nightK);
-  sun.intensity = 1.8 * (1 - 0.8 * caveK) * biomeLightK * (1 - 0.94 * nightK);
-  // golden hour: the LOWER the sun hangs, the warmer its light — clean
-  // white-warm at noon, deep sunset gold as it nears the horizon (the sky
-  // dome's sun disc and the clouds' silver lining pick this color up too);
-  // deep night silvers whatever is left of it
-  const gold = Math.pow(Math.max(0, Math.min(1, (0.72 - _sunDir.y) / 0.5)), 1.6) * (1 - nightK);
-  sun.color.setRGB(
-    1 - 0.25 * nightK,
-    (0.95 - 0.26 * gold) - 0.2 * nightK,
-    (0.87 - 0.49 * gold) - 0.15 * nightK);
+  // the directional sun switches off as it crosses the horizon — below it
+  // there is no sunlight, only the hemisphere's moonlit base
+  const sunElev = Math.asin(Math.max(-1, Math.min(1, _sunDir.y))) * 180 / Math.PI;
+  // fades across the ~4° around the horizon, like the disc sinking into it —
+  // the sun must still rake warm light over the land AT sunset, not switch off
+  // a degree early (that left the golden hour lit by nothing but ambient)
+  const above = Math.max(0, Math.min(1, (sunElev + 2) / 4));
+  sun.intensity = 1.8 * (1 - 0.8 * caveK) * biomeLightK * (1 - 0.94 * nightK) * above;
+  // GOLDEN HOUR, driven purely by how low the sun hangs: neutral warm-white
+  // high up, deepening through amber to a proper sunset orange as it touches
+  // the horizon. NOT gated by nightK any more — the old `* (1 - nightK)`
+  // cancelled the warmth exactly when the sun sat lowest, so the light never
+  // actually went gold (it peaked at a dingy off-white and faded to silver).
+  // The sky dome's disc, its cloud lining and the god rays all read this color.
+  const warm = smooth01((GOLDEN_TOP - sunElev) / GOLDEN_TOP);
+  sun.color.copy(SUN_DAY).lerp(SUN_LOW, warm);
+  // afterglow weight for the AIR (fog + sky): peaks across the golden hour and
+  // dies once the sun is well under, so the warm band fades instead of being
+  // dragged through the night
+  const glowK = warm * Math.max(0, Math.min(1, (sunElev + 8) / 10));
   // the camera sits ~30 m away — keep the fog behind the hero so the cave
   // interior stays dimly visible while the outside world is swallowed.
   // RPG view looks along the ground, so it gets a much deeper fog wall —
@@ -5652,11 +5784,18 @@ function updateAtmosphere(dt) {
   // Gloomy biomes (fogCap) barely take the night tint — their air is already
   // BLACKER than the navy night fog, and lerping toward it LIGHTENED them.
   const nightBlend = biome.fogCap ? nightK * 0.15 : nightK;
-  // pull the fog wall + horizon almost fully into the (dark) night colors —
-  // otherwise the distant mist stays lighter than the now-dark ground and
-  // reads as a glowing band on the horizon, which makes no sense at night
-  const fogTarget = _atmoA.set(biome.fog).lerp(NIGHT_FOG, nightBlend * 0.94).lerp(caveFog, caveK);
-  const skyTarget = _atmoB.set(biome.sky).lerp(NIGHT_SKY, nightBlend * 0.94).lerp(caveFog, caveK);
+  // SUNSET first, then night. The warm band across the horizon haze (and the
+  // pink-violet wash above it) is what actually reads as a sunset — sun colour
+  // alone barely registers when most of the frame is ground and trees. Applied
+  // BEFORE the night lerp so the gold gets swallowed by the dark as it should.
+  // Then pull the fog wall + horizon almost fully into the night colors, or the
+  // distant mist stays lighter than the dark ground and glows on the horizon.
+  const fogTarget = _atmoA.set(biome.fog)
+    .lerp(SUNSET_FOG, glowK * 0.75)
+    .lerp(NIGHT_FOG, nightBlend * 0.94).lerp(caveFog, caveK);
+  const skyTarget = _atmoB.set(biome.sky)
+    .lerp(SUNSET_SKY, glowK * 0.62)
+    .lerp(NIGHT_SKY, nightBlend * 0.94).lerp(caveFog, caveK);
   if (blizzard.k > 0.01 && blizzard.spec?.fogC) {
     // the storm colors the AIR (white blizzard, ochre sand wall…) without
     // moving the fog wall — distant terrain drowns in the storm's hue
@@ -5679,6 +5818,14 @@ function updateAtmosphere(dt) {
 // shadow-cast — in RPG view this culls ~2/3 of the old frustum
 const FOG_SCALE = { short: 0.72, normal: 1, far: 1.6, furthest: 2.4 };
 const NIGHT_SKY = new THREE.Color(0x070c22), NIGHT_FOG = new THREE.Color(0x0d1226);
+// sunset palette: warm haze along the horizon, pink-violet in the sky above it
+const SUNSET_FOG = new THREE.Color(0xe08c4a), SUNSET_SKY = new THREE.Color(0x9c5f80);
+// sun light colour, in LINEAR working space (as setRGB always was here):
+// neutral warm-white high up → deep sunset orange at the horizon. GOLDEN_TOP
+// is the elevation where the warming starts.
+const GOLDEN_TOP = 30;
+const SUN_DAY = new THREE.Color(1.0, 0.97, 0.92);
+const SUN_LOW = new THREE.Color(1.0, 0.38, 0.13);
 const _atmoA = new THREE.Color(), _atmoB = new THREE.Color();
 const _stormC = new THREE.Color();
 let _fogCap = 999; // smoothed per-biome fog ceiling (Dark/Haunted close in)
@@ -5757,8 +5904,12 @@ function applyGraphics() {
   // the post stack is needed for bloom, ambient occlusion or god rays
   if ((settings.bloom || settings.ssao || settings.rays) && !postfx) {
     postfx = new PostFX(renderer);
-    postfx.setSize(renderer.domElement.width, renderer.domElement.height);
   }
+  // Keep the post targets matched to the canvas backing store. setPixelRatio
+  // above resizes the drawing buffer, and this used to run ONLY when the stack
+  // was first created — so after a resolution change the whole post path kept
+  // rendering at the old size (the new setting appeared to do nothing).
+  postfx?.setSize(renderer.domElement.width, renderer.domElement.height);
   // shadow DISTANCE: how far the sun's shadow frustum reaches around the
   // player (High casts shadows across ~270 m). Bigger area → bigger map so
   // it doesn't go blurry, hence "heavier".
@@ -5889,25 +6040,28 @@ function updateCamera(dt = 0) {
     camera.position.set(player.pos.x + fx * OFF + sx, py + H + sy, player.pos.z + fz * OFF + sz);
     camera.lookAt(player.pos.x - fx * 2, py, player.pos.z - fz * 2);
   }
-  // time-driven sun: rises in the east (+x) around 05:00, arcs through the
-  // southern sky and sets in the west around 23:00. Noon sun stands nearly
-  // overhead (short, tucked-in shadows); morning/evening sun hangs low, so
-  // shadows stretch long and dramatic toward sunset. The same _sunDir feeds
-  // the sky dome's sun disc and the water glints, so they always agree.
+  // time-driven sun: rises in the east (+x) at 05:00, arcs through the
+  // southern sky, SETS in the west at 21:00 and travels on beneath the horizon
+  // through the night (solarPhase runs 0..1 over the day, 1..2 over the night).
+  // Noon sun stands nearly overhead (short, tucked-in shadows); evening sun
+  // hangs low, so shadows stretch long and dramatic toward sunset. The same
+  // _sunDir feeds the sky dome's disc and the water glints — always in step.
   const h24 = (game.tod ?? START_TOD) * 24;
-  const dayT = Math.min(1, Math.max(0, (h24 - 5) / 18)); // 05:00 → 23:00
-  const elev = (14 + 61 * Math.sin(Math.PI * dayT)) * (Math.PI / 180); // 14°…75°
-  const az = Math.PI * dayT; // east → south → west
+  const sp = solarPhase(h24);
+  const elev = SUN_PEAK * Math.sin(Math.PI * sp) * (Math.PI / 180); // ±75°
+  const az = Math.PI * sp; // east → south → west, then on under the horizon
   _sunDir.set(
     Math.cos(elev) * Math.cos(az),
     Math.sin(elev),
     Math.cos(elev) * Math.sin(az));
   // stand-off scales with the shadow distance so the whole ortho frustum
-  // stays inside near/far
+  // stays inside near/far. The light's HEIGHT is floored just above ground:
+  // once the sun is down its intensity is zero anyway, and a light placed
+  // below the terrain would throw the shadow frustum upside down.
   const sdist = Math.max(35, _shadowB * 2);
   sun.position.set(
     player.pos.x + _sunDir.x * sdist,
-    _sunDir.y * sdist,
+    Math.max(0.12, _sunDir.y) * sdist,
     player.pos.z + _sunDir.z * sdist);
   sun.target.position.set(player.pos.x, 0, player.pos.z);
 }
@@ -6029,6 +6183,8 @@ function step() {
   // pitch-dark tree line is the look.
   const dayK = game.dungeon ? 0 : (1 - (game.nightK || 0) * 0.92) * (1 - atmoCaveK);
   skyU.uDay.value = dayK;
+  // the moon takes over as the sun goes under — never in a dungeon or the cave
+  skyU.uMoon.value = (game.dungeon ? 0 : (game.nightK || 0)) * (1 - atmoCaveK);
   skyU.uCloudAmt.value = (game.dungeon || settings.clouds === false)
     ? 0 : 0.82 * (1 - atmoCaveK);
 
@@ -6113,6 +6269,8 @@ function step() {
       updateAtmosphere(dt);
       updateWaypoint(dt);
       updatePings(dt);
+      tickGhost();
+      world.noteVillageSeen?.(player.pos.x, player.pos.z); // unlocks its graveyard
 
       // the horse carries you: mesh rides under the player, legs trot
       if (player.mounted && horseMesh) {
@@ -6268,6 +6426,17 @@ function step() {
         ui.toast(`🏔️ From the cave to the world's icy rim: +${xp} XP. The peak still holds its masters — Grimfrost's lair and the summit await.`, 'level');
       }
     }
+  } else if (game.mode === 'play' && game.paused && !game.editorView) {
+    // PAUSED — a panel is open, so the simulation is frozen. But the graphics
+    // settings LIVE in a panel, and world streaming + atmosphere are what
+    // actually realise most of them (chunk detail, foliage density, vegetation
+    // and shadow distance, the fog wall and far plane, light levels). Stepping
+    // them with dt = 0 keeps the picture in step with the settings while
+    // advancing no game state at all: no world clock, no regrowth, no
+    // smoothing lerps. Without this, changing any of those options did nothing
+    // visible until the panel was closed.
+    world.update(0, player.pos);
+    updateAtmosphere(0);
   }
 
   updateCamera(dt);

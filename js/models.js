@@ -433,6 +433,7 @@ const SKY_FRAG = /* glsl */`
   uniform vec3 uSunColor;
   uniform float uTime;
   uniform float uDay;      // 1 = full daylight, 0 = deep night / underground
+  uniform float uMoon;     // 0 = no moon, 1 = full night moon
   uniform float uCloudAmt; // cloud opacity master (0 hides them entirely)
   varying vec3 vSkyDir;
   float chash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
@@ -473,6 +474,15 @@ const SKY_FRAG = /* glsl */`
     float disc = smoothstep(0.99935, 0.99985, sunDot);
     float halo = pow(sunDot, 80.0) * 0.6 + pow(sunDot, 7.0) * 0.25;
     col += uSunColor * (disc * 1.6 + halo) * uDay * (1.0 - cov * 0.85);
+    // the moon: a small cool disc OPPOSITE the sun, so it is up exactly when
+    // the sun is down. (The sun used to park above the horizon all night and
+    // stood in for one; now that it really sets, the night sky needs its own.)
+    if (uMoon > 0.001) {
+      float mDot = max(dot(dir, -sd), 0.0);
+      float mDisc = smoothstep(0.9990, 0.9997, mDot);
+      float mHalo = pow(mDot, 200.0) * 0.45;
+      col += vec3(0.74, 0.80, 0.96) * (mDisc * 1.5 + mHalo) * uMoon * (1.0 - cov * 0.9);
+    }
     gl_FragColor = vec4(col, 1.0);
   }`;
 export function makeSkyDome(radius = 45) {
@@ -487,6 +497,7 @@ export function makeSkyDome(radius = 45) {
       uSunColor: { value: new THREE.Color(0xfff2dd) },
       uTime: { value: 0 },
       uDay: { value: 1 },
+      uMoon: { value: 0 },
       uCloudAmt: { value: 0.9 },
     },
   });
@@ -3147,6 +3158,43 @@ export function makeHayPile(rng = Math.random) {
     straw.rotation.y = a;
     straw.rotation.z = (rng() - 0.5) * 0.8;
     g.add(straw);
+  }
+  return g;
+}
+
+// The village burial ground: six graves in two rows behind a low wall, with a
+// memorial cross at the head of the plot. This is a RESPAWN point, so it has to
+// read as a graveyard from a distance.
+export function makeVillageGraveyard(rng = Math.random) {
+  const g = new THREE.Group();
+  const soil = box(7.2, 0.12, 5.2, 0x4a3a2e);
+  soil.position.y = 0.06;
+  g.add(soil);
+  for (let row = 0; row < 2; row++) {
+    for (let i = 0; i < 3; i++) {
+      const gx = -2.1 + i * 2.1, gz = -1.2 + row * 2.4;
+      const mound = box(1.0, 0.14, 1.7, 0x54432f);
+      mound.position.set(gx, 0.13, gz);
+      const stone = box(0.58, 0.85 + rng() * 0.2, 0.15, 0x8a8578);
+      stone.position.set(gx, 0.5, gz - 0.72);
+      stone.rotation.z = (rng() - 0.5) * 0.12;   // centuries of settling
+      const top = cyl(0.29, 0.29, 0.15, 0x8a8578, 8);
+      top.rotation.x = Math.PI / 2;
+      top.position.set(gx, 0.5 + stone.geometry.parameters.height / 2, gz - 0.72);
+      g.add(mound, stone, top);
+    }
+  }
+  // memorial cross at the head of the plot
+  const postV = box(0.18, 2.2, 0.18, 0x6e5a48);
+  postV.position.set(0, 1.1, -2.5);
+  const postH = box(1.0, 0.18, 0.18, 0x6e5a48);
+  postH.position.set(0, 1.7, -2.5);
+  g.add(postV, postH);
+  // a knee-high wall around the plot
+  for (const [sx, sz, w, d] of [[0, 2.7, 7.2, 0.24], [-3.6, 0, 0.24, 5.2], [3.6, 0, 0.24, 5.2]]) {
+    const wall = box(w, 0.55, d, 0x9a958a);
+    wall.position.set(sx, 0.28, sz);
+    g.add(wall);
   }
   return g;
 }
