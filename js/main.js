@@ -10,7 +10,7 @@ import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOB
          CLASS_CHOOSE_COST, firstClassSkillId, MAX_SPELL_SLOTS } from './config.js';
 import { makeAimArc, updateAimArc, makeRaft, makeBlacksmith, makeHorse, makeWisp, makeMan,
          makeGriffin, makeGriffinRoost, makeTumbleweed, BAKED_MAT, WATER_SHADERS,
-         makeSkyDome } from './models.js';
+         makeSkyDome, setSpectralLook } from './models.js';
 import { PostFX } from './postfx.js';
 import { CanopyShade } from './canopy.js';
 import { Camp } from './camp.js';
@@ -2497,26 +2497,16 @@ function enterGhost(corpseAt) {
   $id('respawn-choice').classList.remove('hidden');
 }
 
-// the ghost look: the whole body goes translucent and pale
-function setGhostVisual(on) {
-  player.mesh.traverse(part => {
-    if (!part.material) return;
-    const list = Array.isArray(part.material) ? part.material : [part.material];
-    for (const m of list) {
-      if (on) {
-        m.userData._ghostOpacity ??= m.opacity;
-        m.userData._ghostTransparent ??= m.transparent;
-        m.transparent = true;
-        m.opacity = 0.35;
-      } else if (m.userData._ghostOpacity !== undefined) {
-        m.opacity = m.userData._ghostOpacity;
-        m.transparent = m.userData._ghostTransparent;
-        delete m.userData._ghostOpacity;
-        delete m.userData._ghostTransparent;
-      }
-      m.needsUpdate = true;
-    }
-  });
+// the ghost look on your OWN body: the same spectral wash every other player
+// sees on you, so a mirror and a bystander agree
+function setGhostVisual(on) { setSpectralLook(player.mesh, on); }
+
+// the screen-wide drain eases in and out instead of snapping
+let ghostFade = 0;
+function tickGhostFade(dt) {
+  const want = ghost.active ? 1 : 0;
+  const rate = want ? 1.6 : 2.6;               // fade in slower than it clears
+  ghostFade += Math.sign(want - ghostFade) * Math.min(Math.abs(want - ghostFade), rate * dt);
 }
 
 function leaveGhost() {
@@ -6270,6 +6260,7 @@ function step() {
       updateWaypoint(dt);
       updatePings(dt);
       tickGhost();
+      tickGhostFade(dt);
       // ?devmode debug handle (same pattern as window.audio) — lets a console
       // or an automated check drive death/ghost states without a real fight
       if (DEVMODE && !window.WOODS) {
@@ -6490,7 +6481,15 @@ function step() {
   renderCharPreview(dt);
   renderSmithPreview(dt);
   // the World Editor renders CLEAN — no bloom / AO / vignette
-  const usePost = (settings.bloom || settings.ssao || settings.rays)
+  // being a ghost drains the world of colour, so the post path has to run even
+  // for a player with every graphics effect switched off — build the stack on
+  // demand (applyGraphics only creates it for bloom/AO/rays) and size it now
+  const ghostK = ghostFade;
+  if (ghostK > 0 && !postfx && !game.editorView) {
+    postfx = new PostFX(renderer);
+    postfx.setSize(renderer.domElement.width, renderer.domElement.height);
+  }
+  const usePost = (settings.bloom || settings.ssao || settings.rays || ghostK > 0)
     && postfx && !game.editorView;
   if (usePost) {
     // "Ambient occlusion" = canopy shade ONLY: soft pools of shade under tree
@@ -6524,7 +6523,7 @@ function step() {
     }
     postfx.render(scene, camera, {
       ssao: false, bloom: !!settings.bloom, // no screen-space contact term
-      canopy, rays,
+      canopy, rays, ghost: ghostK,
     });
   } else { renderer.setRenderTarget(null); renderer.render(scene, camera); }
 }

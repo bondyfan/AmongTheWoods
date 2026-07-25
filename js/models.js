@@ -398,6 +398,53 @@ export function templateMesh(key, build, sway = null) {
 // (clones, sprites, custom mats) is safe to dispose
 export const isSharedMaterial = (mat) =>
   !!mat?.userData?.shared || (!!mat?.color && matCache.get(mat.color.getHex()) === mat);
+// ---- the spectral (ghost) look ----------------------------------------
+// A dead player is a pale blue apparition: translucent, drained of its own
+// colour and lit cold. Used for BOTH the local player and every remote ghost,
+// so everyone sees the same thing. Materials are cloned on first use because
+// the model factories deliberately share materials — tinting in place would
+// turn every living body blue too.
+const GHOST_TINT = 0x7fc4ff;
+const GHOST_OPACITY = 0.38;
+
+export function setSpectralLook(root, on) {
+  root.traverse(part => {
+    if (!part.material) return;
+    const list = Array.isArray(part.material) ? part.material : [part.material];
+    const owned = list.map(src => {
+      if (src.userData?._spectralOwned) return src;
+      const m = src.clone();
+      m.userData = { ...(src.userData || {}), _spectralOwned: true,
+        _baseColor: src.color ? src.color.getHex() : null,
+        _baseOpacity: src.opacity ?? 1,
+        _baseTransparent: !!src.transparent,
+        _baseDepthWrite: src.depthWrite,
+        _baseEmissive: src.emissive ? src.emissive.getHex() : null };
+      return m;
+    });
+    part.material = Array.isArray(part.material) ? owned : owned[0];
+    for (const m of owned) {
+      const d = m.userData;
+      if (on) {
+        // wash the body's own colour out to a cold blue-white, then let it glow
+        // faintly so a ghost still reads at night
+        if (d._baseColor !== null) m.color.setHex(GHOST_TINT);
+        if (d._baseEmissive !== null) m.emissive.setHex(0x22506e);
+        m.transparent = true;
+        m.opacity = GHOST_OPACITY;
+        m.depthWrite = false;      // no z-fighting between overlapping limbs
+      } else {
+        if (d._baseColor !== null) m.color.setHex(d._baseColor);
+        if (d._baseEmissive !== null) m.emissive.setHex(d._baseEmissive);
+        m.transparent = d._baseTransparent;
+        m.opacity = d._baseOpacity;
+        m.depthWrite = d._baseDepthWrite;
+      }
+      m.needsUpdate = true;
+    }
+  });
+}
+
 export function mat(color) {
   if (!matCache.has(color)) matCache.set(color, new THREE.MeshLambertMaterial({ color }));
   return matCache.get(color);

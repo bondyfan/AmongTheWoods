@@ -78,7 +78,7 @@ export class Pickups {
       // nearest living target (the dropper is locked out for a while)
       let target = null, dist = Infinity;
       for (const t of targets) {
-        if (t.dead) continue;
+        if (t.dead || t.ghost) continue;   // the dead cannot carry anything
         if (p.lockT > 0 && t.id === p.lockId) continue;
         const d = Math.hypot(t.pos.x - p.mesh.position.x, t.pos.z - p.mesh.position.z);
         if (d < dist) { dist = d; target = t; }

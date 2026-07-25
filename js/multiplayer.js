@@ -25,7 +25,8 @@ import { makeMan, makeAxe, makeBow, makePickaxe, makeClub, makeSword, makeHandSp
          makeStoneDrop, makeHideDrop, makeIronDrop, makeBerryDrop, makeSalveDrop, makeRoastDrop,
          makeEssenceDrop, makeWoolDrop, makeItemDrop,
          makeEnemyShot, makeSpear, makeWolf, makeMobaTower, makeMobaBase,
-         makeTeamFlag, TEAM_COLORS, mat, makeTorchMesh, makeRaceFlag } from './models.js';
+         makeTeamFlag, TEAM_COLORS, mat, makeTorchMesh, makeRaceFlag,
+         setSpectralLook } from './models.js';
 import { audio } from './audio.js';
 import { MOB_INFO_RADIUS, mobLevelBadge } from './ui.js';
 
@@ -88,6 +89,7 @@ class RemotePlayer {
     this.hp = 100; this.maxHp = 100; this.level = 1;
     this.dead = false;
     this.stealthed = false;
+    this.isGhost = false;
     this.walkT = 0;
     this.moving = false;
     this.attackT = 0;
@@ -136,10 +138,21 @@ class RemotePlayer {
     if (s.atk && this.attackT <= 0) this.attackT = 0.25;
     this.dead = !!s.dead;
     this.downed = !!s.dn; // co-op: down but revivable
+    // a ghost outranks stealth: the spectral wash replaces the fade entirely,
+    // so re-apply whichever look is current when either flag flips
+    const nextGhost = !!s.gh;
     const nextStealthed = !!s.st;
+    if (nextGhost !== this.isGhost) {
+      this.isGhost = nextGhost;
+      if (nextGhost) setSpectralLook(this.mesh, true);
+      else {
+        setSpectralLook(this.mesh, false);
+        if (this.stealthed) setRemoteStealthVisual(this.mesh, true);
+      }
+    }
     if (nextStealthed !== this.stealthed) {
       this.stealthed = nextStealthed;
-      setRemoteStealthVisual(this.mesh, this.stealthed);
+      if (!this.isGhost) setRemoteStealthVisual(this.mesh, this.stealthed);
     }
     const nextOffhand = s.oh || null;
     if (s.w !== this.weaponId || nextOffhand !== this.offhandId) {
@@ -822,6 +835,7 @@ export class Multiplayer {
       get mesh() { return r.mesh; },
       get dead() { return r.dead; },
       get stealthed() { return r.stealthed; },
+      get ghost() { return r.isGhost; },   // wraiths are beneath a beast's notice
       ownerUid: uid, // pickups: magnet-collects are granted back to this uid
       takeDamage: (dmg, src) => net().sendEvent({
         type: 'pdmg', dmg: Math.round(dmg * 10) / 10,
@@ -1103,6 +1117,7 @@ export class Multiplayer {
       atk: p.attackT > 0 ? 1 : 0, dead: p.dead ? 1 : 0,
       dn: (p.dead && this.downedUntil) ? 1 : 0,
       st: p.stealthed ? 1 : 0,
+      gh: p.ghost ? 1 : 0,          // dead and walking — others render the wraith
       ...(ctx.playerName ? { nm: ctx.playerName } : {}),
       pet: ((p.hooks.classRulesEnabled?.() === false || p.selectedClass === 'beastmaster')
         && p.pet && !p.petDead && localPet)
@@ -1316,7 +1331,7 @@ export class Multiplayer {
         if (ctx.petTarget) combatTargets.push(ctx.petTarget);
         for (const r of this.remotes.values()) {
           if (!r.lastSeen) continue;
-          playerTargets.push(r.proxy);
+          if (!r.isGhost) playerTargets.push(r.proxy);   // ghosts can't loot
           combatTargets.push(r.proxy);
           if (!r.petProxy.dead) combatTargets.push(r.petProxy);
         }

@@ -178,6 +178,7 @@ const COMPOSITE_FRAG = /* glsl */`
   uniform bool useBloom;
   uniform bool useRays;
   uniform bool useFXAA;
+  uniform float uGhost;           // 0 = alive, 1 = fully in the land of the dead
   varying vec2 vUv;
   const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
   // canopy shade: reconstruct the pixel's WORLD position from depth, look up
@@ -263,6 +264,18 @@ const COMPOSITE_FRAG = /* glsl */`
     // white at noon, deep gold at sunset)
     if (useRays) c += rayColor * (texture2D(tRays, vUv).r * rayStrength);
     if (useBloom) c += texture2D(tBloom, vUv).rgb * bloomStrength;
+    // ---- the ghost world ----
+    // Death drains the colour out of everything and leaves it lit by a cold
+    // blue. Done in LINEAR light, so it is a true desaturation toward a tinted
+    // grey rather than a wash laid over the top. A gentle edge darkening pulls
+    // the living world further away.
+    if (uGhost > 0.0) {
+      float l = dot(c, LUMA);
+      vec3 spectral = vec3(l) * vec3(0.52, 0.80, 1.35);   // blue-shifted grey
+      float d = length(vUv - 0.5);                        // corner falloff
+      spectral *= 1.0 - 0.45 * smoothstep(0.25, 0.78, d);
+      c = mix(c, spectral, uGhost);
+    }
     gl_FragColor = vec4(l2s(c), 1.0);              // LINEAR → sRGB for the canvas
   }`;
 
@@ -341,6 +354,7 @@ export class PostFX {
       aoStrength: { value: 0.25 }, aoFloor: { value: 0.30 }, bloomStrength: { value: 0.55 },
       useAO: { value: false }, useCanopy: { value: false },
       useBloom: { value: false }, useRays: { value: false }, useFXAA: { value: false },
+      uGhost: { value: 0 },
     });
     this._sunWorld = new THREE.Vector3();
     this._camFwd = new THREE.Vector3();
@@ -452,6 +466,7 @@ export class PostFX {
     c.useBloom.value = !!opts.bloom;
     // the scene target is MSAA-resolved — FXAA on top only smears fine detail
     c.useFXAA.value = false;
+    c.uGhost.value = opts.ghost ?? 0;
     c.aoStrength.value = opts.aoStrength ?? 0.25;
     c.aoFloor.value = opts.aoFloor ?? 0.30;
     c.useRays.value = rayK > 0;
