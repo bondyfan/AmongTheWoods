@@ -361,7 +361,8 @@ const player = new Player(scene, {
     requestAutosave();
   },
   popup: (pos, text, color, cls) => ui.popup(pos, text, color, cls),
-  onHurt: () => ui.hurtFlash(),
+  shake: (dur, amp) => shakeCamera(dur, amp),
+  onHurt: () => { ui.hurtFlash(); shakeCamera(0.18, 0.45); },
   onParry: (src) => {
     if (src?.id == null) return;
     const em = combatMgr();
@@ -1949,6 +1950,9 @@ function discoverType(type) {
   audio.sfx('evolve_ready', 0.35);
 }
 
+// anime impact words cycled per hit so a flurry doesn't read as one repeated word
+const POW_WORDS = ['POW!', 'BAM!', 'WHAM!', 'THWACK!', 'SMASH!'];
+let powTick = 0;
 const enemyMgr = new EnemyManager(scene, world, {
   popup: (pos, text, color, cls) => ui.popup(pos, text, color, cls),
   onKill: (enemy) => {
@@ -2044,7 +2048,7 @@ const enemyMgr = new EnemyManager(scene, world, {
     if (!enemy.ambush) {
       ui.toast(`${skulls} ${enemy.bossName ?? 'A pack mother'} appears! Her children keep coming until she falls.`, 'boss');
       ui.hurtFlash();
-      shakeT = 0.35; // the ground trembles when a mother arrives
+      shakeCamera(0.35, 0.5); // the ground trembles when a mother arrives
     }
   },
   onBossDeath: (enemy) => ui.removeTracker('boss' + enemy.id),
@@ -2073,6 +2077,19 @@ const enemyMgr = new EnemyManager(scene, world, {
       }, { worldRadius: MOB_INFO_RADIUS });
   },
   onRemove: (enemy) => ui.removeTracker('hp' + enemy.id),
+  // every landed blow: punch the camera and pop an anime impact word. Crits
+  // hit harder and shout louder; ordinary swings just thump.
+  onLocalHit: (enemy, dmg, opts) => {
+    player.combatNoiseT = 0;
+    shakeCamera(opts?.crit ? 0.17 : 0.09, opts?.crit ? 0.55 : 0.24);
+    if (enemy?.mesh) {
+      const at = enemy.mesh.position.clone()
+        .setY(enemy.mesh.position.y + 1.15 * (enemy.sizeMult || 1) + 0.5);
+      const word = opts?.weakPoint ? 'CRACK!' : opts?.crit ? 'POW!' : POW_WORDS[(powTick++) % POW_WORDS.length];
+      ui.popup(at, word, opts?.crit ? '#ffd23a' : '#fff3c4', 'pow');
+      player._fxBurst?.(enemy.pos, opts?.crit ? 0xffd23a : 0xfff0b0, opts?.crit ? 10 : 6, 4, 0.28);
+    }
+  },
   // a beaten griffin drops its nest and flees; it may return in ~20 minutes
   onGriffinEscape: (enemy) => {
     pickups.spawn('item', enemy.nestItem ?? 'desertNest', enemy.pos, 0.8, null, true);
@@ -5416,7 +5433,16 @@ function syncFarToFog() {
 }
 
 // ---------- camera ----------
-let shakeT = 0; // brief tremble on boss entrances
+// Screen shake: every impact feeds it. `shakeT` is how long the tremble lasts
+// and `shakeAmp` how hard it hits — repeated calls take the strongest of each,
+// so a flurry of blows reads as one sustained rumble instead of restarting.
+let shakeT = 0, shakeAmp = 0, shakeDur = 0.35;
+function shakeCamera(dur = 0.2, amp = 0.5) {
+  if (game.editorView) return;
+  shakeT = Math.max(shakeT, dur);
+  shakeDur = Math.max(shakeDur, dur);
+  shakeAmp = Math.max(shakeAmp, amp);
+}
 // switching view modes retunes the whole render pipeline: the third-person
 // camera needs to SEE further (fog, far plane, more chunks) but the wider
 // fov + fog wall keep the draw load in check
@@ -5553,12 +5579,14 @@ function updateCamera(dt = 0) {
   if (game.editorView) { input.takeWheel(); return; } // the editor owns the camera
   trackAutoRotate(dt);
   const py = player.mesh.position.y;
-  let sx = 0, sz = 0;
+  let sx = 0, sz = 0, sy = 0;
   if (shakeT > 0) {
     shakeT -= dt;
-    const k = Math.min(1, shakeT / 0.35) * 0.5;
+    const k = Math.min(1, shakeT / Math.max(0.001, shakeDur)) * shakeAmp;
     sx = (Math.random() - 0.5) * k;
     sz = (Math.random() - 0.5) * k;
+    sy = (Math.random() - 0.5) * k * 0.6;
+    if (shakeT <= 0) { shakeAmp = 0; shakeDur = 0.35; }
   }
   if (game.rpgView) {
     // MMORPG chase camera: right-drag steers the character AND tilts the
@@ -5585,8 +5613,8 @@ function updateCamera(dt = 0) {
     const ty = Math.max(py + 1.7 + Math.sin(rpgPitch) * rpgDist, groundY + 1.2);
     if (!camInit) { camSmooth.set(tx, ty, tz); camInit = true; }
     camSmooth.lerp(new THREE.Vector3(tx, ty, tz), Math.min(1, dt * 8));
-    camera.position.set(camSmooth.x + sx, camSmooth.y, camSmooth.z + sz);
-    camera.lookAt(player.pos.x + player.facing.x * 2 + sx, py + 1.7, player.pos.z + player.facing.z * 2 + sz);
+    camera.position.set(camSmooth.x + sx, camSmooth.y + sy, camSmooth.z + sz);
+    camera.lookAt(player.pos.x + player.facing.x * 2, py + 1.7, player.pos.z + player.facing.z * 2);
   } else {
     camInit = false;
     // ease the orbit yaw toward its target the short way around; at yaw 0
@@ -5600,8 +5628,8 @@ function updateCamera(dt = 0) {
       && window.innerHeight < 560;
     _camZoomK += ((landscapePhone ? 0.64 : 1) - _camZoomK) * Math.min(1, dt * 6);
     const H = 26 * _camZoomK, OFF = 14 * _camZoomK;
-    camera.position.set(player.pos.x + fx * OFF + sx, py + H, player.pos.z + fz * OFF + sz);
-    camera.lookAt(player.pos.x - fx * 2 + sx, py, player.pos.z - fz * 2 + sz);
+    camera.position.set(player.pos.x + fx * OFF + sx, py + H + sy, player.pos.z + fz * OFF + sz);
+    camera.lookAt(player.pos.x - fx * 2, py, player.pos.z - fz * 2);
   }
   // time-driven sun: rises in the east (+x) around 05:00, arcs through the
   // southern sky and sets in the west around 23:00. Noon sun stands nearly
@@ -6039,7 +6067,7 @@ function step() {
         canopy = {
           densTex: canopyShade.densTex, metaTex: canopyShade.metaTex,
           cx: canopyShade.cx, cz: canopyShade.cz, size: canopyShade.size,
-          strength: 0.85,
+          strength: 1.0,
         };
       }
     }
