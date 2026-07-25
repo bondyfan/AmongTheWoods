@@ -59,8 +59,10 @@ const GODRAY_FRAG = /* glsl */`
     }
     // radial falloff from the sun: without it every open-sky pixel accumulates
     // a full march and the ENTIRE sky lifts uniformly (a flat wash, not shafts)
+    // reach far enough that a sun sitting just past the top edge still throws
+    // shafts down into frame (0.5 = half the screen height)
     float dist = length((vUv - uSunUv) * vec2(uAspect, 1.0));
-    float fall = 1.0 - smoothstep(0.04, 0.8, dist);
+    float fall = 1.0 - smoothstep(0.05, 1.15, dist);
     gl_FragColor = vec4(vec3(sum / float(RAY_SAMPLES) * fall), 1.0);
   }`;
 
@@ -379,13 +381,19 @@ export class PostFX {
       const facing = -v.z;                            // >0 = sun ahead of the camera
       if (facing > 0) {
         const e = camera.projectionMatrix.elements;
-        const su = (e[0] * v.x / facing) * 0.5 + 0.5;
-        const sv = (e[5] * v.y / facing) * 0.5 + 0.5;
-        // fade as the sun slides out of frame (shafts converging on an
-        // off-screen point look wrong long before they leave)
-        const off = Math.max(Math.abs(su - 0.5), Math.abs(sv - 0.5)) * 2; // 0 centre, 1 edge
-        rayK = opts.rays.strength * Math.max(0, 1 - Math.max(0, off - 0.6) / 1.1)
-          * Math.min(1, facing * 2.2);
+        // CLAMP the shaft origin to just past the frame edge. The third-person
+        // camera tilts down, so the real sun sits above the top edge for all
+        // but a few minutes a day — and shafts converging on a point that far
+        // off screen degenerate to nothing. Pinning the origin to the frame
+        // edge makes light stream IN from the sun's side instead, which is
+        // what a high sun through a canopy actually looks like. (An earlier
+        // off-screen FADE was mathematically tidy and left the effect dead
+        // at every sun angle above ~15°.)
+        const M = 0.35;
+        const su = Math.max(-M, Math.min(1 + M, (e[0] * v.x / facing) * 0.5 + 0.5));
+        const sv = Math.max(-M, Math.min(1 + M, (e[5] * v.y / facing) * 0.5 + 0.5));
+        // the only fade left is how squarely the camera faces the sun
+        rayK = opts.rays.strength * Math.min(1, facing * 2.2);
         if (rayK > 0.001) {
           this.rayMat.uniforms.tDepth.value = this.rtScene.depthTexture;
           this.rayMat.uniforms.uSunUv.value.set(su, sv);

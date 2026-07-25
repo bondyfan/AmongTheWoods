@@ -687,6 +687,25 @@ function sphere(r, color, seg = 8) {
   return m;
 }
 
+// ---- HDR glow ----
+// Bloom (postfx.js) triggers at linear 1.0 — "brighter than white" — so that
+// ordinary lit surfaces never glow. A flame painted with a plain colour tops
+// out AT white and slips under that bar, which is why fire used to have no
+// glow at all. Pushing the colour past 1.0 makes it genuinely over-bright:
+// harmless on its own (it still clamps to white on screen) but bloom now has
+// something to catch. Needs the half-float scene target to survive.
+// Call ONCE per material — it multiplies in place.
+export function overbright(mesh, k = 2.4) {
+  const m = mesh.isMesh || mesh.isSprite ? mesh.material : mesh;
+  if (!m) return mesh;
+  // unlit/sprite materials write their colour straight out, so scale that;
+  // lit materials keep their diffuse (it still has to take light normally)
+  // and push the EMISSIVE term instead
+  if (m.isMeshBasicMaterial || m.isSpriteMaterial) m.color.multiplyScalar(k);
+  else if (m.emissive) m.emissiveIntensity = (m.emissiveIntensity ?? 1) * k;
+  return mesh;
+}
+
 // ---------- Player ----------
 // Starts NAKED except for a leaf; clothing recolors the torso/arms and hides
 // the leaf (player._refreshOutfit drives this via userData refs).
@@ -2111,6 +2130,7 @@ export function makeBonfire() {
   const flame = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.9, 6),
     new THREE.MeshBasicMaterial({ color: 0xff9a30 }));
   flame.position.y = 0.75;
+  overbright(flame, 2.6);
   g.add(flame);
   g.userData.flame = flame;
   return g;
@@ -2853,9 +2873,13 @@ export function makeTorchMesh() {
   const flame = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.32, 6),
     new THREE.MeshBasicMaterial({ color: 0xff9a2e }));
   flame.position.y = 0.58;
+  // 2.4 puts the flame's LUMA just past the bloom threshold while its red
+  // channel is the only one that clamps, so it still reads amber, not yellow
+  overbright(flame, 2.4);
   const flameCore = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.2, 6),
     new THREE.MeshBasicMaterial({ color: 0xffe28a }));
   flameCore.position.y = 0.54;
+  overbright(flameCore, 3.4);      // the white-hot centre glows hardest
   if (!_torchGlowTex) {
     const c = document.createElement('canvas'); c.width = c.height = 64;
     const cx = c.getContext('2d');
@@ -2869,6 +2893,7 @@ export function makeTorchMesh() {
   const glow = new THREE.Sprite(new THREE.SpriteMaterial({
     map: _torchGlowTex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true,
   }));
+  overbright(glow, 1.9);
   glow.scale.setScalar(1.4);
   glow.position.y = 0.6;
   g.add(handle, wrap, flame, flameCore, glow);
@@ -2976,6 +3001,7 @@ export function makeCampfire() {
   const flame = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.55, 6),
     new THREE.MeshLambertMaterial({ color: 0xff8c2a, emissive: 0xff5a00, emissiveIntensity: 0.9 }));
   flame.position.y = 0.42;
+  overbright(flame, 2.6);
   g.add(flame);
   g.userData = { flame };
   return g;
@@ -3005,6 +3031,7 @@ export function makeFurnace() {
   chimney.position.set(0.3, 1.9, 0.3);
   const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.5, 0.1),
     new THREE.MeshLambertMaterial({ color: 0xff7722, emissive: 0xff4400, emissiveIntensity: 0.8 }));
+  overbright(mouth, 2.4);   // the forge mouth glows hot
   mouth.position.set(0, 0.5, -0.71);
   g.add(body, chimney, mouth);
   return g;
@@ -4189,6 +4216,7 @@ export function makeGuardianSphere(emissive = 0x38c0ff) {
   const g = new THREE.Group();
   const core = new THREE.Mesh(new THREE.SphereGeometry(0.28, 12, 10),
     new THREE.MeshLambertMaterial({ color: 0x2b3a4a, emissive, emissiveIntensity: 0.8 }));
+  overbright(core, 2.2);
   core.castShadow = true;
   const ring = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.04, 6, 18),
     new THREE.MeshLambertMaterial({ color: 0x9fd8ff, emissive: 0x225577, emissiveIntensity: 0.6 }));

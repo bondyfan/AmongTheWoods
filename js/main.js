@@ -1959,13 +1959,11 @@ const enemyMgr = new EnemyManager(scene, world, {
     // a fallen village guard yields nothing — no XP, meat or hide (and no
     // quest credit); killing the law is its own punishment
     if (enemy.cfg?.friendly) return;
-    // kill XP is SHARED: every player within 100 m of the kill is rewarded —
-    // 75% each when two or more share, the full amount when only one collects.
-    // The +XP counter pops above the CHARACTER, not the corpse.
+    // Kill XP follows the GROUP: whoever landed the killing blow scores, and so
+    // do their group-mates near the corpse (75% each once two or more share).
+    // Ungrouped players keep their own kills — no free XP from a stranger.
     const shareUids = (mp?.active && mp.killShareUids?.(enemy)) || [];
-    const nearMe = !player.dead
-      && Math.hypot(player.pos.x - enemy.pos.x, player.pos.z - enemy.pos.z) < 100;
-    const meGot = nearMe || (!shareUids.length && !mp?.killerIsRemote?.(enemy));
+    const meGot = !player.dead && (mp?.active ? mp.meScoresKill(enemy, player.pos) : true);
     const sharers = shareUids.length + (meGot ? 1 : 0);
     const xp = Math.max(1, Math.round(enemy.xp * (sharers >= 2 ? 0.75 : 1)));
     for (const uid of shareUids) mp.sendKillXp(xp, uid);
@@ -1977,10 +1975,9 @@ const enemyMgr = new EnemyManager(scene, world, {
       }
       ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2.3), `+${xp} XP`, '#c9a4ff');
     }
-    // Quest kills are proximity-shared in survival co-op. The host owns the
-    // enemy simulation, so it advances its own matching quest here and sends
-    // the same kill to an eligible partner within 20 m.
-    trackQuestKill(enemy);
+    // Quest credit follows the same group rule: my own kills always count, a
+    // group-mate's kill counts when I'm close, a stranger's never does.
+    if (meGot) trackQuestKill(enemy);
     mp?.shareQuestKill?.(enemy, QUEST_KILL_SHARE_RADIUS);
     // meat falls to the ground and is magnet-collected (shared in co-op)
     const piles = Math.min(4, Math.max(1, Math.round(enemy.meat / 2)));
@@ -2943,24 +2940,15 @@ const settings = Object.assign(
       : 'Share this code so a friend can join your running game.';
     $id('admin-row').style.display = (DEVMODE && game.kind === 'survival' && !mp?.active) ? '' : 'none';
     $id('set-admin').checked = !!game.adminMode;
-    // save/load: co-op survival → cloud (needs sign-in); solo survival → THIS
-    // device. Not offered in pvp/moba (saveAvailable gates that).
+    // characters autosave continuously — there is no manual save to offer, so
+    // the row just tells you WHERE this character lives and that it's safe
     const cloud = saveIsCloud();
-    const row = $id('cloud-row');
-    row.style.display = saveAvailable() ? '' : 'none';
-    $id('save-title').textContent = cloud ? '☁️ Cloud save' : '💾 Save game';
-    $id('save-desc').textContent = cloud
-      ? 'Save/Load your character to the cloud (shared co-op account).'
-      : 'Save/Load your character on this device — separate from multiplayer.';
-    $id('cloud-who').textContent = cloud
-      ? (authUser ? `— ${authUser.name}` : '— sign in on the menu first')
+    $id('cloud-row').style.display = saveAvailable() ? '' : 'none';
+    $id('save-title').textContent = cloud ? '☁️ Cloud character' : '💾 Character (this device)';
+    $id('save-desc').textContent = saveAvailable()
+      ? `Autosaves as you play${cloud && authUser ? ` — ${authUser.name}` : ''}. Pick or create characters on the menu.`
       : '';
-    const needAuth = cloud && !authUser;   // solo local save never needs sign-in
-    $id('set-savegame').disabled = needAuth;
-    $id('set-loadgame').disabled = needAuth;
   });
-  $id('set-savegame').addEventListener('click', saveGameNow);
-  $id('set-loadgame').addEventListener('click', openLoadGame);
   $id('set-admin').addEventListener('change', () => {
     game.adminMode = $id('set-admin').checked;
     if (!game.adminMode && player.adminOverrides) {
@@ -3075,6 +3063,7 @@ if (DEVMODE) {
 function serializeState() {
   const p = player;
   const data = {
+    charId: p.charId, name: playerName(),
     level: p.level, xp: p.xp, hp: Math.round(p.hp),
     energy: Math.round(p.energy), mana: Math.round(p.mana),
     res: Object.fromEntries(RESOURCES.map(k => [k, p[k] || 0])),
@@ -3106,20 +3095,23 @@ function serializeState() {
   return JSON.parse(JSON.stringify(data)); // strip undefined for Firebase
 }
 
-// ---------- save backend seam: cloud (co-op) vs local (solo) ----------
-// Co-op survival shares one Firebase account, so it saves to the CLOUD. Solo
-// survival saves to THIS device's localStorage — no sign-in, works offline,
-// and kept entirely separate from the multiplayer saves. Both stores expose the
-// same tiny API (saveGame / autoSave / listSaves / loadSave / deleteSave).
-async function saveBackend() {
-  if (mp?.active && mp.mode === 'coop') return await ensureAuth();
-  return LocalSaves;
+// ---------- character storage seam: cloud (multiplayer) vs local (solo) ----------
+// Multiplayer characters live in the CLOUD (tied to the Google account) so they
+// follow you between devices and sessions; solo characters live on THIS device
+// — no sign-in, offline, entirely separate. Both stores expose the same tiny API
+// (saveChar / listChars / loadChar / deleteChar).
+//
+// `cloud` is decided by the mode the player is ABOUT to enter, which at
+// character-select time is not yet reflected in mp — hence the explicit arg.
+async function saveBackend(cloud = saveIsCloud()) {
+  return cloud ? await ensureAuth() : LocalSaves;
 }
 function saveIsCloud() { return !!(mp?.active && mp.mode === 'coop'); }
-// saving/loading is offered in any survival game EXCEPT pvp (own throwaway world)
+// characters exist in any survival game EXCEPT pvp (its world is throwaway)
 function saveAvailable() {
   return game.kind === 'survival' && (!mp?.active || mp.mode === 'coop');
 }
+const newCharId = () => 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
 // ---------- autosave (single rolling slot) ----------
 // One mechanism catches everything the player asked for — level-ups, purchases
@@ -3169,67 +3161,26 @@ function tickAutosave(dt) {
 }
 
 async function doAutosave() {
+  if (!player.charId) return;            // no character bound yet — nothing to write
   _asBusy = true;
   try {
-    await (await saveBackend()).autoSave(
-      { biome: BIOMES[game.biomeIndex]?.name, level: player.level }, serializeState());
-    ui.toast('💾 Autosaved', 'info');
-  } catch (e) { /* autosave stays quiet on failure — the manual save still nags */ }
+    await (await saveBackend()).saveChar(player.charId, {
+      name: playerName(), cls: player.selectedClass || null,
+      biome: BIOMES[game.biomeIndex]?.name, level: player.level,
+    }, serializeState());
+  } catch { /* autosave stays quiet on failure — it retries on the next change */ }
   finally { _asBusy = false; }
-}
-
-async function saveGameNow() {
-  if (!saveAvailable()) { ui.toast('You can only save inside a survival game.', 'boss'); return; }
-  if (saveIsCloud() && !authUser) { ui.toast('Sign in first (on the menu).', 'boss'); return; }
-  try {
-    await (await saveBackend()).saveGame(
-      { biome: BIOMES[game.biomeIndex].name, level: player.level }, serializeState());
-    ui.toast(saveIsCloud() ? '💾 Game saved to the cloud!' : '💾 Game saved (this device)!', 'level');
-    audio.sfx('upgrade', 0.5);
-  } catch (e) { ui.toast('Save failed: ' + (e?.message || e), 'boss'); }
-}
-
-async function openLoadGame() {
-  if (!saveAvailable()) { ui.toast('You can only load inside a survival game.', 'boss'); return; }
-  if (saveIsCloud() && !authUser) { ui.toast('Sign in first (on the menu).', 'boss'); return; }
-  $id('loadgame').classList.remove('hidden');
-  $id('loadgame').querySelector('h2').textContent = saveIsCloud() ? '☁️ Load Game' : '📂 Load Game (this device)';
-  const list = $id('loadgame-list'), empty = $id('loadgame-empty');
-  list.innerHTML = ''; empty.textContent = 'Loading your saves…'; empty.style.display = '';
-  try {
-    const saves = await (await saveBackend()).listSaves();
-    if (!saves.length) { empty.textContent = 'No saves yet — hit Save first.'; return; }
-    empty.style.display = 'none';
-    for (const sv of saves) {
-      const row = document.createElement('div');
-      row.className = 'save-row';
-      const when = new Date(sv.at).toLocaleString();
-      const tag = sv.auto ? '🔄 Autosave · ' : '';
-      row.innerHTML = `<div class="save-meta"><b>${tag}${sv.biome ?? '?'} · Lv ${sv.level ?? '?'}</b>
-        <div class="save-when">${when}</div></div>
-        <button class="mini-btn" data-load="${sv.id}">📂 Load</button>
-        <button class="mini-btn" data-del="${sv.id}">🗑</button>`;
-      row.querySelector('[data-load]').addEventListener('click', () => doLoad(sv.id));
-      row.querySelector('[data-del]').addEventListener('click', async () => {
-        try { await (await saveBackend()).deleteSave(sv.id); row.remove(); } catch {}
-      });
-      list.appendChild(row);
-    }
-  } catch (e) { empty.textContent = 'Could not load saves: ' + (e?.message || e); }
-}
-
-async function doLoad(id) {
-  try {
-    const data = await (await saveBackend()).loadSave(id);
-    if (!data) { ui.toast('That save is empty.', 'boss'); return; }
-    applyLoadedState(data);
-    $id('loadgame').classList.add('hidden');
-  } catch (e) { ui.toast('Load failed: ' + (e?.message || e), 'boss'); }
 }
 
 function applyLoadedState(d) {
   const p = player;
   clearHunterTraps();
+  // bind this run to the loaded character so its autosave slot keeps rolling
+  p.charId = d.charId || p.charId || newCharId();
+  if (d.name && nameInput) {
+    nameInput.value = sanitizeName(d.name);
+    localStorage.setItem('atw-name', nameInput.value);
+  }
   p.level = Math.max(1, Math.min(MAX_LEVEL, d.level ?? 1));
   // clamp saved XP into the loaded level's bracket — saves from before an
   // XP-curve change would otherwise land outside the new table
@@ -3313,61 +3264,254 @@ function applyLoadedState(d) {
 }
 $id('loadgame').querySelector('.panel-close').addEventListener('click', () => $id('loadgame').classList.add('hidden'));
 
-// ---------- survival: "New game vs Load" prompt on entering ----------
-// Whenever you drop into a survival world that HAS saves, offer to bring a
-// character back instead of always starting fresh. Co-op reads the shared cloud
-// (needs sign-in); solo reads this device. No saves (or pvp/moba) → skip the
-// prompt and just play new, exactly as before.
-let _startChoiceNewestId = null;
+// ---------- character select (WoW-style) ----------
+// Entering a survival world opens a character screen listing your autosaved
+// characters (each has its own rolling slot) plus "+ New character". Picking one
+// restores it; the new one starts fresh at level 1. There are no manual saves.
+const CLASS_ICON = { warrior: '⚔️', ranger: '🏹', mage: '🔮', priest: '✨', beastmaster: '🐺' };
+
 async function maybeOfferStartChoice() {
   if (openingEditor || game.editorView) return; // World Editor is not a play session
-  if (!saveAvailable()) return;                 // pvp/moba have no saves
-  if (saveIsCloud() && !authUser) return;       // co-op cloud needs sign-in
-  let saves = [];
-  try { saves = await (await saveBackend()).listSaves(); } catch { return; }
-  if (!saves.length) return;                    // nothing to load — start fresh silently
-  const newest = saves[0];                      // listSaves is newest-first
-  _startChoiceNewestId = newest.id;
-  const when = new Date(newest.at).toLocaleString();
-  const tag = newest.auto ? '🔄 Autosave · ' : '';
-  $id('cs-last-meta').textContent = `${tag}${newest.biome ?? '?'} · Lv ${newest.level ?? '?'} · ${when}`;
-  $id('cs-lead-note').textContent = saveIsCloud()
-    ? 'You have cloud-saved characters. Start this run fresh, or bring one back?'
-    : 'You have saved characters on this device. Start fresh, or bring one back?';
-  // always open on the first (New/Load) step
-  $id('coopstart-choose').classList.remove('hidden');
-  $id('coopstart-load').classList.add('hidden');
-  // wait out the "entering the woods" overlay so the prompt lands on the world,
-  // not on the loading spinner
-  showStartChoiceWhenRevealed();
+  if (!saveAvailable()) return;                 // pvp/moba have no characters
+  const cloud = saveIsCloud();
+  if (cloud && !authUser) { player.charId ??= newCharId(); return; } // guest co-op: unsaved run
+  let chars = [];
+  try { chars = await (await saveBackend(cloud)).listChars(); } catch { /* offline → new char */ }
+  if (!chars.length) { player.charId ??= newCharId(); return; }  // first time: just play
+  renderCharSelect(chars, cloud);
+  showCharSelectWhenRevealed();
 }
-function showStartChoiceWhenRevealed() {
+
+function renderCharSelect(chars, cloud) {
+  $id('cs-lead-note').textContent = cloud
+    ? 'Your cloud characters — pick one to continue, or roll a new one.'
+    : 'Your characters on this device — pick one to continue, or roll a new one.';
+  const list = $id('charselect-list');
+  list.innerHTML = '';
+  for (const c of chars) {
+    const row = document.createElement('button');
+    row.className = 'char-row';
+    const cls = c.cls ? `${CLASS_ICON[c.cls] || '🎓'} ${c.cls}` : 'no class yet';
+    row.innerHTML = `<span class="char-lv">${c.level ?? 1}</span>
+      <span class="char-main"><b class="char-name"></b>
+        <small class="char-sub"></small></span>
+      <span class="char-del" title="Delete this character">🗑</span>`;
+    row.querySelector('.char-name').textContent = c.name || 'Adventurer';
+    row.querySelector('.char-sub').textContent =
+      `${cls} · ${c.biome ?? 'the woods'} · ${new Date(c.at || 0).toLocaleString()}`;
+    row.addEventListener('click', async (e) => {
+      if (e.target.classList.contains('char-del')) return;   // the bin has its own job
+      audio.sfx('click', 0.4);
+      closeCharSelect();
+      await loadCharacter(c.id, cloud);
+    });
+    row.querySelector('.char-del').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm(`Delete "${c.name || 'Adventurer'}" (level ${c.level ?? 1})? This cannot be undone.`)) return;
+      try { await (await saveBackend(cloud)).deleteChar(c.id); row.remove(); } catch {}
+      if (!list.children.length) closeCharSelect();
+    });
+    list.appendChild(row);
+  }
+}
+
+function showCharSelectWhenRevealed() {
   const ov = $id('enter-overlay');
-  if (ov && !ov.classList.contains('hidden')) { setTimeout(showStartChoiceWhenRevealed, 150); return; }
+  if (ov && !ov.classList.contains('hidden')) { setTimeout(showCharSelectWhenRevealed, 150); return; }
   $id('coopstart').classList.remove('hidden');
 }
-function closeStartChoice() { $id('coopstart').classList.add('hidden'); }
-$id('cs-new').addEventListener('click', () => { audio.sfx('click', 0.4); closeStartChoice(); });
-$id('cs-load').addEventListener('click', () => {
+function closeCharSelect() { $id('coopstart').classList.add('hidden'); }
+
+async function loadCharacter(id, cloud) {
+  try {
+    const data = await (await saveBackend(cloud)).loadChar(id);
+    if (!data) { ui.toast('That character is empty.', 'boss'); player.charId ??= newCharId(); return; }
+    applyLoadedState(data);
+    player.charId = id === 'autosave' ? newCharId() : id; // legacy slot graduates to a real id
+  } catch (e) {
+    ui.toast('Could not load that character: ' + (e?.message || e), 'boss');
+    player.charId ??= newCharId();
+  }
+}
+
+// "+ New character" — a fresh charId means the autosave writes to a NEW slot,
+// leaving every existing character untouched
+$id('cs-new').addEventListener('click', () => {
   audio.sfx('click', 0.4);
-  $id('coopstart-choose').classList.add('hidden');
-  $id('coopstart-load').classList.remove('hidden');
+  player.charId = newCharId();
+  closeCharSelect();
+  ui.toast('✨ A new life begins in the woods.', 'level');
 });
-$id('cs-back').addEventListener('click', () => {
+
+// ==================== social UI: group, duel, inspect ====================
+// Shift-locking another player raises an action bar; the bar stays up after you
+// let go of Shift so you can actually click it, and closes when the target
+// wanders off, dies, or you press Esc.
+let socialTarget = null;      // the RemotePlayer the action bar refers to
+
+function updateSocialTarget() {
+  const locked = targeting.selectedPlayer;
+  if (locked && locked !== socialTarget) socialTarget = locked;
+  // drop the bar when the target is gone from the world
+  if (socialTarget && (!mp?.active || !mp.remotes.has(socialTarget.uid))) socialTarget = null;
+  renderPlayerActions();
+}
+
+function renderPlayerActions() {
+  const el = $id('player-actions');
+  if (!el) return;
+  const t = socialTarget;
+  if (!t || game.mode !== 'play' || game.paused) { el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  $id('pa-name').textContent = t.name || 'Player';
+  const rel = t.inGroup ? 'in your group' : 'not grouped';
+  $id('pa-sub').textContent = `Lv ${t.level ?? '?'} · ${rel}`;
+  const duelling = !!mp?.duel?.active;
+  const inv = $id('pa-invite');
+  inv.textContent = t.inGroup ? '👥 In your group' : '🤝 Invite to group';
+  inv.disabled = t.inGroup || duelling;
+  $id('pa-duel').disabled = duelling;
+}
+function closePlayerActions() { socialTarget = null; renderPlayerActions(); }
+
+$id('pa-close')?.addEventListener('click', () => { audio.sfx('click', 0.35); closePlayerActions(); });
+$id('pa-invite')?.addEventListener('click', () => {
+  if (socialTarget) mp?.inviteToGroup(socialTarget.uid);
+  audio.sfx('click', 0.4); closePlayerActions();
+});
+$id('pa-duel')?.addEventListener('click', () => {
+  if (socialTarget) mp?.challengeDuel(socialTarget.uid);
+  audio.sfx('click', 0.4); closePlayerActions();
+});
+$id('pa-inspect')?.addEventListener('click', () => {
+  if (!socialTarget) return;
   audio.sfx('click', 0.4);
-  $id('coopstart-load').classList.add('hidden');
-  $id('coopstart-choose').classList.remove('hidden');
+  openInspect(socialTarget);
+  closePlayerActions();
 });
-$id('cs-last').addEventListener('click', async () => {
-  audio.sfx('click', 0.4);
-  closeStartChoice();
-  if (_startChoiceNewestId) await doLoad(_startChoiceNewestId);
+
+// ---- accept/decline prompt, shared by group invites and duel challenges ----
+let askAction = null;
+function showSocialAsk(title, text, yesLabel, onYes, onNo) {
+  askAction = { onYes, onNo };
+  $id('ask-title').textContent = title;
+  $id('ask-text').textContent = text;
+  $id('ask-yes').textContent = yesLabel;
+  $id('social-ask').classList.remove('hidden');
+}
+function closeSocialAsk() { $id('social-ask').classList.add('hidden'); askAction = null; }
+$id('ask-yes')?.addEventListener('click', () => {
+  const a = askAction; closeSocialAsk(); audio.sfx('click', 0.4); a?.onYes?.();
 });
-$id('cs-choose').addEventListener('click', () => {
-  audio.sfx('click', 0.4);
-  closeStartChoice();
-  openLoadGame();
+$id('ask-no')?.addEventListener('click', () => {
+  const a = askAction; closeSocialAsk(); audio.sfx('click', 0.35); a?.onNo?.();
 });
+
+// ---- party frames (group members, top-left under your own bars) ----
+function renderPartyFrames() {
+  const box = $id('party-frames');
+  if (!box) return;
+  const mates = mp?.active ? (mp.groupRemotes?.() || []) : [];
+  if (!mates.length) { box.innerHTML = ''; box._keys = ''; return; }
+  const keys = mates.map(r => r.uid).join('|');
+  if (box._keys !== keys) {           // rebuild only when the roster changes
+    box.innerHTML = '';
+    for (const r of mates) {
+      const row = document.createElement('div');
+      row.className = 'pf';
+      row.innerHTML = `<div class="pf-av"></div>
+        <div class="pf-main"><div class="pf-name"></div>
+          <div class="pf-bars">
+            <div class="pf-bar pf-hp"><i></i></div>
+            <div class="pf-bar pf-en"><i></i></div>
+            <div class="pf-bar pf-mn"><i></i></div>
+          </div></div>`;
+      row.addEventListener('click', () => { socialTarget = r; renderPlayerActions(); });
+      box.appendChild(row);
+      r._pf = row;
+    }
+    box._keys = keys;
+  }
+  for (const r of mates) {
+    const row = r._pf; if (!row) continue;
+    row.classList.toggle('pf-dead', !!r.dead);
+    row.querySelector('.pf-av').textContent = (r.name || '?').slice(0, 2).toUpperCase();
+    row.querySelector('.pf-name').textContent = `${r.name || 'Player'} · ${r.level ?? '?'}`;
+    const pct = (v, m) => Math.max(0, Math.min(100, (v / Math.max(1, m)) * 100)) + '%';
+    row.querySelector('.pf-hp > i').style.width = pct(r.hp, r.maxHp);
+    row.querySelector('.pf-en > i').style.width = pct(r.energy ?? 0, r.maxEnergy ?? 100);
+    const manaBar = row.querySelector('.pf-mn');
+    manaBar.style.display = (r.maxMana > 0) ? '' : 'none';
+    if (r.maxMana > 0) manaBar.querySelector('i').style.width = pct(r.mana, r.maxMana);
+  }
+}
+
+// ---- inspect: what I show others, and the modal that shows theirs ----
+function inspectPayload() {
+  const p = player;
+  return {
+    name: playerName(), lv: p.level, cls: p.selectedClass || null,
+    eq: { ...p.equipment },
+    st: {
+      hp: Math.round(p.maxHp), dmg: Math.round(p.damage ?? 0),
+      armor: +(p.armor ?? 0).toFixed(2), crit: +(p.critChance ?? 0).toFixed(2),
+      energy: Math.round(p.maxEnergy || 0), mana: Math.round(p.maxMana || 0),
+      speed: +(p.moveSpeed ?? 0).toFixed(1),
+    },
+  };
+}
+
+function openInspect(remote) {
+  $id('inspect').classList.remove('hidden');
+  $id('inspect-title').textContent = `🔍 ${remote.name || 'Player'}`;
+  $id('inspect-empty').textContent = 'Asking them to show their gear…';
+  $id('inspect-empty').style.display = '';
+  $id('inspect-content').classList.add('hidden');
+  mp?.requestInspect(remote.uid);
+}
+
+function showInspectData(uid, d) {
+  const panel = $id('inspect');
+  if (panel.classList.contains('hidden')) return;    // they answered after I closed it
+  $id('inspect-empty').style.display = 'none';
+  $id('inspect-content').classList.remove('hidden');
+  $id('inspect-title').textContent =
+    `🔍 ${d.name || 'Player'} · Lv ${d.lv ?? '?'}${d.cls ? ` · ${d.cls}` : ''}`;
+  const gear = $id('inspect-gear');
+  gear.innerHTML = '';
+  const SLOTS = [['weapon', 'Weapon'], ['offhand', 'Offhand'], ['head', 'Head'], ['chest', 'Chest'],
+    ['underlayer', 'Underlayer'], ['legs', 'Legs'], ['boots', 'Boots'], ['back', 'Back'],
+    ['mount', 'Mount'], ['charm', 'Charm'], ['companion', 'Companion']];
+  for (const [key, label] of SLOTS) {
+    const id = d.eq?.[key];
+    if (!id || id === 'fists') continue;
+    const item = itemById(id);
+    const row = document.createElement('div');
+    row.className = 'insp-slot';
+    row.innerHTML = `<span class="islot"></span><b></b>`;
+    row.querySelector('.islot').textContent = label;
+    row.querySelector('b').textContent = item?.name || id;
+    gear.appendChild(row);
+  }
+  if (!gear.children.length) gear.innerHTML = '<div class="insp-slot">Nothing equipped.</div>';
+  const stats = $id('inspect-stats');
+  stats.innerHTML = '';
+  const S = d.st || {};
+  const rows = [['Health', S.hp], ['Damage', S.dmg], ['Armor', S.armor],
+    ['Crit', S.crit != null ? Math.round(S.crit * 100) + '%' : null],
+    ['Energy', S.energy], ['Mana', S.mana || null], ['Speed', S.speed]];
+  for (const [label, v] of rows) {
+    if (v == null || v === '' ) continue;
+    const el = document.createElement('div');
+    el.className = 'insp-stat';
+    el.innerHTML = `<span></span> <b></b>`;
+    el.querySelector('span').textContent = label;
+    el.querySelector('b').textContent = String(v);
+    stats.appendChild(el);
+  }
+}
+$id('inspect')?.querySelector('.panel-close')
+  ?.addEventListener('click', () => $id('inspect').classList.add('hidden'));
 
 async function ensureMp() {
   if (!mp) {
@@ -3385,6 +3529,24 @@ async function ensureMp() {
       dropHalfMeat,
       markDeath: (pos) => { minimap.deathAt = { x: pos.x, z: pos.z }; },
       onPartnerJoin: () => hideJoinCodeHud(), // first friend arrives → code goes to Settings only
+      // ---- social hooks ----
+      onGroupChange: () => renderPartyFrames(),
+      onGroupInvite: (inv) => {
+        if (!inv) { closeSocialAsk(); return; }
+        showSocialAsk('🤝 Group invitation',
+          `${inv.name} invites you to join their group. Grouped players share kill XP and quest progress.`,
+          '✅ Join the group',
+          () => mp.acceptGroupInvite(), () => mp.declineGroupInvite());
+      },
+      onDuelChallenge: (d) => {
+        if (!d) { closeSocialAsk(); return; }
+        showSocialAsk('⚔️ Duel challenge',
+          `${d.name} challenges you to a duel. Nobody dies — the loser stops at 1 HP.`,
+          '⚔️ Accept the duel',
+          () => mp.acceptDuel(), () => mp.declineDuel());
+      },
+      inspectPayload,
+      onInspectData: (uid, d) => showInspectData(uid, d),
       startPlaying,
       showPing: (x, z) => showPing(x, z),
       // shared base: apply the partner's camp levels/storage locally
@@ -4824,6 +4986,8 @@ for (let i = 0; i < MAX_SPELL_SLOTS; i++) {
 }
 input.onKey('Escape', () => {
   if (!inPlay()) return;
+  if (!$id('inspect').classList.contains('hidden')) { $id('inspect').classList.add('hidden'); return; }
+  if (socialTarget) { closePlayerActions(); return; }
   if (pendingAbility) { cancelAbilityPlacement(); ui.toast('Cast cancelled.', ''); return; }
   if (pendingCampItem) { cancelCampItemPlacement(); ui.toast('Placement cancelled.', ''); return; }
   if (pendingNest) { cancelNestPlacement(); ui.toast('🪺 Placement cancelled.', ''); return; }
@@ -5798,7 +5962,10 @@ function step() {
   if (game.mode === 'play' && !game.paused && !game.editorView) {
     game.time += dt;
     updateAim(dt);
-    targeting.update(dt, { input, player, alive: combatMgr()?.alive?.() || [] });
+    targeting.update(dt, { input, player, alive: combatMgr()?.alive?.() || [],
+      players: (mp?.active && mp.mode === 'coop') ? mp.mapRemotes() : [] });
+    updateSocialTarget();
+    renderPartyFrames();
     updateNestGhost();
     updateCampItemGhost();
     updateAbilityGhost();
@@ -6088,9 +6255,11 @@ function step() {
     let rays = null;
     if (settings.rays && !game.dungeon) {
       const dayK = (1 - (game.nightK || 0)) * (1 - atmoCaveK);
-      // low sun = long, obvious shafts; overhead noon sun = a subtle wash
+      // low sun = long, obvious shafts; overhead noon sun still gets a solid
+      // wash (the old 0.34 floor left midday shafts invisible once the
+      // off-screen fade took its cut on top)
       const lowSun = 1 - Math.min(1, Math.max(0, (_sunDir.y - 0.25) / 0.65));
-      const k = dayK * (0.34 + 0.66 * lowSun);
+      const k = dayK * (0.62 + 0.38 * lowSun);
       if (k > 0.01) rays = { dir: _sunDir, color: sun.color, strength: k * 0.85 };
     }
     postfx.render(scene, camera, {
