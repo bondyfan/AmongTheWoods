@@ -1236,8 +1236,10 @@ export class World {
     hay.position.set(hax, this.heightAt(hax, haz), haz);
     group.add(hay);
     this.obstacles.push({ x: hax, z: haz, r: 1.2, home: true });
-    for (let i = 0; i < 14; i++) {
-      const a = 1.7 + rng() * 1.1, d = R - 6.2 + rng() * 2.6;
+    // the wheat plot sits on the far side from the hay, so the two props read
+    // as separate things rather than one tangled heap
+    for (let i = 0; i < 16; i++) {
+      const a = -1.5 + rng() * 1.3, d = R - 6.4 + rng() * 3.0;
       const wx = Math.sin(a) * d, wz = Math.cos(a) * d;
       const tuft = makeWheatTuft(rng);
       tuft.position.set(wx, this.heightAt(wx, wz), wz);

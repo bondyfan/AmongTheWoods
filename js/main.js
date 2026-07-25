@@ -6214,7 +6214,6 @@ function step() {
         : channel ? `✨ ${channel.label} ${Math.min(99, Math.round((channel.t / channel.dur) * 100))}%`
         : mp?.revivablePartner?.() ? '💚 Your partner is DOWN — press <kbd>E</kbd> to revive!'
         : nearChest() ? '📦 Storage chest — press <kbd>E</kbd> to open'
-        : nearHome() ? '🏠 Your home — press <kbd>E</kbd> to build &amp; upgrade'
         : nearWildHorse() ? '🐴 A wild horse — press <kbd>E</kbd> to saddle and ride it'
         : nearParkedHorse() ? '🐴 Your horse — press <kbd>E</kbd> to mount'
         : nearSmith() ? '⚒️ Blacksmith — press <kbd>E</kbd> for quests &amp; the forge'
