@@ -25,9 +25,16 @@ import { makeMan, makeAxe, makeBow, makePickaxe, makeClub, makeSword, makeHandSp
          makeStoneDrop, makeHideDrop, makeIronDrop, makeBerryDrop, makeSalveDrop, makeRoastDrop,
          makeEssenceDrop, makeWoolDrop, makeItemDrop,
          makeEnemyShot, makeSpear, makeWolf, makeMobaTower, makeMobaBase,
-         makeTeamFlag, TEAM_COLORS, mat, makeTorchMesh } from './models.js';
+         makeTeamFlag, TEAM_COLORS, mat, makeTorchMesh, makeRaceFlag } from './models.js';
 import { audio } from './audio.js';
 import { MOB_INFO_RADIUS, mobLevelBadge } from './ui.js';
+
+// social tuning: how far a group-mate may stand and still share a kill, and how
+// far duellists may drift before the duel is called a draw
+const XP_SHARE_RADIUS = 100;
+const DUEL_MAX_DIST = 100;
+// players outside a group only appear on each other's maps within this range
+export const MAP_VISIBLE_RADIUS = 100;
 
 // Remote avatars must own their materials: model factories intentionally share
 // many materials, so changing opacity without cloning would fade local actors too.
@@ -123,6 +130,8 @@ class RemotePlayer {
     if (jump) this.pos.copy(this.targetPos); // teleport, don't glide across the map
     this.facing.set(s.fx, 0, s.fz);
     this.hp = s.hp; this.maxHp = s.mhp; this.level = s.lv;
+    if (s.en !== undefined) { this.energy = s.en; this.maxEnergy = s.men || 100; }
+    this.mana = s.mn ?? 0; this.maxMana = s.mmn ?? 0;
     this.moving = !!s.mv;
     if (s.atk && this.attackT <= 0) this.attackT = 0.25;
     this.dead = !!s.dead;
@@ -673,6 +682,19 @@ export class Multiplayer {
       overT: 0, iWon: false, resolved: false,
     };
 
+    // ---- social: group, duel, inspect ----
+    // The GROUP roster is owned by its leader and broadcast to members on every
+    // change, so nobody can drift. members[] always includes the leader.
+    this.group = { leader: null, members: [] };
+    this.pendingInvite = null;   // { uid, name } — someone asked ME to join
+    // A DUEL is a free-form 1v1 anywhere in the world: no arena, no teleport, no
+    // death — HP clamps at 1 and the loser yields.
+    this.duel = {
+      active: false, oppUid: null, oppName: '', countdown: 0,
+      resolved: false, flag: null, overT: 0,
+    };
+    this.pendingDuel = null;     // { uid, name } — someone challenged ME
+
     // combat proxy: lets the local player's melee/arrows/companions hit the
     // remote player in the arena through the normal EnemyManager interface
     const self = this;
@@ -859,6 +881,15 @@ export class Multiplayer {
     this.remotes.delete(uid);
     this._campSyncedTo.delete(uid);
     r.dispose();
+    // they take their group seat and any duel with them
+    if (this.group.members.includes(uid)) {
+      const rest = this.group.members.filter(u => u !== uid);
+      if (rest.length < 2) this._setGroup(null, []);
+      else if (this.group.leader === uid) this._setGroup(rest[0], rest);
+      else this._setGroup(this.group.leader, rest);
+    }
+    if (this.pendingInvite?.uid === uid) { this.pendingInvite = null; this.ctx.onGroupInvite?.(null); }
+    if (this.pendingDuel?.uid === uid) { this.pendingDuel = null; this.ctx.onDuelChallenge?.(null); }
     if (this.mode === 'coop') this.ctx.ui.toast(`👋 ${r.name} left the world.`, 'boss');
   }
 
@@ -1061,6 +1092,9 @@ export class Multiplayer {
       x: +p.pos.x.toFixed(1), z: +p.pos.z.toFixed(1),
       fx: +p.facing.x.toFixed(2), fz: +p.facing.z.toFixed(2),
       hp: Math.round(p.hp), mhp: p.maxHp, lv: p.level,
+      // party frames mirror the group's energy/mana too
+      en: Math.round(p.energy), men: p.maxEnergy,
+      ...(p.maxMana > 0 ? { mn: Math.round(p.mana), mmn: p.maxMana } : {}),
       w: p.equipment.weapon, oh: p.equipment.offhand || 0, mv: (ctx.input.moveX || ctx.input.moveZ) ? 1 : 0,
       atk: p.attackT > 0 ? 1 : 0, dead: p.dead ? 1 : 0,
       dn: (p.dead && this.downedUntil) ? 1 : 0,
@@ -1079,6 +1113,8 @@ export class Multiplayer {
     const torchDark = !!ctx.game.dungeon
       || (BIOMES[ctx.game.biomeIndex]?.darkness ?? 0) >= 0.35
       || (ctx.game.nightK || 0) > 0.55;
+    // keep each avatar's group flag fresh — the maps and party frames read it
+    for (const [uid, r] of this.remotes) r.inGroup = this.isGrouped(uid);
     for (const r of this.remotes.values()) r.update(dt, torchDark);
     this.shadow?.update(dt, p);
     this.mobaShadow?.update(dt);
@@ -1130,6 +1166,7 @@ export class Multiplayer {
     }
 
     if (this.mode === 'pvp') this._updatePvp(dt);
+    this._updateDuel(dt);
     this._updateHudLine();
   }
 
@@ -1247,7 +1284,9 @@ export class Multiplayer {
   combatMgr() {
     if (this.mode === 'moba') return this.isHost ? this.moba.hostileMgr('player') : this.mobaShadow;
     if (this.mode === 'pvp') return this.arena.active ? this.arenaAdapter : this.ctx.enemyMgr;
-    return this.isHost ? this.ctx.enemyMgr : this.shadow;
+    const base = this.isHost ? this.ctx.enemyMgr : this.shadow;
+    // a duel layers the rival on top of the live world — mobs stay playable
+    return this.duel.active ? this._duelAdapter(base) : base;
   }
 
   // world simulation step (replaces the solo enemy/pickup update)
@@ -1308,6 +1347,8 @@ export class Multiplayer {
   // local player died — true means "handled, don't show the end screen"
   handleLocalDeath() {
     if (!this.active) return false;
+    // a duel never kills: yield at 1 HP instead of dying for real
+    if (this.duel.active && !this.duel.resolved) { this.duelYield(); return true; }
     if (this.arena.active) { this._onArenaDeath(); return true; }
     const { ctx } = this;
     const p = ctx.player;
@@ -1427,18 +1468,41 @@ export class Multiplayer {
       ...(ownerLock ? { lk: 1 } : {}) });
   }
 
-  // co-op host: every ally eligible for this kill's XP — within 100 m of the
-  // kill, or they landed the killing blow from beyond it. Returns uids.
+  // co-op host: every ally eligible for this kill's XP. Kills are shared only
+  // inside a GROUP (nearby members all score); ungrouped players keep their own
+  // kills — whoever landed the last hit takes it.
   killShareUids(enemy) {
     if (!this.active || this.mode !== 'coop' || !this.isHost) return [];
+    const killer = this._killerUid(enemy);
     const out = [];
     for (const [uid, r] of this.remotes) {
-      const up = r.mesh?.visible && !r.dead;
-      const near = up && Math.hypot(r.pos.x - enemy.pos.x, r.pos.z - enemy.pos.z) < 100;
-      const credit = enemy.lastHitBy === uid || enemy.lastHitBy === uid + '#pet';
-      if (near || credit) out.push(uid);
+      const credit = killer === uid;
+      // group sharing: the killer's group-mates near the corpse score too
+      const shared = killer && this.isGrouped(uid) && this.isGrouped(killer)
+        && r.mesh?.visible && !r.dead
+        && Math.hypot(r.pos.x - enemy.pos.x, r.pos.z - enemy.pos.z) < XP_SHARE_RADIUS;
+      if (credit || shared) out.push(uid);
     }
     return out;
+  }
+
+  // which player (uid) landed the killing blow — null when the host's own
+  // player/pet/tower did it
+  _killerUid(enemy) {
+    const by = enemy.lastHitBy;
+    if (!by || by === 'local' || by === 'pet' || by === 'tower') return null;
+    const base = by.endsWith('#pet') ? by.slice(0, -4) : by;
+    return this.remotes.has(base) ? base : null;
+  }
+
+  // does the LOCAL player score this kill? Yes if my own sim landed it, or a
+  // group-mate did and I'm close enough to share.
+  meScoresKill(enemy, myPos) {
+    if (!this.active || this.mode !== 'coop' || !this.isHost) return true;
+    const killer = this._killerUid(enemy);
+    if (!killer) return true;                       // my player/pet/tower killed it
+    if (!this.isGrouped(killer) || !this.isGrouped(this.myUid())) return false;
+    return Math.hypot(myPos.x - enemy.pos.x, myPos.z - enemy.pos.z) < XP_SHARE_RADIUS;
   }
 
   // did one of my allies (or their pet) land the killing blow?
@@ -1453,13 +1517,17 @@ export class Multiplayer {
     this.net.sendEvent({ type: 'xpkill', xp }, toUid);
   }
 
-  // Co-op host: share a slain creature with every ally close enough at the
-  // moment of death. The receiving player still decides whether their currently
-  // active quest matches this creature/boss/biome.
+  // Co-op host: quest credit follows the same rule as XP — the killer always
+  // scores, and their GROUP-mates nearby score too. Ungrouped bystanders get
+  // nothing. The receiver still decides whether their quest matches.
   shareQuestKill(enemy, radius = 20) {
     if (!this.active || this.mode !== 'coop' || !this.isHost) return;
+    const killer = this._killerUid(enemy);
     for (const r of this.remotes.values()) {
       if (!r.mesh?.visible || r.dead || !r.lastSeen) continue;
+      const credit = killer === r.uid;
+      const shared = killer && this.isGrouped(r.uid) && this.isGrouped(killer);
+      if (!credit && !shared) continue;
       const pos = r.targetPos ?? r.pos;
       if (Math.hypot(pos.x - enemy.pos.x, pos.z - enemy.pos.z) > radius) continue;
       this.net.sendEvent({
@@ -1516,6 +1584,234 @@ export class Multiplayer {
       }
     }
     return wasNear(ev.ax, ev.az, (ev.ar ?? 2) + 0.8);
+  }
+
+  // ================= social: group / duel / inspect =================
+  myUid() { return typeof this.net.uid === 'function' ? this.net.uid() : this.net.uid; }
+  inGroup() { return this.group.members.length > 1; }
+  isGrouped(uid) { return this.group.members.includes(uid); }
+  groupMates() { return this.group.members.filter(u => u !== this.myUid()); }
+  // every group member's RemotePlayer (leader included, me excluded)
+  groupRemotes() { return this.groupMates().map(u => this.remotes.get(u)).filter(Boolean); }
+
+  // ---- group ----
+  inviteToGroup(uid) {
+    const r = this.remotes.get(uid);
+    if (!r || this.mode !== 'coop') return false;
+    if (this.isGrouped(uid)) { this.ctx.ui.toast(`${r.name} is already in your group.`, 'info'); return false; }
+    if (this.inGroup() && this.group.leader !== this.myUid()) {
+      this.ctx.ui.toast('Only the group leader can invite.', 'boss'); return false;
+    }
+    this.net.sendEvent({ type: 'ginv', nm: this.ctx.playerName || 'A player' }, uid);
+    this.ctx.ui.toast(`📨 Invited ${r.name} to your group.`, 'level');
+    return true;
+  }
+
+  acceptGroupInvite() {
+    const inv = this.pendingInvite;
+    this.pendingInvite = null;
+    if (!inv) return;
+    // joining someone else's group replaces whatever I was in
+    this.net.sendEvent({ type: 'gacc' }, inv.uid);
+    this.ctx.ui.toast(`🤝 You joined ${inv.name}'s group.`, 'level');
+    audio.sfx('purchase', 0.5);
+  }
+
+  declineGroupInvite() {
+    const inv = this.pendingInvite;
+    this.pendingInvite = null;
+    if (inv) this.net.sendEvent({ type: 'gdec' }, inv.uid);
+  }
+
+  leaveGroup() {
+    if (!this.inGroup()) return;
+    const me = this.myUid();
+    for (const u of this.groupMates()) this.net.sendEvent({ type: 'gleave' }, u);
+    const wasLeader = this.group.leader === me;
+    const rest = this.group.members.filter(u => u !== me);
+    // hand the group to the next member so it survives the leader walking out
+    if (wasLeader && rest.length > 1) {
+      const nextLeader = rest[0];
+      for (const u of rest) this.net.sendEvent({ type: 'gsync', ld: nextLeader, mem: rest }, u);
+    }
+    this._setGroup(null, []);
+    this.ctx.ui.toast('👋 You left the group.', 'info');
+  }
+
+  _setGroup(leader, members) {
+    this.group.leader = members.length > 1 ? leader : null;
+    this.group.members = members.length > 1 ? [...members] : [];
+    this.ctx.onGroupChange?.();
+    this._pushGroupToServer();
+  }
+
+  // the leader tells everyone (and the server sim) the new roster
+  _broadcastGroup() {
+    for (const u of this.groupMates()) {
+      this.net.sendEvent({ type: 'gsync', ld: this.group.leader, mem: this.group.members }, u);
+    }
+    this._pushGroupToServer();
+  }
+
+  // the authoritative server needs the roster to split kill XP / quest credit
+  _pushGroupToServer() {
+    if (this.isServer) this.net.sendEvent({ type: 'gset', mem: this.group.members });
+  }
+
+  // ---- duel ----
+  challengeDuel(uid) {
+    const r = this.remotes.get(uid);
+    if (!r || this.mode !== 'coop') return false;
+    if (this.duel.active) { this.ctx.ui.toast('You are already duelling.', 'boss'); return false; }
+    this.net.sendEvent({ type: 'duelreq', nm: this.ctx.playerName || 'A player' }, uid);
+    this.ctx.ui.toast(`⚔️ Duel challenge sent to ${r.name}.`, 'level');
+    return true;
+  }
+
+  acceptDuel() {
+    const d = this.pendingDuel;
+    this.pendingDuel = null;
+    if (!d) return;
+    this.net.sendEvent({ type: 'duelacc' }, d.uid);
+    this._beginDuel(d.uid, d.name);
+  }
+
+  declineDuel() {
+    const d = this.pendingDuel;
+    this.pendingDuel = null;
+    if (d) this.net.sendEvent({ type: 'dueldec' }, d.uid);
+  }
+
+  _beginDuel(uid, name) {
+    const r = this.remotes.get(uid);
+    const { ctx } = this;
+    this.duel.active = true;
+    this.duel.oppUid = uid;
+    this.duel.oppName = r?.name || name || 'your rival';
+    this.duel.countdown = 5.999;   // 5…4…3…2…1 then FIGHT
+    this.duel.resolved = false;
+    this.duel.overT = 0;
+    // plant a flag midway between the two duellists
+    const me = ctx.player.pos, them = r?.targetPos ?? me;
+    const fx = (me.x + them.x) / 2, fz = (me.z + them.z) / 2;
+    try {
+      const flag = makeRaceFlag(0xd83c2e);
+      flag.position.set(fx, ctx.world.heightAt(fx, fz), fz);
+      ctx.scene.add(flag);
+      this.duel.flag = flag;
+    } catch { this.duel.flag = null; }
+    audio.sfx('lane_unlock', 0.6);
+    ctx.ui.toast(`⚔️ Duel with ${this.duel.oppName}! First to fall loses — nobody dies.`, 'boss');
+  }
+
+  // I lost (my HP would have hit 0) — tell the winner and end it
+  duelYield() {
+    if (!this.duel.active || this.duel.resolved) return false;
+    this.duel.resolved = true;
+    this.net.sendEvent({ type: 'duelend', w: this.duel.oppUid }, this.duel.oppUid);
+    this._finishDuel(false, `${this.duel.oppName} wins the duel!`);
+    return true;
+  }
+
+  _finishDuel(iWon, message) {
+    const { ctx } = this, p = ctx.player;
+    this.duel.resolved = true;
+    this.duel.overT = 3;
+    // a duel never maims: full debuff wipe on both sides, HP floor of 1
+    p.combatDots = {};
+    p.combatDotTickT = 0;
+    p.stunT = 0;
+    if (p.dead) { p.revive(0.25); p.mesh.rotation.z = 0; }
+    p.hp = Math.max(1, p.hp);
+    ctx.ui.banner(iWon ? '🏆 DUEL WON' : '🤝 DUEL LOST');
+    ctx.ui.toast(message, iWon ? 'level' : 'boss');
+    audio.sfx(iWon ? 'victory' : 'defeat', 0.5);
+  }
+
+  _cancelDuel(reason) {
+    if (!this.duel.active) return;
+    this.duel.resolved = true;
+    this.duel.overT = 2;
+    const p = this.ctx.player;
+    p.combatDots = {}; p.combatDotTickT = 0;
+    p.hp = Math.max(1, p.hp);
+    this.ctx.ui.banner('🏳️ DUEL CANCELLED');
+    this.ctx.ui.toast(reason, 'info');
+  }
+
+  _clearDuel() {
+    if (this.duel.flag) { this.ctx.scene.remove(this.duel.flag); this.duel.flag = null; }
+    this.duel.active = false; this.duel.oppUid = null; this.duel.oppName = '';
+    this.duel.countdown = 0; this.duel.resolved = false; this.duel.overT = 0;
+  }
+
+  // true while blows may actually land (countdown finished, not yet resolved)
+  duelLive() { return this.duel.active && this.duel.countdown <= 0 && !this.duel.resolved; }
+
+  _updateDuel(dt) {
+    if (!this.duel.active) return;
+    const { ctx } = this;
+    if (this.duel.countdown > 0) {
+      const before = Math.ceil(this.duel.countdown);
+      this.duel.countdown -= dt;
+      const now = Math.ceil(this.duel.countdown);
+      if (now !== before && now > 0) { ctx.ui.banner(String(now)); audio.sfx('click', 0.5, 200); }
+      if (this.duel.countdown <= 0) { ctx.ui.banner('⚔️ FIGHT!'); audio.sfx('aggro', 0.6); }
+    }
+    if (this.duel.resolved) {
+      this.duel.overT -= dt;
+      if (this.duel.overT <= 0) this._clearDuel();
+      return;
+    }
+    // the rival vanished or strayed too far → call it a draw
+    const r = this.remotes.get(this.duel.oppUid);
+    if (!r || !r.lastSeen) { this._cancelDuel('Your rival left — duel cancelled.'); return; }
+    const d = Math.hypot(ctx.player.pos.x - r.targetPos.x, ctx.player.pos.z - r.targetPos.z);
+    if (d > DUEL_MAX_DIST) this._cancelDuel('Too far apart — the duel is a draw.');
+  }
+
+  // combat adapter: the duel opponent becomes a targetable "enemy" ON TOP of the
+  // real world, so mobs stay fully playable during a duel
+  _duelAdapter(base) {
+    const self = this;
+    const proxy = this.duelProxy ??= {
+      id: 'duel-rival', hitR: 0.6, sizeMult: 1, stunT: 0, cfg: { hitR: 0.6 },
+      get pos() { return self.remotes.get(self.duel.oppUid)?.targetPos ?? null; },
+      get mesh() { return self.remotes.get(self.duel.oppUid)?.mesh ?? null; },
+      get dying() { return false; },
+      get dead() { return !!self.remotes.get(self.duel.oppUid)?.dead; },
+      get stealthed() { return false; },
+      get hp() { return self.remotes.get(self.duel.oppUid)?.hp ?? 1; },
+      get maxHp() { return self.remotes.get(self.duel.oppUid)?.maxHp ?? 1; },
+      get name() { return self.duel.oppName; },
+      takeDamage: () => {}, applyStun: () => {},
+    };
+    return {
+      alive: () => (this.duelLive() && proxy.pos ? [proxy, ...base.alive()] : base.alive()),
+      damage: (e, dmg, knockDir = null, srcId = 'local', opts = null) => {
+        if (e?.id !== 'duel-rival') return base.damage(e, dmg, knockDir, srcId, opts);
+        if (!this.duelLive()) return;
+        this.net.sendEvent({
+          type: 'duelhit', dmg: Math.round(dmg * 10) / 10,
+          ...(opts?.bleed ? { bl: opts.bleed.dps, bt: opts.bleed.dur } : {}),
+          ...(opts?.burn ? { bu: opts.burn.dps, bd: opts.burn.dur } : {}),
+        }, this.duel.oppUid);
+        const m = proxy.mesh;
+        if (m) this.ctx.popup(m.position.clone().setY(m.position.y + 2), Math.round(dmg).toString(), '#ffb3b3');
+        audio.sfx('hit', 0.3, 90);
+      },
+      stun: (e, sec) => {
+        if (e?.id !== 'duel-rival') return base.stun?.(e, sec);
+        if (this.duelLive()) this.net.sendEvent({ type: 'duelhit', dmg: 0, stun: sec }, this.duel.oppUid);
+      },
+    };
+  }
+
+  // ---- inspect ----
+  requestInspect(uid) {
+    if (!this.remotes.has(uid)) return false;
+    this.net.sendEvent({ type: 'inspreq' }, uid);
+    return true;
   }
 
   // ---------- incoming events ----------
@@ -1645,6 +1941,83 @@ export class Multiplayer {
         }
         break;
       }
+      // ---------- group ----------
+      case 'ginv': // someone wants me in their group
+        if (this.duel.active) break;
+        this.pendingInvite = { uid: ev.from, name: this.remotes.get(ev.from)?.name || ev.nm || 'A player' };
+        ctx.onGroupInvite?.(this.pendingInvite);
+        audio.sfx('chime', 0.5);
+        break;
+      case 'gacc': { // they accepted MY invite → I own the roster, so extend it
+        const me = this.myUid();
+        if (!this.group.members.length) { this.group.leader = me; this.group.members = [me]; }
+        if (this.group.leader !== me) break;          // only the leader grows the group
+        if (!this.group.members.includes(ev.from)) this.group.members.push(ev.from);
+        ctx.ui.toast(`🤝 ${this.remotes.get(ev.from)?.name || 'A player'} joined your group.`, 'level');
+        ctx.onGroupChange?.();
+        this._broadcastGroup();
+        break;
+      }
+      case 'gdec':
+        ctx.ui.toast(`${this.remotes.get(ev.from)?.name || 'They'} declined your invite.`, 'info');
+        break;
+      case 'gsync': // the leader's authoritative roster
+        this._setGroup(ev.ld, Array.isArray(ev.mem) ? ev.mem : []);
+        break;
+      case 'gleave': { // a member walked out
+        const left = ev.from;
+        if (!this.group.members.includes(left)) break;
+        ctx.ui.toast(`👋 ${this.remotes.get(left)?.name || 'A player'} left the group.`, 'info');
+        const rest = this.group.members.filter(u => u !== left);
+        if (this.group.leader === this.myUid()) {
+          this.group.members = rest;
+          if (rest.length < 2) this._setGroup(null, []); else { ctx.onGroupChange?.(); this._broadcastGroup(); }
+        } else {
+          this._setGroup(this.group.leader, rest);
+        }
+        break;
+      }
+
+      // ---------- duel ----------
+      case 'duelreq':
+        if (this.duel.active || this.pendingDuel) { this.net.sendEvent({ type: 'dueldec' }, ev.from); break; }
+        this.pendingDuel = { uid: ev.from, name: this.remotes.get(ev.from)?.name || ev.nm || 'A player' };
+        ctx.onDuelChallenge?.(this.pendingDuel);
+        audio.sfx('aggro', 0.5);
+        break;
+      case 'duelacc': // they took my challenge
+        if (!this.duel.active) this._beginDuel(ev.from, this.remotes.get(ev.from)?.name);
+        break;
+      case 'dueldec':
+        ctx.ui.toast(`${this.remotes.get(ev.from)?.name || 'They'} declined the duel.`, 'info');
+        break;
+      case 'duelhit': { // a blow from my rival — I am authoritative over my own HP
+        if (!this.duelLive() || ev.from !== this.duel.oppUid) break;
+        if (ev.dmg > 0) {
+          // never lethal: the duel ends at 1 HP instead of a death
+          if (p.hp - ev.dmg <= 1) { p.hp = 1; this.duelYield(); break; }
+          p.takeDamage(ev.dmg, { id: 'duel', name: this.duel.oppName, pos: null });
+          if (p.hp <= 1) { p.hp = 1; this.duelYield(); break; }
+        }
+        if (ev.stun) p.applyStun(ev.stun);
+        if (ev.bl) p.applyCombatDot?.('bleed', ev.bl, ev.bt || 4, { id: 'duel' });
+        if (ev.bu) p.applyCombatDot?.('burn', ev.bu, ev.bd || 4, { id: 'duel' });
+        break;
+      }
+      case 'duelend': // my rival yielded → I win
+        if (this.duel.active && !this.duel.resolved) {
+          this._finishDuel(true, `You beat ${this.duel.oppName}!`);
+        }
+        break;
+
+      // ---------- inspect ----------
+      case 'inspreq': // somebody wants to look at my gear — answer with a summary
+        this.net.sendEvent({ type: 'inspdata', d: ctx.inspectPayload?.() || {} }, ev.from);
+        break;
+      case 'inspdata':
+        ctx.onInspectData?.(ev.from, ev.d || {});
+        break;
+
       case 'camp': ctx.onCampSync?.(ev.lv, ev.st, ev.gp, ev.pos); break; // shared base
       case 'ping': ctx.showPing?.(ev.x, ev.z); break;
       case 'drop': // an ally dropped loot — the host materializes it
@@ -1681,6 +2054,9 @@ export class Multiplayer {
     this.active = false;
     this.arena.active = false;
     this.ctx.world.removeArena();
+    this._clearDuel();
+    this.group = { leader: null, members: [] };
+    this.pendingInvite = null; this.pendingDuel = null;
     for (const r of this.remotes.values()) r.dispose();
     this.remotes.clear();
     this._campSyncedTo.clear();

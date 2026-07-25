@@ -70,6 +70,8 @@
       <div class="bar-wrap mana hidden"><div id="mana-bar" class="bar"></div><span id="mana-text" class="bar-label"></span></div>
       <div class="bar-wrap xp"><div id="xp-bar" class="bar"></div><span id="level-text" class="bar-label"></span></div>
       <div id="active-quest" class="hidden"></div>
+      <!-- group members: tiny hp/energy/mana frames under your own bars -->
+      <div id="party-frames"></div>
     </div>
     <!-- windup bar: a tiny sliver above the hotbar that fills as the weapon rises -->
     <div id="swing-bar-wrap" class="hidden"><div id="swing-bar"></div></div>
@@ -158,6 +160,40 @@
   <div id="actionbar" class="hidden">
     <div id="slot-hint" class="hidden"><span>Drag your new ability onto a slot</span><i>👇</i></div>
     <div id="spellbar"></div>
+  </div>
+
+  <!-- Shift-locked another player: what you can do with them -->
+  <div id="player-actions" class="hidden">
+    <div class="pa-who"><b id="pa-name"></b><small id="pa-sub"></small></div>
+    <button id="pa-invite" class="pa-btn">🤝 Invite to group</button>
+    <button id="pa-duel" class="pa-btn">⚔️ Duel</button>
+    <button id="pa-inspect" class="pa-btn">🔍 Inspect</button>
+    <button id="pa-close" class="pa-btn pa-x" title="Close">✕</button>
+  </div>
+
+  <!-- incoming group invite / duel challenge -->
+  <div id="social-ask" class="panel hidden">
+    <div class="panel-head"><h2 id="ask-title">Invitation</h2></div>
+    <div id="social-ask-body">
+      <p class="cs-lead" id="ask-text"></p>
+      <button id="ask-yes" class="cs-big"></button>
+      <button id="ask-no" class="mini-btn cs-back">Decline</button>
+    </div>
+  </div>
+
+  <!-- inspect: another player's gear + stats (no inventory) -->
+  <div id="inspect" class="panel hidden">
+    <div class="panel-head">
+      <h2 id="inspect-title">🔍 Inspect</h2>
+      <button class="panel-close">✕</button>
+    </div>
+    <div id="inspect-body">
+      <p class="empty-note" id="inspect-empty">Asking them to show their gear…</p>
+      <div id="inspect-content" class="hidden">
+        <div id="inspect-gear"></div>
+        <div id="inspect-stats"></div>
+      </div>
+    </div>
   </div>
 
   <div id="banner" class="hidden"></div>
@@ -474,10 +510,8 @@
             <small id="mpcode-note">Share this code so a friend can join your running game.</small></span>
         </div>
         <div class="setting-row" id="cloud-row" style="display:none">
-          <span style="flex:1"><b id="save-title">☁️ Cloud save</b> <small id="cloud-who"></small><br>
-            <small id="save-desc">Save/Load your character to the cloud (co-op survival only).</small></span>
-          <button id="set-savegame" class="mini-btn">💾 Save</button>
-          <button id="set-loadgame" class="mini-btn">📂 Load</button>
+          <span style="flex:1"><b id="save-title">☁️ Cloud character</b><br>
+            <small id="save-desc">Autosaves as you play.</small></span>
         </div>
         <label class="setting-row" id="admin-row" style="display:none">
           <input type="checkbox" id="set-admin">
@@ -490,40 +524,16 @@
     </div>
   </div>
 
-  <!-- cloud save picker -->
-  <div id="loadgame" class="panel hidden">
-    <div class="panel-head">
-      <h2>☁️ Load Game</h2>
-      <button class="panel-close">✕</button>
-    </div>
-    <div id="loadgame-body">
-      <p class="empty-note" id="loadgame-empty">Loading your saves…</p>
-      <div id="loadgame-list"></div>
-    </div>
-  </div>
-
-  <!-- co-op survival: on entering, choose a fresh start or bring a saved
-       character back (only shown when signed in and you HAVE cloud saves) -->
+  <!-- character select: your autosaved characters, WoW-style -->
   <div id="coopstart" class="panel hidden">
     <div class="panel-head">
-      <h2>🌲 Enter the woods</h2>
+      <h2>🌲 Choose your character</h2>
     </div>
     <div id="coopstart-body">
-      <div id="coopstart-choose">
-        <p class="cs-lead" id="cs-lead-note">You have saved characters. Start this run fresh, or bring one back?</p>
-        <button id="cs-new" class="cs-big">🆕 New game from scratch
-          <small>Wake in the cave at level 1 with an empty camp.</small></button>
-        <button id="cs-load" class="cs-big">📂 Load a saved game
-          <small>Restore your character, gear and camp into this world.</small></button>
-      </div>
-      <div id="coopstart-load" class="hidden">
-        <p class="cs-lead">Which save?</p>
-        <button id="cs-last" class="cs-big">⏱️ Continue last save
-          <small id="cs-last-meta">—</small></button>
-        <button id="cs-choose" class="cs-big">📂 Choose another save…
-          <small>Pick from your full save history.</small></button>
-        <button id="cs-back" class="mini-btn cs-back">← Back</button>
-      </div>
+      <p class="cs-lead" id="cs-lead-note">Pick a character to continue, or roll a new one.</p>
+      <div id="charselect-list"></div>
+      <button id="cs-new" class="cs-big">＋ New character
+        <small>Wake in the cave at level 1 with an empty camp.</small></button>
     </div>
   </div>
 

@@ -34,6 +34,13 @@ const rankValue = (skill, key, rank, fallback = 0) => {
 // What each melee style sounds like when it lands IN FLESH. The swing whoosh
 // (attack_melee) plays on every swing including a miss; these only play on a hit,
 // so you can hear the difference between cutting air and cutting meat.
+// Swinging through EMPTY AIR — a pure whoosh, no thud. Plays on EVERY swing
+// (hit or miss); the flesh impact above layers on top only when you connect.
+const SWING_SFX = {
+  fists: 'swing_fist',
+  sword: 'swing_light', spear: 'swing_light',
+  axe:   'swing_heavy', club: 'swing_heavy', pick: 'swing_heavy',
+};
 const MELEE_HIT_SFX = {
   fists: 'punch_hit',   // bare knuckles — dull fleshy thud
   sword: 'slash_hit',   // blades — wet slicing cut
@@ -175,6 +182,7 @@ export class Player {
     this.energySpentT = 999;  // seconds since the last swing drank energy
     this.manaSpentT = 999;
     this.noEnergyWarnT = 0;   // throttles the "out of energy" nag
+    this.movingNow = false;   // energy regen halves while you're on the move
     this.attackT = 0;
     this.attackDur = 0.3;
     this.swingWindup = null; // { t, dur } — the raise-before-the-strike phase
@@ -2748,7 +2756,10 @@ export class Player {
     this.manaSpentT += dt;
     this.noEnergyWarnT = Math.max(0, this.noEnergyWarnT - dt);
     if (this.energy < this.maxEnergy) {
-      const rate = this.energyRegen * (this.energySpentT > 1.2 ? 1.7 : 1);
+      // Standing still you catch your breath; running burns half of it away.
+      // (moving is set from the input each frame, further up in update())
+      const rate = this.energyRegen * (this.movingNow ? 0.5 : 1)
+        * (this.energySpentT > 1.2 ? 1.35 : 1);
       this.energy = Math.min(this.maxEnergy, this.energy + rate * dt);
     }
     if (this.maxMana > 0 && this.mana < this.maxMana) {
@@ -2914,6 +2925,7 @@ export class Player {
       }
       moving = (mx !== 0 || mz !== 0 || flyY !== 0) && !ctx.boatPlacing; // raft being set up
       this.idleT = moving ? 0 : this.idleT + dt;
+      this.movingNow = moving; // read by the energy regen (one frame behind — invisible)
       if (moving) {
         const len = Math.hypot(mx, mz, flyY);
         mx /= len; mz /= len; flyY /= len;
@@ -3051,7 +3063,7 @@ export class Player {
         this.energySpentT = 0;
         const dur = SWING_TIME * 0.36; // wind up, then the strike lands
         this.swingWindup = { t: dur, dur, cost: swingCost };
-        audio.sfx('attack_melee', 0.18, 320); // a light "raise" whoosh
+        // no sound on the raise — the swoosh fires when the blow actually cuts
       } else if (this.noEnergyWarnT <= 0) {
         this.noEnergyWarnT = 1.1;
         this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
@@ -3306,7 +3318,7 @@ export class Player {
     this.attackSide = this.swingSide; // this strike cuts from the raised side
     this.swingSide = -this.swingSide; // …and the next one winds up opposite
     this._spawnSlash();
-    audio.sfx('attack_melee', 0.22); // whoosh of cutting AIR — impact layers on top
+    audio.sfx(SWING_SFX[w.style] || 'swing_light', 0.5); // cutting AIR — impact layers on top
 
     // (No attack lunge — a forward hop on every moving swing read as a jerky
     // stutter. Attacks now land in place while you keep moving smoothly.)

@@ -3,6 +3,17 @@
 import { WORLD, BIOMES, MOBA, biomeIndexAt, radiusOf, coastDistAt } from './config.js';
 import { lanePoint } from './mobaworld.js';
 
+// How an ally is drawn on both maps. Group-mates are always visible and marked
+// in gold; strangers stay hidden until they come genuinely close, so a busy
+// shared world doesn't turn the map into a crowd of dots.
+const ALLY_VISIBLE_RADIUS = 100;
+export function allyStyle(r, player) {
+  if (!r?.mesh?.visible) return null;
+  if (r.inGroup) return { color: '#ffd24a', r: 4.5, group: true };
+  const d = Math.hypot(r.pos.x - player.pos.x, r.pos.z - player.pos.z);
+  return d <= ALLY_VISIBLE_RADIUS ? { color: '#5fa8e0', r: 3, group: false } : null;
+}
+
 const CELL = 25;                       // world units per discovery cell
 const REVEAL_RADIUS = 45;              // world units revealed around the player
 
@@ -242,7 +253,9 @@ export class Minimap {
     const partners = (Array.isArray(partner) ? partner : partner ? [partner] : [])
       .filter(r => r?.mesh?.visible);
     this.reveal(player.pos.x, player.pos.z);
-    for (const r of partners) this.reveal(r.pos.x, r.pos.z);
+    // only GROUP-mates scout for you — strangers wandering the shared world
+    // shouldn't quietly uncover the whole map
+    for (const r of partners) if (r.inGroup) this.reveal(r.pos.x, r.pos.z);
     this.pings = this.pings.filter(p => (p.t -= dt) > 0);
     this.redrawT -= dt;
     // while the camera is turning, redraw every frame so the map spins smoothly
@@ -510,14 +523,19 @@ export class Minimap {
       text('⚰️', x, y);
     }
 
-    // co-op allies: blue dots
+    // co-op allies: group-mates are bright gold and always shown; everyone else
+    // is a dim blue dot that only appears when they're genuinely nearby
     for (const r of partners) {
+      const st = allyStyle(r, player);
+      if (!st) continue;
       const tp = toC(r.pos.x, r.pos.z);
-      if (inView(tp)) {
-        ctx.fillStyle = '#5fa8e0';
-        ctx.beginPath(); ctx.arc(tp.x, tp.y, 3, 0, Math.PI * 2); ctx.fill();
-        ctx.strokeStyle = '#000'; ctx.stroke();
-      }
+      if (!inView(tp)) continue;
+      ctx.fillStyle = st.color;
+      ctx.beginPath(); ctx.arc(tp.x, tp.y, st.r, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = st.group ? '#3a2a00' : '#000';
+      ctx.lineWidth = st.group ? 1.5 : 1;
+      ctx.stroke();
+      ctx.lineWidth = 1;
     }
 
     ctx.restore(); // end of the rotated map — the player marker stays screen-fixed
@@ -729,8 +747,14 @@ export class Minimap {
     }
     for (const r of (Array.isArray(partner) ? partner : partner ? [partner] : [])) {
       if (!r?.mesh?.visible || !inView(r.pos.x, r.pos.z)) continue;
-      ctx.fillStyle = '#5fa8e0';
-      ctx.beginPath(); ctx.arc(toX(r.pos.x), toY(r.pos.z), 4, 0, Math.PI * 2); ctx.fill();
+      const st = allyStyle(r, player);
+      if (!st) continue;
+      ctx.fillStyle = st.color;
+      ctx.beginPath(); ctx.arc(toX(r.pos.x), toY(r.pos.z), st.r + 1, 0, Math.PI * 2); ctx.fill();
+      if (st.group) {  // group-mates carry their name on the world map
+        ctx.fillStyle = '#ffd76a'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText(r.name || '', toX(r.pos.x), toY(r.pos.z) - 8);
+      }
     }
     // player: a bold green heading arrow (no map rotation on the big map)
     this._drawPlayerArrow(ctx, toX(player.pos.x), toY(player.pos.z),

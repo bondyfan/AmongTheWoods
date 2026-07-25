@@ -831,6 +831,84 @@ body.slotting .spell-slot.empty {
 }
 #start-btn:hover, #restart-btn:hover { filter: brightness(1.15); transform: translateY(-1px); }
 
+/* ---------- character select ---------- */
+#charselect-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px;
+  max-height: 46vh; overflow-y: auto; }
+.char-row {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  padding: 10px 12px; cursor: pointer; color: #f2f0e0;
+  background: linear-gradient(rgba(60,80,40,0.5), rgba(30,44,20,0.5));
+  border: 2px solid #4d6a34; border-radius: 12px; font-size: 15px;
+}
+.char-row:hover { border-color: #86b45e; filter: brightness(1.12); }
+.char-lv {
+  flex: 0 0 40px; height: 40px; display: flex; align-items: center; justify-content: center;
+  background: rgba(10,16,8,0.7); border: 2px solid #86b45e; border-radius: 50%;
+  font-weight: bold; font-size: 15px;
+}
+.char-main { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.char-name { font-size: 16px; }
+.char-sub { opacity: 0.7; font-size: 11px; }
+.char-del { flex: 0 0 auto; opacity: 0.45; padding: 4px 6px; border-radius: 8px; font-size: 15px; }
+.char-del:hover { opacity: 1; background: rgba(200,60,50,0.35); }
+
+/* ---------- party frames (group members, top-left under your bars) ---------- */
+#party-frames { display: flex; flex-direction: column; gap: 5px; margin-top: 4px; }
+.pf {
+  display: flex; align-items: center; gap: 6px; padding: 4px 6px;
+  background: rgba(10,16,8,0.55); border: 1px solid rgba(255,210,74,0.4);
+  border-radius: 8px; pointer-events: auto; cursor: pointer;
+}
+.pf:hover { border-color: #ffd24a; }
+.pf.pf-dead { opacity: 0.5; border-color: rgba(255,90,80,0.6); }
+.pf-av {
+  flex: 0 0 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(#4a6a30, #2c4019); border: 1px solid #86b45e;
+  border-radius: 50%; font-size: 11px; font-weight: bold;
+}
+.pf-main { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pf-name { font-size: 10px; font-weight: bold; color: #ffe9a8;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pf-bars { display: flex; flex-direction: column; gap: 1.5px; }
+.pf-bar { height: 4px; border-radius: 3px; background: rgba(0,0,0,0.5); overflow: hidden; }
+.pf-bar > i { display: block; height: 100%; border-radius: 3px; }
+.pf-hp > i { background: linear-gradient(#d3564a, #a12f26); }
+.pf-en > i { background: linear-gradient(#ffe07a, #c8930f); }
+.pf-mn > i { background: linear-gradient(#8fb6ef, #3f5fbd); }
+
+/* ---------- Shift-locked player: social action bar ---------- */
+#player-actions {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: 150px; z-index: 30;
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  background: rgba(14, 22, 10, 0.93); border: 2px solid #86b45e; border-radius: 14px;
+  box-shadow: 0 10px 28px rgba(0,0,0,0.55);
+}
+#player-actions.hidden { display: none; }
+.pa-who { display: flex; flex-direction: column; padding-right: 6px; margin-right: 2px;
+  border-right: 1px solid rgba(255,255,255,0.18); }
+.pa-who b { color: #ffe9a8; font-size: 14px; }
+.pa-who small { opacity: 0.7; font-size: 11px; }
+.pa-btn {
+  padding: 8px 12px; font-size: 13px; cursor: pointer; color: #f2f0e0;
+  background: linear-gradient(#5d8a3a, #3c5c24); border: 1px solid #86b45e;
+  border-radius: 9px; white-space: nowrap;
+}
+.pa-btn:hover { filter: brightness(1.18); }
+.pa-btn:disabled { opacity: 0.4; cursor: default; filter: none; }
+.pa-x { background: rgba(60,40,36,0.8); border-color: #8a5a4a; padding: 8px 10px; }
+
+/* ---------- inspect ---------- */
+#inspect-gear { display: grid; grid-template-columns: repeat(auto-fill, minmax(126px, 1fr));
+  gap: 6px; margin-bottom: 12px; }
+.insp-slot { display: flex; align-items: center; gap: 7px; padding: 6px 8px; font-size: 12px;
+  background: rgba(10,16,8,0.5); border: 1px solid rgba(255,255,255,0.12); border-radius: 9px; }
+.insp-slot .islot { opacity: 0.55; font-size: 10px; text-transform: uppercase; }
+.insp-slot b { color: #ffe9a8; }
+#inspect-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 6px; }
+.insp-stat { padding: 6px 8px; font-size: 12px; background: rgba(10,16,8,0.5);
+  border: 1px solid rgba(255,255,255,0.12); border-radius: 9px; }
+.insp-stat span { opacity: 0.65; }
+
 /* ---------- username (shown above your head to other players) ---------- */
 #name-row {
   display: flex; align-items: center; justify-content: center; gap: 8px;

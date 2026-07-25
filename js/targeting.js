@@ -20,6 +20,8 @@ export class Targeting {
     this.scene = scene;
     this.camera = camera;
     this.selected = null;      // primary locked unit (nearest to centre)
+    this.selectedPlayer = null; // locked remote PLAYER (social menu, never combat)
+    this._pMarker = null;
     this.spin = 0;
     this._v = new THREE.Vector3();
     this._markedIds = new Set();
@@ -61,8 +63,26 @@ export class Targeting {
     return this._reticle;
   }
 
-  // `alive` is enemyMgr.alive() — the candidate units.
-  update(dt, { input, player, alive }) {
+  // Shift-lock a PLAYER: same screen-centre pick, but players are kept apart
+  // from the combat lock so abilities never fire at an ally. Returns the picked
+  // RemotePlayer (or null) for the social action menu.
+  _pickPlayer(player, players) {
+    let best = null, bestS = TOL_SINGLE;
+    for (const r of players || []) {
+      if (!r?.mesh?.visible || !r.pos) continue;
+      const dx = r.pos.x - player.pos.x, dz = r.pos.z - player.pos.z;
+      if (dx * dx + dz * dz > MAX_RANGE_2) continue;
+      this._v.copy(r.mesh.position).project(this.camera);
+      if (this._v.z > 1) continue;
+      const s = Math.hypot(this._v.x, this._v.y);
+      if (s < bestS) { bestS = s; best = r; }
+    }
+    return best;
+  }
+
+  // `alive` is enemyMgr.alive() — the candidate units. `players` are remote
+  // players, locked separately (social menu) so combat never targets them.
+  update(dt, { input, player, alive, players }) {
     const on = !!input?.selecting && !player?.dead;
     const el = this._reticleEl();
     if (el) el.classList.toggle('hidden', !on);
@@ -72,7 +92,27 @@ export class Targeting {
       this.selected = null;
       this._markedIds.clear();
       for (const m of this.markers) m.group.visible = false;
+      this.selectedPlayer = null;
+      if (this._pMarker) this._pMarker.group.visible = false;
       return;
+    }
+
+    // a player under the crosshair wins the frame — you're pointing AT them
+    const pickedPlayer = this._pickPlayer(player, players);
+    if (pickedPlayer !== this.selectedPlayer) {
+      this.selectedPlayer = pickedPlayer;
+      if (pickedPlayer) audio.sfx('select', 0.45, 90);
+    }
+    if (pickedPlayer) {
+      this._pMarker ??= this._makeMarker();
+      this._pMarker.ring.material.color.setHex(0x5fa8e0);
+      this._pMarker.reticle.material.color.setHex(0xbfe4ff);
+      this._pMarker.column.material.color.setHex(0x5fa8e0);
+      this.spin += dt * 2.2;
+      this._animateMarker(this._pMarker, { id: 'p:' + pickedPlayer.uid, pos: pickedPlayer.pos,
+        mesh: pickedPlayer.mesh, hitR: 0.6 }, dt);
+    } else if (this._pMarker) {
+      this._pMarker.group.visible = false;
     }
 
     const cap = Math.max(1, player.multiSelectCap?.() || 1);

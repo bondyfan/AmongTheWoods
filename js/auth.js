@@ -74,44 +74,50 @@ export const Auth = {
     this.user = null;
   },
 
-  // ---- cloud saves ----
-  async saveGame(meta, data) {
+  // ---- cloud CHARACTERS (WoW-style: one rolling autosave slot each) ----
+  // saves/<uid>/chars/<charId> = { at, name, cls, level, biome, data }
+  async saveChar(charId, meta, data) {
     ensure();
     if (!this.user) throw new Error('Not signed in');
-    const rec = { name: this.user.name, at: Date.now(), ...meta, data };
-    await push(ref(db, `saves/${this.user.uid}`), rec);
+    await set(ref(db, `saves/${this.user.uid}/chars/${charId}`),
+      { id: charId, at: Date.now(), ...meta, data });
   },
 
-  // co-op autosave: a SINGLE slot at a fixed key, so every autosave overwrites
-  // the previous one (set, not push). It lives alongside the manual saves under
-  // saves/<uid> and shows up in listSaves like any other, tagged auto:true.
-  async autoSave(meta, data) {
-    ensure();
-    if (!this.user) throw new Error('Not signed in');
-    const rec = { name: this.user.name, at: Date.now(), auto: true, ...meta, data };
-    await set(ref(db, `saves/${this.user.uid}/autosave`), rec);
-  },
-
-  // newest-first list of { id, at, biome, level, name }
-  async listSaves() {
+  // newest-first list of { id, at, name, cls, level, biome }
+  async listChars() {
     ensure();
     if (!this.user) return [];
-    const snap = await get(query(ref(db, `saves/${this.user.uid}`), orderByChild('at'), limitToLast(20)));
+    const snap = await get(ref(db, `saves/${this.user.uid}/chars`));
     const out = [];
-    snap.forEach((c) => { const v = c.val(); out.push({ id: c.key, at: v.at, biome: v.biome, level: v.level, auto: !!v.auto }); });
-    return out.reverse();
+    snap.forEach((c) => {
+      const v = c.val() || {};
+      out.push({ id: c.key, at: v.at, name: v.name, cls: v.cls, level: v.level, biome: v.biome });
+    });
+    out.sort((a, b) => (b.at || 0) - (a.at || 0));
+    // legacy: a pre-character rolling autosave still sitting at saves/<uid>/autosave
+    if (!out.length) {
+      const old = await get(ref(db, `saves/${this.user.uid}/autosave`));
+      if (old.exists()) {
+        const v = old.val();
+        out.push({ id: 'autosave', at: v.at, name: v.data?.name || v.name,
+          cls: v.data?.selectedClass || null, level: v.level, biome: v.biome, legacy: true });
+      }
+    }
+    return out;
   },
 
-  async loadSave(id) {
+  async loadChar(charId) {
     ensure();
     if (!this.user) throw new Error('Not signed in');
-    const snap = await get(ref(db, `saves/${this.user.uid}/${id}`));
+    const path = charId === 'autosave' ? 'autosave' : `chars/${charId}`;
+    const snap = await get(ref(db, `saves/${this.user.uid}/${path}`));
     return snap.exists() ? snap.val().data : null;
   },
 
-  async deleteSave(id) {
+  async deleteChar(charId) {
     ensure();
     if (!this.user) return;
-    await remove(ref(db, `saves/${this.user.uid}/${id}`));
+    const path = charId === 'autosave' ? 'autosave' : `chars/${charId}`;
+    await remove(ref(db, `saves/${this.user.uid}/${path}`));
   },
 };

@@ -15,6 +15,11 @@ const OUT = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'sound
 
 // [filename, prompt, duration seconds]
 const SOUNDS = [
+  // ---- swinging through EMPTY AIR: a pure whoosh, no impact, no thud.
+  // This plays on every swing (hit or miss); the impacts above layer on top. ----
+  ['swing_light', 'A fast blade slicing through empty air: a short sharp airy whoosh, clean swoosh of something cutting wind, no impact, no thud, no hit, no music, no voice', 0.5],
+  ['swing_heavy', 'A heavy weapon swung hard through empty air: a deep slow powerful whoosh of displaced wind, weighty air swoosh, no impact, no thud, no hit, no music, no voice', 0.6],
+  ['swing_fist',  'A quick punch thrown through empty air: a short soft airy whiff of a fist cutting the air, light fabric-like swoosh, no impact, no thud, no music, no voice', 0.5],
   // ---- weapon impacts: what it sounds like when YOUR blow lands in FLESH.
   // Each weapon family gets its own thud so you can hear what you're swinging. ----
   ['punch_hit',  'A bare-knuckle punch landing hard on a body: heavy dull fleshy thud, soft leathery slap of skin, a short muffled meaty impact, dry and very close, single hit, no music, no voice, no reverb', 0.5],

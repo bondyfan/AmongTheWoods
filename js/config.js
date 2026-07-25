@@ -409,9 +409,10 @@ export const oocRegenFor = (level) => (7 + 1.5 * level) * 0.25;
 export const SWING_TIME = 0.5;                       // seconds per basic attack, all weapons
 export const PLAYER_ENERGY = (level) => 99 + level;  // 100 @ L1 … 149 @ L50
 export const PLAYER_MANA = (level) => Math.round(100 + 12 * level);
-// Energy is a REAL resource: a full bar is ~5 bare-handed blows, and it
-// trickles back, so you burst, disengage, then come back in.
-export const energyRegenFor = (level) => 5 + 0.03 * level;
+// Energy is a REAL resource: a full bar is ~5 bare-handed blows. It only
+// comes back properly when you STAND STILL — running halves the regen, so
+// you plant your feet to recover, then wade back in.
+export const energyRegenFor = (level) => 6 + 0.036 * level;
 export const manaRegenFor = (level) => 3 + 0.12 * level;
 // Per-swing energy by weapon style — heavy weapons hit hard but drain you, so
 // a two-hander swings less often than bare knuckles even at the same 0.5 s.

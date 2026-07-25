@@ -43,6 +43,7 @@ export class GameRoom {
       { get: (t, k) => (k in t ? t[k] : noop) });
     this.enemyMgr = new EnemyManager(scene, world, hooks);
     this.players = new Map();          // uid -> { proxy, petProxy, hasPet }
+    this.groups = new Map();           // uid -> Set(uids) — who shares kills with whom
     this._snapAcc = 0;
   }
 
@@ -64,7 +65,7 @@ export class GameRoom {
     this.players.set(uid, { proxy, petProxy, hasPet: false });
   }
 
-  removePlayer(uid) { this.players.delete(uid); }
+  removePlayer(uid) { this.players.delete(uid); this.groups.delete(uid); }
   get empty() { return this.players.size === 0; }
 
   // ---- ingest a guest's STATE packet into its proxy ----
@@ -124,6 +125,14 @@ export class GameRoom {
       case 'berry':
         this.world.applyRemoteBerry?.(ev.k);
         return true;
+      case 'gset': {
+        // a client's group roster — kill XP and quest credit are shared inside
+        // it and nowhere else. Consumed here; peers learn it from the leader.
+        const mem = Array.isArray(ev.mem) ? ev.mem.filter(u => typeof u === 'string') : [];
+        if (mem.length > 1) this.groups.set(uid, new Set(mem));
+        else this.groups.delete(uid);
+        return true;
+      }
       default:
         return false; // revive/ping/classHeal/… are peer relays — Room forwards them
     }
@@ -183,22 +192,41 @@ export class GameRoom {
     this.io.sendTo(uid, { t: 'event', ev });
   }
 
+  // who landed the killing blow (uid), or null if nobody tracked did
+  _killerUid(enemy) {
+    const by = enemy.lastHitBy;
+    if (!by || by === 'local') return null;
+    const base = by.endsWith('#pet') ? by.slice(0, -4) : by;
+    return this.players.has(base) ? base : null;
+  }
+
+  // does `uid` share `killer`'s kills? Only inside a group both agree on.
+  _sharesWith(killer, uid) {
+    if (killer === uid) return true;
+    const g = this.groups.get(killer);
+    return !!(g && g.has(uid) && this.groups.get(uid)?.has(killer));
+  }
+
   _awardKill(enemy) {
     const ex = enemy.pos.x, ez = enemy.pos.z;
-    // shared kill XP: guests within 100m OR the killer; 75% each when two share
+    // kill XP goes to the KILLER, plus their group-mates near the corpse.
+    // Ungrouped bystanders get nothing — no free XP off a stranger's work.
+    const killer = this._killerUid(enemy);
+    if (!killer) return;                       // nothing tracked landed the blow
     const eligible = [];
     for (const [uid, P] of this.players) {
+      if (!this._sharesWith(killer, uid)) continue;
       const near = !P.proxy.dead && Math.hypot(P.proxy.pos.x - ex, P.proxy.pos.z - ez) < XP_SHARE_RADIUS;
-      const credit = enemy.lastHitBy === uid || enemy.lastHitBy === uid + '#pet';
-      if (near || credit) eligible.push(uid);
+      if (uid === killer || near) eligible.push(uid);
     }
     const share = eligible.length >= 2 ? 0.75 : 1;
     const xp = Math.max(1, Math.round(enemy.xp * share));
     for (const uid of eligible) this.io.sendTo(uid, { t: 'event', ev: { type: 'xpkill', xp } });
-    // shared quest progress within 20m
+    // quest progress: same group rule, tighter radius
     for (const [uid, P] of this.players) {
       if (P.proxy.dead) continue;
-      if (Math.hypot(P.proxy.pos.x - ex, P.proxy.pos.z - ez) > QUEST_KILL_SHARE_RADIUS) continue;
+      if (!this._sharesWith(killer, uid)) continue;
+      if (uid !== killer && Math.hypot(P.proxy.pos.x - ex, P.proxy.pos.z - ez) > QUEST_KILL_SHARE_RADIUS) continue;
       this.io.sendTo(uid, { t: 'event', ev: {
         type: 'questKill', t: enemy.type, b: enemy.bossRank || 0,
         x: +ex.toFixed(1), z: +ez.toFixed(1), pa: enemy.cfg?.passive ? 1 : 0,
