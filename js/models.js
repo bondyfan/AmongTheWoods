@@ -2614,7 +2614,10 @@ export function makeTownHouse(rng = Math.random) {
   for (const sideZ of [-1, 1]) { // gable roof from two leaning slabs
     const slab = box(w + 0.5, 0.14, d * 0.62, 0x8a4f3a);
     slab.position.set(0, h + d * 0.19, sideZ * d * 0.24);
-    slab.rotation.x = -sideZ * 0.62;
+    // +sideZ, not -sideZ: with the sign flipped each slab tipped its OUTER edge
+    // up, so the pair formed a V-shaped valley with the ridge beam floating in
+    // the middle of it. This way the inner edges meet at the ridge.
+    slab.rotation.x = sideZ * 0.62;
     g.add(slab);
   }
   const ridge = box(w + 0.55, 0.14, 0.18, 0x6e3d2c);
@@ -2639,10 +2642,10 @@ export function makeChurch(rng = Math.random) {
   const nave = box(3.6, 3.0, 6.5, 0xd6cfc0);
   nave.position.y = 1.5;
   g.add(nave);
-  for (const sideZ of [-1, 1]) {
+  for (const sideZ of [-1, 1]) {   // same inverted-gable fix as makeTownHouse
     const slab = box(4.2, 0.16, 4.0, 0x6e5a48);
     slab.position.set(0, 3.7, sideZ * 1.35);
-    slab.rotation.x = -sideZ * 0.7;
+    slab.rotation.x = sideZ * 0.7;
     g.add(slab);
   }
   const tower = box(2.0, 5.6, 2.0, 0xcfc8b8);
@@ -3092,6 +3095,77 @@ export function makeRaft() {
 }
 
 // ---------- survival spawn cottage ----------
+// ---- homestead & village fencing ----------------------------------------
+// One straight run of rail fence, `len` metres long, centred on the origin and
+// laid along +X. Two rails on posts — cheap (a handful of boxes) because these
+// get repeated dozens of times around the homestead and the village.
+export function makeFenceRun(len = 4, color = 0x6b4a2a) {
+  const g = new THREE.Group();
+  const posts = Math.max(2, Math.round(len / 1.6) + 1);
+  for (let i = 0; i < posts; i++) {
+    const px = -len / 2 + (len * i) / (posts - 1);
+    const post = box(0.16, 1.25, 0.16, color);
+    post.position.set(px, 0.62, 0);
+    g.add(post);
+  }
+  for (const ry of [0.5, 0.95]) {
+    const rail = box(len, 0.11, 0.09, color);
+    rail.position.set(0, ry, 0);
+    g.add(rail);
+  }
+  return g;
+}
+
+// A gate: two tall posts with a lintel, so the opening in a fence reads as a
+// deliberate way in rather than a hole where the fence failed to build.
+export function makeFenceGate(width = 3, color = 0x6b4a2a) {
+  const g = new THREE.Group();
+  for (const sx of [-1, 1]) {
+    const post = box(0.22, 1.9, 0.22, color);
+    post.position.set(sx * width / 2, 0.95, 0);
+    g.add(post);
+  }
+  const lintel = box(width + 0.3, 0.18, 0.18, color);
+  lintel.position.y = 1.85;
+  g.add(lintel);
+  return g;
+}
+
+// A mound of cut hay — the "we farm here" prop for the starting homestead.
+export function makeHayPile(rng = Math.random) {
+  const g = new THREE.Group();
+  const base = cyl(1.05, 1.25, 0.85, 0xc9a63f, 8);
+  base.position.y = 0.42;
+  const top = cone(0.95, 0.9, 0xd8b74e, 8);
+  top.position.y = 1.25;
+  g.add(base, top);
+  // loose straw sticking out of the pile
+  for (let i = 0; i < 7; i++) {
+    const a = rng() * Math.PI * 2;
+    const straw = box(0.5 + rng() * 0.3, 0.05, 0.05, 0xe0c766);
+    straw.position.set(Math.cos(a) * 0.9, 0.2 + rng() * 0.6, Math.sin(a) * 0.9);
+    straw.rotation.y = a;
+    straw.rotation.z = (rng() - 0.5) * 0.8;
+    g.add(straw);
+  }
+  return g;
+}
+
+// A single headstone over a turned-earth mound — the one grave the homestead
+// starts with (makeGraveyard is the four-slab placeable version).
+export function makeGraveSingle() {
+  const g = new THREE.Group();
+  const mound = box(1.1, 0.16, 1.9, 0x4a3a2e);
+  mound.position.y = 0.08;
+  const stone = box(0.62, 0.9, 0.16, 0x8a8578);
+  stone.position.set(0, 0.45, -0.78);
+  const top = cyl(0.31, 0.31, 0.16, 0x8a8578, 8);
+  top.rotation.x = Math.PI / 2;
+  top.position.set(0, 0.9, -0.78);
+  g.add(mound, stone, top);
+  return g;
+}
+
 export function makeCottage() {
   const g = new THREE.Group();
   const walls = box(3.4, 2.1, 2.8, 0x6e4d2a);

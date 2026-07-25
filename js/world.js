@@ -20,6 +20,7 @@ import { makeTree, makeRock, makeGrassTuft, makeGrassBlades, makeGrassField,
          makeTemple, makeLianaPole, makeBonfire, makeSummitCairn, makeCactus,
          makeLairEntrance, makeCage, makeFern, makeTownHouse, makeChurch,
          makeFountain, makeWheatTuft, makeJunglePlant, makeReeds, makePebbles,
+         makeFenceRun, makeFenceGate, makeHayPile, makeGraveSingle, makeCottage,
          makePalm, makeGroundLeaves, impostorTemplate } from './models.js';
 import { makePier } from './ship.js';
 import { bakeGroup, bakeAccumulator, buildBakedMesh, bakeAt, BAKED_MAT,
@@ -993,7 +994,29 @@ export class World {
       if (this.isWater(smith.x, smith.z)) continue;
       const entry = spot(34, 0);                  // street mouth toward the camp
       const guards = [spot(31, -3), spot(31, 3)]; // two soldiers flank the gate
-      this.village = { x, z, dirX, dirZ, entry, smith, guards, buildings };
+      // A fence rings the hamlet: runs laid end to end around a rectangle that
+      // clears the smith (-34) and the gate (+34) lengthwise and the house rows
+      // (±9.5 plus their 2.3 m footprint) sideways. The stretch in front of the
+      // gate is left open so the road — and the guards standing on it — are not
+      // walled in, and so fleeing villagers always have a way out.
+      const HALF_LEN = 42, HALF_WID = 16, RUN = 4, GATE_HALF = 4;
+      const fence = [];
+      const addRun = (along, side, alongAxis) => {
+        const p = spot(along, side);
+        if (this.isWater(p.x, p.z)) return;
+        fence.push({ ...p, len: RUN,
+          rot: alongAxis ? Math.atan2(dirX, dirZ) : Math.atan2(perX, perZ) });
+      };
+      for (let s = -HALF_WID; s <= HALF_WID; s += RUN) {      // the two long sides
+        addRun(-HALF_LEN, s, false);
+        if (Math.abs(s) > GATE_HALF) addRun(HALF_LEN, s, false); // gap at the gate
+      }
+      for (let a = -HALF_LEN + RUN; a <= HALF_LEN - RUN; a += RUN) { // the flanks
+        addRun(a, -HALF_WID, true);
+        addRun(a, HALF_WID, true);
+      }
+      const gate = { ...spot(HALF_LEN, 0), rot: Math.atan2(perX, perZ) };
+      this.village = { x, z, dirX, dirZ, entry, smith, guards, buildings, fence, gate };
       break;
     }
   }
@@ -1162,32 +1185,68 @@ export class World {
     }
   }
 
-  // ---- the starting cave: a small boulder horseshoe, opening toward +z
-  // (down-screen, where the camp is). Every boulder gets its own collision
-  // circle so the walls block EXACTLY where the rocks are. ----
+  // ---- the starting homestead: a fenced yard you already own, opening toward
+  // +z (down-screen). Inside: the cottage you woke up in, a single grave, a hay
+  // pile and a patch of wheat. This is a FIXED place — there is no base to
+  // upgrade, so what you see here is what home looks like for the whole run. ----
   _buildCave() {
     const rng = mulberry32(this.seed ^ 0xca4e);
     const R = WORLD.caveR;
-    const OPEN_HALF = 0.62; // radians of clear opening around the +z direction
+    const OPEN_HALF = 0.62; // radians of clear gateway around the +z direction
     const group = new THREE.Group();
-    for (let a = OPEN_HALF; a < Math.PI * 2 - OPEN_HALF; a += 1.7 / R) {
-      const bx = Math.sin(a) * R, bz = Math.cos(a) * R; // a=0 → +z (the opening)
-      const scale = 1.4 + rng() * 0.8;
-      const b = makeBoulder(scale, 0x5c584e, rng);
-      b.position.set(bx, this.heightAt(bx, bz) + 0.3, bz);
-      group.add(b);
-      this.obstacles.push({ x: bx, z: bz, r: scale * 0.85, home: true }); // matches the rock
+
+    // the paling: fence runs laid tangent to the yard circle, gateway left open
+    const STEP = 3.4 / R;   // ≈ one 3.4 m run per step
+    for (let a = OPEN_HALF; a < Math.PI * 2 - OPEN_HALF; a += STEP) {
+      const bx = Math.sin(a) * R, bz = Math.cos(a) * R; // a=0 → +z (the gateway)
+      const run = makeFenceRun(3.6);
+      run.position.set(bx, this.heightAt(bx, bz), bz);
+      run.rotation.y = a + Math.PI / 2;                 // tangent to the ring
+      group.add(run);
+      this.obstacles.push({ x: bx, z: bz, r: 1.5, home: true });
     }
-    for (let i = 0; i < 3; i++) {
-      const a = Math.PI * 0.6 + rng() * Math.PI * 0.8; // back of the cave
-      const d = 3 + rng() * (R - 5);
-      const sx = Math.sin(a) * d, sz = Math.cos(a) * d;
-      const s = makeStalagmite(rng);
-      s.position.set(sx, this.heightAt(sx, sz), sz);
-      group.add(s);
+    // a gate frame either side of the opening, so the way in reads as a gate
+    for (const s of [-1, 1]) {
+      const ga = s * OPEN_HALF;
+      const gx = Math.sin(ga) * R, gz = Math.cos(ga) * R;
+      const post = makeFenceGate(1.2);
+      post.position.set(gx, this.heightAt(gx, gz), gz);
+      post.rotation.y = ga + Math.PI / 2;
+      group.add(post);
     }
+
+    // the cottage sits at the back of the yard, door toward the gateway
+    const hx = Math.sin(Math.PI) * (R - 4.6), hz = Math.cos(Math.PI) * (R - 4.6);
+    const cottage = makeCottage();
+    cottage.position.set(hx, this.heightAt(hx, hz), hz);
+    cottage.rotation.y = Math.PI;                       // face +z, out the gate
+    group.add(cottage);
+    this.obstacles.push({ x: hx, z: hz, r: 2.3, home: true });
+
+    // one grave in the corner — someone lived here before you
+    const gvx = Math.sin(-2.2) * (R - 3.2), gvz = Math.cos(-2.2) * (R - 3.2);
+    const grave = makeGraveSingle();
+    grave.position.set(gvx, this.heightAt(gvx, gvz), gvz);
+    grave.rotation.y = -2.2;
+    group.add(grave);
+
+    // hay by the fence, and a little wheat plot beside it
+    const hax = Math.sin(2.3) * (R - 3.4), haz = Math.cos(2.3) * (R - 3.4);
+    const hay = makeHayPile(rng);
+    hay.position.set(hax, this.heightAt(hax, haz), haz);
+    group.add(hay);
+    this.obstacles.push({ x: hax, z: haz, r: 1.2, home: true });
+    for (let i = 0; i < 14; i++) {
+      const a = 1.7 + rng() * 1.1, d = R - 6.2 + rng() * 2.6;
+      const wx = Math.sin(a) * d, wz = Math.cos(a) * d;
+      const tuft = makeWheatTuft(rng);
+      tuft.position.set(wx, this.heightAt(wx, wz), wz);
+      tuft.rotation.y = rng() * Math.PI;
+      group.add(tuft);
+    }
+
     this._homeGroup = this._addStatic(group);
-    // a small campfire just outside the cave mouth — home
+    // the hearth, just outside the gate where it always was
     const fire = makeCampfire();
     fire.position.set(2, this.heightAt(2, 14), 14);
     this._addStatic(fire);
@@ -1396,8 +1455,8 @@ export class World {
       else out.copy(sand).lerp(_gcTmp.set(0x5e6e66), Math.min(1, -cd / 40));
     }
 
-    // the cave floor is dark rock
-    if (r < WORLD.caveR + 2.5) out.lerp(_gcTmp.set(0x2a2a26), Math.min(1, (WORLD.caveR + 2.5 - r) / 3));
+    // the homestead yard: trodden earth inside the fence, not cave rock
+    if (r < WORLD.caveR + 2.5) out.lerp(_gcTmp.set(0x6b5a3c), Math.min(0.75, (WORLD.caveR + 2.5 - r) / 3));
 
     // subtle per-vertex jitter so large flats never look uniform
     const j = (latticeHash(Math.round(x * 3), Math.round(z * 3), this.seed + 99) - 0.5) * 0.05;
@@ -2589,6 +2648,26 @@ export class World {
           this.obstacles.push({ x: b.x, z: b.z, r: b.type === 'fountain' ? 1.9 : 2.3,
             tag: 'vlg:' + this.village.buildings.indexOf(b) });
         }
+      }
+      // -- the fence ringing the hamlet, plus its gate --
+      for (const f of this.village.fence || []) {
+        if (f.x < cxw || f.x >= cxw + CHUNK || f.z < czw || f.z >= czw + CHUNK) continue;
+        const mesh = bakeGroup(makeFenceRun(f.len));
+        mesh.position.set(f.x, this.heightAt(f.x, f.z), f.z);
+        mesh.rotation.y = f.rot;
+        group.add(mesh);
+        if (!f.obstacleAdded) {
+          f.obstacleAdded = true;
+          this.obstacles.push({ x: f.x, z: f.z, r: 1.5,
+            tag: 'vfence:' + this.village.fence.indexOf(f) });
+        }
+      }
+      const gt = this.village.gate;
+      if (gt && gt.x >= cxw && gt.x < cxw + CHUNK && gt.z >= czw && gt.z < czw + CHUNK) {
+        const mesh = bakeGroup(makeFenceGate(9));
+        mesh.position.set(gt.x, this.heightAt(gt.x, gt.z), gt.z);
+        mesh.rotation.y = gt.rot;
+        group.add(mesh);   // no obstacle — the gateway must stay walkable
       }
     }
 

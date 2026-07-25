@@ -11,9 +11,6 @@ import { SHOP_GROUPS, SMITH_GROUPS, questFor, repeatableQuestFor, questXpFor,
          PLAYER_HP, ENEMY_HP, ENEMY_DMG, xpKillFor, meatForLevel,
          enemyTypicalLevel, attackEnergyFor } from './config.js';
 
-const NEED_NAMES = { tent: 'Hide Tent', cabin: 'Wooden Cabin', furnace: 'Stone Furnace',
-  keep: 'Medieval Keep', runic: 'Runic Hall', mountain: 'Mountain Fortress',
-  spirit: 'Spirit Bastion', primal: 'Primal Citadel', frosthold: 'Frosthold' };
 import { itemIcon, resIcon, skillArt } from './icons.js';
 import { attachTip } from './tooltip.js';
 import { audio } from './audio.js';
@@ -97,7 +94,7 @@ export class Panels {
   // up at once (that's how you drag loot around like in WoW)
   static PANEL_IDS = {
     shop: 'shop', character: 'character', bestiary: 'bestiary', smith: 'smith',
-    settings: 'settings', base: 'basepanel', chest: 'chestpanel',
+    settings: 'settings', chest: 'chestpanel',
     help: 'helppanel',
   };
 
@@ -138,7 +135,6 @@ export class Panels {
     if (this.openSet.has('smith')) this.renderSmith();
     if (this.openSet.has('character')) this.renderCharacter();
     if (this.openSet.has('bestiary')) this.renderBestiary();
-    if (this.openSet.has('base')) this.renderBase();
     if (this.openSet.has('chest')) this.renderChest();
   }
 
@@ -220,8 +216,7 @@ export class Panels {
     const groups = this.moba
       ? [...SHOP_GROUPS, { key: 'base', label: '🏰 Base' }]
       : this.camp
-        ? [{ key: 'camp', label: '🏕️ Camp' },
-           ...SHOP_GROUPS, { key: 'supplies', label: '🧪 Supplies' }]
+        ? [...SHOP_GROUPS, { key: 'supplies', label: '🧪 Supplies' }]
         : SHOP_GROUPS;
     const tabs = $('shop-tabs');
     tabs.innerHTML = '';
@@ -240,10 +235,6 @@ export class Panels {
 
     if (this.shopTab === 'base') {
       this._renderBase(wrap);
-      return;
-    }
-    if (this.shopTab === 'camp') {
-      this._renderCamp(wrap);
       return;
     }
     if (this.shopTab === 'supplies') {
@@ -269,14 +260,12 @@ export class Panels {
 
       const owned = isSpells ? p.spellsOwned.has(entry.id) : p.hasItem(entry.id);
       const levelLocked = p.level < entry.level;
-      // era gating: some gear needs a camp building (survival only)
-      const needMissing = entry.needs && this.camp && !this.camp.has(entry.needs);
       const requiredClass = this.camp ? requiredClassForItem(entry) : null;
       const cost = costFor(entry.cost, !!this.moba);
       const affordable = cost && this._affordable(cost);
 
       const card = document.createElement('div');
-      card.className = 'card' + (owned ? ' owned' : (levelLocked || needMissing) ? ' locked' : affordable ? ' buyable' : ' expensive');
+      card.className = 'card' + (owned ? ' owned' : levelLocked ? ' locked' : affordable ? ' buyable' : ' expensive');
 
       let status;
       // one level ahead you can already see the price and start saving;
@@ -284,7 +273,6 @@ export class Panels {
       if (levelLocked) status = entry.level === p.level + 1
         ? `<span class="tag">🔒 Lv ${entry.level} — ${this._costStr(cost)}</span>`
         : `<span class="tag">🔒 Lv ${entry.level}</span>`;
-      else if (needMissing) status = `<span class="tag">🏕️ Needs ${NEED_NAMES[entry.needs] ?? entry.needs}</span>`;
       else if (owned && isSpells) status = '<span class="tag ok">✔ Owned</span>';
       else status = (owned ? '<span class="tag ok">✔ Owned</span> ' : '') +
         `<button class="buy-btn${owned ? ' owned' : ''}" data-id="${entry.id}">Buy${owned ? ' another' : ''} — ${this._costStr(cost)}</button>`;
@@ -346,17 +334,15 @@ export class Panels {
       }
       const owned = p.hasItem(entry.id);
       const levelLocked = p.level < entry.level;
-      const needMissing = entry.needs && this.camp && !this.camp.has(entry.needs);
       const requiredClass = this.camp ? requiredClassForItem(entry) : null;
       const cost = costFor(entry.cost, false);
       const affordable = cost && this._affordable(cost);
       const card = document.createElement('div');
-      card.className = 'card' + (owned ? ' owned' : (levelLocked || needMissing) ? ' locked' : affordable ? ' buyable' : ' expensive');
+      card.className = 'card' + (owned ? ' owned' : levelLocked ? ' locked' : affordable ? ' buyable' : ' expensive');
       let status;
       if (levelLocked) status = entry.level === p.level + 1
         ? `<span class="tag">🔒 Lv ${entry.level} — ${this._costStr(cost)}</span>`
         : `<span class="tag">🔒 Lv ${entry.level}</span>`;
-      else if (needMissing) status = `<span class="tag">🏕️ Needs ${NEED_NAMES[entry.needs] ?? entry.needs}</span>`;
       else status = (owned ? '<span class="tag ok">✔ Owned</span> ' : '') +
         `<button class="buy-btn${owned ? ' owned' : ''}" data-id="${entry.id}">Forge${owned ? ' another' : ''} — ${this._costStr(cost)}</button>`;
       card.innerHTML = `
@@ -500,13 +486,11 @@ export class Panels {
         || (!!it.training && !!this.player.upgrades?.[it.training]); // learned skills
       const rebuyable = !!it.torch && !it.torch.permanent; // ordinary torches burn out
       const locked = it.level > this.player.level;
-      const eraLocked = !!it.needs && !!this.camp && !this.camp.has(it.needs);
       const affordable = this._affordable(it.cost);
       const card = document.createElement('div');
       card.className = 'card' + (owned && !rebuyable ? ' owned'
-        : affordable && !locked && !eraLocked ? ' buyable' : locked || eraLocked ? ' locked' : ' expensive');
+        : affordable && !locked ? ' buyable' : locked ? ' locked' : ' expensive');
       const foot = locked ? `<span class="tag">🔒 Lv ${it.level}</span>`
-        : eraLocked ? `<span class="tag">🔒 Needs ${NEED_NAMES[it.needs] ?? it.needs}</span>`
         : (owned && !rebuyable) ? `<span class="tag ok">✔ ${placed ? 'Placed' : it.placeable ? 'In backpack — click to place' : 'Owned — equip in Character (C)'}</span>`
         : (owned ? '<span class="tag ok">✔ Owned</span> ' : '')
           + `<button class="buy-btn${owned ? ' owned' : ''}" data-supply="${it.id}">Buy${owned ? ' another' : ''} — ${this._costStr(it.cost)}</button>`;
@@ -858,8 +842,8 @@ export class Panels {
 
     const groups = [
       { icon: '❤️', title: 'Vitals', tone: 'hp', rows: [
-        ['Max health', p.maxHp, hpParts.join(' · ')],
-        ['Health regen', `${Math.round(p.hpRegen * 10) / 10}/s`,
+        ['Health', p.maxHp, hpParts.join(' · ')],
+        ['Regen', `${Math.round(p.hpRegen * 10) / 10}/s`,
           `${regenParts.join(' · ')} — out of combat ${Math.round(oocTotal)}/s (~${Math.round(p.maxHp / Math.max(0.1, oocTotal))}s to full)`],
       ] },
       { icon: '⚡', title: 'Energy', tone: 'energy', rows: [
@@ -867,7 +851,7 @@ export class Panels {
           `100 base · +${p.level - 1} level — every basic attack is paid from here`],
         ['Regen', `${standRegen.toFixed(1)}/s`,
           `standing still · ${(standRegen * 0.5).toFixed(1)}/s while moving — plant your feet to recover`],
-        ['Swings per full bar', swingsPerBar,
+        ['Swings / bar', swingsPerBar,
           `then ~${sustained.toFixed(1)} swing${sustained === 1 ? '' : 's'}/s sustained at ${cost} energy each`],
       ] },
       ...(p.maxMana > 0 ? [{ icon: '💧', title: 'Mana', tone: 'mana', rows: [
@@ -876,37 +860,48 @@ export class Panels {
       ] }] : []),
       { icon: '⚔️', title: 'Attack', tone: 'atk', rows: [
         ['Damage', Math.round(p.weapon.dmg), dmgParts.join(' · ')],
-        ['Energy per attack', cost, enParts.join(' · ')],
-        ['Damage per energy', (p.weapon.dmg / cost).toFixed(1),
+        ['Cost / hit', cost, enParts.join(' · ')],
+        ['Dmg / energy', (p.weapon.dmg / cost).toFixed(1),
           'how much punch you get out of the bar — the real comparison between weapons'],
         ['Reach', `${Math.round(p.weapon.range * 10) / 10} m`, rgParts.join(' · ')],
       ] },
       { icon: '🏃', title: 'Mobility', tone: 'move', rows: [
-        ['Move speed', Math.round(shownSpeed * 10) / 10, spParts.join(' · ')],
+        ['Speed', Math.round(shownSpeed * 10) / 10, spParts.join(' · ')],
       ] },
     ];
 
     const companionRows = [];
-    if (p.pet) companionRows.push(['Pet damage', Math.round(p.pet.dmg),
+    if (p.pet) companionRows.push(['Pet', Math.round(p.pet.dmg),
       `${p.pet.maxHp} hp · training T${s.pet} · your level ${p.level}`]);
-    if (p.orb) companionRows.push(['Orb damage', `${Math.round(p.orb.dmg)} ×${p.orb.targets}`,
+    if (p.orb) companionRows.push(['Orb', `${Math.round(p.orb.dmg)} ×${p.orb.targets}`,
       s.power ? `+${s.power * 5}% Power training` : 'scales with Power training']);
     if (companionRows.length) groups.push({ icon: '🐾', title: 'Companion', tone: 'pet', rows: companionRows });
 
     const classRows = [['Class', classTree ? `${classTree.icon} ${classTree.name}` : 'Unchosen', classTree
       ? `${passiveRanks}/${classTree.passives.length * 3} passive ranks · ${activeRanks}/${classTree.actives.length * 3} active ranks · see the Class tab`
       : 'Open the Class tab to choose one class']];
-    if (classEffects.classCdReduction) classRows.push(['Class recovery',
+    if (classEffects.classCdReduction) classRows.push(['Recovery',
       `-${Math.round(classEffects.classCdReduction * 100)}%`, `${classTree?.name ?? 'Class'} passive training`]);
     groups.push({ icon: '🧬', title: 'Class', tone: 'class', rows: classRows });
 
-    $('char-stats').innerHTML = groups.map(g =>
-      `<section class="stat-group ${g.tone}">
-        <h4 class="sg-head"><span class="sg-icon">${g.icon}</span>${g.title}</h4>
-        ${g.rows.map(([label, val, parts]) =>
-          `<div class="stat-row"><span class="sr-label">${label}</span>
-            <b>${val}</b><small>${parts}</small></div>`).join('')}
-      </section>`).join('');
+    // The stats column is only ~380 px wide, so each stat is ONE line —
+    // label left, value right — and the full breakdown lives in the hover
+    // tooltip instead of wrapping into four lines and swallowing the panel.
+    const statsEl = $('char-stats');
+    statsEl.innerHTML = '';
+    for (const g of groups) {
+      const sec = document.createElement('section');
+      sec.className = `stat-group ${g.tone}`;
+      sec.innerHTML = `<h4 class="sg-head"><span class="sg-icon">${g.icon}</span>${g.title}</h4>`;
+      for (const [label, val, parts] of g.rows) {
+        const row = document.createElement('div');
+        row.className = 'stat-row';
+        row.innerHTML = `<span class="sr-label">${label}</span><b>${val}</b>`;
+        if (parts) attachTip(row, `<div class="tt-head">${label}</div><div class="tt-body">${parts}</div>`);
+        sec.appendChild(row);
+      }
+      statsEl.appendChild(sec);
+    }
 
     // admin mode: type a value to override any stat (blank = back to normal)
     if (this.hooks.isAdmin?.()) {
@@ -1230,74 +1225,12 @@ export class Panels {
   }
 
   // Survival camp: home upgrades through the ages + utility buildings + chest.
-  _campCard(def) {
-    const p = this.player, camp = this.camp;
-    const info = camp.buildingInfo(def.id);
-    const levelLocked = !info.maxed && p.level < info.reqLevel;
-    const affordable = info.cost && this._affordable(info.cost);
-    const card = document.createElement('div');
-    card.className = 'card' + (info.maxed ? ' owned' : levelLocked ? ' locked' : affordable ? ' buyable' : ' expensive');
-    let status;
-    if (info.maxed) status = '<span class="tag ok">Built</span>';
-    else if (levelLocked) status = `<span class="tag">Unlocks at Lv ${info.reqLevel}</span>`;
-    else status = `<button class="camp-btn" data-id="${def.id}">` +
-      `${info.level === 0 ? 'Build' : 'Upgrade to'} ${info.nextName} — ${this._costStr(info.cost)}</button>`;
-    card.innerHTML = `
-      <div class="card-head"><span class="icon">${itemIcon(def)}</span>
-        <span class="name">${info.level > 0 ? info.name : (info.nextName ?? info.name)}</span>
-        <span class="lv">${info.level}/${def.max}</span></div>
-      <div class="desc">${info.desc}</div>
-      <div class="card-foot">${status}</div>`;
-    return card;
-  }
 
-  _wireCampButtons(wrap) {
-    wrap.querySelectorAll('.camp-btn').forEach(btn => {
-      btn.addEventListener('click', () => this.hooks.onCampBuild(btn.dataset.id));
-    });
-  }
 
   // Upgrades → Camp tab: the utility buildings. The home itself (and the
   // chest) are upgraded/used in person via their own E modals.
-  _renderCamp(wrap) {
-    for (const def of CAMP_BUILDINGS) {
-      if (def.id === 'home') continue;
-      wrap.appendChild(this._campCard(def));
-    }
-    this._wireCampButtons(wrap);
-  }
 
   // ---------- E at your home: the base modal (era + home upgrade) ----------
-  renderBase() {
-    const camp = this.camp;
-    if (!camp) return;
-    $('base-res').innerHTML = this._resLine();
-    const wrap = $('base-items');
-    wrap.innerHTML = '';
-    const era = document.createElement('div');
-    era.className = 'card owned';
-    era.style.gridColumn = '1 / -1';
-    era.innerHTML = `<div class="card-head"><span class="icon">${itemIcon({ id: 'home' })}</span>
-      <span class="name">Current era: ${camp.era()}</span></div>
-      <div class="desc">Upgrade your home to advance through the ages and unlock new gear.</div>`;
-    wrap.appendChild(era);
-    wrap.appendChild(this._campCard(CAMP_BUILDINGS.find(d => d.id === 'home')));
-    const classReset = document.createElement('div');
-    classReset.className = 'card owned';
-    classReset.style.gridColumn = '1 / -1';
-    const spent = Object.values(this.player.classTraining || {}).reduce((sum, rank) => sum + (Number(rank) || 0), 0);
-    const selected = classTreeById(this.player.selectedClass);
-    classReset.innerHTML = `<div class="card-head"><span class="icon">🧬</span>
-      <span class="name">Reset class tree</span><span class="lv">${selected ? `${selected.icon} ${selected.name} · ` : ''}${spent} ranks</span></div>
-      <div class="desc">Clears the selected class and all trained skills. Spent meat is not refunded; every rank must be trained again.</div>
-      <div class="card-foot"><button class="buy-btn danger" data-home-class-reset="1" ${selected ? '' : 'disabled'}>
-        🔄 Reset class — no refund
-      </button></div>`;
-    wrap.appendChild(classReset);
-    classReset.querySelector('[data-home-class-reset]')?.addEventListener('click', () =>
-      this.hooks.onResetClass?.());
-    this._wireCampButtons(wrap);
-  }
 
   // ---------- E at the chest: storage modal ----------
   renderChest() {

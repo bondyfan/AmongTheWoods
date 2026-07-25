@@ -55,21 +55,15 @@ export class Camp {
     return this.levels[need] >= 1;
   }
 
-  era() { return ERAS[Math.min(this.levels.home, ERAS.length - 1)]; }
-
-  // max-hp bonus from the home building — worth building FOR, not box-ticking
-  homeHpBonus() {
-    return [0, 20, 60, 120, 180, 240, 310, 390, 480, 580][Math.min(this.levels.home, 9)]
-      + [0, 0, 40, 90][Math.min(this.levels.banner, 3)];
-  }
-
-  forgeTier() { return Math.max(0, Math.min(5, this.levels.home - 4)); }
-
-  // secondary era perks: cabin pulls loot from further, the stone house
-  // swings harder at trees & rocks, the keep sharpens your wits (+XP)
-  magnetMult() { return (this.has('cabin') ? 1.3 : 1) * (1 + 0.18 * this.levels.banner); }
-  chopMult() { return this.has('stonehouse') ? 1.25 : 1; }
-  xpMult() { return (this.has('keep') ? 1.15 : 1) * (1 + [0, 0.08, 0.16, 0.25][Math.min(this.levels.banner, 3)]); }
+  // The base upgrade tree is gone: home is a fixed fenced homestead, so none of
+  // these scale any more. They stay as neutral constants because player.recompute
+  // and the pickup magnet still read them.
+  era() { return 'Homestead'; }
+  homeHpBonus() { return 0; }
+  forgeTier() { return 0; }
+  magnetMult() { return 1; }
+  chopMult() { return 1; }
+  xpMult() { return 1; }
 
   buildingInfo(id) {
     const def = CAMP_BUILDINGS.find(b => b.id === id);

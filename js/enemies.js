@@ -16,6 +16,9 @@ const MAX_ALIVE_HARD = 140; // hard cap on simultaneously live units
 // give up a chase after this long without reaching the target, then jog home
 const LEASH_TIME = 7;
 const LEASH_TIME_BOSS = 16;
+// village guards: how far a cry for help carries, and how long they stay angry
+const GUARD_ALERT_R = 22;
+const GUARD_GRUDGE_T = 20;
 // Persistent zone population: the world is carved into ZONE×ZONE cells; each
 // cell populates ONCE (always out of the player's sight), the dead STAY dead,
 // and a fully wiped cell only repopulates REPOP_COOLDOWN after the wipe.
@@ -799,6 +802,19 @@ export class EnemyManager {
       }
     }
     enemy.lastHitBy = srcId; // kill credit (co-op XP attribution)
+    // Guards are NEUTRAL, not harmless: strike one and it — and every guard
+    // within earshot — turns on the culprit. srcIds that are not mobs ('e…')
+    // or other guards ('npc…') are players and their pets.
+    if (enemy.cfg.friendly && srcId && !/^(e|npc)\d/.test(srcId)) {
+      const culprit = srcId.endsWith('#pet') ? srcId.slice(0, -4)
+        : srcId === 'pet' ? 'local' : srcId;
+      for (const o of this.list) {
+        if (!o.cfg.friendly || o.dying) continue;
+        if (o !== enemy && Math.hypot(o.pos.x - enemy.pos.x, o.pos.z - enemy.pos.z) > GUARD_ALERT_R) continue;
+        o.guardGrudgeId = culprit;
+        o.guardGrudgeT = GUARD_GRUDGE_T;
+      }
+    }
     const hitColor = opts?.weakPoint ? '#fff08a' : opts?.crit ? '#ffd23a' : '#ffffff';
     this.hooks.popup(enemy.mesh.position.clone().setY(enemy.mesh.position.y + 1.4 * enemy.sizeMult + 0.4),
       Math.round(dmg).toString(), hitColor, opts?.crit ? 'big' : '');
@@ -867,9 +883,11 @@ export class EnemyManager {
   // ---- VILLAGE GUARD AI: hold the post; any hostile that steps within
   // ENGAGE metres of the soldier gets run through. Chases to a short leash,
   // then walks back to the gate. ----
-  _updateFriendly(e, dt) {
+  _updateFriendly(e, dt, targets = []) {
     e.postX ??= e.pos.x; e.postZ ??= e.pos.z;
     const ENGAGE = 3, LEASH = 24;
+    // a guard who was struck by a player hunts THAT player for a while
+    if (e.guardGrudgeT > 0) e.guardGrudgeT -= dt;
     e.guardCombatT = Math.max(0, (e.guardCombatT ?? 0) - dt);
     if (e.stunDrT > 0) e.stunDrT -= dt;
     if (e.stunT > 0) { // guards can be staggered like anyone else
@@ -902,15 +920,26 @@ export class EnemyManager {
         if (d < fd + (o.hitR || 0)) { fd = d; foe = o; }
       }
     }
+    // …and the grudge wins over everything: hit a guard and it comes for YOU.
+    // A player foe is not an enemy record, so it is tracked separately and
+    // struck through takeDamage() instead of this.damage().
+    let playerFoe = null;
+    if (e.guardGrudgeT > 0 && e.guardGrudgeId != null) {
+      const t = targets.find(t => t && t.id === e.guardGrudgeId && !t.dead && !t.stealthed);
+      if (t && Math.hypot(t.pos.x - e.postX, t.pos.z - e.postZ) < LEASH) playerFoe = t;
+      else if (!t) e.guardGrudgeT = 0;   // they died or vanished — stand down
+    }
+    if (playerFoe) foe = null;           // the culprit outranks any mob
     e.guardFoe = foe;
-    if (foe) e.guardCombatT = Math.max(e.guardCombatT, 4);
+    if (foe || playerFoe) e.guardCombatT = Math.max(e.guardCombatT, 4);
 
     // move: close on the foe, else walk home to the post
+    const chase = playerFoe || foe;
     let vx = 0, vz = 0;
-    const goal = foe ? foe.pos : { x: e.postX, z: e.postZ };
+    const goal = chase ? chase.pos : { x: e.postX, z: e.postZ };
     const dx = goal.x - e.pos.x, dz = goal.z - e.pos.z;
     const gd = Math.hypot(dx, dz) || 1;
-    const keep = foe ? Math.max(0.6, e.range * 0.75 + (foe.hitR || 0) * 0.5) : 0.3;
+    const keep = chase ? Math.max(0.6, e.range * 0.75 + (chase.hitR || 0) * 0.5) : 0.3;
     if (gd > keep) { vx = (dx / gd) * e.speed; vz = (dz / gd) * e.speed; }
     // shoulder-room from everyone nearby
     for (const o of this.list) {
@@ -925,19 +954,27 @@ export class EnemyManager {
     // strike — threat lands on the guard's own proxy id, pulling the mob off
     // the villagers (and the player) and onto the soldier
     e.attackCd -= dt;
-    if (foe && Math.hypot(foe.pos.x - e.pos.x, foe.pos.z - e.pos.z) < e.range + (foe.hitR || 0)
+    if (chase && Math.hypot(chase.pos.x - e.pos.x, chase.pos.z - e.pos.z) < e.range + (chase.hitR || 0)
         && e.attackCd <= 0) {
       e.attackCd = e.cfg.attackCd;
       e.lungeT = 0.25;
-      this.damage(foe, e.meleeDmg,
-        new THREE.Vector3(foe.pos.x - e.pos.x, 0, foe.pos.z - e.pos.z), 'npc' + e.id);
+      if (playerFoe) {
+        // players own their own HP — hit them the way any hostile mob would
+        playerFoe.takeDamage(e.meleeDmg, {
+          id: 'npc' + e.id, name: e.name || 'Village Guard',
+          pos: { x: e.pos.x, z: e.pos.z }, range: e.range,
+        });
+      } else {
+        this.damage(foe, e.meleeDmg,
+          new THREE.Vector3(foe.pos.x - e.pos.x, 0, foe.pos.z - e.pos.z), 'npc' + e.id);
+      }
       audio.sfx?.('attack_melee', 0.3, 60);
     }
 
     // presentation: face the foe (or stand easy facing out the gate)
     const spd = Math.hypot(vx, vz);
-    if (foe || spd > 0.1) {
-      const fx = foe ? foe.pos.x - e.pos.x : vx, fz = foe ? foe.pos.z - e.pos.z : vz;
+    if (chase || spd > 0.1) {
+      const fx = chase ? chase.pos.x - e.pos.x : vx, fz = chase ? chase.pos.z - e.pos.z : vz;
       if (fx || fz) e.mesh.rotation.y = Math.atan2(fx, fz) + Math.PI;
       e.walkT += dt * Math.max(2, spd);
     } else if (this.world.village) {
@@ -1105,7 +1142,7 @@ export class EnemyManager {
       // mob target selection — a guard must never count as "aggroed" or the
       // player would sit in permanent combat at the village gate) ----
       if (e.cfg.friendly) {
-        this._updateFriendly(e, dt);
+        this._updateFriendly(e, dt, targets);
         continue;
       }
 

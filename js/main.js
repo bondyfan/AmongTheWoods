@@ -3843,7 +3843,6 @@ function buyItem(id) {
   if (!item || player.level < item.level) return; // re-buying copies is fine
   if (item.training && player.upgrades?.[item.training]) return; // skills are one-time
   if (player.invFullFor(id)) { ui.toast('🎒 Inventory full — drop or use something first.', ''); audio.sfx('error', 0.5); return; }
-  if (item.needs && camp && !camp.has(item.needs)) return; // era gate (survival)
   const cost = costFor(item.cost, game.kind === 'moba');
   if (!Object.entries(cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
   for (const [k, v] of Object.entries(cost)) player[k] = roundResource(player[k] - v);
