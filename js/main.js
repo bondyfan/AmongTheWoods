@@ -7,7 +7,7 @@ import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOB
          consumableById, essenceDropFor, MAX_LEVEL, XP_LEVELS, questFor, repeatableQuestFor,
          questXpFor, BIOME_LAIRS, CAMP_BUILDINGS, trainingLevelFor, CLASS_TREES,
          classTreeById, classSkillById, classSkillRequiredLevel, classSkillMeatCost, classSkillEssenceCost,
-         CLASS_CHOOSE_COST, firstClassSkillId } from './config.js';
+         CLASS_CHOOSE_COST, firstClassSkillId, MAX_SPELL_SLOTS } from './config.js';
 import { makeAimArc, updateAimArc, makeRaft, makeBlacksmith, makeHorse, makeWisp, makeMan,
          makeGriffin, makeGriffinRoost, makeTumbleweed, BAKED_MAT, WATER_SHADERS,
          makeSkyDome } from './models.js';
@@ -265,7 +265,7 @@ const panels = new Panels({
     player.toggleSpellSlot(id);
     if (player.spellSlots.includes(id)) localStorage.setItem('woods_slot_hint_done', '1');
     panels.refresh();
-    ui.updateSpellbar(player); // repaint the 1–6 bar NOW — the loop is paused
+    ui.updateSpellbar(player); // repaint the 1–9 bar NOW — the loop is paused
   },
   onBuild: (id, lane) => buildBase(id, lane),
   onCampBuild: (id) => campBuild(id),
@@ -279,7 +279,7 @@ const panels = new Panels({
     player.spellSlots[i] = id;
     localStorage.setItem('woods_slot_hint_done', '1'); // the drag lesson is learned
     audio.sfx('click', 0.4);
-    ui.updateSpellbar(player); // repaint the 1–6 bar NOW — the loop is paused while the modal is open
+    ui.updateSpellbar(player); // repaint the 1–9 bar NOW — the loop is paused while the modal is open
   },
   onDropRes: (key) => dropResource(key),
   onDropItem: (id) => dropItem(id),
@@ -3048,6 +3048,7 @@ function serializeState() {
   const p = player;
   const data = {
     level: p.level, xp: p.xp, hp: Math.round(p.hp),
+    energy: Math.round(p.energy), mana: Math.round(p.mana),
     res: Object.fromEntries(RESOURCES.map(k => [k, p[k] || 0])),
     equipment: { ...p.equipment },
     invItems: [...p.invItems],
@@ -3229,7 +3230,7 @@ function applyLoadedState(d) {
   p.tamedPet = (d.tamedPet && typeof d.tamedPet.type === 'string' && ENEMY_TYPES[d.tamedPet.type])
     ? { type: d.tamedPet.type, name: d.tamedPet.name || d.tamedPet.type } : null;
   p.spellsOwned = new Set(d.spellsOwned || []);
-  p.spellSlots = Array.isArray(d.spellSlots) ? d.spellSlots.slice(0, 6).map(s => s ?? undefined) : [];
+  p.spellSlots = Array.isArray(d.spellSlots) ? d.spellSlots.slice(0, MAX_SPELL_SLOTS).map(s => s ?? undefined) : [];
   p.spellSlots = p.spellSlots.map(id => {
     const classSkill = classSkillById(id);
     if (classSkill) return classSkill.type === 'active' && classSkill.classId === p.selectedClass
@@ -3272,6 +3273,8 @@ function applyLoadedState(d) {
   p.enforceClassEquipment();
   p.recompute();
   p.hp = Math.min(p.maxHp, d.hp ?? p.maxHp);
+  p.energy = Math.min(p.maxEnergy, d.energy ?? p.maxEnergy);
+  p.mana = Math.min(p.maxMana, d.mana ?? p.maxMana);
   companions.sync(player);
   syncQuestResidents();
   resetAutosaveBaseline(); // don't let the loaded state trigger an instant re-save
@@ -3689,10 +3692,10 @@ function trainClassSkill(id) {
   player.recompute();
   companions.sync(player);
   const tree = classTreeById(skill.classId);
-  // New actives are NOT auto-slotted — the player drags them onto the 1–6 bar
+  // New actives are NOT auto-slotted — the player drags them onto the 1–9 bar
   // (a one-time hint above the bar teaches this on the very first ability).
   ui.toast(skill.type === 'active' && nextRank === 1 && !player.spellSlots.includes(id)
-    ? `${tree.icon} Learned: ${skill.name} — drag it onto the 1–6 bar!`
+    ? `${tree.icon} Learned: ${skill.name} — drag it onto the 1–9 bar!`
     : `${tree.icon} Trained: ${skill.name} — rank ${nextRank}/${skill.maxRank}`, 'level');
   audio.sfx('upgrade', 0.55);
   panels.refresh();
@@ -3765,7 +3768,7 @@ function dropConsumable(id) {
   audio.sfx('click', 0.4);
 }
 
-// action bar 1–6: spells and trained class abilities cast, items equip
+// action bar 1–9: spells and trained class abilities cast, items equip
 function useBarSlot(i) {
   const id = player.spellSlots[i];
   if (!id) return;
@@ -4785,7 +4788,7 @@ for (const [btnId, d] of [['bigmap-zoomin', 1], ['bigmap-zoomout', -1]]) {
 }
 $id('respawn-cave').addEventListener('click', () => reviveAt('cave'));
 $id('respawn-grave').addEventListener('click', () => reviveAt('grave'));
-for (let i = 0; i < 6; i++) {
+for (let i = 0; i < MAX_SPELL_SLOTS; i++) {
   input.onKey('Digit' + (i + 1), () => {
     if (!inPlay() || game.paused) return;
     useBarSlot(i);
@@ -6036,7 +6039,7 @@ function step() {
         canopy = {
           densTex: canopyShade.densTex, metaTex: canopyShade.metaTex,
           cx: canopyShade.cx, cz: canopyShade.cz, size: canopyShade.size,
-          strength: 0.65,
+          strength: 0.85,
         };
       }
     }

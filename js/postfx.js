@@ -157,7 +157,7 @@ const COMPOSITE_FRAG = /* glsl */`
     // crown is hidden BY that crown, so this is what makes a thick wood
     // visibly darker from above (a lone tree's crown barely registers).
     float fade = mix(1.0, 0.35, smoothstep(topH * 0.5, topH * 0.95, world.y - groundH));
-    return 1.0 - min(dens * fade * uCanopyStrength, 0.5);
+    return 1.0 - min(dens * fade * uCanopyStrength, 0.62);
   }
   vec3 s2l(vec3 c){ return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
   vec3 l2s(vec3 c){ c = max(c, 0.0); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
