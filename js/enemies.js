@@ -873,11 +873,28 @@ export class EnemyManager {
       hitR: e.hitR,
       takeDamage: (dmg, src) => {
         if (src?.id != null) { e.guardFoeId = src.id; e.guardCombatT = 6; }
+        // A villager cannot defend itself, so screaming IS its defence: every
+        // soldier within earshot drops what it is doing and comes for the
+        // attacker. Without this, mobs could farm the village unopposed.
+        if (src?.id != null && e.type === 'villager') mgr._callTheGuard(e, src.id);
         mgr.damage(e, dmg, null, src?.id != null ? 'e' + src.id : 'local');
       },
       applyStun: (s) => mgr.stun(e, s),
     };
     return e._npcProxy;
+  }
+
+  // A villager is under attack — rally every soldier within earshot onto the
+  // attacker. GUARD_CALL_R is generous on purpose: a raid at the far end of the
+  // street should still bring the gate guards running.
+  _callTheGuard(victim, attackerId) {
+    const GUARD_CALL_R = 42;
+    for (const g of this.list) {
+      if (!g.cfg.friendly || g.dying) continue;
+      if (Math.hypot(g.pos.x - victim.pos.x, g.pos.z - victim.pos.z) > GUARD_CALL_R) continue;
+      g.guardFoeId = attackerId;
+      g.guardCombatT = Math.max(g.guardCombatT ?? 0, 10);
+    }
   }
 
   // ---- VILLAGE GUARD AI: hold the post; any hostile that steps within
@@ -1000,7 +1017,12 @@ export class EnemyManager {
     // a mob they strike turns on them (threat matches the proxy id). Idle
     // guards stay invisible to mob aggro — nothing picks a fight at the gate
     // until the guard swings first (or something hits him).
-    const fighting = this.list.filter(e => e.cfg.friendly && !e.dying && (e.guardCombatT ?? 0) > 0);
+    // Guards in combat join as attackable proxies (a mob they strike turns on
+    // them). VILLAGERS join unconditionally: to a wolf a farmer is prey like
+    // anything else, and a village that cannot be raided has no stakes. Idle
+    // guards stay invisible so nothing picks a fight at the gate unprovoked.
+    const fighting = this.list.filter(e => !e.dying
+      && ((e.cfg.friendly && (e.guardCombatT ?? 0) > 0) || e.type === 'villager'));
     if (fighting.length) targets = targets.concat(fighting.map(e => this._npcProxy(e)));
 
     // suspended while a lair dungeon is open: no ambient zone spawning

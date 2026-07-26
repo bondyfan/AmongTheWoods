@@ -3757,6 +3757,9 @@ async function ensureMp() {
       grantPickup,
       dropHalfMeat,
       markDeath: (pos) => { minimap.deathAt = { x: pos.x, z: pos.z }; },
+      // a multiplayer death that nobody revived goes through the SAME ghost
+      // flow as solo — corpse, graveyard, the lot
+      onRealDeath: () => survivalRespawn(),
       onPartnerJoin: () => hideJoinCodeHud(), // first friend arrives → code goes to Settings only
       // ---- social hooks ----
       onGroupChange: () => renderPartyFrames(),
@@ -5743,6 +5746,7 @@ function tickDayNight(dt) {
   }
   game.nightK = nightAtHour(game.tod * 24);
   if (enemyMgr) enemyMgr.nightK = game.nightK;
+  world.nightK = game.nightK;   // the great fires blaze brighter after dark
   devTimeSync?.();
 
   // HUD clock: a sun that sets into a moon

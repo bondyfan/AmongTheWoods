@@ -21,7 +21,7 @@ import { makeTree, makeRock, makeGrassTuft, makeGrassBlades, makeGrassField,
          makeLairEntrance, makeCage, makeFern, makeTownHouse, makeChurch,
          makeFountain, makeWheatTuft, makeJunglePlant, makeReeds, makePebbles,
          makeFenceRun, makeFenceGate, makeHayPile, makeGraveSingle, makeCottage,
-         makeVillageGraveyard, makeClassMaster,
+         makeVillageGraveyard, makeClassMaster, makeGreatFire,
          makePalm, makeGroundLeaves, impostorTemplate } from './models.js';
 import { makePier } from './ship.js';
 import { bakeGroup, bakeAccumulator, buildBakedMesh, bakeAt, BAKED_MAT,
@@ -193,6 +193,7 @@ export class World {
     this.onPoiSpawned = null;    // main hooks this to post crypt guards
     this.smiths = [];            // wandering blacksmiths — forge gear at them
     this.classMasters = [];      // the ONLY people who will teach you your path
+    this.greatFires = [];        // permanent bonfires that light the night
     this._patchObstacles = new Set(); // building obstacles already pushed
     this._genRings();
     this._genLakes();
@@ -1113,11 +1114,14 @@ export class World {
     // pick a class without a pilgrimage; the village keeps the other, so the
     // trek out there is still worth making.
     this.classMasters = [{ id: 1, x: 6.5, z: 5.5 }];
+    // the great fires: the homestead hearth and the village square
+    this.greatFires = [{ id: 1, x: -5.5, z: 6.0 }];
     if (this.village) {
       const v = this.village;
       const perX = -v.dirZ, perZ = v.dirX;
       this.classMasters.push({ id: 2,
         x: v.x + v.dirX * 8 + perX * 6, z: v.z + v.dirZ * 8 + perZ * 6 });
+      this.greatFires.push({ id: 2, x: v.x, z: v.z });   // the square itself
     }
 
     // the village blacksmith — a fixed id far above the ~200 grid cells so it
@@ -2672,6 +2676,19 @@ export class World {
       }
     }
 
+    // -- the great fires (permanent light sources) --
+    for (const gf of this.greatFires) {
+      if (gf.x < cxw || gf.x >= cxw + CHUNK || gf.z < czw || gf.z >= czw + CHUNK) continue;
+      const mesh = makeGreatFire();   // NOT baked: flames flicker, light breathes
+      mesh.position.set(gf.x, this.heightAt(gf.x, gf.z), gf.z);
+      group.add(mesh);
+      gf.mesh = mesh;
+      if (!gf.obstacleAdded) {
+        gf.obstacleAdded = true;
+        this.obstacles.push({ x: gf.x, z: gf.z, r: 1.5, tag: 'greatfire:' + gf.id });
+      }
+    }
+
     // -- class masters in this chunk --
     for (const cm of this.classMasters) {
       if (cm.x < cxw || cm.x >= cxw + CHUNK || cm.z < czw || cm.z >= czw + CHUNK) continue;
@@ -2903,6 +2920,24 @@ export class World {
   }
 
   update(dt, playerPos) {
+    // the great fires: real fire never burns steady, and they blaze brighter
+    // once the sun is down (nightK is fed in from main.js)
+    const nightK = this.nightK ?? 0;
+    for (const gf of this.greatFires) {
+      const ud = gf.mesh?.userData;
+      if (!ud?.light) continue;
+      const t = this.time || 0;
+      const flick = Math.sin(t * 8.3) * 0.5 + Math.sin(t * 19.7) * 0.3 + Math.sin(t * 3.3) * 0.2;
+      // a hearth is a warm glow by day and the only thing you can see by at night
+      ud.light.intensity = ud.baseIntensity * (0.45 + 1.15 * nightK) + flick * (0.5 + nightK);
+      ud.light.distance = 34 + nightK * 10;
+      for (let i = 0; i < ud.flames.length; i++) {
+        const k = 1 + Math.sin(t * (9 + i * 4) + i) * 0.13;
+        ud.flames[i].scale.set(k, 1 + (k - 1) * 1.8, k);
+        ud.flames[i].rotation.y += dt * (0.9 + i * 0.5);
+      }
+    }
+
     // the class master's sigil turns slowly and breathes — it is the beacon
     // that says "you can train here"
     for (const cm of this.classMasters) {

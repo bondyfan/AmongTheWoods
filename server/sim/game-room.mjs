@@ -80,6 +80,9 @@ export class GameRoom {
     P.proxy.pos.y = this.world.heightAt(P.proxy.pos.x, P.proxy.pos.z);
     P.proxy.dead = !!st.dead;
     P.proxy.stealthed = !!st.st;
+    // a ghost is walking but not present: enemies must not chase or hit it, and
+    // it cannot hoover loot. validTarget in enemies.js already honours `ghost`.
+    P.proxy.ghost = !!st.gh;
     P.proxy.level = st.lv || P.proxy.level;
     P.hasPet = !!st.pet;
     if (st.pet && typeof st.px === 'number') {

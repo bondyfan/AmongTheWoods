@@ -1404,24 +1404,14 @@ export class Multiplayer {
   // the un-rescued death: level lost, half of everything spilled, wake at camp.
   // `immediate` (player chose to respawn now, pressing X) skips the dramatic
   // pause and stands them up at the cabin right away.
+  // The un-rescued death. This used to run its OWN respawn — lose a level, wake
+  // at the cabin — which is why nobody ever became a ghost in multiplayer: it
+  // silently bypassed the whole corpse-run system. It now hands off to the same
+  // death path solo uses, so a ghost rises at the nearest graveyard either way.
   _bleedOut(immediate = false) {
-    const { ctx } = this;
-    const p = ctx.player;
     this.downedUntil = null;
-    ctx.markDeath?.(p.pos);
-    const dropped = ctx.dropHalfMeat(p.pos.clone());
-    p.loseLevel();
-    p.mesh.rotation.z = Math.PI / 2; // lie down while "out"
-    ctx.ui.toast(immediate
-      ? `☠️ You wake at the cabin. This level's XP progress is gone; ${dropped} 🍖 spilled where you died.`
-      : `☠️ You fell… you wake at the cabin. This level's XP progress is gone; ${dropped} 🍖 spilled where you died.`, 'boss');
-    const stand = () => {
-      if (!this.active) return;
-      p.revive(1);
-      p.pos.set(0, 0, 3);
-      p.mesh.rotation.z = 0;
-    };
-    if (immediate) stand(); else setTimeout(stand, 3000);
+    document.getElementById('downed-hint')?.classList.add('hidden');
+    this.ctx.onRealDeath?.(immediate);
   }
 
   // X while downed: give up waiting for a partner rescue and respawn at base now

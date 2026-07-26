@@ -3270,6 +3270,45 @@ export function makeCampfire() {
   return g;
 }
 
+// The great fire: a permanent, oversized campfire that anchors the homestead and
+// the village. Much bigger than the little POI campfire, and it OWNS its own
+// PointLight so the light travels with the mesh into whatever chunk it lands in
+// — that is what makes it work in multiplayer without any syncing.
+export function makeGreatFire() {
+  const g = new THREE.Group();
+  // a ring of hearth stones
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2;
+    const st = box(0.34, 0.26, 0.3, 0x8b8680);
+    st.position.set(Math.cos(a) * 1.15, 0.12, Math.sin(a) * 1.15);
+    st.rotation.y = a;
+    g.add(st);
+  }
+  // stacked logs
+  for (let i = 0; i < 5; i++) {
+    const log = cyl(0.14, 0.14, 1.6, 0x5c4326, 6);
+    log.rotation.z = Math.PI / 2;
+    log.rotation.y = (i / 5) * Math.PI;
+    log.position.y = 0.22;
+    g.add(log);
+  }
+  const flames = [];
+  for (const [r, h, y, c] of [[0.5, 1.5, 0.95, 0xff8c2a], [0.3, 1.0, 1.15, 0xffc247]]) {
+    const f = new THREE.Mesh(new THREE.ConeGeometry(r, h, 7),
+      new THREE.MeshLambertMaterial({ color: c, emissive: c, emissiveIntensity: 1.0 }));
+    f.position.y = y;
+    overbright(f, 3.0);
+    g.add(f);
+    flames.push(f);
+  }
+  // the light itself rides with the mesh
+  const light = new THREE.PointLight(0xffb066, 5, 34, 1.1);
+  light.position.y = 1.3;
+  g.add(light);
+  g.userData = { flames, light, baseIntensity: 5 };
+  return g;
+}
+
 export function makeTent() {
   const g = new THREE.Group();
   const canvas = cone(1.9, 2.0, 0x8a6b4e, 6); // hide-colored teepee
