@@ -5,7 +5,12 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "map:info": "node scripts/map-sync.mjs info",
+    "map:diff": "node scripts/map-sync.mjs diff",
+    "map:pull": "node scripts/map-sync.mjs pull",
+    "map:push": "node scripts/map-sync.mjs push",
+    "map:versions": "node scripts/map-sync.mjs versions"
   },
   "devDependencies": {
     "vite": "^6.0.0"
