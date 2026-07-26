@@ -2131,9 +2131,19 @@ function rollBossDrop(enemy) {
   const rank = BOSS_RANKS[enemy.bossRank - 1];
   if (Math.random() < rank.dropChance) {
     // companions are never loot — you TAME a wolf, you don't skin one for it
+    // Boss-only trade-off gear is the reason to fight a boss at all, so give it
+    // its own roll first: it is never for sale, and the ordinary pool would
+    // drown it (it is 9 items against ~80).
+    const bossPool = ITEMS.filter(i =>
+      i.bossOnly && !player.hasItem(i.id) && i.level <= player.level + 3);
+    if (bossPool.length && Math.random() < 0.45) {
+      const pick = bossPool[Math.floor(Math.random() * bossPool.length)];
+      pickups.spawn('item', pick.id, enemy.pos, 0.5, null, true);
+      return;
+    }
     const candidates = ITEMS.filter(i =>
-      !i.free && !i.unique && !player.hasItem(i.id) && i.level <= player.level + 1
-      && i.slot !== 'companion');
+      !i.free && !i.unique && !i.bossOnly && !player.hasItem(i.id)
+      && i.level <= player.level + 1 && i.slot !== 'companion');
     if (!candidates.length) { pickups.spawn('meat', 5, enemy.pos, 1, null, true); return; }
     const item = candidates[Math.floor(Math.random() * candidates.length)];
     pickups.spawn('item', item.id, enemy.pos, 0.5, null, true);
