@@ -23,6 +23,12 @@ const withTimeout = (p, ms) => Promise.race([
   p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms)),
 ]);
 
+// which map version THIS session is actually running — the update watchdog
+// compares it against the live one to spot a session left open across a save
+let _loadedId = null;
+export function setLoadedVersion(id) { _loadedId = id ?? null; }
+export function getLoadedVersion() { return _loadedId; }
+
 const jput = (url, body, ms = 9000) =>
   withTimeout(fetch(url, { method: 'PUT', body: JSON.stringify(body) }), ms);
 
@@ -45,6 +51,7 @@ export async function saveVersion(patch, note = '', by = 'admin') {
   await jput(`${MAP}/patches/${id}.json`, patch);
   await jput(`${MAP}/versions/${id}.json`, meta);
   await jput(`${MAP}/current.json`, { id, ...meta, patch });
+  setLoadedVersion(id); // the admin who just saved must not be told to refresh
   prune().catch(() => {});
   return { id, ...meta };
 }
@@ -77,6 +84,7 @@ export async function fetchVersion(id, ms = 8000) {
 export async function makeCurrent(id) {
   const patch = await fetchVersion(id);
   if (!patch) throw new Error('version not found');
+  setLoadedVersion(id); // a restore makes THIS the version we're running
   const metaRes = await withTimeout(fetch(`${MAP}/versions/${id}.json`, { cache: 'no-store' }), 6000);
   const meta = metaRes.ok ? (await metaRes.json()) : {};
   await jput(`${MAP}/current.json`, { id, at: meta.at ?? Date.now(), note: meta.note ?? '', by: meta.by ?? '', patch });

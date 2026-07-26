@@ -21,7 +21,8 @@ import { initTouch } from './touch.js';
 import { World, latticeHash } from './world.js';
 import { ShipLine } from './ship.js';
 import { loadWorldPatch, applyTweaks, worldPatch } from './worldpatch.js';
-import { fetchCurrent } from './worldsync.js';
+import { fetchCurrent, setLoadedVersion } from './worldsync.js';
+import { startUpdateWatch } from './updatecheck.js';
 import { WorldEditor } from './editor.js';
 import { MobaWorld } from './mobaworld.js';
 import { DungeonWorld } from './dungeon.js';
@@ -373,6 +374,7 @@ const panels = new Panels({
 // assets/world-patch.json baseline; a missing/slow cloud just falls back to it
 const _cloudMap = await fetchCurrent();
 if (_cloudMap?.patch && worldPatch.load(_cloudMap.patch)) {
+  setLoadedVersion(_cloudMap.id); // the update watchdog compares against this
   console.log('[worldpatch] live cloud version', _cloudMap.id, 'loaded');
 } else {
   await loadWorldPatch(); // static baseline (assets/world-patch.json)
@@ -2927,6 +2929,25 @@ if ((settings.controlsRev ?? 0) < CONTROLS_DEFAULT_VERSION) {
     refreshHud();
     audio.sfx('click', 0.35);
   });
+
+  // true fullscreen: the browser's tab strip and address bar go away. Must be
+  // driven by a real click (browsers reject requestFullscreen otherwise), so
+  // it's a button rather than a persisted setting.
+  const fsBtn = $id('set-fullscreen');
+  const fsLabel = () => {
+    fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Go fullscreen';
+  };
+  fsBtn.addEventListener('click', async () => {
+    audio.sfx('click', 0.35);
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+    } catch (e) {
+      ui.toast('🖥️ Fullscreen was blocked by the browser — press F11 instead.', 'level');
+    }
+  });
+  document.addEventListener('fullscreenchange', fsLabel);
+  fsLabel();
 
   // hide any tracked resource whose total is 0 (on by default — a cleaner HUD)
   settings.hideZeroRes ??= true;
@@ -6912,6 +6933,17 @@ tick();
 const bgClock = new Worker(URL.createObjectURL(
   new Blob(['setInterval(() => postMessage(0), 100);'], { type: 'text/javascript' })));
 bgClock.onmessage = () => { if (document.hidden && mp?.active) step(); };
+
+// a tab left open across a deploy (or a map save) is running stale code —
+// check every 5 minutes and gate it behind a blocking "UPDATE AVAILABLE" modal
+startUpdateWatch({
+  // freeze the sim behind the gate so nothing keeps ticking on the old build
+  onBlock: () => { game.paused = true; },
+  // one last write so nothing earned since the last autosave is lost
+  onSave: () => (autosaveEligible() ? doAutosave() : null),
+  // never interrupt the admin mid-edit — they'd lose unsaved World-Editor work
+  isBusy: () => !!game.editorView,
+});
 
 // debug handle (also handy for the future multiplayer host loop)
 window.__game = { game, scene, player, enemyMgr, companions, pickups, panels, input, updateAim, minimap,

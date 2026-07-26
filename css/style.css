@@ -559,6 +559,14 @@ body.slotting .spell-slot.empty {
   flex: 0 0 auto;
 }
 .setting-row small { opacity: 0.7; line-height: 1.45; display: inline-block; margin-top: 3px; }
+/* action button inside a settings row (fullscreen, …) */
+.opt-btn {
+  flex: 0 0 auto; align-self: center; white-space: nowrap; cursor: pointer;
+  padding: 9px 15px; font: inherit; font-size: 13px; font-weight: 600;
+  color: #e9f0dc; background: rgba(134, 180, 94, 0.18);
+  border: 1px solid rgba(134, 180, 94, 0.6); border-radius: 9px;
+}
+.opt-btn:hover { background: rgba(134, 180, 94, 0.32); }
 .resource-setting { display: block; cursor: default; }
 .resource-setting-grid {
   display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px;
