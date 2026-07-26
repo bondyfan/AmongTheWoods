@@ -7,7 +7,8 @@ import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOB
          consumableById, essenceDropFor, MAX_LEVEL, XP_LEVELS, questFor, repeatableQuestFor,
          questXpFor, BIOME_LAIRS, CAMP_BUILDINGS, trainingLevelFor, CLASS_TREES,
          classTreeById, classSkillById, classSkillRequiredLevel, classSkillMeatCost, classSkillEssenceCost,
-         CLASS_CHOOSE_COST, firstClassSkillId, MAX_SPELL_SLOTS, SLOT_CODES } from './config.js';
+         CLASS_CHOOSE_COST, firstClassSkillId, MAX_SPELL_SLOTS, SLOT_CODES,
+         WEAPON_RING_SLOT, WEAPON_RING_MAX } from './config.js';
 import { makeAimArc, updateAimArc, makeRaft, makeBlacksmith, makeHorse, makeWisp, makeMan,
          makeGriffin, makeGriffinRoost, makeTumbleweed, BAKED_MAT, WATER_SHADERS,
          makeSkyDome, setSpectralLook, makeCorpse } from './models.js';
@@ -282,13 +283,38 @@ const panels = new Panels({
   onChestChange: () => mp?.sendCampSync?.(),
   onAssignSlot: (i, id) => {
     while (player.spellSlots.length <= i) player.spellSlots.push(undefined);
+    // ---- Q: the weapon ring ----
+    // Q holds a LIST of up to five weapons/tools rather than one thing, and
+    // each press equips the next. Only gear you can actually swing belongs in
+    // it; anything else would stall the cycle on something unequippable.
+    if (i === WEAPON_RING_SLOT) {
+      const it = itemById(id);
+      if (!it || it.slot !== 'weapon') {
+        ui.toast('🔁 Q is the weapon ring — only weapons and tools go in it.', 'boss');
+        audio.sfx('error', 0.4);
+        return;
+      }
+      const ring = weaponRing();
+      if (ring.includes(id)) { ui.toast(`${it.name} is already on the ring.`, ''); return; }
+      if (ring.length >= WEAPON_RING_MAX) {
+        ui.toast(`🔁 The ring holds ${WEAPON_RING_MAX} — clear it first (drag it off Q).`, 'boss');
+        audio.sfx('error', 0.4);
+        return;
+      }
+      ring.push(id);
+      player.spellSlots[i] = ring;
+      ui.toast(`🔁 ${it.name} added to the Q ring (${ring.length}/${WEAPON_RING_MAX}).`, 'level');
+      audio.sfx('click', 0.4);
+      ui.updateSpellbar(player);
+      return;
+    }
     // an ability lives in ONE slot: clear any earlier slot holding it
-    const prev = player.spellSlots.indexOf(id);
+    const prev = player.spellSlots.findIndex(v => v === id);
     if (prev >= 0 && prev !== i) player.spellSlots[prev] = undefined;
     player.spellSlots[i] = id;
     localStorage.setItem('woods_slot_hint_done', '1'); // the drag lesson is learned
     audio.sfx('click', 0.4);
-    ui.updateSpellbar(player); // repaint the 1–9 bar NOW — the loop is paused while the modal is open
+    ui.updateSpellbar(player); // repaint the bar NOW — the loop is paused while the modal is open
   },
   onDropRes: (key) => dropResource(key),
   onDropItem: (id) => dropItem(id),
@@ -4252,9 +4278,52 @@ function dropConsumable(id) {
 }
 
 // action bar 1–9: spells and trained class abilities cast, items equip
+// The Q ring: player.spellSlots[Q] holds an ARRAY of weapon ids instead of a
+// single id. Everything that reads a slot has to cope with both shapes.
+function weaponRing() {
+  const v = player.spellSlots[WEAPON_RING_SLOT];
+  return Array.isArray(v) ? v : (v ? [v] : []);
+}
+
+// press Q: equip the next weapon on the ring (wrapping), skipping anything you
+// no longer own so a sold or broken tool cannot jam the cycle
+function cycleWeaponRing() {
+  const ring = weaponRing().filter(id => player.hasItem(id) || id === 'fists');
+  if (!ring.length) {
+    ui.toast('🔁 Q is empty — drag weapons onto it (up to 5) to build a swap ring.', '');
+    return;
+  }
+  const here = ring.indexOf(player.equipment.weapon);
+  const next = ring[(here + 1) % ring.length];
+  if (next === player.equipment.weapon && ring.length === 1) {
+    ui.toast(`🔁 ${itemById(next)?.name ?? next} is the only thing on the ring.`, '');
+    return;
+  }
+  player.equip(next);
+  ui.flashSpell(WEAPON_RING_SLOT);
+  audio.sfx('equip_gear', 0.45);
+}
+
 function useBarSlot(i) {
+  if (i === WEAPON_RING_SLOT) { cycleWeaponRing(); return; }
   const id = player.spellSlots[i];
   if (!id) return;
+  // consumables and berries are slottable now, so a slot may hold something you
+  // EAT rather than something you cast or equip
+  if (id === 'berry') {
+    if (!player.eatBerry()) ui.toast('🫐 No berries — pick some from a bush (E).', '');
+    ui.flashSpell(i);
+    refreshHud();
+    return;
+  }
+  if (consumableById(id)) {
+    if (!player.useConsumable(id) && (player.consumables[id] ?? 0) <= 0) {
+      ui.toast(`${consumableById(id).icon} None left.`, '');
+    }
+    ui.flashSpell(i);
+    refreshHud();
+    return;
+  }
   // ground-targeted abilities enter aim-and-click placement instead of firing
   const skill = classSkillById(id);
   if (skill && GROUND_TARGETED.has(skill.action) && player.hasClassSkill(id)) {
@@ -4937,12 +5006,13 @@ input.onKey('F2', toggleWorldEditor);
 // H — the keybind legend; I — inventory; F / G — field consumables
 input.onKey('KeyH', () => { if (inPlay()) panels.toggle('help'); });
 input.onKey('KeyI', () => { if (inPlay()) panels.toggle('character'); }); // inventory lives in the Armory
-input.onKey('KeyF', () => {
-  if (!inPlay() || game.paused) return;
+// F is an action slot now, but an EMPTY F keeps its old reflex: drink a salve.
+function quaffSalve() {
   if (!player.useConsumable('salve') && player.consumables.salve <= 0) {
     ui.toast('🧪 No Healing Salve — buy some in Upgrades → Supplies.', '');
   }
-});
+  refreshHud();
+}
 input.onKey('KeyG', () => {
   if (!inPlay() || game.paused) return;
   if (!player.useConsumable('roast') && player.consumables.roast <= 0) {
@@ -5340,6 +5410,8 @@ for (let i = 0; i < MAX_SPELL_SLOTS; i++) {
     // R doubles as "resurrect pet" at a home/graveyard — that wins when it is
     // actually available, otherwise R is just another action slot
     if (code === 'KeyR' && canResurrectPetHere()) { resurrectPet(); return; }
+    // an unassigned F still drinks a salve, so the old muscle memory survives
+    if (code === 'KeyF' && !player.spellSlots[i]) { quaffSalve(); return; }
     useBarSlot(i);
   });
 }

@@ -2,6 +2,7 @@
 
 import * as THREE from 'three';
 import { XP_LEVELS, MAX_LEVEL, MAX_SPELL_SLOTS, SLOT_KEYS, ENEMY_TYPES, RES_ICONS,
+         WEAPON_RING_SLOT, WEAPON_RING_MAX, consumableById,
          fmtResource, itemById, spellById, classSkillById, classActiveInfo } from './config.js';
 import { itemIcon, skillArt } from './icons.js';
 import { attachTip } from './tooltip.js';
@@ -78,9 +79,16 @@ export class UI {
         const other = document.elementFromPoint(ev.clientX, ev.clientY)?.closest?.('.spell-slot');
         if (other) { // swap the two slots
           const j = Number(other.dataset.slot);
+          // Q owns the weapon RING (an array); letting a reorder move that array
+          // into a numbered slot — or bury a spell inside Q — would break every
+          // reader that assumes only Q holds a list.
+          if (i === WEAPON_RING_SLOT || j === WEAPON_RING_SLOT) {
+            audio.sfx('error', 0.35);
+            return;
+          }
           while (slots.length <= Math.max(i, j)) slots.push(undefined);
           [slots[i], slots[j]] = [slots[j], slots[i]];
-        } else slots[i] = undefined; // dragged off the bar → unslot
+        } else slots[i] = undefined; // dragged off the bar → unslot (Q: clears the ring)
         localStorage.setItem('woods_slot_hint_done', '1');
         audio.sfx('click', 0.4);
         // Repaint NOW. While a panel is open the game is paused in solo, so the
@@ -305,9 +313,45 @@ export class UI {
         attachTip(el, ' '); // reads el._tipHtml live, refreshed below each frame
         bar.appendChild(el);
       }
-      const id = player.spellSlots[i];
+      const raw = player.spellSlots[i];
       const iconEl = el.querySelector('.spell-icon');
       const cdEl = el.querySelector('.spell-cd');
+      // ---- Q, the weapon ring ----
+      // It holds an ARRAY, and it should show the weapon you are HOLDING so a
+      // glance tells you what the next press swaps away from.
+      if (i === WEAPON_RING_SLOT && Array.isArray(raw) && raw.length) {
+        const shown = raw.includes(player.equipment.weapon) ? player.equipment.weapon : raw[0];
+        const it = itemById(shown);
+        el.classList.remove('empty', 'class-ability-slot');
+        el.classList.toggle('equipped-slot', player.equipment.weapon === shown);
+        iconEl.innerHTML = itemIcon(it);
+        cdEl.style.height = '0%';
+        el._tipHtml = `<div class="tt-head"><span class="tt-ico">${itemIcon(it)}</span>
+            <span class="tt-title"><b>Weapon ring</b><span class="tt-sub">${raw.length}/${WEAPON_RING_MAX} · key Q</span></span></div>
+          <div class="tt-desc">${raw.map(w => (w === player.equipment.weapon ? '▶ ' : '') 
+            + (itemById(w)?.name ?? w)).join('<br>')}</div>
+          <div class="tt-hint">Press Q to swap to the next one · drag a weapon here to add it</div>`;
+        el.dataset.ring = raw.length;
+        continue;
+      }
+      el.removeAttribute('data-ring');
+      const id = Array.isArray(raw) ? raw[0] : raw;
+      // consumables and the berry stack are slottable, and are neither spells
+      // nor equippable items — they get their own card
+      const con = id ? consumableById(id) : null;
+      if (id === 'berry' || con) {
+        const icon = con ? con.icon : '🫐';
+        const name = con ? con.name : 'Berries';
+        const have = con ? (player.consumables?.[id] ?? 0) : Math.floor(player.berry ?? 0);
+        el.classList.remove('empty', 'class-ability-slot', 'equipped-slot');
+        iconEl.innerHTML = `<span class="slot-emoji">${icon}</span>`;
+        cdEl.style.height = '0%';
+        el.classList.toggle('slot-out', have <= 0);
+        el._tipHtml = `<div class="tt-head"><span class="tt-ico">${icon}</span>
+            <span class="tt-title"><b>${name}</b><span class="tt-sub">${have} held · key ${SLOT_KEYS[i] ?? i + 1}</span></span></div>
+          <div class="tt-desc">${con ? con.desc : 'Eat a berry: a small heal and a slug of energy.'}</div>`;
+        continue;
+      }
       const spell = id ? spellById(id) : null;
       const classAbility = id && !spell ? classSkillById(id) : null;
       const activeClassAbility = classAbility?.type === 'active' ? classAbility : null;

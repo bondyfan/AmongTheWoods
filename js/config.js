@@ -1015,12 +1015,18 @@ export function costFor(cost, mobaMode) {
 
 // ---- Spells / skills. Bought in the shop, equipped into max 9 spell slots,
 // cast with keys 1-9. cd in seconds. ----
-export const MAX_SPELL_SLOTS = 11;
+export const MAX_SPELL_SLOTS = 12;
 // what each action slot is labelled with, and the key that fires it. The first
-// nine are the number row; Q and R extend the bar without stealing WASD.
-export const SLOT_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'Q', 'R'];
+// nine are the number row; Q, R and F extend the bar without stealing WASD.
+export const SLOT_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'Q', 'R', 'F'];
 export const SLOT_CODES = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5',
-  'Digit6', 'Digit7', 'Digit8', 'Digit9', 'KeyQ', 'KeyR'];
+  'Digit6', 'Digit7', 'Digit8', 'Digit9', 'KeyQ', 'KeyR', 'KeyF'];
+
+// Q is special: instead of holding ONE thing it holds a ring of up to five
+// weapons/tools, and each press equips the next. That is what turns "stop, open
+// the bag, swap to the axe, chop, swap back" into a single key.
+export const WEAPON_RING_SLOT = 9;          // index of Q in the arrays above
+export const WEAPON_RING_MAX = 5;
 export const SPELLS = [
   { id: 'haste',     level: 7,  icon: '⚡', name: 'Haste',       cost: { meat: 40, essence: 2 }, cd: 90,
     desc: 'Double attack speed for 10 s.' },

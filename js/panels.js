@@ -1154,7 +1154,9 @@ export class Panels {
         ghost.style.top = (e.clientY - 24) + 'px';
         // only GEAR can be hotkeyed — highlighting a slot for a resource or a
         // consumable promised a drop the release handler then refused
-        const over = cell.kind === 'item'
+        const canSlot = cell.kind === 'item' || cell.kind === 'consumable'
+          || (cell.kind === 'res' && cell.id === 'berry');
+        const over = canSlot
           ? document.elementFromPoint(e.clientX, e.clientY)?.closest?.('.spell-slot') : null;
         document.querySelectorAll('.spell-slot.drop-hot').forEach(s => s.classList.remove('drop-hot'));
         over?.classList.add('drop-hot');
@@ -1169,7 +1171,11 @@ export class Panels {
       if (!dragging) { this._invClick(cell); return; }
       const under = document.elementFromPoint(e.clientX, e.clientY);
       const barSlot = under?.closest?.('.spell-slot');
-      if (barSlot && cell.kind === 'item') {
+      // gear, consumables AND the berry stack can all be hotkeyed now — a slot
+      // may hold something you eat as readily as something you equip
+      const slottable = cell.kind === 'item' || cell.kind === 'consumable'
+        || (cell.kind === 'res' && cell.id === 'berry');
+      if (barSlot && slottable) {
         this.hooks.onAssignSlot?.(Number(barSlot.dataset.slot), cell.id);
         this.refresh();
         return;
