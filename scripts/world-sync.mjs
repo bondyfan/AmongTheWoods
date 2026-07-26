@@ -1,22 +1,27 @@
 #!/usr/bin/env node
 // ==========================================================================
-// map-sync — bridge between the LIVE cloud map and the repo.
+// world-sync — bridge between the LIVE cloud world and the repo.
 //
-// The world a player sees = procedural generation (code, seed 1) + the
-// World-Editor patch (a JSON blob living in Firebase). Editing in the browser
-// only ever touches the CLOUD half, so the repo — and anyone reading it —
-// drifts out of sync with what is actually live. This script closes that gap:
+// What players actually run = procedural generation (code, seed 1) + the
+// World-Editor patch (a JSON blob in Firebase). That patch carries BOTH halves
+// of the editor's power:
+//   • the MAP — sculpted height, painted surface/water/roads, placed entities,
+//     deleted and moved landmarks;
+//   • the NUMBERS — per-object overrides of ENEMY_TYPES, ITEMS, BIOMES and
+//     class SKILLS, which silently replace the values in config.js at runtime.
+// Editing in the browser only ever writes the CLOUD half, so the repo — and
+// anyone reading it — drifts out of sync with what is live. Worse, the numbers
+// drift invisibly: config.js can say an ability unlocks at level 12 while every
+// player unlocks it at 8. This script closes both gaps:
 //
-//   node scripts/map-sync.mjs info [--local]   what the live map actually contains
-//   node scripts/map-sync.mjs pull             cloud  -> assets/world-patch.json
-//   node scripts/map-sync.mjs push ["note"]    assets/world-patch.json -> new cloud version
-//   node scripts/map-sync.mjs versions         list the cloud version history
-//   node scripts/map-sync.mjs diff             local baseline vs live cloud
+//   node scripts/world-sync.mjs info [--local]   everything the live world overrides
+//   node scripts/world-sync.mjs pull             cloud  -> assets/world-patch.json
+//   node scripts/world-sync.mjs push ["note"]    assets/world-patch.json -> new cloud version
+//   node scripts/world-sync.mjs versions         cloud version history
+//   node scripts/world-sync.mjs diff             local baseline vs live cloud
 //
-// Typical use: `pull` before touching anything world-related (so the repo shows
-// the real map and git records its history), `info` to locate hand-made things
-// — a painted road, a placed village, a tweaked ability — that exist only in
-// the patch and can't be found by reading the source.
+// Run `info` before ANY world-shape or balance work; `pull` + commit whenever
+// the repo should carry the real world (and give the map a git history).
 // ==========================================================================
 
 import { readFile, writeFile } from 'node:fs/promises';
@@ -98,7 +103,7 @@ function blobs(pairs = []) {
 }
 
 // ---- commands -----------------------------------------------------------
-function report(patch, label, meta = null) {
+async function report(patch, label, meta = null) {
   console.log(`\n=== ${label} ===`);
   if (meta) console.log(`version ${meta.id}   saved ${fmtDate(meta.at)}   ${meta.note || ''}`);
   if (!patch) { console.log('(no patch)'); return; }
@@ -154,31 +159,94 @@ function report(patch, label, meta = null) {
     for (const [k, p] of patch.moved) console.log(`  ${k} -> (${p.x}, ${p.z})`);
   }
 
-  // stat overrides — the ones you can NEVER find by reading config.js
-  const tw = patch.tweaks ?? {};
+  await reportTweaks(patch.tweaks ?? {});
+}
+
+// ---- gameplay overrides: mobs / items / biomes / abilities --------------
+// The editor's Stats + Biomes tabs write here, and applyTweaks() lays them over
+// config.js at boot. Reading config.js therefore tells you nothing about what
+// actually runs — so resolve each override against the real config and print
+// "was -> now", plus the object's human name, and flag ids config no longer has.
+const getPath = (obj, path) => path.split('.').reduce((o, k) => o?.[k], obj);
+const hex = (v) => (typeof v === 'number' ? '#' + v.toString(16).padStart(6, '0') : String(v));
+
+async function resolvers() {
+  const cfg = await import(join(ROOT, 'js/config.js'));
+  const wp = await import(join(ROOT, 'js/worldpatch.js'));
+  const skills = cfg.allClassSkills ? cfg.allClassSkills() : [];
+  return {
+    enemies: {
+      title: 'MOBS', fields: wp.ENEMY_TWEAK_FIELDS,
+      find: (id) => cfg.ENEMY_TYPES?.[id],
+      name: (o) => o?.name ?? '',
+      orig: (o, f) => o?.[f],
+    },
+    items: {
+      title: 'ITEMS', fields: wp.ITEM_TWEAK_FIELDS,
+      find: (id) => cfg.ITEMS?.find((i) => i.id === id),
+      name: (o) => o?.name ?? '',
+      orig: (o, f) => getPath(o, f),
+    },
+    biomes: {
+      title: 'BIOMES', fields: [...(wp.BIOME_TWEAK_FIELDS ?? []), ...(wp.BIOME_COLOR_FIELDS ?? [])],
+      colorFields: new Set(wp.BIOME_COLOR_FIELDS ?? []),
+      find: (idx) => cfg.BIOMES?.[+idx],
+      name: (o) => o?.name ?? '',
+      orig: (o, f) => o?.[f],
+    },
+    skills: {
+      title: 'ABILITIES', fields: wp.SKILL_TWEAK_FIELDS,
+      find: (id) => skills.find((s) => s.id === id),
+      name: (o) => o?.name ?? '',
+      orig: (o, f) => o?.[f],
+    },
+  };
+}
+
+async function reportTweaks(tw) {
   const groups = Object.entries(tw).filter(([, v]) => v && Object.keys(v).length);
-  if (groups.length) {
-    console.log(`\n⚠ STAT OVERRIDES (config.js values are NOT what runs):`);
-    for (const [group, table] of groups) {
-      for (const [id, fields] of Object.entries(table)) {
-        const kv = Object.entries(fields).map(([f, v]) => `${f}=${v}`).join(', ');
-        console.log(`  ${group}.${id}: ${kv}`);
+  if (!groups.length) {
+    console.log(`\nGAMEPLAY OVERRIDES: none — config.js is the truth for mobs,`
+      + ` items, biomes and abilities.`);
+    return;
+  }
+  const R = await resolvers();
+  let objs = 0, fields = 0;
+  const lines = [];
+  for (const [group, table] of groups) {
+    const r = R[group];
+    lines.push(`\n  ${r?.title ?? group.toUpperCase()}`);
+    for (const [id, over] of Object.entries(table)) {
+      const obj = r?.find(id);
+      objs++;
+      const label = `${id}${obj && r.name(obj) ? ` "${r.name(obj)}"` : ''}`;
+      lines.push(`    ${label}${obj ? '' : '   ⚠ NOT IN config.js (stale override)'}`);
+      for (const [f, v] of Object.entries(over)) {
+        fields++;
+        const was = obj ? r.orig(obj, f) : undefined;
+        const isColor = r?.colorFields?.has(f);
+        const fmt = isColor ? hex : (x) => (x === undefined ? '(unset)' : String(x));
+        const known = r?.fields?.includes(f);
+        lines.push(`        ${f.padEnd(14)} ${fmt(was).padStart(9)}  ->  ${fmt(v)}`
+          + (known ? '' : '   ⚠ unknown field'));
       }
     }
-  } else {
-    console.log(`\nstat overrides: none (config.js is the truth)`);
   }
+  console.log(`\n⚠ GAMEPLAY OVERRIDES — these REPLACE config.js at runtime`);
+  console.log(`  (${objs} object(s), ${fields} field(s) changed — editing the`
+    + ` config.js value alone will NOT change the game)`);
+  console.log(lines.join('\n'));
 }
 
 const [cmd = 'info', ...rest] = process.argv.slice(2);
 
 if (cmd === 'info') {
   if (rest.includes('--local')) {
-    report(await readLocal(), 'LOCAL assets/world-patch.json');
+    await report(await readLocal(), 'LOCAL assets/world-patch.json');
   } else {
     const cur = await jget('current');
     if (!cur) { console.log('No cloud map saved yet — the live world is the repo baseline.'); }
-    else report(cur.patch, 'LIVE CLOUD MAP', cur);
+    else await report(cur.patch, 'LIVE CLOUD WORLD', cur);
   }
 } else if (cmd === 'pull') {
   const cur = await jget('current');
