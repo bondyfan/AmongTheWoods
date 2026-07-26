@@ -974,9 +974,32 @@ body.slotting .spell-slot.empty {
   color: #f2f0e0; border-radius: 14px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
 }
 #mode-select button small { display: block; font-size: 12px; opacity: 0.75; margin-top: 8px; font-weight: normal; }
+/* Each card carries its OWN background — #mode-select button only sets text and
+   shape. A card without a rule here falls through to the browser's default
+   button chrome, i.e. a white box with unreadable cream text. */
 #mode-survival-btn { background: linear-gradient(#5d8a3a, #3c5c24); border: 2px solid #86b45e; }
-#mode-moba-btn { background: linear-gradient(#6e4d2a, #4c3520); border: 2px solid #a8834e; }
-#mode-select button:hover { filter: brightness(1.15); transform: translateY(-1px); }
+#mode-public-btn   { background: linear-gradient(#356d8a, #1f4459); border: 2px solid #5aa3c4; }
+#menu-world-editor { background: linear-gradient(#4a4a6b, #2c2c44); border: 2px solid #7d7da8; }
+#mode-select button:hover:not(:disabled) { filter: brightness(1.15); transform: translateY(-1px); }
+/* offline / still checking: dimmed but still legible, never white */
+#mode-select button:disabled { opacity: 0.55; cursor: default; filter: saturate(0.6); }
+
+/* the small footer row: the two side dishes, deliberately quiet */
+#mode-extras {
+  display: flex; gap: 10px; justify-content: center; margin-top: 12px;
+}
+.tiny-btn {
+  font-size: 13px; padding: 7px 14px; cursor: pointer; line-height: 1.1;
+  color: #cfd8c4; background: rgba(20, 30, 16, 0.72);
+  border: 1px solid rgba(180, 200, 160, 0.35); border-radius: 9px;
+}
+.tiny-btn:hover { background: rgba(32, 46, 26, 0.9); color: #f2f0e0; }
+/* MOBA moved into that row, so its old big-card colours must not apply */
+#mode-extras #mode-moba-btn {
+  background: rgba(20, 30, 16, 0.72); border: 1px solid rgba(180, 200, 160, 0.35);
+  font-size: 13px; padding: 7px 14px; box-shadow: none; border-radius: 9px;
+}
+#mode-extras #mode-moba-btn:hover { background: rgba(32, 46, 26, 0.9); }
 
 #mode-options h2 { font-size: 26px; margin-bottom: 14px; letter-spacing: 2px; }
 #mode-options.is-moba .surv-only { display: none !important; }
