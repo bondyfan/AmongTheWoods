@@ -1525,6 +1525,21 @@ body.slotting .spell-slot.empty {
 }
 body.touch #burger-btn { display: block; }
 
+/* DESKTOP burger: the same tuck-away, bottom-right where the column already
+   lived, so the play area isn't permanently walled in by six buttons. */
+body:not(.touch) #burger-btn {
+  display: block; top: auto; left: auto;
+  bottom: 18px; right: 18px;
+}
+body:not(.touch) #hud-buttons {
+  display: none;
+  bottom: 74px; right: 18px;
+  background: rgba(12,18,8,0.92); padding: 8px; border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.14); z-index: 12;
+}
+body:not(.touch).menu-open #hud-buttons { display: flex; }
+#quit-btn { background: linear-gradient(#6b4a35, #4a3020); border-color: #8f6d4c; }
+
 /* the menu column drops down from the burger */
 body.touch #hud-buttons {
   top: calc(66px + var(--sa-t)); left: calc(12px + var(--sa-l));

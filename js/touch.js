@@ -143,7 +143,7 @@ export function initTouch(game) {
   if (burger) {
     burger.addEventListener('click', () => document.body.classList.toggle('menu-open'));
     // opening any panel closes the burger tray so it isn't in the way
-    for (const id of ['shop-btn', 'char-btn', 'bestiary-btn', 'settings-btn', 'help-btn', 'base-btn']) {
+    for (const id of ['shop-btn', 'char-btn', 'bestiary-btn', 'settings-btn', 'help-btn', 'base-btn', 'quit-btn']) {
       $(id)?.addEventListener('click', () => document.body.classList.remove('menu-open'));
     }
   }

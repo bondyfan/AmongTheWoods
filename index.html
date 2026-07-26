@@ -155,6 +155,7 @@
       <button id="bestiary-btn">📕 Bestiary <kbd>N</kbd></button>
       <button id="settings-btn">⚙️ Settings</button>
       <button id="help-btn">❓ Controls <kbd>H</kbd></button>
+      <button id="quit-btn">💾 Save &amp; Quit</button>
     </div>
   </div>
 
@@ -635,9 +636,16 @@
       </div>
 
       <!-- step 1: pick a mode -->
+      <!-- The two ways almost everyone plays, front and centre. Survival is
+           the game; MOBA and the code-based local server are side dishes and
+           live in the small footer row below. -->
       <div id="mode-select">
-        <button id="mode-survival-btn">🌲 Survival<br><small>Journey north to the Frozen Peak</small></button>
-        <button id="mode-moba-btn">🏰 MOBA<br><small>Three lanes, creeps &amp; towers</small></button>
+        <button id="mode-survival-btn">🌲 Single Player<br><small>Journey north to the Frozen Peak</small></button>
+        <button id="mode-public-btn" disabled title="Play on the public dedicated server">🌐 Multiplayer<br><small id="public-status">checking the public server…</small></button>
+      </div>
+      <div id="mode-extras">
+        <button id="mode-local-btn" class="tiny-btn">🖧 Local Server</button>
+        <button id="mode-moba-btn" class="tiny-btn">🏰 MOBA</button>
       </div>
 
       <!-- step 2: single player or multiplayer for the chosen mode -->
@@ -646,8 +654,8 @@
         <button id="start-btn">▶ Single Player</button>
         <div id="mp-lobby">
           <div id="mp-choose">
-            <button id="mp-coop-btn" class="surv-only">🤝 Create Co-op</button>
-            <button id="mp-server-btn" class="surv-only" disabled title="Play on the dedicated server">🖥️ Server <small id="mp-server-status" style="opacity:.7;font-weight:normal">checking…</small></button>
+            <button id="mp-coop-btn" class="surv-only">🖧 Create Local Server<br><small>a private world your friends join with a code</small></button>
+            <button id="mp-server-btn" class="hidden" disabled>🖥️ Server <small id="mp-server-status"></small></button>
             <div class="mp-row surv-only">
               <button id="mp-pvp-btn">⚔️ Create PvP</button>
               <select id="mp-interval">

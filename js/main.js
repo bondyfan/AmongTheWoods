@@ -2765,6 +2765,18 @@ const settings = Object.assign(
   { mouseMove: false },
   JSON.parse(localStorage.getItem('atw-settings') || '{}'),
 );
+// RPG view and free mouse-look are the intended default experience. They were
+// already the default for a FRESH profile (the ??= below), but anyone who had
+// switched them off — or whose profile predates them being defaults — stayed
+// switched off forever. This is a ONE-TIME nudge, versioned so it never fights
+// the player again: turn it off after this and it stays off.
+const CONTROLS_DEFAULT_VERSION = 2;
+if ((settings.controlsRev ?? 0) < CONTROLS_DEFAULT_VERSION) {
+  settings.controlsRev = CONTROLS_DEFAULT_VERSION;
+  settings.rpgView = true;
+  settings.mouseLook = true;
+  try { localStorage.setItem('atw-settings', JSON.stringify(settings)); } catch {}
+}
 {
   const box = $id('set-mousemove');
   box.checked = settings.mouseMove;
@@ -3848,10 +3860,14 @@ async function startServerStatusWatch() {
   } catch { return; }
   ServerStatusMod.start();
   _serverUnsub?.();
+  const pub = $id('mode-public-btn'), pubStatus = $id('public-status');
   _serverUnsub = ServerStatusMod.onChange((online, detail) => {
     btn.disabled = !online;
     btn.classList.toggle('is-offline', !online);
-    if (status) status.textContent = online ? `· ${detail}` : `· ${detail}`;
+    if (status) status.textContent = `· ${detail}`;
+    // the headline Multiplayer button mirrors it
+    if (pub) { pub.disabled = !online; pub.classList.toggle('is-offline', !online); }
+    if (pubStatus) pubStatus.textContent = online ? detail : `public server ${detail}`;
   });
 }
 function stopServerStatusWatch() {
@@ -3879,11 +3895,41 @@ $id('mp-server-btn')?.addEventListener('click', async () => {
     btn.disabled = false;
   }
 });
-$id('mode-survival-btn').addEventListener('click', () => showModeOptions('survival'));
+// Survival single player starts straight away — the old two-step (pick a mode,
+// then pick solo/multi) was a menu in front of a menu.
+$id('mode-survival-btn').addEventListener('click', () => {
+  audio.sfx('click', 0.4);
+  selectedMode = 'survival';
+  if (!requireName()) return;
+  startGame();
+});
+// The public dedicated server is the headline multiplayer button now; it drives
+// the same handler the old in-lobby Server button used.
+$id('mode-public-btn')?.addEventListener('click', () => $id('mp-server-btn')?.click());
+// Local Server = the code-based private world (what used to be "Create Co-op").
+$id('mode-local-btn')?.addEventListener('click', () => showModeOptions('survival'));
+// Save & Quit: flush the character to its slot, drop any multiplayer session,
+// then return to the menu. The autosave is rate-limited, so quitting without
+// this could throw away the last few minutes of play.
+$id('quit-btn')?.addEventListener('click', async () => {
+  if (game.mode !== 'play') return;
+  document.body.classList.remove('menu-open');
+  const btn = $id('quit-btn');
+  btn.disabled = true; btn.textContent = '💾 Saving…';
+  try { await doAutosave(); } catch {}
+  try { mp?.dispose?.(); } catch {}
+  mp = null;
+  // A full reload is the only honest way back to a clean menu: the world,
+  // enemies, camp and class state are live module singletons with no teardown.
+  location.reload();
+});
+
 $id('mode-moba-btn').addEventListener('click', () => showModeOptions('moba'));
+// the public-server button lives on the FIRST screen now, so its health poll
+// has to start with the menu rather than when a submenu opens
+startServerStatusWatch();
 $id('mode-back-btn').addEventListener('click', () => {
   audio.sfx('click', 0.4);
-  stopServerStatusWatch();
   resetLobbyUI();
   $id('mode-options').classList.add('hidden');
   $id('mode-select').classList.remove('hidden');
