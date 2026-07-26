@@ -61,6 +61,8 @@ const NEEDS_TARGET = new Set(['target', 'execute', 'magicTarget', 'shadowstep', 
 const SHIFT_LOCK_ONLY = new Set(['magicTarget']);
 // a ghost sprints back to its corpse — the run of shame is meant to be quick
 export const GHOST_SPEED_MULT = 2.5;
+// honey's vigour window: energy comes back half again as fast
+const VIGOR_MULT = 1.5;
 
 export class Player {
   constructor(scene, hooks) {
@@ -152,6 +154,7 @@ export class Player {
     this.evadeT = 0;
     this.classShield = 0;
     this.hotT = 0;
+    this.vigorT = 0;      // honey: a window of surging energy recovery
     this.hotRate = 0;
     this.hotTickT = 0;
     this.guardianSpiritT = 0;
@@ -429,6 +432,7 @@ export class Player {
     this.evadeT = 0;
     this.classShield = 0;
     this.hotT = this.hotRate = 0;
+    this.vigorT = 0;
     this.guardianSpiritT = 0;
     this.orbSummons = [];
     this.combatDots = {};
@@ -1293,6 +1297,36 @@ export class Player {
       return true;
     }
 
+    // ---- Shadow Step: a directional blink through the shadow realm ----
+    // Distinct from `shadowstep`, which needs an enemy to appear behind. This
+    // one is pure movement: it goes where you are FACING, so it reads as an
+    // aimed gap-closer / escape rather than a target you pick.
+    if (skill.action === 'shadowBlink') {
+      const from = this.pos.clone();
+      const dist = rv('distance', 9);
+      const dir = this.facing.clone().setY(0).normalize();
+      // Step in small increments so a wall STOPS the blink at the wall. A
+      // single collide() after a long jump would happily let you pop out the
+      // far side of anything thinner than the blink distance.
+      const probe = this.pos.clone();
+      const STEP = 0.6;
+      for (let travelled = 0; travelled < dist; travelled += STEP) {
+        const next = probe.clone().addScaledVector(dir, STEP);
+        const before = next.clone();
+        ctx.world?.collide?.(next, 0.45);
+        if (next.distanceTo(before) > 0.05) break;   // shoved by geometry — stop short
+        probe.copy(next);
+      }
+      this.pos.copy(probe);
+      this._applyBounds(ctx);
+      this._shadowBlinkFx(from, this.pos.clone(), dir);
+      this.attackDur = 0.22; this.attackT = 0.22;   // land ready, not exposed
+      audio.sfx('special', 0.55, 0);
+      audio.sfx('spawn', 0.35, -200);
+      this.breakStealth();
+      return true;
+    }
+
     if (skill.action === 'shadowstep') {
       const enemy = target();
       const from = this.pos.clone();
@@ -1787,6 +1821,58 @@ export class Player {
     }
   }
 
+  // The Shadow Step animation: a collapse where you left, a ribbon of
+  // after-images along the path, and a bloom where you arrive. Three distinct
+  // beats, so a 5 m hop and a 15 m leap both read clearly.
+  _shadowBlinkFx(from, to, dir) {
+    const y = this.mesh.position.y;
+    const ang = Math.atan2(dir.x, dir.z);
+    const DARK = 0x2a1b4d, VIOLET = 0x7a5cff, PALE = 0xb9a4ff;
+
+    // 1. EXIT — the ground drinks you in
+    this._fxRingBlink(from.clone().setY(y - 0.55), DARK, 2.1, 0.34, false);
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      this._fxRiser(from.clone().setY(y + 0.2), VIOLET,
+        new THREE.Vector3(Math.cos(a) * 1.2, 3.4 + Math.random() * 1.6, Math.sin(a) * 1.2),
+        0.4, 0.17, 0.85);
+    }
+    this._fxStreak(from.clone().setY(y + 1.0), ang, DARK, 0.9, 2.4, 0.3, 0.75);
+
+    // 2. TRAVEL — after-images strung along the path, dark behind → pale ahead
+    // so the eye reads the direction without needing motion blur
+    const seg = new THREE.Vector3().subVectors(to, from);
+    const ghosts = Math.min(9, Math.max(3, Math.round(seg.length() / 1.4)));
+    for (let i = 0; i <= ghosts; i++) {
+      const k = i / ghosts;
+      const p = from.clone().addScaledVector(seg, k).setY(y + 0.9);
+      this._fxStreak(p, ang, k < 0.5 ? DARK : VIOLET, 0.5, 1.7,
+        0.26 + 0.14 * k, 0.55 * (1 - k * 0.6) + 0.15);
+      if (i % 2 === 0) {
+        this._fxRiser(p.clone().setY(y + 0.1), VIOLET, new THREE.Vector3(0, 1.4, 0), 0.34, 0.13, 0.5);
+      }
+    }
+
+    // 3. ENTRY — you bloom back out of the dark
+    this._fxBurst(to, PALE, 14, 5, 0.44);
+    this._fxRingBlink(to.clone().setY(y - 0.55), VIOLET, 0.5, 0.4, true);
+    this._fxStreak(to.clone().setY(y + 1.0), ang, PALE, 0.75, 2.2, 0.26, 0.8);
+  }
+
+  // a flat ground ring that either collapses inward or blooms outward
+  _fxRingBlink(pos, color, size, life, outward) {
+    const geo = new THREE.RingGeometry(size * 0.55, size, 30);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.9, side: THREE.DoubleSide,
+      depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(pos);
+    this.scene.add(mesh);
+    this.classFx.push({ mesh, t: life, life, kind: outward ? 'blinkOut' : 'blinkIn', op0: 0.9 });
+  }
+
   // one drifting particle (Blood Fury aura, charge dust…)
   _fxRiser(pos, color, vel, life = 0.5, size = 0.15, opacity = 0.8) {
     const geo = new THREE.PlaneGeometry(size, size);
@@ -2071,6 +2157,16 @@ export class Player {
           fx.mesh.position.set(this.pos.x, this.mesh.position.y + 0.1, this.pos.z);
           fx.mesh.scale.setScalar(0.8 + k * 1.9);
           fx.mesh.material.opacity = 0.3 + 0.55 * k;
+          break;
+        case 'blinkIn':   // collapses inward as the body is swallowed
+          fx.mesh.scale.setScalar(Math.max(0.05, 1 - k * 0.95));
+          fx.mesh.material.opacity = op0 * (1 - k * k);
+          fx.mesh.rotation.y += dt * 5;
+          break;
+        case 'blinkOut':  // blooms outward as the body reappears
+          fx.mesh.scale.setScalar(0.2 + k * 4.2);
+          fx.mesh.material.opacity = op0 * (1 - k);
+          fx.mesh.rotation.y -= dt * 4;
           break;
         case 'riser':
           if (fx.vel) fx.mesh.position.addScaledVector(fx.vel, dt);
@@ -2386,6 +2482,7 @@ export class Player {
       ['spiritWardT', '👻', 'Spirit Ward', 'defensive'],
       ['guardianSpiritT', '👼', 'Guardian Spirit', 'defensive'],
       ['hotT', '🌿', 'Renew', 'hot'],
+      ['vigorT', '💛', 'Vigour', 'buff'],
     ];
     const out = [];
     for (const [field, icon, name, kind] of DESCS) {
@@ -2667,12 +2764,25 @@ export class Player {
     return true;
   }
 
+  // Berries are the FIELD SNACK: a small heal, but mainly a fast slug of energy.
+  // That is what makes them worth carrying — they buy you another few swings
+  // mid-fight, which matters most to the melee classes that live on the bar.
   eatBerry() {
     if (this.dead || this.berry < 1) return false;
+    const hpRoom = this.hp < this.maxHp, enRoom = this.energy < this.maxEnergy;
+    if (!hpRoom && !enRoom) {
+      this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
+        '🫐 already full', '#b9a7d8');
+      return false;                       // don't burn a berry for nothing
+    }
     this.berry = Math.round((this.berry - 1) * 10) / 10;
-    const heal = Math.max(7, Math.round(this.maxHp * 0.05)); // 5% of the pool
+    const heal = Math.max(7, Math.round(this.maxHp * 0.05));
+    const en = Math.max(10, Math.round(this.maxEnergy * 0.22));
     this.hp = Math.min(this.maxHp, this.hp + heal);
-    this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2), `🫐 +${heal} ❤️`, '#c9a4ff');
+    this.energy = Math.min(this.maxEnergy, this.energy + en);
+    this.energySpentT = Math.max(this.energySpentT, 1.3); // keep the fast-regen ramp
+    this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
+      `🫐 +${heal} ❤️ +${en} ⚡`, '#c9a4ff');
     audio.sfx('eat_food', 0.55, 300);
     return true;
   }
@@ -2697,8 +2807,24 @@ export class Player {
     const heal = c.healPct ? Math.round(this.maxHp * c.healPct) : (c.heal || 0);
     this.hp = Math.min(this.maxHp, this.hp + heal);
     if (c.speedDur) this.roastT = c.speedDur;
+    // energy, a lingering trickle of health, and a vigour window are what make
+    // a consumable worth a slot instead of being hoarded and never used
+    let en = 0;
+    if (c.energyPct || c.energy) {
+      en = c.energyPct ? Math.round(this.maxEnergy * c.energyPct) : c.energy;
+      this.energy = Math.min(this.maxEnergy, this.energy + en);
+      this.energySpentT = Math.max(this.energySpentT, 1.3);
+    }
+    if (c.hotDur) {
+      this.hotT = Math.max(this.hotT, c.hotDur);
+      this.hotRate = Math.max(this.hotRate || 0,
+        Math.round(this.maxHp * (c.hotPct ?? 0.02)));
+      this.hotTickT = 0;
+    }
+    if (c.vigorDur) this.vigorT = Math.max(this.vigorT || 0, c.vigorDur);
     this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
-      `${c.icon} +${heal} ❤️${c.speedDur ? ' +🏃' : ''}`, '#7fe07f');
+      `${c.icon} +${heal} ❤️${en ? ` +${en} ⚡` : ''}${c.speedDur ? ' +🏃' : ''}${c.vigorDur ? ' +💛' : ''}`,
+      '#7fe07f');
     audio.sfx('eat_food', 0.6, 250);
     return true;
   }
@@ -2798,12 +2924,14 @@ export class Player {
     // the fight moving. Mana is the slow caster pool and refills hard OOC.
     this.energySpentT += dt;
     this.manaSpentT += dt;
+    if (this.vigorT > 0) this.vigorT = Math.max(0, this.vigorT - dt);
     this.noEnergyWarnT = Math.max(0, this.noEnergyWarnT - dt);
     if (this.energy < this.maxEnergy) {
       // Standing still you catch your breath; running burns half of it away.
       // (moving is set from the input each frame, further up in update())
       const rate = this.energyRegen * (this.movingNow ? 0.5 : 1)
-        * (this.energySpentT > 1.2 ? 1.35 : 1);
+        * (this.energySpentT > 1.2 ? 1.35 : 1)
+        * (this.vigorT > 0 ? VIGOR_MULT : 1);
       this.energy = Math.min(this.maxEnergy, this.energy + rate * dt);
     }
     if (this.maxMana > 0 && this.mana < this.maxMana) {

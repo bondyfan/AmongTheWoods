@@ -399,7 +399,7 @@ export const ITEM_TWEAK_FIELDS = ['level', 'weapon.dmg', 'weapon.cd', 'weapon.ra
   'stats.hp', 'stats.regen', 'stats.speed', 'stats.dmgPct'];
 // Class abilities & passives. Only SCALAR fields — the per-rank arrays
 // (weaponMult, damage, stun…) stay in code; `level` is the required level.
-export const SKILL_TWEAK_FIELDS = ['level', 'cd', 'energy', 'mana', 'range', 'radius', 'windup'];
+export const SKILL_TWEAK_FIELDS = ['level', 'cd', 'energy', 'mana', 'range', 'radius', 'windup', 'distance'];
 
 const getPath = (obj, path) => path.split('.').reduce((o, k) => o?.[k], obj);
 const setPath = (obj, path, v) => {

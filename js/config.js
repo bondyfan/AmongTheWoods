@@ -854,9 +854,12 @@ export const CONSUMABLES = [
   { id: 'salve', icon: '🧪', name: 'Healing Salve', key: 'F', cost: { berry: 5 },
     healPct: 0.4, desc: 'Brewed from 5 blueberries. Drink with F: restores 40% of your health.' },
   { id: 'roast', icon: '🍗', name: 'Roasted Meat', key: 'G', cost: { meat: 10 },
-    healPct: 0.12, speedDur: 30, desc: 'Eat with G: +12% health and +10% speed for 30 s.' },
+    healPct: 0.12, speedDur: 30, energyPct: 0.25,
+    desc: 'Eat with G: +12% health, a quarter of your energy back, and +10% speed for 30 s.' },
   { id: 'honey', icon: '🍯', name: 'Wild Honey', found: true,
-    healPct: 0.25, desc: 'Raided from a beehive. Click it in the inventory: +25% health.' },
+    healPct: 0.12, hotDur: 12, hotPct: 0.02, energyPct: 0.45, vigorDur: 25,
+    desc: 'Raided from a beehive. Click it: +12% health at once and more knitting back over 12 s, '
+      + 'nearly half your energy bar, and 25 s of surging recovery. The fighter\'s drink.' },
   { id: 'venom', icon: '☠️', name: 'Snapjaw Venom', found: true, venomDur: 60,
     desc: 'Milked from a carnivorous bloom. Click to coat your weapon: attacks poison for 60 s.' },
   { id: 'scroll', icon: '📜', name: 'Scroll of Discovery', found: true, reveal: 300,
@@ -1061,6 +1064,8 @@ export const CLASS_TREES = [
         { cd: 26, duration: [8, 11, 15] }),
       A('rogue_evade', '💨', 'Evade', 7, 'Avoid every incoming attack during a short glowing window.', 'evade',
         { cd: 22, duration: [1, 1.4, 2] }),
+      A('rogue_shadow_step', '🌌', 'Shadow Step', 10, 'Slip into the shadow realm and reappear 5/9/15 m ahead of you. Walls stop you at the wall — it is a leap, not a phase.', 'shadowBlink',
+        { cd: 14, energy: 18, distance: [5, 9, 15] }),
       A('rogue_backstab_active', '🔪', 'Backstab', 12, 'A brutal strike that is far stronger from behind. Builds a Combo Point (two from behind).', 'target',
         { cd: 10, range: 3.2, weaponMult: [2.0, 2.7, 3.5], backstab: true, combo: 'build' }),
       A('rogue_shadowstep', '🌘', 'Shadowstep', 16, 'Teleport behind the aimed (or Shift-locked) enemy and strike. Reaches 15/22/30 m by rank.', 'shadowstep',
@@ -1347,7 +1352,8 @@ export function classActiveInfo(skill, rank) {
   else if (skill.range && ['target', 'execute', 'magicTarget', 'shadowstep'].includes(skill.action))
     out.push(`${num1(rv('range'))} m range`);
   if (skill.action === 'tame') out.push(`${num1(rv('channel'))} s channel`, 'permanent companion', `${skill.range} m reach`);
-  if (skill.distance) out.push(`charges ${num1(rv('distance'))} m`);
+  if (skill.distance) out.push(skill.action === 'shadowBlink'
+    ? `blinks ${num1(rv('distance'))} m` : `charges ${num1(rv('distance'))} m`);
   if (skill.castRange) out.push(`cast up to ${Math.min(20, rv('castRange'))} m away`);
   if (skill.count && (Array.isArray(skill.count) || skill.count > 1)) out.push(`×${rv('count')}`);
   if (skill.petMult) out.push(`${rv('petMult')}× companion damage`);
