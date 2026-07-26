@@ -2489,7 +2489,7 @@ function survivalRespawn() {
   audio.sfx('defeat', 0.5);
   const by = player.killedBy || 'the wilds';
   ui.banner(`☠️ Slain by ${by}`);
-  ui.toast(`☠️ Slain by ${by} · ${dropped} loot spilled. Run back to your body to return whole — or resurrect at the graveyard and lose this level's XP.`, 'boss');
+  ui.toast(`☠️ Slain by ${by} · ${dropped} loot spilled. Run back to your body to keep your XP (you revive weak) — or resurrect at the graveyard at full strength and lose this level's XP.`, 'boss');
   player.killedBy = null;
   player.mesh.rotation.z = Math.PI / 2;            // lie down while "out"
   setTimeout(() => { if (game.mode === 'play') enterGhost(at); }, 2000);
@@ -2542,11 +2542,17 @@ function resurrectAtCorpse() {
   if (!ghost.active || !ghost.corpse) return;
   const { x, z } = ghost.corpse;
   leaveGhost();
-  player.revive(0.5);
+  // Crawling back into your own body costs you: you keep every scrap of XP,
+  // but you come round at 10% health with an EMPTY energy bar — wherever you
+  // died is still dangerous, and you cannot simply resume the fight that killed
+  // you. revive() refills both, so the drain has to come after it.
+  player.revive(0.10);
+  player.energy = 0;
+  player.energySpentT = 0;
   player.pos.set(x, 0, z);
   audio.sfx('evolve_ready', 0.55);
   ui.banner('✨ Back from the dead');
-  ui.toast('✨ You slip back into your body — your XP is intact.', 'level');
+  ui.toast('✨ You claw back into your body — XP intact, but you are spent: 10% health and no energy.', 'level');
 }
 
 // gave up on the run: full health at the graveyard, but this level's XP is gone
@@ -2555,7 +2561,7 @@ function resurrectAtGraveyard() {
   const g = ghost.grave || { x: 0, z: 4 };
   leaveGhost();
   player.loseLevel();
-  player.revive(1);
+  player.revive(1);          // full health, energy and mana — the trade is the XP
   player.pos.set(g.x, 0, g.z);
   audio.sfx('defeat', 0.45);
   ui.banner('⚰️ Resurrected');
