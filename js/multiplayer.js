@@ -26,7 +26,7 @@ import { makeMan, makeAxe, makeBow, makePickaxe, makeClub, makeSword, makeHandSp
          makeEssenceDrop, makeWoolDrop, makeItemDrop,
          makeEnemyShot, makeSpear, makeWolf, makeMobaTower, makeMobaBase,
          makeTeamFlag, TEAM_COLORS, mat, makeTorchMesh, makeRaceFlag,
-         setSpectralLook } from './models.js';
+         setSpectralLook, applyWornGear } from './models.js';
 import { audio } from './audio.js';
 import { MOB_INFO_RADIUS, mobLevelBadge } from './ui.js';
 
@@ -153,6 +153,15 @@ class RemotePlayer {
     if (nextStealthed !== this.stealthed) {
       this.stealthed = nextStealthed;
       if (!this.isGhost) setRemoteStealthVisual(this.mesh, this.stealthed);
+    }
+    // worn armour: rebuild only when the set genuinely changes, since this
+    // runs ~14x a second per peer
+    if (typeof s.gr === 'string' && s.gr !== this._gearSig) {
+      this._gearSig = s.gr;
+      const [head, chest, legs, boots, back, underlayer] = s.gr.split(',')
+        .map(v => (v && v !== '0') ? v : null);
+      applyWornGear(this.mesh, { head, chest, legs, boots, back, underlayer }, itemById);
+      if (this.isGhost) setSpectralLook(this.mesh, true);   // keep a wraith spectral
     }
     const nextOffhand = s.oh || null;
     if (s.w !== this.weaponId || nextOffhand !== this.offhandId) {
@@ -1116,7 +1125,11 @@ export class Multiplayer {
       // party frames mirror the group's energy/mana too
       en: Math.round(p.energy), men: p.maxEnergy,
       ...(p.maxMana > 0 ? { mn: Math.round(p.mana), mmn: p.maxMana } : {}),
-      w: p.equipment.weapon, oh: p.equipment.offhand || 0, mv: (ctx.input.moveX || ctx.input.moveZ) ? 1 : 0,
+      w: p.equipment.weapon, oh: p.equipment.offhand || 0,
+      // worn armour, so allies see what you are actually wearing
+      gr: [p.equipment.head, p.equipment.chest, p.equipment.legs,
+           p.equipment.boots, p.equipment.back, p.equipment.underlayer]
+        .map(v => v || 0).join(','), mv: (ctx.input.moveX || ctx.input.moveZ) ? 1 : 0,
       atk: p.attackT > 0 ? 1 : 0, dead: p.dead ? 1 : 0,
       dn: (p.dead && this.downedUntil) ? 1 : 0,
       st: p.stealthed ? 1 : 0,

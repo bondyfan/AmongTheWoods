@@ -398,6 +398,120 @@ export function templateMesh(key, build, sway = null) {
 // (clones, sprites, custom mats) is safe to dispose
 export const isSharedMaterial = (mat) =>
   !!mat?.userData?.shared || (!!mat?.color && matCache.get(mat.color.getHex()) === mat);
+// ---- WORN GEAR: what you equip, you actually wear ---------------------
+// Armour used to live only in the paper doll — the figure in the world stayed
+// naked-with-a-leaf no matter what you put on. Each slot now builds a real mesh
+// onto the existing body, tagged so a rebuild can strip the previous set.
+//
+// An item may declare `worn: { color, trim }`; anything that doesn't gets a
+// palette inferred from the material its NAME implies, so every existing item
+// is covered without hand-authoring each one.
+const WORN_TAG = '_wornGear';
+
+const MATERIAL_TINTS = [
+  [/iron|steel|plate|cuirass|shod/i, { color: 0x8d949c, trim: 0x5f666e }],
+  [/bone|skull/i, { color: 0xd8d2bd, trim: 0x9a927b }],
+  [/fur|bear|pelt|wolf/i, { color: 0x6b4a2f, trim: 0x4a3120 }],
+  [/hide|leather|wrap/i, { color: 0x8a5f3a, trim: 0x5e3f26 }],
+  [/ice|frost|glacier/i, { color: 0x9fd8ef, trim: 0x5f9ec2 }],
+  [/grave|shadow|void|night|dread/i, { color: 0x40374f, trim: 0x2a2335 }],
+  [/gold|sun|royal|crown/i, { color: 0xd8b24a, trim: 0x9a7f2e }],
+  [/ember|flame|fire|ash|molten/i, { color: 0xa8452c, trim: 0x6e2a19 }],
+  [/robe|silk|cloth|vest/i, { color: 0x4a5a86, trim: 0x334060 }],
+];
+
+function wornPalette(item) {
+  if (item?.worn?.color != null) {
+    return { color: item.worn.color, trim: item.worn.trim ?? item.worn.color };
+  }
+  for (const [re, pal] of MATERIAL_TINTS) if (re.test(item?.name || '')) return pal;
+  return { color: 0x7c6a55, trim: 0x554738 };   // plain cloth
+}
+
+// Build the mesh for ONE worn slot. Every piece is sized off the body boxes in
+// makeMan, and sits a hair proud of them so it never z-fights the skin.
+function makeWornPiece(slot, item) {
+  const { color, trim } = wornPalette(item);
+  const g = new THREE.Group();
+  if (slot === 'chest') {
+    const tunic = box(0.56, 0.58, 0.36, color); tunic.position.y = 0.80;
+    const belt = box(0.58, 0.09, 0.38, trim); belt.position.y = 0.55;
+    const collar = box(0.34, 0.08, 0.34, trim); collar.position.y = 1.11;
+    g.add(tunic, belt, collar);
+    // pauldrons read as "armoured" from the top-down camera, where the torso
+    // itself is mostly hidden by the head
+    const pl = box(0.20, 0.14, 0.28, trim); pl.position.set(-0.33, 1.06, 0);
+    const pr = box(0.20, 0.14, 0.28, trim); pr.position.set(0.33, 1.06, 0);
+    g.add(pl, pr);
+  } else if (slot === 'legs') {
+    const lo = box(0.24, 0.34, 0.24, color); lo.position.set(-0.13, 0.34, 0);
+    const ro = box(0.24, 0.34, 0.24, color); ro.position.set(0.13, 0.34, 0);
+    g.add(lo, ro);
+  } else if (slot === 'boots') {
+    const lb = box(0.24, 0.16, 0.28, color); lb.position.set(-0.13, 0.08, 0.02);
+    const rb = box(0.24, 0.16, 0.28, color); rb.position.set(0.13, 0.08, 0.02);
+    const lc = box(0.25, 0.05, 0.29, trim); lc.position.set(-0.13, 0.17, 0.02);
+    const rc = box(0.25, 0.05, 0.29, trim); rc.position.set(0.13, 0.17, 0.02);
+    g.add(lb, rb, lc, rc);
+  } else if (slot === 'underlayer') {
+    // sleeves: the arms are separate pivots, so these ride the shoulders
+    const ls = box(0.19, 0.30, 0.19, color); ls.position.set(-0.33, 0.94, 0);
+    const rs = box(0.19, 0.30, 0.19, color); rs.position.set(0.33, 0.94, 0);
+    g.add(ls, rs);
+  } else if (slot === 'back') {
+    const cloak = box(0.54, 0.86, 0.06, color); cloak.position.set(0, 0.82, -0.20);
+    cloak.rotation.x = -0.06;
+    const clasp = box(0.30, 0.07, 0.10, trim); clasp.position.set(0, 1.13, -0.17);
+    g.add(cloak, clasp);
+  } else return null;
+  g.userData[WORN_TAG] = true;
+  return g;
+}
+
+// Head gear goes in makeMan's existing capSlot, which already sits at the crown.
+function makeWornHead(item) {
+  const { color, trim } = wornPalette(item);
+  const g = new THREE.Group();
+  const cap = box(0.36, 0.14, 0.36, color); cap.position.y = 0.02;
+  g.add(cap);
+  if (/helm|plate|iron|steel/i.test(item?.name || '')) {
+    const crest = box(0.06, 0.16, 0.30, trim); crest.position.y = 0.15;
+    const guard = box(0.30, 0.12, 0.06, color); guard.position.set(0, -0.10, 0.17);
+    g.add(crest, guard);
+  } else if (/hood|fur|cowl/i.test(item?.name || '')) {
+    const back = box(0.34, 0.26, 0.14, trim); back.position.set(0, -0.06, -0.16);
+    g.add(back);
+  } else {
+    const brim = box(0.42, 0.05, 0.42, trim); brim.position.y = -0.05;
+    g.add(brim);
+  }
+  g.userData[WORN_TAG] = true;
+  return g;
+}
+
+// Rebuild the whole worn set. `resolve` maps an item id → item (passed in so
+// models.js keeps knowing nothing about config.js).
+export function applyWornGear(root, equipment, resolve) {
+  const ud = root.userData || {};
+  // strip the previous set wherever it was parented
+  for (const parent of [root, ud.capSlot].filter(Boolean)) {
+    for (const child of [...parent.children]) {
+      if (child.userData?.[WORN_TAG]) parent.remove(child);
+    }
+  }
+  if (!equipment) return;
+  for (const slot of ['chest', 'legs', 'boots', 'underlayer', 'back']) {
+    const item = resolve?.(equipment[slot]);
+    if (!item) continue;
+    const piece = makeWornPiece(slot, item);
+    if (piece) root.add(piece);
+  }
+  const head = resolve?.(equipment.head);
+  if (head && ud.capSlot) ud.capSlot.add(makeWornHead(head));
+  // the starter leaf is embarrassing once you own real clothes
+  if (ud.leaf) ud.leaf.visible = !resolve?.(equipment.chest);
+}
+
 // ---- the spectral (ghost) look ----------------------------------------
 // A dead player is a pale blue apparition: translucent, drained of its own
 // colour and lit cold. Used for BOTH the local player and every remote ghost,

@@ -11,7 +11,7 @@ import { WORLD, XP_LEVELS, MAX_LEVEL, itemById, spellById, consumableById,
          SWING_TIME, swingTimeFor, PLAYER_ENERGY, PLAYER_MANA, energyRegenFor, manaRegenFor,
          attackEnergyFor, abilityEnergyFor, abilityManaFor, CASTER_CLASSES } from './config.js';
 import { makeMan, makeAxe, makeBow, makePickaxe, makeTorchMesh, makeClub,
-         makeSword, makeHandSpear, makeCrossbow, makeShield } from './models.js';
+         makeSword, makeHandSpear, makeCrossbow, makeShield, applyWornGear } from './models.js';
 import { audio } from './audio.js';
 import { makeHumanMan, humanReady, humanModelEnabled } from './humanmodel.js';
 
@@ -2375,29 +2375,20 @@ export class Player {
     this._refreshOutfit();
   }
 
-  // Naked-with-a-leaf until clothes are crafted: chest gear recolors the torso
-  // & arms and hides the leaf; head gear adds a cap.
+  // Naked-with-a-leaf until you craft clothes. This used to be a torso recolour
+  // plus a flat box on the head; applyWornGear now builds real per-slot pieces
+  // (tunic + belt + pauldrons, greaves, boots, sleeves, cloak, shaped helms),
+  // so the two must not both run — this one owns only the SKIN underneath.
   _refreshOutfit() {
     const ud = this.mesh.userData;
     if (!ud.torso) return;
-    const chestColors = { leatherArmor: 0x8a5a2b, furCoat: 0x6e5a40, bearHide: 0x4a3a2a,
-      widowShroud: 0x273521, graveplate: 0x4d485c, iceplate: 0xa9c8d8 };
-    const headColors = { leatherCap: 0x8a5a2b, furHood: 0x6e5a40, bearHelm: 0xb8bec6 };
     const skin = 0xd9a066;
-    const chestId = this.equipment.chest;
-    const color = chestId ? (chestColors[chestId] ?? 0x7a5230) : skin;
+    // bare skin under the armour; the worn chest piece covers it when present
     for (const part of [ud.torso, ud.armL, ud.armR]) {
-      part.material = new THREE.MeshLambertMaterial({ color });
+      part.material = new THREE.MeshLambertMaterial({ color: skin });
     }
-    ud.leaf.visible = !chestId;
-    ud.capSlot.clear();
-    const headId = this.equipment.head;
-    if (headId) {
-      const cap = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.14, 0.38),
-        new THREE.MeshLambertMaterial({ color: headColors[headId] ?? 0x8a5a2b }));
-      ud.capSlot.add(cap);
-      ud.hair.visible = false;
-    } else ud.hair.visible = true;
+    applyWornGear(this.mesh, this.equipment, itemById);
+    if (ud.hair) ud.hair.visible = !this.equipment.head;
   }
 
   applyStun(sec) {
