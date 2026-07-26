@@ -100,8 +100,30 @@ export class Panels {
 
   get open() { return this.openSet.size ? [...this.openSet][this.openSet.size - 1] : null; }
 
+  // Opened by a Class Master: the class path ALONE, with the Gear/Class tab
+  // strip hidden — you are here to be taught, not to rummage in your bag.
+  openClassOnly() {
+    this.charTab = 'class';
+    this.classOnly = true;
+    if (!this.openSet.has('character')) this.toggle('character');
+    else { this.refresh(); this._applyClassOnly(); }
+  }
+
+  _applyClassOnly() {
+    const tabs = $('char-tabs');
+    if (tabs) tabs.classList.toggle('hidden', !!this.classOnly);
+    $('character')?.classList.toggle('class-only', !!this.classOnly);
+  }
+
   toggle(name) {
     audio.sfx('click', 0.4);
+    // opening the Character panel any OTHER way is a normal, full visit
+    if (name === 'character' && !this.openSet.has('character') && !this.classOnly) {
+      this.charTab = 'gear';
+    }
+    if (name === null || (name === 'character' && this.openSet.has('character'))) {
+      this.classOnly = false;   // closing clears the restriction
+    }
     if (name === null) { // close everything (Escape)
       this.openSet.clear();
     } else if (this.openSet.has(name)) {
@@ -114,6 +136,7 @@ export class Panels {
     }
     this._arrange();
     this.refresh();
+    this._applyClassOnly();
     if (this.openSet.has('shop')) $('shop-btn').classList.remove('pulse');
     this.hooks.onPauseChange(this.openSet.size > 0);
   }

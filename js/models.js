@@ -398,6 +398,40 @@ export function templateMesh(key, build, sway = null) {
 // (clones, sprites, custom mats) is safe to dispose
 export const isSharedMaterial = (mat) =>
   !!mat?.userData?.shared || (!!mat?.color && matCache.get(mat.color.getHex()) === mat);
+// The Class Master: the one person who will teach you your path. Deliberately
+// unlike the villagers and the blacksmith — a hooded robe, a rune-topped stave
+// and a slowly turning sigil overhead, so you can pick them out of a crowd.
+export function makeClassMaster() {
+  const g = new THREE.Group();
+  const robe = box(0.62, 1.05, 0.5, 0x3f3a63); robe.position.y = 0.53;
+  const hem = box(0.7, 0.1, 0.58, 0x2a2746); hem.position.y = 0.06;
+  const chest = box(0.5, 0.3, 0.4, 0x524b7d); chest.position.y = 1.0;
+  const head = box(0.3, 0.3, 0.3, 0xd9a066); head.position.y = 1.28;
+  const hood = box(0.38, 0.3, 0.4, 0x2a2746); hood.position.set(0, 1.32, -0.04);
+  const sash = box(0.64, 0.08, 0.52, 0xc8a33f); sash.position.y = 0.72;
+  g.add(robe, hem, chest, head, hood, sash);
+
+  // the stave, planted at their side
+  const staff = cyl(0.045, 0.045, 1.9, 0x6b4a2e, 6);
+  staff.position.set(0.42, 0.95, 0.1);
+  const runeTop = new THREE.Mesh(new THREE.OctahedronGeometry(0.14),
+    new THREE.MeshBasicMaterial({ color: 0x9fd0ff, transparent: true, opacity: 0.92 }));
+  runeTop.position.set(0.42, 1.95, 0.1);
+  g.add(staff, runeTop);
+
+  // a slow sigil ring floating above — the "you can train here" beacon
+  const ringGeo = new THREE.RingGeometry(0.34, 0.46, 26);
+  ringGeo.rotateX(-Math.PI / 2);
+  const sigil = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({
+    color: 0x9fd0ff, transparent: true, opacity: 0.55, side: THREE.DoubleSide,
+    depthWrite: false, blending: THREE.AdditiveBlending,
+  }));
+  sigil.position.y = 2.25;
+  g.add(sigil);
+  g.userData = { sigil, runeTop };
+  return g;
+}
+
 // ---- WORN GEAR: what you equip, you actually wear ---------------------
 // Armour used to live only in the paper doll — the figure in the world stayed
 // naked-with-a-leaf no matter what you put on. Each slot now builds a real mesh

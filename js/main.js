@@ -4029,6 +4029,11 @@ function buyStat(id) {
 function chooseClass(classId) {
   const tree = classTreeById(classId);
   if (!tree) return;
+  if (!nearClassMaster()) {
+    ui.toast('🧙 A Class Master must induct you — find one (homestead or village).', 'error');
+    audio.sfx('error', 0.4);
+    return;
+  }
   if (player.selectedClass) {
     if (player.selectedClass !== classId) {
       ui.toast(`🔒 You are already committed to ${classTreeById(player.selectedClass)?.name}.`, 'error');
@@ -4055,6 +4060,11 @@ function chooseClass(classId) {
 function trainClassSkill(id) {
   const skill = classSkillById(id);
   if (!skill) return;
+  if (!nearClassMaster()) {
+    ui.toast('🧙 Only a Class Master can teach that — find one (homestead or village).', 'error');
+    audio.sfx('error', 0.4);
+    return;
+  }
   if (!player.selectedClass) {
     ui.toast('🧬 Choose a class first.', 'error');
     audio.sfx('error', 0.4);
@@ -4381,6 +4391,13 @@ function nearPoi() {
 function nearSmith() {
   return game.kind === 'survival' && !!world.smithNear?.(player.pos.x, player.pos.z, 4.5);
 }
+
+// A class is CHOSEN and abilities are TRAINED at a Class Master, nowhere else.
+// One stands at the homestead so a fresh character isn't stranded; the village
+// keeps the other.
+function nearClassMaster() {
+  return game.kind === 'survival' && !!world.classMasterNear?.(player.pos.x, player.pos.z, 4.5);
+}
 function nearTreasure() {
   return game.kind === 'survival' && player.treasureAt
     && Math.hypot(player.pos.x - player.treasureAt.x, player.pos.z - player.treasureAt.z) < 5;
@@ -4685,6 +4702,10 @@ function interactE() {
   else if (shipTryBoard()) { /* ship line boarding handled */ }
   else if (nearWildHorse()) tameHorse(nearWildHorse());
   else if (nearParkedHorse()) { mountUp(); audio.sfx('click', 0.5); }
+  else if (nearClassMaster()) {   // the master teaches — class tree, no gear
+    panels.openClassOnly?.();
+    audio.sfx('special', 0.45);
+  }
   else if (nearSmith()) { // the forge: quests + weapons & gear live HERE
     if (!panels.openSet.has('smith')) panels.toggle('smith');
     else panels.renderSmith();
@@ -4717,6 +4738,7 @@ function tickTouchAction() {
   }
   else if (mp?.revivablePartner?.()) icon = '\ud83d\udc9a';
   else if (nearBerryBush()) icon = '\ud83e\uded0';
+  else if (nearClassMaster()) icon = '\ud83e\uddd9';
   else if (nearChest?.()) icon = '\ud83d\udce6';
   else if (nearHome?.()) icon = '\ud83c\udfe0';
   else if (nearPoi?.()) icon = '\ud83d\udea9';
@@ -6464,6 +6486,9 @@ function step() {
         : nearChest() ? '📦 Storage chest — press <kbd>E</kbd> to open'
         : nearWildHorse() ? '🐴 A wild horse — press <kbd>E</kbd> to saddle and ride it'
         : nearParkedHorse() ? '🐴 Your horse — press <kbd>E</kbd> to mount'
+        : nearClassMaster() ? (player.selectedClass
+            ? '🧙 Class Master — press <kbd>E</kbd> to train your abilities'
+            : '🧙 Class Master — press <kbd>E</kbd> to CHOOSE your class')
         : nearSmith() ? '⚒️ Blacksmith — press <kbd>E</kbd> for quests &amp; the forge'
         : nearFlightNest() ? '🪽 Griffin roost — press <kbd>E</kbd> to open the flight map'
         : world.propNear?.(player.pos.x, player.pos.z, 3) ? {

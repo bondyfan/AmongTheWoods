@@ -21,7 +21,7 @@ import { makeTree, makeRock, makeGrassTuft, makeGrassBlades, makeGrassField,
          makeLairEntrance, makeCage, makeFern, makeTownHouse, makeChurch,
          makeFountain, makeWheatTuft, makeJunglePlant, makeReeds, makePebbles,
          makeFenceRun, makeFenceGate, makeHayPile, makeGraveSingle, makeCottage,
-         makeVillageGraveyard,
+         makeVillageGraveyard, makeClassMaster,
          makePalm, makeGroundLeaves, impostorTemplate } from './models.js';
 import { makePier } from './ship.js';
 import { bakeGroup, bakeAccumulator, buildBakedMesh, bakeAt, BAKED_MAT,
@@ -192,6 +192,7 @@ export class World {
     this.pois = [];              // landmarks: shrines / monoliths / crypts
     this.onPoiSpawned = null;    // main hooks this to post crypt guards
     this.smiths = [];            // wandering blacksmiths — forge gear at them
+    this.classMasters = [];      // the ONLY people who will teach you your path
     this._patchObstacles = new Set(); // building obstacles already pushed
     this._genRings();
     this._genLakes();
@@ -1108,6 +1109,17 @@ export class World {
       }
     }
 
+    // Class Masters. One stands at the homestead so a brand-new character can
+    // pick a class without a pilgrimage; the village keeps the other, so the
+    // trek out there is still worth making.
+    this.classMasters = [{ id: 1, x: 6.5, z: 5.5 }];
+    if (this.village) {
+      const v = this.village;
+      const perX = -v.dirZ, perZ = v.dirX;
+      this.classMasters.push({ id: 2,
+        x: v.x + v.dirX * 8 + perX * 6, z: v.z + v.dirZ * 8 + perZ * 6 });
+    }
+
     // the village blacksmith — a fixed id far above the ~200 grid cells so it
     // can never collide with a generated id (patch smiths start at 100000)
     if (this.village) {
@@ -1131,6 +1143,10 @@ export class World {
 
   smithNear(x, z, radius) {
     return this.smiths.find(sm => Math.hypot(sm.x - x, sm.z - z) < radius) ?? null;
+  }
+
+  classMasterNear(x, z, radius) {
+    return this.classMasters.find(cm => Math.hypot(cm.x - x, cm.z - z) < radius) ?? null;
   }
 
   _regionLakes(rx, rz) {
@@ -2656,6 +2672,20 @@ export class World {
       }
     }
 
+    // -- class masters in this chunk --
+    for (const cm of this.classMasters) {
+      if (cm.x < cxw || cm.x >= cxw + CHUNK || cm.z < czw || cm.z >= czw + CHUNK) continue;
+      const mesh = makeClassMaster();   // NOT baked: the sigil must keep turning
+      mesh.position.set(cm.x, this.heightAt(cm.x, cm.z), cm.z);
+      mesh.rotation.y = (cm.id * 2.3) % (Math.PI * 2);
+      group.add(mesh);
+      cm.mesh = mesh;
+      if (!cm.obstacleAdded) {
+        cm.obstacleAdded = true;
+        this.obstacles.push({ x: cm.x, z: cm.z, r: 0.8, tag: 'classmaster:' + cm.id });
+      }
+    }
+
     // -- blacksmith camps in this chunk --
     for (const sm of this.smiths) {
       if (sm.x < cxw || sm.x >= cxw + CHUNK || sm.z < czw || sm.z >= czw + CHUNK) continue;
@@ -2873,6 +2903,17 @@ export class World {
   }
 
   update(dt, playerPos) {
+    // the class master's sigil turns slowly and breathes — it is the beacon
+    // that says "you can train here"
+    for (const cm of this.classMasters) {
+      const ud = cm.mesh?.userData;
+      if (!ud?.sigil) continue;
+      ud.sigil.rotation.z += dt * 0.7;
+      const k = 0.45 + 0.18 * Math.sin((this.time || 0) * 2.1);
+      ud.sigil.material.opacity = k;
+      ud.sigil.position.y = 2.25 + Math.sin((this.time || 0) * 1.4) * 0.07;
+      if (ud.runeTop) ud.runeTop.rotation.y += dt * 1.6;
+    }
     this.time += dt;
     // beehives rebuild themselves a while after being smashed
     for (const chunk of this.chunks.values()) {
