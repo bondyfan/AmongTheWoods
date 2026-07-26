@@ -99,7 +99,7 @@ export class GameRoom {
       return;
     }
     const rank = poi.type === 'temple' ? 3 : (poi.ring < 2 ? 1 : poi.ring < 4 ? 2 : 3);
-    const count = poi.type === 'captive' ? 3 : (poi.type === 'temple' ? 6 : 4 + rank);
+    const count = poi.type === 'captive' ? 8 : (poi.type === 'temple' ? 6 : 4 + rank);
     ring(count, 4.5, type);
     if (poi.type !== 'captive') {
       const boss = this.enemyMgr._spawn(type, poi.x + 3, poi.z + 3, progress, rank,

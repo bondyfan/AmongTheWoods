@@ -61,6 +61,10 @@ const NEEDS_TARGET = new Set(['target', 'execute', 'magicTarget', 'shadowstep', 
 const SHIFT_LOCK_ONLY = new Set(['magicTarget']);
 // a ghost sprints back to its corpse — the run of shame is meant to be quick
 export const GHOST_SPEED_MULT = 2.5;
+// roads are for travelling: +20% on one, tapering off as you stray
+const ROAD_SPEED_BONUS = 0.20;
+const ROAD_WIDTH = 2.2;   // metres from the centre line that still count as "on it"
+const ROAD_FADE = 2.0;    // and how far the bonus takes to fade after that
 // honey's vigour window: energy comes back half again as fast
 const VIGOR_MULT = 1.5;
 
@@ -807,6 +811,19 @@ export class Player {
     return 1 + 0.055 * (this.level - 1);
   }
 
+  // Ambush's rider, read off the trained skill so the number the card shows and
+  // the number combat uses can never drift apart.
+  _ambushMult() {
+    const sk = classSkillById('rogue_stealth');
+    const r = Math.max(1, this.classRank?.('rogue_stealth') ?? 1);
+    const v = sk?.ambushMult;
+    return (Array.isArray(v) ? v[Math.min(v.length - 1, r - 1)] : v) ?? 2.2;
+  }
+  _ambushCombo() {
+    const sk = classSkillById('rogue_stealth');
+    return sk?.ambushCombo ?? 3;
+  }
+
   _classMagicDamage(base, element = null) {
     const amount = base * this.levelSpellMult * this._classMagicMultiplier(element);
     const crit = Math.random() < (this.classEffects.spellCrit || 0);
@@ -899,7 +916,10 @@ export class Player {
         if (skill.backstab && this._isBehind(enemy)) amount *= 1.35 + rank * 0.15;
         let ambush = false;
         if (this.ambushArmed) { // Ambush: guaranteed crit + big rider, then bank 3 CP
-          ambush = true; this.ambushArmed = false; amount *= 2.2; this._gainCombo(3);
+          ambush = true; this.ambushArmed = false;
+          // declared on the skill so the ability card can show it — a magic
+          // 2.2 here is exactly how the number went missing from the UI
+          amount *= this._ambushMult(); this._gainCombo(this._ambushCombo());
           this.hooks.popup(enemy.mesh.position.clone().setY(enemy.mesh.position.y + 2.3), '🗡️ AMBUSH', '#c9a4ff', 'big');
         }
         damageTarget(enemy, amount, ambush ? { ...opts, crit: true } : opts);
@@ -3103,9 +3123,18 @@ export class Player {
                                                // stroke animation is playing) — no slowdown
                                                // wading in or the frame he first steps deep
           : 1;
+        // A ROAD is worth taking: +20% while you keep to one. pathDistance()
+        // returns 0 on painted roads, town lanes and the village street, and
+        // widens from there — so the bonus fades out rather than snapping off
+        // the moment a foot leaves the gravel.
+        const roadD = ctx.devFly ? Infinity : (world.pathDistance?.(this.pos.x, this.pos.z) ?? Infinity);
+        this.onRoad = roadD <= ROAD_WIDTH;
+        const roadMult = 1 + ROAD_SPEED_BONUS
+          * Math.max(0, 1 - Math.max(0, roadD - ROAD_WIDTH) / ROAD_FADE);
         const speed = (this.speed + this.moveSpeedBonus + mountBonus) * terrainMult
           * guardSlow * (this.tameChannel ? 0 : this.castWindup ? 0.5 : 1)
           * (this.roastT > 0 ? 1.1 : 1) * (ctx.devFly ? 1 : (ctx.envSpeedMult ?? 1))
+          * roadMult
           * (this.ghost ? GHOST_SPEED_MULT : 1);   // the dead run fast
         // cliffs are walls: block any step that climbs too steeply (walking
         // DOWN or falling off is always allowed); sliding along one is fine.

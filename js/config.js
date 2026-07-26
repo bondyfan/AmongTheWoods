@@ -317,10 +317,10 @@ export const ENEMY_TYPES = {
   // -- humanoids: bandits, tribes & other two-legged trouble. Rarer than
   // beasts, and they travel in small camps (2-5 together). --
   bandit:  { name: 'Bandit', icon: '🗡️',
-             hpMult: 0.7,  dmgMult: 0.9,  meleeDmgMult: 0.6, speed: 6, range: 1.4, attackCd: 1.2, xpMult: 0.9, hitR: 0.55, aggro: 15,
+             hpMult: 1.4,  dmgMult: 1.8,  meleeDmgMult: 1.2, speed: 6, range: 1.4, attackCd: 1.2, xpMult: 1.4, hitR: 0.55, aggro: 15,
              humanoid: true, ranged: true, spear: true, shootRange: 10, spellCd: 2.4, projectileSpeed: 20, shotColor: 0xb08a5a },
   banditBrute: { name: 'Bandit Brute', icon: '🪓',
-             hpMult: 1.3, dmgMult: 1.1, speed: 6.5, range: 1.7, attackCd: 1.2, xpMult: 1.1, hitR: 0.8, aggro: 15,
+             hpMult: 2.6, dmgMult: 2.2, speed: 6.5, range: 1.7, attackCd: 1.2, xpMult: 1.7, hitR: 0.8, aggro: 15,
              humanoid: true },
   tribesman: { name: 'Wild Tribesman', icon: '🪃',
              hpMult: 1, dmgMult: 1, meleeDmgMult: 0.85, speed: 7, range: 1.5, attackCd: 1.1, xpMult: 1, hitR: 0.6, aggro: 16,
@@ -1199,8 +1199,8 @@ export const CLASS_TREES = [
     actives: [
       A('rogue_fleet', '🌗', 'Shadow Dance', 3, 'For a few seconds EVERY strike counts as a backstab — even from the front — and builds Combo Points twice as fast.', 'buff',
         { cd: 45, buff: 'shadowDance', duration: [5, 6, 8] }),
-      A('rogue_stealth', '🌑', 'Ambush', 3, 'Vanish. Your next strike from stealth is a guaranteed crit for huge bonus damage and instantly banks 3 Combo Points.', 'stealth',
-        { cd: 26, duration: [8, 11, 15] }),
+      A('rogue_stealth', '🌑', 'Ambush', 3, 'Vanish. Your next strike from stealth is a GUARANTEED crit with a big damage rider, and instantly banks Combo Points.', 'stealth',
+        { cd: 26, duration: [8, 11, 15], ambushMult: 2.2, ambushCombo: 3 }),
       A('rogue_evade', '💨', 'Evade', 7, 'Avoid every incoming attack during a short glowing window.', 'evade',
         { cd: 22, duration: [1, 1.4, 2] }),
       A('rogue_shadow_step', '🌌', 'Shadow Step', 10, 'Slip into the shadow realm and reappear 5/9/15 m ahead of you. Walls stop you at the wall — it is a leap, not a phase.', 'shadowBlink',
@@ -1215,7 +1215,7 @@ export const CLASS_TREES = [
         { cd: 16, radius: [5, 6, 7], weaponMult: [1.4, 2.0, 2.6], poison: [6, 11, 16], detonate: true }),
       A('rogue_smoke_bomb', '🌫️', 'Smoke Bomb', 29, 'Create a smoke zone that hides you from enemies.', 'zone',
         { cd: 40, zone: 'smoke', castRange: 20, radius: [4.5, 5.5, 6.5], duration: [7, 9, 11], interval: 0.5 }),
-      A('rogue_sprint', '🏃', 'Sprint', 33, 'Gain a tremendous burst of movement speed.', 'buff',
+      A('rogue_sprint', '🏃', 'Sprint', 8, 'Gain a tremendous burst of movement speed.', 'buff',
         { cd: 35, buff: 'sprint', duration: [6, 8, 10], power: [5, 8, 11] }),
       A('rogue_kidney_shot', '⚡', 'Kidney Shot', 41, 'Stun one target, deal weapon damage and build a Combo Point.', 'target',
         { cd: 24, range: 3.2, weaponMult: [1.0, 1.4, 1.9], stun: [3, 4, 5], combo: 'build' }),
@@ -1479,6 +1479,21 @@ export function classActiveInfo(skill, rank) {
       out.push('enemies attack it instead of you');
       out.push('obeys the P stance (aggressive / defensive / passive)');
     }
+  }
+  // Ambush's payload lived only in player.js, so the card promised "huge bonus
+  // damage" and quantified nothing. Declared here, it is shown automatically.
+  if (skill.ambushMult) {
+    out.push(`the strike out of stealth deals ${num1(rv('ambushMult'))}x damage`);
+    out.push('and is a GUARANTEED critical (so your crit damage applies on top)');
+    if (skill.ambushCombo) out.push(`banks ${rv('ambushCombo')} Combo Points at once`);
+  }
+  // pet commands: `power` is a fraction of the companion's health / bite
+  if (skill.worldAction === 'mendPet') {
+    out.push(`heals your companion for ${pctStr(rv('power', 0.35))} of its health`);
+    out.push(`and empowers its bite by ${pctStr(rv('power', 0.35) * 0.5)} for 6 s`);
+  }
+  if (skill.worldAction === 'petCommand') {
+    out.push(`your companion savages the target for ${pctStr(rv('power', 0.2))} bonus damage`);
   }
   if (skill.weaponMult) out.push(`${Math.round(rv('weaponMult') * 100)}% weapon damage`);
   if (skill.damage) out.push(`${Math.round(rv('damage'))} damage`);
