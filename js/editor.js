@@ -129,6 +129,7 @@ export class WorldEditor {
     this.optElev = false;
     this.gfx = 'high'; // editor render quality: low | medium | high (draw distance is NEVER touched)
     this._undo = [];   // Ctrl/Cmd+Z stack of serialized patch snapshots
+    this.pitch = 29;   // god-view tilt in ° from straight-down (29 ≈ the classic look)
     this._nameSprites = new Map();
     this._nameT = 0;
     this.grabbed = null;
@@ -218,7 +219,16 @@ export class WorldEditor {
       v.dist = Math.max(35, Math.min(1000, v.dist * (1 + this._wheel * 0.001)));
       this._wheel = 0;
     }
-    camera.position.set(v.x, v.dist, v.z + v.dist * 0.55);
+    // orbit the look-at point at a fixed radius, tilted `pitch`° off straight
+    // down — 0° is a pure map view, high values look across the land almost
+    // horizontally. The default (29°) reproduces the classic 0.55 back-offset.
+    const rad = this.pitch * Math.PI / 180;
+    const R = v.dist * 1.1436; // = hypot(1, 0.55): keeps framing at the default
+    const camY = R * Math.cos(rad);
+    camera.position.set(v.x, camY, v.z + R * Math.sin(rad));
+    // never dip into a mountain when looking almost flat
+    const groundY = this.o.world.heightAt(camera.position.x, camera.position.z);
+    if (camera.position.y < groundY + 6) camera.position.y = groundY + 6;
     camera.lookAt(v.x, 0, v.z);
     this._ray.setFromCamera(this._mouse, camera);
     const o = this._ray.ray.origin, d = this._ray.ray.direction;
@@ -517,10 +527,18 @@ export class WorldEditor {
     this._markers.visible = on;
     this._setTestPick(false);
     if (on) document.exitPointerLock?.();
-    this.o.onToggle?.(on);
-    if (on && this.optElev) { this.o.world.debugElevation = true; this.o.onDirty('ground', {}); }
+    // Own chrome FIRST, and never at the host's mercy: a throw inside onToggle
+    // used to abort the whole toggle, leaving the god view running with no
+    // editor UI and the full game HUD still on screen.
     if (on && !this._ui) this._buildUI();
     if (this._ui) this._ui.style.display = on ? '' : 'none';
+    document.body.classList.toggle('we-on', on); // the hide-the-game-UI rule
+    try {
+      this.o.onToggle?.(on);
+    } catch (e) {
+      console.error('[editor] onToggle failed', e);
+    }
+    if (on && this.optElev) { this.o.world.debugElevation = true; this.o.onDirty('ground', {}); }
     if (on) this.o.onGfx?.(this.gfx); // apply the editor render quality
     if (!on) {
       this.painting = false;
@@ -1160,6 +1178,13 @@ export class WorldEditor {
               </div>
             </div>
             <div style="font-size:10px; color:var(--dim); margin-top:2px">Lower = better FPS. View distance is unaffected.</div>
+            <div class="we-opt" style="justify-content:space-between; gap:6px; margin-top:4px">
+              <span>Camera tilt</span>
+              <span style="display:flex; align-items:center; gap:6px">
+                <input data-we="pitch" type="range" min="0" max="75" step="1" style="width:96px">
+                <span class="we-val" data-we="pitchv" style="min-width:34px"></span></span>
+            </div>
+            <div style="font-size:10px; color:var(--dim)">0° = straight down · higher = flatter, more 3D angle.</div>
           </div>
         </div>
         <button class="we-act gold" data-we="save">💾 Save</button>
@@ -1535,6 +1560,10 @@ export class WorldEditor {
       b.classList.toggle('on', b.dataset.gfx === this.gfx);
       b.onclick = () => this._setGfx(b.dataset.gfx);
     }
+    const pitchEl = $('pitch'), pitchV = $('pitchv');
+    const showPitch = () => { pitchEl.value = this.pitch; pitchV.textContent = `${this.pitch}°`; };
+    pitchEl.oninput = (e) => { this.pitch = +e.target.value; pitchV.textContent = `${this.pitch}°`; };
+    showPitch();
     $('test').onclick = () => {
       this._setTestPick(!this._testPick);
       this.o.toast(this._testPick

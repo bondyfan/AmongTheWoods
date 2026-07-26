@@ -5001,7 +5001,7 @@ function toggleWorldEditor() {
     },
     onToggle: (on) => {
       game.editorView = on;
-      if (on) closeStartChoice(); // never leave the New/Load prompt over the editor
+      if (on) closeCharSelect(); // never leave the New/Load character prompt over the editor
       document.body.classList.toggle('we-on', on); // hides the game HUD
       if (on && panels.open) panels.toggle(null);
       enemyMgr.zoneScale = on ? 3 : 1;   // mobs stay alive across the whole view
