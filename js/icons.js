@@ -496,6 +496,52 @@ ITEM_ICONS.graveyardItem = ITEM_ICONS.grave;
 
 // ===== resource icons (drawn, not emoji) =====
 export const RES_SVG = {
+  // ---- the six that were still emoji ----
+  // A raw cut of meat: red muscle, pale fat rind, a bone stub at one end.
+  meat: S(`
+    <path d="M7 19c-2.4-3.4-1.4-8.2 2.4-10.6C13.6 5.7 19 6.4 22 9.6c3 3.2 2.6 8-.9 10.6-3.8 2.8-9.4 2.2-12.1-1.2z" fill="#c8503f" stroke="#8d2f24" stroke-width="1.3"/>
+    <path d="M9.6 17.2c-1.3-2 .1-4.9 2.6-6.2 2.6-1.4 5.6-.7 6.8 1.3" fill="none" stroke="#e2806e" stroke-width="1.5" stroke-linecap="round"/>
+    <path d="M21.4 20.6c1.9 1.1 4 1 5-.4.9-1.3.3-3-1.3-3.9" fill="none" stroke="#efe4cf" stroke-width="2.6" stroke-linecap="round"/>
+    <circle cx="26.6" cy="16.4" r="2.1" fill="#f3ead7" stroke="#c9bda3" stroke-width="1"/>
+    <circle cx="26.2" cy="21" r="2.1" fill="#f3ead7" stroke="#c9bda3" stroke-width="1"/>`),
+  // Split logs seen end-on: two stacked billets with visible growth rings.
+  wood: S(`
+    <rect x="4" y="15.5" width="24" height="9" rx="2.6" fill="#8a5f3a" stroke="#5b3d24" stroke-width="1.3"/>
+    <ellipse cx="8.4" cy="20" rx="3.1" ry="4.4" fill="#c79a63" stroke="#5b3d24" stroke-width="1.2"/>
+    <ellipse cx="8.4" cy="20" rx="1.5" ry="2.3" fill="none" stroke="#8a5f3a" stroke-width="1"/>
+    <rect x="8" y="7" width="19" height="8.4" rx="2.4" fill="#9a6c44" stroke="#5b3d24" stroke-width="1.3"/>
+    <ellipse cx="11.8" cy="11.2" rx="2.8" ry="4" fill="#d3a970" stroke="#5b3d24" stroke-width="1.2"/>
+    <ellipse cx="11.8" cy="11.2" rx="1.3" ry="2" fill="none" stroke="#9a6c44" stroke-width="1"/>`),
+  // A chipped grey boulder with a lit top facet and a smaller chip beside it.
+  stone: S(`
+    <path d="M6 21.5l3-9.5 7.5-4.4 8 4 2.5 9.4-5.4 4.2H10.6z" fill="#8f949a" stroke="#585d63" stroke-width="1.3" stroke-linejoin="round"/>
+    <path d="M9 12l7.5-4.4 8 4-7.4 3.2z" fill="#b3b8be"/>
+    <path d="M17.1 14.8l7.4-3.2 2.5 9.4-5.4 4.2z" fill="#7d8288"/>
+    <path d="M6.4 24.6l3.6-2 3 3.6" fill="none" stroke="#585d63" stroke-width="1.1" stroke-linecap="round"/>`),
+  // A forged iron ingot: dark bar, bevelled top, a cold blue-steel sheen.
+  iron: S(`
+    <path d="M6.5 21.5l3-5.5h13l3 5.5-3 4.5h-13z" fill="#7c848d" stroke="#454b52" stroke-width="1.3" stroke-linejoin="round"/>
+    <path d="M9.5 16l2.6-4.4h7.8L22.5 16z" fill="#9aa3ad" stroke="#454b52" stroke-width="1.2" stroke-linejoin="round"/>
+    <path d="M12.1 11.6h7.8" stroke="#c2ccd6" stroke-width="1.4" stroke-linecap="round"/>
+    <path d="M8.6 20.4h14.8" stroke="#5c636b" stroke-width="1.1"/>
+    <path d="M10.6 13.4l1.4-1" stroke="#dfe8f2" stroke-width="1.1" stroke-linecap="round"/>`),
+  // A cluster of blueberries with a leaf — clearly fruit, clearly blue.
+  berry: S(`
+    <path d="M15.4 9.2c-1.9-2.6-5-3.3-7.4-2.1 1 2.5 3.6 4.3 6.4 4.2z" fill="#4f9a45" stroke="#31682c" stroke-width="1.1" stroke-linejoin="round"/>
+    <circle cx="12" cy="17.6" r="5" fill="#5566c4" stroke="#313b86" stroke-width="1.3"/>
+    <circle cx="20.4" cy="15.6" r="4.4" fill="#6376d8" stroke="#313b86" stroke-width="1.3"/>
+    <circle cx="17.2" cy="23" r="4.6" fill="#4a5ab5" stroke="#313b86" stroke-width="1.3"/>
+    <circle cx="10.3" cy="15.6" r="1.5" fill="#c3ccff" opacity="0.85"/>
+    <circle cx="19" cy="13.8" r="1.2" fill="#c3ccff" opacity="0.75"/>`),
+  // A ball of wool yarn with a loose strand trailing off.
+  wool: S(`
+    <circle cx="15.5" cy="17" r="9.2" fill="#efe9dc" stroke="#b6ac97" stroke-width="1.3"/>
+    <path d="M8 13.4c4.2 1.2 8.8 4.4 11.6 8.8" fill="none" stroke="#c9bfa8" stroke-width="1.3"/>
+    <path d="M11.2 8.8c3 3.2 6 8.2 7.2 13.4" fill="none" stroke="#c9bfa8" stroke-width="1.3"/>
+    <path d="M20.6 9.6c-2.4 3.6-3.6 9-3.2 13.6" fill="none" stroke="#c9bfa8" stroke-width="1.3"/>
+    <path d="M24.4 14c-3.8 1.4-7.6 4.6-9.6 8.6" fill="none" stroke="#c9bfa8" stroke-width="1.3"/>
+    <path d="M24.3 21.4c2 .6 3.4 2 3.6 3.8" fill="none" stroke="#efe9dc" stroke-width="2.2" stroke-linecap="round"/>`),
+
   // Ethereal Essence: a glowing green orb wreathed in floating motes of light —
   // raw arcane power of the deep woods, not a bottled potion
   essence: S(`

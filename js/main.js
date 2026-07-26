@@ -38,6 +38,7 @@ import { Minimap, MobaMinimap } from './minimap.js';
 import { UI, MOB_INFO_RADIUS, mobLevelBadge } from './ui.js';
 import { Panels } from './panels.js';
 import { DevDistanceRadius } from './dev-distance-radius.js';
+import { resIcon } from './icons.js';
 import { LocalSaves } from './localsaves.js';
 
 // ---------- PWA: installable + full-screen on the home screen ----------
@@ -1669,7 +1670,7 @@ function tickGraveEvent() {
   if (anyAlive) return;
   if (graveEvent.wave < 3) { spawnGraveWave(); return; }
   const poi = graveEvent.poi;
-  poi.claimed = true;
+  markPoiClaimed(poi);
   graveEvent = null;
   recordQuestEvent('graveyardRest', poi.ring);
   recordQuestEvent('landmark', poi.ring);
@@ -2059,7 +2060,7 @@ const enemyMgr = new EnemyManager(scene, world, {
       const poi = (game.dungeon?.poi.id === enemy.lairId ? game.dungeon.poi : null)
         ?? world.pois?.find(p => p.id === enemy.lairId);
       if (poi) {
-        poi.claimed = true;
+        markPoiClaimed(poi);
         recordQuestEvent('lair', poi.ring);
         recordQuestEvent('landmark', poi.ring);
         minimap.redrawT = 0;
@@ -2295,6 +2296,7 @@ function startPlaying() {
     // crypts, jungle temples and the summit come pre-garrisoned with a
     // silent guard pack — the summit's keeper is a colossal named boss
     world.onPoiSpawned = (poi) => {
+      if (poiClaimActive(poi.id)) poi.claimed = true;   // honour the saved ledger
       if (poi.claimed || poi.guarded) return;
       if (!['crypt', 'temple', 'summit', 'lair', 'captive'].includes(poi.type)) return;
       if (mp?.active && !mp.isHost) return; // host simulates the guards
@@ -2493,6 +2495,35 @@ function dropHalfMeat(pos) {
 // Reaching it restores you intact; giving up and resurrecting at the graveyard
 // costs this level's XP progress. Your loot still spills where you fell.
 const ghost = { active: false, corpse: null, grave: null, mesh: null };
+
+// ---- POI claim ledger ----
+// poi.claimed lived only on the in-memory world, so quitting and rejoining
+// handed you every shrine and every caged captive again. Claims are recorded
+// here with a real timestamp and saved with the character; a claim older than
+// one full game day (DAY_LENGTH real minutes = 24 game hours) lapses, so these
+// become daily rather than infinite.
+const poiClaims = Object.create(null);
+const POI_COOLDOWN_MS = 24 * 60 * 1000;      // 24 game hours == 24 real minutes
+
+function markPoiClaimed(poi) {
+  if (!poi?.id) return;
+  poiClaims[poi.id] = Date.now();
+  markPoiClaimed(poi);
+}
+// has this claim lapsed? (also the seam that re-opens a POI after a day)
+function poiClaimActive(id) {
+  const at = poiClaims[id];
+  return !!at && (Date.now() - at) < POI_COOLDOWN_MS;
+}
+// re-apply the ledger to the freshly generated world, and expire old claims
+function applyPoiClaims() {
+  for (const id of Object.keys(poiClaims)) {
+    if (!poiClaimActive(id)) delete poiClaims[id];
+  }
+  for (const poi of (world.pois || [])) {
+    if (poiClaimActive(poi.id)) poi.claimed = true;
+  }
+}
 
 // every graveyard the player may wake at: the world's own, plus a grave they
 // placed themselves
@@ -2887,7 +2918,7 @@ if ((settings.controlsRev ?? 0) < CONTROLS_DEFAULT_VERSION) {
   const resourceSettings = $id('set-hud-resources');
   resourceSettings.innerHTML = RESOURCES.map(key =>
     `<label><input type="checkbox" value="${key}"${settings.hudResources.includes(key) ? ' checked' : ''}>`
-    + `<span>${RES_ICONS[key]} ${resourceNames[key]}</span></label>`).join('');
+    + `<span>${resIcon(key, RES_ICONS[key])} ${resourceNames[key]}</span></label>`).join('');
   ui.setTrackedResources(settings.hudResources);
   resourceSettings.addEventListener('change', () => {
     settings.hudResources = [...resourceSettings.querySelectorAll('input:checked')].map(input => input.value);
@@ -3326,6 +3357,7 @@ function serializeState() {
       positions: JSON.parse(JSON.stringify(camp.positions)) } : null,
     biomeIndex: game.biomeIndex,
     map: minimap.serializeDiscovery(),
+    poiClaims: { ...poiClaims },   // shrines/captives stay claimed for a game day
   };
   return JSON.parse(JSON.stringify(data)); // strip undefined for Firebase
 }
@@ -3472,6 +3504,9 @@ function applyLoadedState(d) {
   p.repeatableDone = { ...(d.repeatableDone || {}) };
   p.quest = d.quest || null;
   p.shrineBonus = d.shrineBonus || 0;
+  for (const k of Object.keys(poiClaims)) delete poiClaims[k];
+  if (d.poiClaims && typeof d.poiClaims === 'object') Object.assign(poiClaims, d.poiClaims);
+  applyPoiClaims();
   if (d.map) minimap.restoreDiscovery(d.map); // old saves simply keep the current fog state
   if (camp && d.camp) {
     Object.assign(camp.levels, d.camp.levels || {});
@@ -3798,6 +3833,7 @@ async function ensureMp() {
       get camp() { return camp; },
       get petTarget() { return (companions.wolf && !player.petDead) ? petProxy : null; },
       get playerName() { return playerName(); },
+      arrowHitsHive,   // arrows crack beehives in multiplayer too
       popup: (pos, text, color, cls) => ui.popup(pos, text, color, cls),
       onDiscover: discoverType,
       onSharedQuestKill: (enemy) => trackQuestKill(enemy, false),
@@ -4705,7 +4741,7 @@ function claimPoi(poi) {
     return;
   }
   if (poi.type === 'captive') {
-    poi.claimed = true;
+    markPoiClaimed(poi);
     if (poi.mesh?.userData.prisoner) poi.mesh.userData.prisoner.visible = false;
     recordQuestEvent('rescue', poi.ring);
     recordQuestEvent('landmark', poi.ring);
@@ -4714,7 +4750,7 @@ function claimPoi(poi) {
     audio.sfx('victory', 0.4);
     return;
   }
-  poi.claimed = true;
+  markPoiClaimed(poi);
   recordQuestEvent(poi.type, poi.ring);
   recordQuestEvent('landmark', poi.ring);
   const ring = poi.ring;

@@ -1365,11 +1365,14 @@ export class Multiplayer {
         ctx.enemyMgr.update(dt, combatTargets, ctx.projectiles);
         // Pets fight, but never magnet-collect their owner's or allies' loot.
         ctx.pickups.update(dt, playerTargets);
-        ctx.projectiles.update(dt, ctx.enemyMgr, combatTargets);
+        ctx.projectiles.update(dt, this.combatMgr(), combatTargets, ctx.arrowHitsHive);
       } else {
         // shadow world handles enemy/pickup rendering; local projectiles hit
         // shadow enemies, and locally-chopped wood still drops locally
-        ctx.projectiles.update(dt, this.shadow, [ctx.player]);
+        // combatMgr(), not this.shadow: in a duel the opponent lives in the duel
+        // adapter, so arrows aimed at them used to fly straight through. The
+        // hive callback was missing too, so arrows could not crack a hive in MP.
+        ctx.projectiles.update(dt, this.combatMgr(), [ctx.player], ctx.arrowHitsHive);
         ctx.pickups.update(dt, [ctx.player]);
       }
     } else {
@@ -1378,7 +1381,7 @@ export class Multiplayer {
         const soloTargets = ctx.petTarget ? [ctx.player, ctx.petTarget] : [ctx.player];
         ctx.enemyMgr.update(dt, soloTargets, ctx.projectiles);
         ctx.pickups.update(dt, [ctx.player]);
-        ctx.projectiles.update(dt, ctx.enemyMgr, soloTargets);
+        ctx.projectiles.update(dt, this.combatMgr(), soloTargets, ctx.arrowHitsHive);
       } else {
         ctx.projectiles.update(dt, this.arenaAdapter, [ctx.player]);
       }

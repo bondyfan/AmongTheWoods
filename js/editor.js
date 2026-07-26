@@ -1031,9 +1031,13 @@ export class WorldEditor {
     const el = this._ui = document.createElement('div');
     el.id = 'we-ui';
     el.innerHTML = `<style>
-      body.we-on #hud, body.we-on #popups, body.we-on #waypoint-arrow,
-      body.we-on #vignette, body.we-on #biome-gloom, body.we-on #night-tint,
-      body.we-on #lowhp, body.we-on #blizzard { display: none !important; }
+      /* The god view owns the whole screen: EVERY game/mobile overlay is hidden
+         by an allowlist (not a hand-kept list that new HUD bits keep escaping) —
+         only the 3D canvas, the editor chrome and toasts survive. */
+      body.we-on > *:not(#game):not(#we-ui):not(#we-versions):not(#toasts) {
+        display: none !important; }
+      body.we-on #touch-ui, body.we-on #actionbar, body.we-on #hud {
+        display: none !important; }  /* belt & braces if any get re-parented */
       #we-ui { --gold:#ffd884; --ink:#e9e6da; --dim:#9aa287; --line:#3f4a33;
         --bg:rgba(13,17,11,0.93); font:13px 'Segoe UI',sans-serif; color:var(--ink);
         user-select:none; }
