@@ -19,7 +19,10 @@ const MAX_CLIMB_SLOPE = 1.0; // steeper ground than this is a wall
 const GRAVITY = 34;
 const SAFE_FALL = 5.5;       // meters of free fall before damage kicks in
 const CRIT_CHANCE = 0.1;     // every attack can crit for CRIT_MULT damage
-const CRIT_MULT = 1.6;
+const CRIT_MULT = 1.6;   // base crit damage; gear and passives move player.critMult
+// every slot whose gear may carry crit stats (the weapon's own crit rides here too)
+const CRIT_SLOTS = ['weapon', 'head', 'chest', 'boots', 'charm', 'offhand',
+                    'underlayer', 'legs', 'back', 'mount'];
 
 const rankValue = (skill, key, rank, fallback = 0) => {
   const value = skill?.[key];
@@ -179,6 +182,10 @@ export class Player {
     // in recompute(); these are the live values.
     this.energy = 100;
     this.maxEnergy = 100;
+    // recompute() owns these, but combat must never read an undefined
+    // multiplier (that would silently make every crit deal NaN damage)
+    this.critChance = CRIT_CHANCE;
+    this.critMult = CRIT_MULT;
     this.mana = 0;
     this.maxMana = 0;
     this.energySpentT = 999;  // seconds since the last swing drank energy
@@ -799,7 +806,7 @@ export class Player {
   _classMagicDamage(base, element = null) {
     const amount = base * this.levelSpellMult * this._classMagicMultiplier(element);
     const crit = Math.random() < (this.classEffects.spellCrit || 0);
-    return { amount: amount * (crit ? CRIT_MULT : 1), crit };
+    return { amount: amount * (crit ? this.critMult : 1), crit };
   }
 
   _classBurnDamage(base) {
@@ -1071,7 +1078,7 @@ export class Player {
           -this.facing.x * sin + this.facing.z * cos,
         ).normalize();
         ctx.projectiles.spawnArrow(origin, dir, {
-          dmg: this.weapon.dmg * rv('weaponMult', 1) * this.dmgMult * (crit ? CRIT_MULT : 1),
+          dmg: this.weapon.dmg * rv('weaponMult', 1) * this.dmgMult * (crit ? this.critMult : 1),
           crit,
           pierce: !!skill.pierce, speed, life: this.weapon.range / speed,
           effects: this.classEffects.arrowBleed
@@ -1109,7 +1116,7 @@ export class Player {
       const enemy = target();
       if (!enemy) return false; // the cast gate normally prevents this
       const crit = Math.random() < this.critChance + (this.bowCritBonus || 0);
-      const dmg = this._classWeaponDamage(enemy, rv('weaponMult', 1)) * (crit ? CRIT_MULT : 1);
+      const dmg = this._classWeaponDamage(enemy, rv('weaponMult', 1)) * (crit ? this.critMult : 1);
       const opts = {
         ...(crit ? { crit: true } : {}),
         ...(skill.poison ? { poison: { dps: rv('poison') * (1 + (this.classEffects.poisonPower || 0)), dur: 8 } } : {}),
@@ -1138,7 +1145,7 @@ export class Player {
       const tint = skill.bleed ? 0xd23b2f : 0xffe08a;
       for (const enemy of targets) {
         const crit = Math.random() < this.critChance + (this.bowCritBonus || 0);
-        const dmg = this._classWeaponDamage(enemy, rv('weaponMult', 1)) * (crit ? CRIT_MULT : 1);
+        const dmg = this._classWeaponDamage(enemy, rv('weaponMult', 1)) * (crit ? this.critMult : 1);
         let bleedOpt;
         if (skill.bleed) {
           // %-max-HP bleed, boss-soft-capped like Rend so it stays fine on trash
@@ -1191,7 +1198,7 @@ export class Player {
           : { amount: this._classWeaponDamage(enemy, rv('weaponMult', 1)) };
         if (skill.classId === 'beastmaster') {
           const crit = Math.random() < this.critChance + (this.bowCritBonus || 0);
-          result = { amount: result.amount * (crit ? CRIT_MULT : 1), crit };
+          result = { amount: result.amount * (crit ? this.critMult : 1), crit };
         }
         const opts = {
           ...(result.crit ? { crit: true } : {}),
@@ -1688,12 +1695,12 @@ export class Player {
             if (skill.zone === 'arrows' && zone.castSnapshot) {
               const crit = Math.random() < zone.castSnapshot.critChance;
               result = { amount: zone.castSnapshot.weaponDmg * zone.castSnapshot.damageMult
-                * rv('weaponMult', 1) * (crit ? CRIT_MULT : 1), crit };
+                * rv('weaponMult', 1) * (crit ? this.critMult : 1), crit };
             } else if (skill.weaponMult) {
               const crit = skill.classId === 'beastmaster'
                 && Math.random() < this.critChance + (this.bowCritBonus || 0);
               result = { amount: this._classWeaponDamage(enemy, rv('weaponMult', 1))
-                * (crit ? CRIT_MULT : 1), crit };
+                * (crit ? this.critMult : 1), crit };
             } else result = this._classMagicDamage(rv('damage'),
               skill.zone === 'fire' ? 'fire' : skill.zone === 'frost' ? 'frost'
                 : skill.zone === 'elemental' ? 'elemental' : null);
@@ -2173,8 +2180,21 @@ export class Player {
     if (this.upgrades.questPower) this.weapon.dmg *= 1 + this.upgrades.questPower * 0.03;
     this.shield = equipped('offhand')?.shield || null;
     this.canBlock = !!this.shield || !!this.weapon.parry;
-    this.critChance = CRIT_CHANCE + (this.upgrades.hunterResident ? 0.04 : 0)
-      + (base.kind === 'bow' ? 0 : (this.classEffects.meleeCrit || 0));
+    // ---- CRIT: both halves are real, gear-movable stats now ----
+    // `crit` on an item shifts the chance, `critDmg` shifts the multiplier.
+    // BOTH may be negative — that is the whole point of the boss trade-off
+    // pieces — so the totals are floored rather than assumed positive.
+    let gearCrit = 0, gearCritDmg = 0;
+    for (const slot of CRIT_SLOTS) {
+      const it = equipped(slot);
+      if (it?.stats?.crit) gearCrit += it.stats.crit;
+      if (it?.stats?.critDmg) gearCritDmg += it.stats.critDmg;
+    }
+    this.critChance = Math.max(0, CRIT_CHANCE + (this.upgrades.hunterResident ? 0.04 : 0)
+      + (base.kind === 'bow' ? 0 : (this.classEffects.meleeCrit || 0))
+      + gearCrit + (this.classEffects.critChance || 0));
+    // a crit that does LESS than a normal hit would be nonsense — floor at 1
+    this.critMult = Math.max(1, CRIT_MULT + gearCritDmg + (this.classEffects.critDmg || 0));
     this.bowCritBonus = this.classEffects.rangedCrit || 0;
     this.weakPointBonus = this.classEffects.rangedCrit ? 0.2 : 0;
     this.blockBonus = this.classEffects.blockBonus || 0;
@@ -3357,7 +3377,7 @@ export class Player {
         const crit = baseCrit || weakPoint || ambush;
         const armored = (e.armor ?? (/golem|snapper|colossus/i.test(e.type) ? 0.3 : 0)) > 0;
         const armorMult = armored && w.armoredBonus ? w.armoredBonus : 1;
-        let dmg = this._classWeaponDamage(e, impactMult) * armorMult * (crit ? CRIT_MULT : 1);
+        let dmg = this._classWeaponDamage(e, impactMult) * armorMult * (crit ? this.critMult : 1);
         if (ambush) dmg *= 2.2;
         const poisonActive = this.poisonBladesT > 0
           ? 4 * this.poisonBladesPower * (1 + (this.classEffects.poisonPower || 0))
@@ -3487,7 +3507,7 @@ export class Player {
       .setY(this.mesh.position.y + 1.1 + (mounted ? 0.9 : 0));
     projectiles.spawnArrow(origin, this.facing.clone(), {
       dmg: this.dmgMult * w.dmg * drawMult * mountMult
-        * (crit ? CRIT_MULT + (weakPoint ? (this.weakPointBonus || 0) : 0) : 1),
+        * (crit ? this.critMult + (weakPoint ? (this.weakPointBonus || 0) : 0) : 1),
       pierce: w.pierce || weakPoint, speed, crit, weakPoint, effects,
       life: w.range / speed, // arrows fall dead at the weapon's max range
     });

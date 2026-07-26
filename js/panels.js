@@ -795,6 +795,8 @@ export class Panels {
     const weaponName = itemById(p.equipment.weapon)?.name ?? 'fists';
     const charm = itemById(p.equipment.charm);
     const GEAR_SLOTS = ['head', 'chest', 'boots', 'charm', 'offhand', 'underlayer', 'legs', 'back', 'mount'];
+    // the weapon can carry crit too, so its own slot joins the crit breakdown
+    const CRIT_GEAR_SLOTS = ['weapon', ...GEAR_SLOTS];
 
     // ── ❤️ VITALS ─────────────────────────────────────────────────────────
     const hpParts = [`${PLAYER_HP(1)} base`];
@@ -814,6 +816,28 @@ export class Panels {
       if (it?.stats?.regen) regenParts.push(`+${(it.stats.regen * p.gearMult).toFixed(1)} ${it.name}`);
     }
     const oocTotal = p.oocRegen + p.hpRegen;
+
+    // ── 💥 CRIT ───────────────────────────────────────────────────────────
+    // Both halves are shown: how OFTEN you crit and how HARD. Gear may push
+    // either one DOWN (the boss trade-off pieces), so the breakdown lists
+    // negatives too rather than pretending every source is a bonus.
+    const isBow = base.kind === 'bow';
+    const shownCrit = p.critChance + (isBow ? (p.bowCritBonus || 0) : 0);
+    const critParts = ['10% base'];
+    if (p.upgrades?.hunterResident) critParts.push('+4% hunter');
+    if (!isBow && classEffects.meleeCrit) critParts.push(`+${Math.round(classEffects.meleeCrit * 100)}% melee training`);
+    if (isBow && p.bowCritBonus) critParts.push(`+${Math.round(p.bowCritBonus * 100)}% ranged training`);
+    if (classEffects.critChance) critParts.push(`${classEffects.critChance > 0 ? '+' : ''}${Math.round(classEffects.critChance * 100)}% class`);
+    for (const slot of CRIT_GEAR_SLOTS) {
+      const it = itemById(p.equipment[slot]);
+      if (it?.stats?.crit) critParts.push(`${it.stats.crit > 0 ? '+' : ''}${Math.round(it.stats.crit * 100)}% ${it.name}`);
+    }
+    const critDmgParts = ['160% base'];
+    if (classEffects.critDmg) critDmgParts.push(`${classEffects.critDmg > 0 ? '+' : ''}${Math.round(classEffects.critDmg * 100)}% class`);
+    for (const slot of CRIT_GEAR_SLOTS) {
+      const it = itemById(p.equipment[slot]);
+      if (it?.stats?.critDmg) critDmgParts.push(`${it.stats.critDmg > 0 ? '+' : ''}${Math.round(it.stats.critDmg * 100)}% ${it.name}`);
+    }
 
     // ── ⚡ ENERGY ─────────────────────────────────────────────────────────
     // the two numbers that actually decide how long you can keep swinging
@@ -877,6 +901,8 @@ export class Panels {
         ['Reach', `${Math.round(p.weapon.range * 10) / 10} m`, rgParts.join(' · ')],
         ...(base.kind === 'bow' ? [['Draw time', `${p.swingTime.toFixed(2)}s`,
           'a bow must be drawn — Quick Draw and Arrow Haste shorten it (a melee swing is a flat 0.50s)']] : []),
+        ['Crit chance', `${(shownCrit * 100).toFixed(1)}%`, critParts.join(' · ')],
+        ['Crit damage', `${Math.round(p.critMult * 100)}%`, critDmgParts.join(' · ')],
       ] },
       { icon: '🏃', title: 'Mobility', tone: 'move', rows: [
         ['Speed', Math.round(shownSpeed * 10) / 10, spParts.join(' · ')],
