@@ -9,7 +9,7 @@ import { SHOP_GROUPS, SMITH_GROUPS, questFor, repeatableQuestFor, questXpFor,
          classSkillMeatCost, classSkillEssenceCost, classPathSkills, firstClassSkillId, CLASS_CHOOSE_COST,
          classActiveInfo, classPassiveInfo, requiredClassForItem,
          PLAYER_HP, ENEMY_HP, ENEMY_DMG, xpKillFor, meatForLevel,
-         enemyTypicalLevel, attackEnergyFor, swingTimeFor } from './config.js';
+         enemyTypicalLevel, attackEnergyFor, swingTimeFor, SLOT_KEYS } from './config.js';
 
 import { itemIcon, resIcon, skillArt } from './icons.js';
 import { attachTip } from './tooltip.js';
@@ -672,7 +672,7 @@ export class Panels {
       const slotIdx = p.spellSlots.indexOf(skill.id);
       const draggable = skill.type === 'active' && rank > 0;
       const slotTag = draggable
-        ? `<span class="node-slot${slotIdx >= 0 ? ' on' : ''}">${slotIdx >= 0 ? `⌨ key ${slotIdx + 1}` : '✋ drag to 1–9 bar'}</span>`
+        ? `<span class="node-slot${slotIdx >= 0 ? ' on' : ''}">${slotIdx >= 0 ? `⌨ key ${SLOT_KEYS[slotIdx] ?? slotIdx + 1}` : '✋ drag to the action bar'}</span>`
         : '';
 
       const node = document.createElement('div');
@@ -993,7 +993,7 @@ export class Panels {
       const div = document.createElement('button');
       div.className = 'inv-item' + (slotIdx >= 0 ? ' slotted' : '') + (spell.type === 'active' ? ' class-ability' : '');
       const icon = spell.type === 'active' ? `<span class="inv-art">${skillArt(id, spell.icon)}</span>` : itemIcon(spell);
-      div.innerHTML = `${icon} <b>${spell.name}</b> ${spell.type === 'active' ? `<span class="ability-rank">R${this._classRank(id)}</span>` : ''}<span class="lv">${slotIdx >= 0 ? `key ${slotIdx + 1}` : 'drag to 1–9'}</span>`;
+      div.innerHTML = `${icon} <b>${spell.name}</b> ${spell.type === 'active' ? `<span class="ability-rank">R${this._classRank(id)}</span>` : ''}<span class="lv">${slotIdx >= 0 ? `key ${SLOT_KEYS[slotIdx] ?? slotIdx + 1}` : 'drag to the bar'}</span>`;
       const tip = spell.type === 'active'
         ? this._abilityTip(spell, this._classRank(id), { hint: slotIdx >= 0 ? 'Click to unslot' : 'Drag onto the 1–9 bar (or click to auto-slot)' })
         : `<div class="tt-head"><span class="tt-ico">${itemIcon(spell)}</span><span class="tt-title"><b>${spell.name}</b></span></div><div class="tt-desc">${spell.desc}</div>`;

@@ -1,7 +1,7 @@
 // ---- HUD, spellbar, floating popups, boss labels, toasts, menus ----
 
 import * as THREE from 'three';
-import { XP_LEVELS, MAX_LEVEL, MAX_SPELL_SLOTS, ENEMY_TYPES, RES_ICONS,
+import { XP_LEVELS, MAX_LEVEL, MAX_SPELL_SLOTS, SLOT_KEYS, ENEMY_TYPES, RES_ICONS,
          fmtResource, itemById, spellById, classSkillById, classActiveInfo } from './config.js';
 import { itemIcon, skillArt } from './icons.js';
 import { attachTip } from './tooltip.js';
@@ -296,7 +296,7 @@ export class UI {
         el = document.createElement('div');
         el.className = 'spell-slot';
         el.dataset.slot = i;
-        el.innerHTML = `<span class="spell-icon"></span><span class="spell-key">${i + 1}</span><div class="spell-cd"></div>`;
+        el.innerHTML = `<span class="spell-icon"></span><span class="spell-key">${SLOT_KEYS[i] ?? i + 1}</span><div class="spell-cd"></div>`;
         attachTip(el, ' '); // reads el._tipHtml live, refreshed below each frame
         bar.appendChild(el);
       }

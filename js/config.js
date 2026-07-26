@@ -879,7 +879,12 @@ export function costFor(cost, mobaMode) {
 
 // ---- Spells / skills. Bought in the shop, equipped into max 9 spell slots,
 // cast with keys 1-9. cd in seconds. ----
-export const MAX_SPELL_SLOTS = 9;
+export const MAX_SPELL_SLOTS = 11;
+// what each action slot is labelled with, and the key that fires it. The first
+// nine are the number row; Q and R extend the bar without stealing WASD.
+export const SLOT_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'Q', 'R'];
+export const SLOT_CODES = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5',
+  'Digit6', 'Digit7', 'Digit8', 'Digit9', 'KeyQ', 'KeyR'];
 export const SPELLS = [
   { id: 'haste',     level: 7,  icon: '⚡', name: 'Haste',       cost: { meat: 40, essence: 2 }, cd: 90,
     desc: 'Double attack speed for 10 s.' },

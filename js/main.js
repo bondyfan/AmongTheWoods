@@ -7,7 +7,7 @@ import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOB
          consumableById, essenceDropFor, MAX_LEVEL, XP_LEVELS, questFor, repeatableQuestFor,
          questXpFor, BIOME_LAIRS, CAMP_BUILDINGS, trainingLevelFor, CLASS_TREES,
          classTreeById, classSkillById, classSkillRequiredLevel, classSkillMeatCost, classSkillEssenceCost,
-         CLASS_CHOOSE_COST, firstClassSkillId, MAX_SPELL_SLOTS } from './config.js';
+         CLASS_CHOOSE_COST, firstClassSkillId, MAX_SPELL_SLOTS, SLOT_CODES } from './config.js';
 import { makeAimArc, updateAimArc, makeRaft, makeBlacksmith, makeHorse, makeWisp, makeMan,
          makeGriffin, makeGriffinRoost, makeTumbleweed, BAKED_MAT, WATER_SHADERS,
          makeSkyDome, setSpectralLook, makeCorpse } from './models.js';
@@ -4084,7 +4084,7 @@ function trainClassSkill(id) {
   // New actives are NOT auto-slotted — the player drags them onto the 1–9 bar
   // (a one-time hint above the bar teaches this on the very first ability).
   ui.toast(skill.type === 'active' && nextRank === 1 && !player.spellSlots.includes(id)
-    ? `${tree.icon} Learned: ${skill.name} — drag it onto the 1–9 bar!`
+    ? `${tree.icon} Learned: ${skill.name} — drag it onto the action bar!`
     : `${tree.icon} Trained: ${skill.name} — rank ${nextRank}/${skill.maxRank}`, 'level');
   audio.sfx('upgrade', 0.55);
   panels.refresh();
@@ -5163,7 +5163,8 @@ input.onKey('KeyZ', () => {
   audio.sfx('click', 0.35);
 });
 
-input.onKey('KeyR', () => {
+// R at a home/graveyard raises a fallen pet; elsewhere R is an action slot
+function resurrectPet() {
   if (!inPlay() || !canResurrectPetHere()) return;
   const cost = petResurrectCost();
   if (!Object.entries(cost).every(([k, v]) => player[k] >= v)) { audio.sfx('error', 0.5); return; }
@@ -5177,7 +5178,7 @@ input.onKey('KeyR', () => {
     audio.sfx('spawn', 0.6);
     panels.refresh();
   });
-});
+}
 
 const PET_MODES = ['aggressive', 'defensive', 'passive'];
 const PET_MODE_LABEL = {
@@ -5226,8 +5227,13 @@ for (const [btnId, d] of [['bigmap-zoomin', 1], ['bigmap-zoomout', -1]]) {
 }
 $id('respawn-grave').addEventListener('click', () => resurrectAtGraveyard());
 for (let i = 0; i < MAX_SPELL_SLOTS; i++) {
-  input.onKey('Digit' + (i + 1), () => {
+  const code = SLOT_CODES[i];
+  if (!code) continue;
+  input.onKey(code, () => {
     if (!inPlay() || game.paused) return;
+    // R doubles as "resurrect pet" at a home/graveyard — that wins when it is
+    // actually available, otherwise R is just another action slot
+    if (code === 'KeyR' && canResurrectPetHere()) { resurrectPet(); return; }
     useBarSlot(i);
   });
 }

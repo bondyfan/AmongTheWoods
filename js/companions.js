@@ -287,8 +287,13 @@ export class Companions {
       }
     }
 
-    const compItem = null; // no companion items anymore (mage spheres are summon abilities)
-    const orbId = classAllowsCompanion && player.orb ? compItem : null;
+    // No companion items exist any more (mage spheres are summon abilities), so
+    // this slot is always empty. It used to read classAllowsCompanion, which is
+    // declared inside the block above — so this line threw a ReferenceError on
+    // EVERY sync() call, aborting it half-way. That is what left the Character
+    // panel un-refreshed after choosing a class or training a skill: the throw
+    // happened before panels.refresh() could run.
+    const orbId = null;
     if (orbId !== this.orbItem) {
       for (const s of this.spheres) this.scene.remove(s.mesh);
       this.spheres = [];
