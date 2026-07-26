@@ -34,6 +34,8 @@ import { MOB_INFO_RADIUS, mobLevelBadge } from './ui.js';
 // far duellists may drift before the duel is called a draw
 const XP_SHARE_RADIUS = 100;
 const DUEL_MAX_DIST = 100;
+// how often a grouped client re-asserts its roster to the server sim
+const GROUP_PUSH_INTERVAL = 5000;
 // players outside a group only appear on each other's maps within this range
 export const MAP_VISIBLE_RADIUS = 100;
 
@@ -1151,6 +1153,7 @@ export class Multiplayer {
     // keep each avatar's group flag fresh — the maps and party frames read it
     for (const [uid, r] of this.remotes) r.inGroup = this.isGrouped(uid);
     for (const r of this.remotes.values()) r.update(dt, torchDark);
+    this._tickGroupHeartbeat();
     this.shadow?.update(dt, p);
     this.mobaShadow?.update(dt);
 
@@ -1671,8 +1674,24 @@ export class Multiplayer {
   }
 
   // the authoritative server needs the roster to split kill XP / quest credit
+  // The server sim keeps its group rosters in a plain in-memory Map, and it
+  // drops a player's entry the moment they disconnect. So a server restart, a
+  // socket reconnect, or a brief drop silently un-groups you as far as kill and
+  // QUEST sharing are concerned — the sharing rule needs BOTH sides registered,
+  // and nothing ever re-registered them. Hence a heartbeat: cheap, and it heals
+  // every one of those cases without the client having to detect them.
   _pushGroupToServer() {
-    if (this.isServer) this.net.sendEvent({ type: 'gset', mem: this.group.members });
+    if (!this.isServer) return;
+    this._lastGroupPush = performance.now();
+    this.net.sendEvent({ type: 'gset', mem: this.group.members });
+  }
+
+  // called every frame; re-asserts the roster a few times a minute
+  _tickGroupHeartbeat() {
+    if (!this.isServer || !this.inGroup()) return;
+    const now = performance.now();
+    if (now - (this._lastGroupPush || 0) < GROUP_PUSH_INTERVAL) return;
+    this._pushGroupToServer();
   }
 
   // ---- duel ----

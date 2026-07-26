@@ -3567,10 +3567,15 @@ export class Player {
     const trees = arcSort(world.treesNear(this.pos, w.range + 0.6));
     const rocks = arcSort(world.rocksNear?.(this.pos, w.range + 0.6) ?? []);
 
+    // A swing that lands on wood or stone must SOUND like it hit wood or stone.
+    // Only the generic whoosh played before unless you held the exact right
+    // tool, so chopping with a sword — or picking at a boulder with an axe —
+    // was silent and felt like swinging at nothing.
     if (trees.length && w.chop > 0) {
       const tree = trees[0];
       const power = w.chop * this.chopMult * (1 + charge * 0.5);
       const wood = world.chop(tree, power, this.pos);
+      audio.sfx('chop_hit', 0.5, 40);          // the bite, over world.chop's crack
       this.hooks.onChop?.(tree, power); // co-op keeps the partner's forest in sync
       if (wood > 0) {
         const total = Math.max(1, Math.round(wood * this.gatherMult));
@@ -3585,6 +3590,7 @@ export class Player {
       }
     } else if (rocks.length && w.mine > 0) {
       const stone = world.mineRock(rocks[0], w.mine * this.chopMult * (1 + charge * 0.5), this.pos);
+      audio.sfx('mine_hit', 0.5, 40);          // steel on stone, over world's crack
       if (stone > 0) {
         const total = Math.max(1, Math.round(stone * this.gatherMult));
         const dropPos = new THREE.Vector3(rocks[0].x, 0, rocks[0].z);
@@ -3596,14 +3602,22 @@ export class Player {
           this.hooks.popup(dropPos.clone().setY(1.6), '🔩 iron vein!', '#c8d0d8');
         }
       }
-    } else if (trees.length && w.chop <= 0 && !this.hintedAxe) {
-      this.hintedAxe = true;
-      this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
-        'Only an AXE fells trees — craft a Bone Axe!', '#ffcc66');
-    } else if (rocks.length && !(w.mine > 0) && !this.hintedRock) {
-      this.hintedRock = true;
-      this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
-        'Rock needs a PICKAXE — craft a Bone Pickaxe!', '#ffcc66');
+    } else if (trees.length && w.chop <= 0) {
+      // WRONG TOOL, but you still hit a tree: a dull useless thud every time,
+      // not silence. The hint itself stays one-shot so it isn't nagging.
+      audio.sfx('punch_hit', 0.32, 90);
+      if (!this.hintedAxe) {
+        this.hintedAxe = true;
+        this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
+          'Only an AXE fells trees — craft a Bone Axe!', '#ffcc66');
+      }
+    } else if (rocks.length && !(w.mine > 0)) {
+      audio.sfx('rock_crack', 0.28, 90);   // steel skittering off stone
+      if (!this.hintedRock) {
+        this.hintedRock = true;
+        this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
+          'Rock needs a PICKAXE — craft a Bone Pickaxe!', '#ffcc66');
+      }
     }
   }
 

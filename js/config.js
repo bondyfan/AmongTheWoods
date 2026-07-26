@@ -1655,15 +1655,25 @@ export const QUEST_CATEGORY_LABELS = {
   hunting: '🏹 Hunting contract', contract: '⚒️ Smith contract', repeatable: '♻️ Repeatable job',
 };
 
+// Every desc says WHAT to look for, WHERE to find it and WHICH key to press —
+// "find and resolve a landmark encounter" was atmospheric and useless.
 const SIGNATURE_QUESTS = [
-  { event: 'farm', name: '🏚️ A roof for the lost', desc: 'Find and restore the abandoned farmstead.' },
-  { event: 'crypt', name: '🗝️ Sand-buried oath', desc: 'Clear and open a crypt in the Scorched Desert.' },
-  { event: 'temple', name: '🏛️ The broken map', desc: 'Clear a jungle temple and recover its hidden route.' },
-  { event: 'tribeAlliance', name: '🪶 Terms with the marsh', desc: 'Earn safe passage from the swamp tribe at their village.' },
-  { event: 'crypt', name: '🕯️ Light below the roots', desc: 'Clear and open a crypt in the Dark Forest.' },
-  { event: 'graveyardRest', name: '👻 Let the dead sleep', desc: 'Defend a haunted graveyard until its spirits rest.' },
-  { event: 'raceWin', name: '🏁 The high road', desc: 'Win a mounted race through the Highlands.' },
-  { event: 'summit', name: '⛰️ Nothing above us', desc: 'Reach and claim the summit of the Frozen Peak.' },
+  { event: 'farm', name: '🏚️ A roof for the lost',
+    desc: 'Find the abandoned farmstead (🏚️ on the world map, M) in the Verdant Forest and press E to restore it. It becomes a safe haven with a stocked larder.' },
+  { event: 'crypt', name: '🗝️ Sand-buried oath',
+    desc: 'Find the crypt (☗ on the world map, M) in the Scorched Desert, kill every keeper guarding it, then press E to loot it open.' },
+  { event: 'temple', name: '🏛️ The broken map',
+    desc: 'Find the jungle temple (🏛️ on the world map, M), clear the guards around it, then press E to open its treasury.' },
+  { event: 'tribeAlliance', name: '🪶 Terms with the marsh',
+    desc: 'Walk into the swamp tribe\'s village (🪶 on the world map, M) carrying at least 15 🍖 and press E to pay tribute. They stop attacking you for good.' },
+  { event: 'crypt', name: '🕯️ Light below the roots',
+    desc: 'Find the crypt (☗ on the world map, M) in the Dark Forest, kill every keeper, then press E to open it.' },
+  { event: 'graveyardRest', name: '👻 Let the dead sleep',
+    desc: 'Press E at the restless graveyard (⚰️ on the world map, M) and survive all THREE waves of risen dead without dying.' },
+  { event: 'raceWin', name: '🏁 The high road',
+    desc: 'Tame or mount a horse, ride to the race post (🏁 on the world map, M) in the Highlands, press E while mounted, and finish first.' },
+  { event: 'summit', name: '⛰️ Nothing above us',
+    desc: 'Climb to the summit of the Frozen Peak (⛰️ on the world map, M), defeat its keeper, then press E to claim the peak.' },
 ];
 
 export function questFor(bi, idx) {
@@ -1671,8 +1681,8 @@ export function questFor(bi, idx) {
   const en = (k) => biome.enemies[k % biome.enemies.length];
   const signature = SIGNATURE_QUESTS[bi] || SIGNATURE_QUESTS[0];
   const personal = bi === 7
-    ? { event: 'bonfire', name: '🔥 The last pilgrim', desc: 'Relight a Frozen Peak bonfire and make it a safe refuge.' }
-    : { event: 'rescue', name: '🔓 No one left in a cage', desc: 'Find a captive in this region and set them free.' };
+    ? { event: 'bonfire', name: '🔥 The last pilgrim', desc: 'Climb to a Frozen Peak bonfire (marked on the world map, M) and press E to rest at it — that relights it and makes the camp a safe zone.' }
+    : { event: 'rescue', name: '🔓 No one left in a cage', desc: 'Find the caged captive marked on the world map (M) in this region, kill the guards around the cage, then press E to free them.' };
   const defs = [
     { category: 'hunting', type: 'kill', target: en(0), need: 4 + bi,
       reward: bi === 0 ? { unlock: 'broadheadArrows' } : { resources: { hide: 2 + bi } } },
@@ -1698,19 +1708,29 @@ export function questFor(bi, idx) {
   if (!q.name && d.type === 'kill') {
     const c = ENEMY_TYPES[d.target];
     q.name = `${c.icon} Hunt: ${c.name}`;
-    q.desc = `Track and slay ${d.need} ${c.name}s in the ${biome.name}.`;
+    q.desc = `Slay ${d.need} ${c.name}s — the kills only count inside the ${biome.name}, `
+      + 'so hunt them where the quest was given.';
   } else if (!q.name && d.type === 'gather') {
     q.name = `${RES_ICONS[d.res]} Fetch: ${d.res}`;
-    q.desc = `Recover ${d.need} ${d.res} for the forge.`;
+    q.desc = `Bring ${d.need} ${d.res} to the forge. `
+      + (d.res === 'wood' ? 'Chop trees with an AXE.'
+        : d.res === 'stone' ? 'Mine boulders with a PICKAXE.'
+        : 'Essence drops from hostile creatures — the deeper the zone, the more.')
+      + ' Hand it in at the blacksmith.';
   } else if (!q.name && d.type === 'killAny') {
     q.name = '⚔️ Break the threat';
-    q.desc = `Slay ${d.need} hostile creatures of the ${biome.name}.`;
+    q.desc = `Kill any ${d.need} HOSTILE creatures inside the ${biome.name} — `
+      + 'passive animals like rabbits and sheep do not count.';
   } else if (!q.name && d.type === 'boss') {
     q.name = '💀 The heart of the wilds';
-    q.desc = `Bring down a skull-ranked boss in the ${biome.name}.`;
+    q.desc = `Bring down one skull-ranked boss in the ${biome.name}. `
+      + 'Bosses wear 💀 marks above them and hold lairs marked on the world map (M).';
   } else if (!q.name && d.event === 'landmark') {
     q.name = '🧭 Leave the beaten path';
-    q.desc = `Find and resolve a landmark encounter in the ${biome.name}.`;
+    q.desc = `Deal with any ONE landmark in the ${biome.name} — open the world map (M) `
+      + 'to spot them, walk up and press E when the prompt appears. A bonfire is the '
+      + 'quickest (rest at it); an abandoned farm, a wandering trader, a shrine or '
+      + 'monolith, a caged captive, a graveyard, a race post or a boss lair all count too.';
   }
   return q;
 }

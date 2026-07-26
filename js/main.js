@@ -3600,6 +3600,14 @@ function renderPlayerActions() {
   inv.textContent = t.inGroup ? '👥 In your group' : '🤝 Invite to group';
   inv.disabled = t.inGroup || duelling;
   $id('pa-duel').disabled = duelling;
+  // Leaving is only meaningful when you actually share a group with them, so the
+  // button appears on a group-mate (including via their party frame) and hides
+  // otherwise rather than sitting there greyed out.
+  const leave = $id('pa-leave');
+  if (leave) {
+    leave.classList.toggle('hidden', !t.inGroup);
+    leave.disabled = duelling;
+  }
 }
 function closePlayerActions() { socialTarget = null; renderPlayerActions(); }
 
@@ -3611,6 +3619,11 @@ $id('pa-invite')?.addEventListener('click', () => {
 $id('pa-duel')?.addEventListener('click', () => {
   if (socialTarget) mp?.challengeDuel(socialTarget.uid);
   audio.sfx('click', 0.4); closePlayerActions();
+});
+$id('pa-leave')?.addEventListener('click', () => {
+  audio.sfx('click', 0.4);
+  mp?.leaveGroup?.();
+  closePlayerActions();
 });
 $id('pa-inspect')?.addEventListener('click', () => {
   if (!socialTarget) return;
