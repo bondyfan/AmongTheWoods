@@ -962,6 +962,9 @@ export const CLASS_TREES = [
       P('war_heavy_hands', '🔨', 'Heavy Hands', 27, 'Your hits can stagger enemies mid-attack.', { staggerChance: [0.08, 0.16, 0.26] }),
       P('war_unshaken', '⛰️', 'Unshaken', 31, 'Shortens every stun and disable used against you.', { stunResist: [0.18, 0.34, 0.55] }),
       P('war_iron_guard', '🛡️', 'Iron Guard', 37, 'Blocks far more damage when guarding.', { blockBonus: [0.08, 0.16, 0.26] }),
+      P('war_conditioning', '🫁', 'Conditioning', 9, 'Years under armour: a much deeper energy pool, so you keep swinging long after others have stalled.', { maxEnergyPct: [0.15, 0.30, 0.50] }),
+      P('war_second_wind', '💨', 'Second Wind', 24, 'You recover your breath between blows far faster than any other fighter.', { energyRegenPct: [0.20, 0.40, 0.65] }),
+      P('war_tireless', '🔩', 'Tireless', 34, 'Every swing costs less energy — the cheapest melee in the world.', { swingCostCut: [0.08, 0.16, 0.25] }),
       P('war_tactician', '📯', 'Battle Tactician', 44, 'Cuts the cooldown of every Warrior ability.', { classCdReduction: [0.06, 0.12, 0.18] }),
     ],
     actives: [
@@ -1046,6 +1049,9 @@ export const CLASS_TREES = [
       P('rogue_poisoner', '☠️', 'Poisoner', 27, 'Empowers all of your weapon poisons.', { poisonPower: [0.25, 0.55, 0.90] }),
       P('rogue_combo', '⚔️', 'Combo Mastery', 31, 'Your blades fly faster and bite deeper.', { meleeSpeed: [0.08, 0.16, 0.26], meleeDmg: [0.03, 0.05, 0.08] }),
       P('rogue_escape', '🌫️', 'Escape Artist', 37, 'Taking damage grants a burst of speed to escape.', { hurtSpeed: [0.25, 0.5, 0.85] }),
+      P('rogue_quick_hands', '🤲', 'Quick Hands', 9, 'A trained thief wastes no motion: your strikes cost noticeably less energy.', { swingCostCut: [0.10, 0.20, 0.32] }),
+      P('rogue_adrenaline', '🩸', 'Adrenaline', 24, 'A critical hit floods you with adrenaline, giving energy straight back.', { critEnergy: [4, 9, 15] }),
+      P('rogue_deep_reserves', '🌘', 'Deep Reserves', 34, 'A larger energy pool and a swifter recovery between bursts.', { maxEnergyPct: [0.10, 0.20, 0.32], energyRegenPct: [0.10, 0.20, 0.32] }),
       P('rogue_assassin', '💀', 'Assassin', 44, 'Extra damage to wounded targets (below 50% health).', { executeDmg: [0.15, 0.30, 0.50] }),
     ],
     actives: [

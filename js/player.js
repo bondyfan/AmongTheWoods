@@ -2135,7 +2135,10 @@ export class Player {
     // ---- ENERGY (everyone) & MANA (mage/priest only). Grown like maxHp: if the
     // cap rises the current value rises with it, so a level-up feels like a gift.
     const oldMaxE = this.maxEnergy || 0;
-    this.maxEnergy = PLAYER_ENERGY(this.level);
+    // Warrior/Rogue stamina passives: a deeper pool and a faster refill are the
+    // whole identity of the melee classes, so they scale the base curve.
+    this.maxEnergy = Math.round(PLAYER_ENERGY(this.level)
+      * (1 + (this.classEffects.maxEnergyPct || 0)));
     if (this.maxEnergy > oldMaxE) this.energy = (this.energy || 0) + (this.maxEnergy - oldMaxE);
     this.energy = Math.max(0, Math.min(this.energy ?? this.maxEnergy, this.maxEnergy));
     const canMana = this.hooks.classRulesEnabled?.() === false
@@ -2144,7 +2147,8 @@ export class Player {
     this.maxMana = canMana ? PLAYER_MANA(this.level) : 0;
     if (this.maxMana > oldMaxM) this.mana = (this.mana || 0) + (this.maxMana - oldMaxM);
     this.mana = Math.max(0, Math.min(this.mana ?? this.maxMana, this.maxMana));
-    this.energyRegen = energyRegenFor(this.level);
+    this.energyRegen = energyRegenFor(this.level)
+      * (1 + (this.classEffects.energyRegenPct || 0));
     this.manaRegen = manaRegenFor(this.level);
 
     // effective weapon = base weapon + training (range/power/swift tracks).
@@ -2340,7 +2344,10 @@ export class Player {
 
   // what the NEXT basic attack will cost, after buffs
   get swingEnergyCost() {
-    return Math.max(2, Math.round((this.weapon?.energy ?? 20) * this.cdMult));
+    // swingCostCut is the melee classes' economy passive: a Warrior's Tireless
+    // and a Rogue's Quick Hands both make every swing genuinely cheaper.
+    const cut = Math.min(0.6, this.classEffects?.swingCostCut || 0);
+    return Math.max(2, Math.round((this.weapon?.energy ?? 20) * this.cdMult * (1 - cut)));
   }
 
   get moveSpeedBonus() {
@@ -3368,6 +3375,9 @@ export class Player {
     const baseArcDot = w.style === 'spear' || w.style === 'pick' ? 0.76 : 0.6;
     const arcDot = Math.max(-0.1, baseArcDot - (this.meleeArcBonus || 0));
     const baseCrit = Math.random() < this.critChance;
+    // Rogue's Adrenaline: a critical hit hands energy straight back, so a crit
+    // build genuinely fuels itself. Refunded ONCE per swing, not per enemy hit.
+    let critRefunded = false;
     let builtCombo = false; // Rogue: a basic swing banks at most one Combo Point
     for (const e of enemyMgr.alive()) {
       if (this._inArc(e.pos.x, e.pos.z, w.range + (moving ? 0.25 : 0), e.hitR, arcDot)) {
@@ -3375,6 +3385,10 @@ export class Player {
         let ambush = false;
         if (this.ambushArmed) { ambush = true; this.ambushArmed = false; }
         const crit = baseCrit || weakPoint || ambush;
+        if (crit && !critRefunded && this.classEffects.critEnergy) {
+          critRefunded = true;
+          this.energy = Math.min(this.maxEnergy, this.energy + this.classEffects.critEnergy);
+        }
         const armored = (e.armor ?? (/golem|snapper|colossus/i.test(e.type) ? 0.3 : 0)) > 0;
         const armorMult = armored && w.armoredBonus ? w.armoredBonus : 1;
         let dmg = this._classWeaponDamage(e, impactMult) * armorMult * (crit ? this.critMult : 1);
