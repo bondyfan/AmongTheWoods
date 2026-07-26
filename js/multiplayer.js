@@ -439,7 +439,13 @@ class ShadowWorld {
     if (s.hp <= s.maxHp * 0.35) {
       s.dying = 0.0001;
       this.dyingMeshes.push(s);
-      audio.creature(s.type, 'death', 0.45, 30);
+      // audio.sfx has no positional falloff, so an ally killing something on the
+      // far side of the island used to shriek in your ears at full volume. Fade
+      // it with distance and drop it entirely past earshot — the same treatment
+      // the attack sound below already gets.
+      const ear = this._earPos;
+      const d = ear ? Math.hypot(ear.x - s.pos.x, ear.z - s.pos.z) : 0;
+      if (d < 55) audio.creature(s.type, 'death', Math.max(0.12, 0.45 - d / 150), 30);
     } else {
       this.scene.remove(s.mesh);
     }
@@ -469,6 +475,7 @@ class ShadowWorld {
   stun(e, sec) { this.hooks.sendEvent({ type: 'ehit', id: e.id, dmg: 0, stun: sec }); }
 
   update(dt, localPlayer) {
+    this._earPos = localPlayer?.pos ?? null;   // for distance-gated sounds
     for (const s of this.enemies.values()) {
       const prev = s.pos.clone();
       // big jumps (respawn/teleport/stale) snap instead of sliding across

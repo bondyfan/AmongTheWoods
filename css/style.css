@@ -1703,3 +1703,11 @@ select:has(> option.opt-warn:checked) { color: #e0605a; border-color: rgba(224,9
 /* a slotted consumable you have run out of */
 .spell-slot.slot-out { opacity: 0.45; }
 .spell-slot .slot-emoji { font-size: 22px; line-height: 1; }
+
+
+/* shop card stat strip — the numbers that decide a purchase, always visible */
+.card-stats {
+  margin: 4px 0 2px; font-size: 11px; font-weight: bold; color: #cfe3b8;
+  opacity: 0.92; letter-spacing: 0.2px;
+}
+.card-stats.has-cost { color: #ffcf9a; }  /* this piece takes something away */

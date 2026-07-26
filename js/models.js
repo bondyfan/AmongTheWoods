@@ -3138,7 +3138,7 @@ export function makeTorchMesh() {
   flame.position.y = 0.58;
   // 2.4 puts the flame's LUMA just past the bloom threshold while its red
   // channel is the only one that clamps, so it still reads amber, not yellow
-  overbright(flame, 2.4);
+  overbright(flame, 3.4);          // the outer cone now blooms as well
   const flameCore = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.2, 6),
     new THREE.MeshBasicMaterial({ color: 0xffe28a }));
   flameCore.position.y = 0.54;
@@ -3264,7 +3264,7 @@ export function makeCampfire() {
   const flame = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.55, 6),
     new THREE.MeshLambertMaterial({ color: 0xff8c2a, emissive: 0xff5a00, emissiveIntensity: 0.9 }));
   flame.position.y = 0.42;
-  overbright(flame, 2.6);
+  overbright(flame, 4.2);   // over the bloom threshold — 2.6 never glowed at all
   g.add(flame);
   g.userData = { flame };
   return g;

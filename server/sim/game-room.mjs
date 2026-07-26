@@ -23,7 +23,8 @@ audio.muted = true;                    // silence all SFX before anything plays
 // the client smooths toward the last known position, so a long gap means a
 // fast catch-up right after each packet and a crawl before the next one.
 const SNAP_HZ = Number(process.env.SNAP_HZ || 15);
-const NEAR = 130;                      // only stream entities within 130m of a player
+const NEAR = 130;                      // stream entities within 130m of a player…
+const NEAR_KEEP = 175;                 // …and keep streaming them out to here
 const XP_SHARE_RADIUS = 100;
 const QUEST_KILL_SHARE_RADIUS = 20;
 const DAY = 600;                       // 10-min day/night cycle for spawn density
@@ -182,12 +183,27 @@ export class GameRoom {
     // the world watching, so enemies around them must keep streaming (an
     // alive-only filter emptied the snapshot and culled every enemy client-side)
     const positions = [...this.players.values()].map(P => P.proxy.pos);
-    const near = (x, z) => positions.some(p => Math.hypot(x - p.x, z - p.z) < NEAR);
+    // HYSTERESIS. A single radius makes every enemy that drifts across the
+    // boundary pop out of the snapshot and back in, and the client hard-removes
+    // anything missing from a snapshot — so it reads as mobs despawning and
+    // respawning around you. It is worst when they scatter, e.g. the moment a
+    // rogue vanishes and they all lose their target. Enter at NEAR, leave only
+    // past NEAR_KEEP.
+    const inRange = (x, z, r) => positions.some(p => Math.hypot(x - p.x, z - p.z) < r);
+    const prev = this._streamed || (this._streamed = new Set());
+    const nowStreamed = new Set();
+    const near = (id, x, z) => {
+      const keep = prev.has(id) ? NEAR_KEEP : NEAR;
+      if (!inRange(x, z, keep)) return false;
+      nowStreamed.add(id);
+      return true;
+    };
     const snap = {
-      e: this.enemyMgr.snapshot().filter(s => near(s.x, s.z)),
-      p: this.pickups.snapshot().filter(s => near(s.x, s.z)),
+      e: this.enemyMgr.snapshot().filter(s => near('e' + s.id, s.x, s.z)),
+      p: this.pickups.snapshot().filter(s => near('p' + s.i, s.x, s.z)),
       s: this.projectiles.snapshotShots(),
     };
+    this._streamed = nowStreamed;
     this.io.broadcast({ t: 'snap', snap });
   }
 

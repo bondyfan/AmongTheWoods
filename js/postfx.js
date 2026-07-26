@@ -179,6 +179,8 @@ const COMPOSITE_FRAG = /* glsl */`
   uniform bool useRays;
   uniform bool useFXAA;
   uniform float uGhost;           // 0 = alive, 1 = fully in the land of the dead
+  uniform float uNight;           // 0 = day, 1 = deep night
+  uniform vec3  uNightTint;       // the colour night drags everything toward
   varying vec2 vUv;
   const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
   // canopy shade: reconstruct the pixel's WORLD position from depth, look up
@@ -263,6 +265,13 @@ const COMPOSITE_FRAG = /* glsl */`
     // additively lit by the sun, so they take the sun's current colour —
     // white at noon, deep gold at sunset)
     if (useRays) c += rayColor * (texture2D(tRays, vUv).r * rayStrength);
+    // NIGHT lands HERE — before bloom, and in linear light. It used to be a CSS
+    // multiply overlay laid across the finished frame, which crushed the fires
+    // along with everything else: a flame could never be brighter than ~45%
+    // grey no matter how hot it was, which is exactly the "limited glow"
+    // ceiling. Darkening the scene first and THEN adding the glow lets a fire
+    // read as genuinely bright against a dark world.
+    if (uNight > 0.0) c *= mix(vec3(1.0), uNightTint, uNight);
     if (useBloom) c += texture2D(tBloom, vUv).rgb * bloomStrength;
     // ---- the ghost world ----
     // Death drains the colour out of everything and leaves it lit by a cold
@@ -355,6 +364,7 @@ export class PostFX {
       useAO: { value: false }, useCanopy: { value: false },
       useBloom: { value: false }, useRays: { value: false }, useFXAA: { value: false },
       uGhost: { value: 0 },
+      uNight: { value: 0 }, uNightTint: { value: new THREE.Color(0.30, 0.36, 0.55) },
     });
     this._sunWorld = new THREE.Vector3();
     this._camFwd = new THREE.Vector3();
@@ -467,6 +477,7 @@ export class PostFX {
     // the scene target is MSAA-resolved — FXAA on top only smears fine detail
     c.useFXAA.value = false;
     c.uGhost.value = opts.ghost ?? 0;
+    c.uNight.value = opts.night ?? 0;
     c.aoStrength.value = opts.aoStrength ?? 0.25;
     c.aoFloor.value = opts.aoFloor ?? 0.30;
     c.useRays.value = rayK > 0;

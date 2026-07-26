@@ -72,6 +72,7 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.getElementById('game').appendChild(renderer.domElement);
 
 let postfx = null; // created on demand by applyGraphics (bloom)
+let _postNightActive = false; // true while the shader owns the night darkening
 let canopyShade = null; // world-space crown-shade map (the visible half of AO)
 
 const scene = new THREE.Scene();
@@ -5844,7 +5845,12 @@ function tickDayNight(dt) {
 
   // screen darkening — never underground: the dungeon does its own gloom, and
   // a DOM overlay would flatten the torchlight into darkness
-  $id('night-tint').style.opacity = game.dungeon ? '0' : (game.nightK * 0.6).toFixed(2);
+  // The DOM overlay is the fallback for the no-postfx path. When the post
+  // stack runs, night is applied inside the composite instead (before bloom),
+  // so fires can still blaze — a CSS multiply over the finished frame crushed
+  // them to ~45% grey no matter how hot they were.
+  $id('night-tint').style.opacity = (game.dungeon || _postNightActive)
+    ? '0' : (game.nightK * 0.6).toFixed(2);
 
   // stars fade in on the night sky (a static field parked on the camera)
   if (!starField) {
@@ -6748,6 +6754,8 @@ function step() {
   }
   const usePost = (settings.bloom || settings.ssao || settings.rays || ghostK > 0)
     && postfx && !game.editorView;
+  // tell the DOM overlay to stand down while the shader owns the night
+  _postNightActive = usePost && !game.dungeon;
   if (usePost) {
     // "Ambient occlusion" = canopy shade ONLY: soft pools of shade under tree
     // crowns, nothing global. The screen-space SSAO term is gone — THAT was the
@@ -6781,6 +6789,7 @@ function step() {
     postfx.render(scene, camera, {
       ssao: false, bloom: !!settings.bloom, // no screen-space contact term
       canopy, rays, ghost: ghostK,
+      night: game.dungeon ? 0 : (game.nightK || 0),
     });
   } else { renderer.setRenderTarget(null); renderer.render(scene, camera); }
 }

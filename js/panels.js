@@ -207,10 +207,17 @@ export class Panels {
       }
     }
     const st = item.stats || {};
-    if (st.hp) stats.push(['Max health', '+' + st.hp]);
-    if (st.speed) stats.push(['Move speed', '+' + st.speed]);
-    if (st.regen) stats.push(['Regen', '+' + st.regen + '/s']);
-    if (st.dmgPct) stats.push(['Damage', '+' + Math.round(st.dmgPct * 100) + '%']);
+    // Trade-off gear carries NEGATIVE stats, so every number is signed rather
+    // than prefixed '+' — "+-60 max health" was the alternative. Crit was
+    // missing outright, so the crit gear showed none of its numbers anywhere.
+    const sg = (v, suffix = '') => (v > 0 ? '+' : '') + v + suffix;
+    const pct = (v) => (v > 0 ? '+' : '') + Math.round(v * 100) + '%';
+    if (st.hp) stats.push(['Max health', sg(st.hp)]);
+    if (st.speed) stats.push(['Move speed', sg(st.speed)]);
+    if (st.regen) stats.push(['Regen', sg(st.regen, '/s')]);
+    if (st.crit) stats.push(['💥 Crit chance', pct(st.crit)]);
+    if (st.critDmg) stats.push(['💥 Crit damage', pct(st.critDmg)]);
+    if (st.dmgPct) stats.push(['Damage', pct(st.dmgPct)]);
     if (st.aspd) stats.push(['Cheaper swings', '-' + Math.round(st.aspd * 100) + '% energy']);
     if (item.shield?.block) stats.push(['Block', Math.round(item.shield.block * 100) + '%']);
     const slot = SLOT_LABELS[item.slot] || item.slot;
@@ -220,6 +227,33 @@ export class Panels {
       ${stats.length ? `<ul class="tt-stats">${stats.map(([k, v]) => `<li><span>${k}</span><b>${v}</b></li>`).join('')}</ul>` : ''}
       ${requiredClass ? '<div class="tt-req">🔒 Requires the Beastmaster class to equip</div>' : ''}
       ${action ? `<div class="tt-hint">${action}</div>` : ''}`;
+  }
+
+  // A compact always-visible stat strip for a shop card. The hover tooltip is
+  // the full sheet, but it does not exist on touch, so the numbers that decide
+  // a purchase have to be on the card itself.
+  _shopStatLine(item) {
+    const out = [];
+    const w = item.weapon;
+    const sg = (v, suf = '') => (v > 0 ? '+' : '') + v + suf;
+    const pct = (v) => (v > 0 ? '+' : '') + Math.round(v * 100) + '%';
+    if (w) {
+      if (w.dmg) out.push(`⚔ ${Math.round(w.dmg)}`);
+      out.push(`⚡ ${attackEnergyFor(w)}`);
+      if (w.range) out.push(`↔ ${w.range} m`);
+      if (w.chop > 0) out.push(`🪓 ${w.chop}`);
+      if (w.mine > 0) out.push(`⛏️ ${w.mine}`);
+    }
+    const st = item.stats || {};
+    if (st.hp) out.push(`❤️ ${sg(st.hp)}`);
+    if (st.speed) out.push(`🏃 ${sg(st.speed)}`);
+    if (st.regen) out.push(`💚 ${sg(st.regen, '/s')}`);
+    if (st.crit) out.push(`💥 ${pct(st.crit)}`);
+    if (st.critDmg) out.push(`💢 ${pct(st.critDmg)}`);
+    if (item.shield?.block) out.push(`🛡 ${Math.round(item.shield.block * 100)}%`);
+    if (!out.length) return '';
+    const bad = Object.values(st).some(v => v < 0);
+    return `<div class="card-stats${bad ? ' has-cost' : ''}">${out.join(' · ')}</div>`;
   }
 
   _abilityTip(skill, rank = 0, { hint } = {}) {
@@ -384,7 +418,11 @@ export class Panels {
           <span class="name">${entry.name}</span><span class="lv">${SLOT_LABELS[entry.slot].toLowerCase()}</span></div>
         <div class="desc">${entry.desc}${requiredClass
           ? `<span class="class-requirement">🔒 Requires Beastmaster class to equip</span>` : ''}</div>
+        ${this._shopStatLine(entry)}
         <div class="card-foot">${status}</div>`;
+      // the full stat sheet on hover, exactly what the inventory shows — you
+      // should never have to BUY something to find out what it does
+      attachTip(card, this._itemTip(entry, { requiredClass }));
       wrap.appendChild(card);
     }
     wrap.querySelectorAll('.buy-btn').forEach(btn =>
