@@ -3575,7 +3575,6 @@ export class Player {
       const tree = trees[0];
       const power = w.chop * this.chopMult * (1 + charge * 0.5);
       const wood = world.chop(tree, power, this.pos);
-      audio.sfx('chop_hit', 0.5, 40);          // the bite, over world.chop's crack
       this.hooks.onChop?.(tree, power); // co-op keeps the partner's forest in sync
       if (wood > 0) {
         const total = Math.max(1, Math.round(wood * this.gatherMult));
@@ -3605,14 +3604,14 @@ export class Player {
     } else if (trees.length && w.chop <= 0) {
       // WRONG TOOL, but you still hit a tree: a dull useless thud every time,
       // not silence. The hint itself stays one-shot so it isn't nagging.
-      audio.sfx('punch_hit', 0.32, 90);
+      audio.sfx('wood_chop', 0.22, 90);    // a weak, unproductive thock
       if (!this.hintedAxe) {
         this.hintedAxe = true;
         this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
           'Only an AXE fells trees — craft a Bone Axe!', '#ffcc66');
       }
     } else if (rocks.length && !(w.mine > 0)) {
-      audio.sfx('rock_crack', 0.28, 90);   // steel skittering off stone
+      audio.sfx('mine_hit', 0.26, 90);     // steel skittering off stone
       if (!this.hintedRock) {
         this.hintedRock = true;
         this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),

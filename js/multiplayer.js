@@ -1966,7 +1966,16 @@ export class Multiplayer {
         break;
       case 'chop': { // partner chopped a tree — mirror it
         const trees = ctx.world.treesNear({ x: ev.x, z: ev.z }, 1.5);
-        if (trees.length) ctx.world.chop(trees[0], ev.power, { x: ev.x + 1, z: ev.z });
+        if (!trees.length) break;
+        // world.chop plays wood_chop, and audio.sfx has no positional falloff —
+        // so an ally chopping on the far side of the island used to hammer in
+        // your ears at full volume. Mirror the tree silently unless it is close
+        // enough that you would actually hear it.
+        const far = Math.hypot(ctx.player.pos.x - ev.x, ctx.player.pos.z - ev.z) > 40;
+        const wasMuted = audio.muted;
+        if (far) audio.muted = true;
+        try { ctx.world.chop(trees[0], ev.power, { x: ev.x + 1, z: ev.z }); }
+        finally { audio.muted = wasMuted; }
         break;
       }
       case 'berry': ctx.world.applyRemoteBerry?.(ev.k); break; // partner emptied a bush
