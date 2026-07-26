@@ -1129,7 +1129,10 @@ export class Panels {
       if (ghost) {
         ghost.style.left = (e.clientX - 24) + 'px';
         ghost.style.top = (e.clientY - 24) + 'px';
-        const over = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('.spell-slot');
+        // only GEAR can be hotkeyed — highlighting a slot for a resource or a
+        // consumable promised a drop the release handler then refused
+        const over = cell.kind === 'item'
+          ? document.elementFromPoint(e.clientX, e.clientY)?.closest?.('.spell-slot') : null;
         document.querySelectorAll('.spell-slot.drop-hot').forEach(s => s.classList.remove('drop-hot'));
         over?.classList.add('drop-hot');
       }
@@ -1162,6 +1165,11 @@ export class Panels {
         this.refresh();
         return;
       }
+      // Aiming at the action bar and missing by a few pixels must NEVER throw the
+      // item into the world: #actionbar is a full-screen pointer-events:none
+      // layer, so a release in the ~6 px gap between slots resolves to the
+      // canvas and used to read as "released outside every panel".
+      if (under?.closest?.('#actionbar')) { this.refresh(); return; }
       // released outside every panel → drop it on the ground
       if (!under?.closest?.('.panel')) {
         if (cell.kind === 'res') this.hooks.onDropRes?.(cell.id);

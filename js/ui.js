@@ -83,6 +83,11 @@ export class UI {
         } else slots[i] = undefined; // dragged off the bar → unslot
         localStorage.setItem('woods_slot_hint_done', '1');
         audio.sfx('click', 0.4);
+        // Repaint NOW. While a panel is open the game is paused in solo, so the
+        // per-frame updateSpellbar never runs — without this the slot kept its
+        // icon after being emptied and its key silently did nothing.
+        this.updateSpellbar(this._player);
+        this.onSlotsChanged?.();
       };
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);

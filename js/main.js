@@ -267,9 +267,10 @@ const panels = new Panels({
     // a burning torch lights with a whoomp; everything else buckles on
     audio.sfx(item?.torch ? 'torch_equip' : 'equip_gear', 0.5);
     panels.refresh();
+    refreshHud();   // the weapon readout is behind the panel, not hidden by it
   },
   onToast: (msg) => ui.toast(msg, 'error'),
-  onUnequip: (slot) => { player.unequip(slot); panels.refresh(); },
+  onUnequip: (slot) => { player.unequip(slot); panels.refresh(); refreshHud(); },
   onToggleSpell: (id) => {
     player.toggleSpellSlot(id);
     if (player.spellSlots.includes(id)) localStorage.setItem('woods_slot_hint_done', '1');
@@ -442,7 +443,7 @@ const player = new Player(scene, {
   // from the Character modal. Equipping off the 1–9 bar, a torch burning out or
   // an item being consumed all land here, and used to leave an open gear modal
   // showing stale slots until you closed and reopened it.
-  onEquipChange: () => { companions.sync(player); panels.refresh?.(); },
+  onEquipChange: () => { companions.sync(player); panels.refresh?.(); refreshHud(); },
   onPetChange: () => { companions.sync(player); panels.refresh?.(); },
   onSummonImp: (spec) => { companions.spawnImp(player, spec); panels.refresh?.(); },
   onClassWorldAction: (action, skill, rank, ctx) => handleClassWorldAction(action, skill, rank, ctx),
@@ -1907,7 +1908,6 @@ function grantPickup(kind, payload) {
     ui.toast(item.nest
       ? `🎁 Loot: ${item.icon} ${item.name} — open your bag (C) and CLICK it to place a flight roost.`
       : `🎁 Loot: ${item.icon} ${item.name} — in your bag (equip in Character, C).`, 'level');
-    panels.refresh();
   } else if (kind === 'salve' || kind === 'roast' || kind === 'venom' || kind === 'honey' || kind === 'scroll') {
     player.consumables[kind] = (player.consumables[kind] ?? 0) + payload;
     ui.popup(player.mesh.position.clone().setY(player.mesh.position.y + 2),
@@ -1921,6 +1921,10 @@ function grantPickup(kind, payload) {
     if (player.quest?.type === 'gather' && player.quest.res === kind) questProgress(gained);
   }
   pickupSfx[kind]?.();
+  // every branch, not just items: with a panel open in co-op the resource line
+  // and the "too expensive" styling stayed on pre-pickup numbers
+  panels.refresh();
+  refreshHud();
 }
 
 const pickups = new Pickups(scene, world, {
@@ -4099,6 +4103,7 @@ function resetClassTree() {
   player.selectedClass = null;
   player.classTraining = {};
   player.spellSlots = player.spellSlots.map(id => oldActives.has(id) ? undefined : id);
+  ui.updateSpellbar(player);   // the bar still showed the reset abilities
   for (const id of oldActives) delete player.spellCds[id];
   player.enforceClassEquipment();
   player.recompute();
@@ -4141,6 +4146,7 @@ function dropItem(id) {
   // clear the hotkey only when the LAST copy left your hands
   if (!player.hasItem(id)) {
     player.spellSlots = player.spellSlots.map(sid => (sid === id ? undefined : sid));
+    ui.updateSpellbar(player);
   }
   const at = dropAt();
   if (mp?.active && !mp.isHost) mp.sendDrop('item', id, at.x, at.z, true);
