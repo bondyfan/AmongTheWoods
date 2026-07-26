@@ -364,6 +364,7 @@ class ShadowWorld {
       }
       s.target.set(e.x, 0, e.z);
       s.hp = e.hp; s.maxHp = e.m;
+      if (e.cy != null) s.cryptId = e.cy;   // keeps guarded-POI checks honest
       // voice the swing ONCE per attack: `a` carries the attack's timestamp and
       // the same swing rides several snapshots, so only a changed stamp counts
       if (e.a && e.a !== s.lastAtk) { s.lastAtk = e.a; s.pendingAtk = true; }
@@ -1581,6 +1582,13 @@ export class Multiplayer {
     }
   }
 
+  // a guest cracked a beehive — the authority releases the swarm
+  sendHive(x, z) {
+    if (this.active && this.mode === 'coop') {
+      this.net.sendEvent({ type: 'hive', x: +x.toFixed(1), z: +z.toFixed(1) });
+    }
+  }
+
   sendBerry(key) {
     if (this.active && this.mode === 'coop') this.net.sendEvent({ type: 'berry', k: key });
   }
@@ -1983,6 +1991,17 @@ export class Multiplayer {
         if (far) audio.muted = true;
         try { ctx.world.chop(trees[0], ev.power, { x: ev.x + 1, z: ev.z }); }
         finally { audio.muted = wasMuted; }
+        break;
+      }
+      case 'hive': { // an ally cracked a hive — the host releases the swarm
+        if (!this.isHost) break;
+        const n = 10 + Math.floor(Math.random() * 11);
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * Math.PI * 2;
+          const e = ctx.enemyMgr._spawn('bee',
+            ev.x + Math.cos(a) * 1.4, ev.z + Math.sin(a) * 1.4, 0.3);
+          if (e) e.aggroed = true;
+        }
         break;
       }
       case 'berry': ctx.world.applyRemoteBerry?.(ev.k); break; // partner emptied a bush

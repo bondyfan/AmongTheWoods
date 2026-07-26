@@ -16,6 +16,7 @@ import { Pickups } from '../../js/pickups.js';
 import { Projectiles } from '../../js/projectiles.js';
 import { audio } from '../../js/audio.js';
 import { makeOnKill } from './onkill.mjs';
+import { BIOMES, BIOME_LAIRS, biomeIndexAt, progressAt } from '../../js/config.js';
 
 audio.muted = true;                    // silence all SFX before anything plays
 
@@ -30,6 +31,7 @@ const QUEST_KILL_SHARE_RADIUS = 20;
 const DAY = 600;                       // 10-min day/night cycle for spawn density
 
 const noop = () => {};
+const GUARDED_POI = new Set(['crypt', 'temple', 'summit', 'lair', 'captive']);
 
 export class GameRoom {
   // io = { broadcast(obj, exceptUid?), sendTo(uid, obj) }  (from Room)
@@ -46,9 +48,64 @@ export class GameRoom {
     const hooks = new Proxy({ onKill: (e) => this._onKill(e) },
       { get: (t, k) => (k in t ? t[k] : noop) });
     this.enemyMgr = new EnemyManager(scene, world, hooks);
+    // GUARDED POIs. On a dedicated server nobody is the host, and the client
+    // spawner bails out with `if (mp.active && !mp.isHost) return` — so crypts,
+    // temples, summits, captives and boss LAIRS came up completely unguarded.
+    // Walking to a lair and pressing E then passed the "any keepers left?"
+    // check trivially and handed out the reward. The authority has to spawn
+    // them, and the authority is here.
+    world.onPoiSpawned = (poi) => this._garrisonPoi(poi);
     this.players = new Map();          // uid -> { proxy, petProxy, hasPet }
     this.groups = new Map();           // uid -> Set(uids) — who shares kills with whom
     this._snapAcc = 0;
+  }
+
+  // Mirror of the client's world.onPoiSpawned, minus the UI. Guards are spawned
+  // un-aggroed and tagged with cryptId so "is it still guarded?" works.
+  _garrisonPoi(poi) {
+    if (!poi || poi.claimed || poi.guarded) return;
+    if (!GUARDED_POI.has(poi.type)) return;
+    poi.guarded = true;
+    const biome = BIOMES[biomeIndexAt(poi.x, poi.z)];
+    const type = biome.enemies[Math.floor(Math.random() * biome.enemies.length)];
+    const progress = progressAt(poi.x, poi.z);
+    const ring = (n, radius, what) => {
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2;
+        const g = this.enemyMgr._spawn(what, poi.x + Math.cos(a) * radius,
+          poi.z + Math.sin(a) * radius, progress);
+        if (g) { g.aggroed = false; g.cryptId = poi.id; }
+      }
+    };
+    if (poi.type === 'lair') {
+      const lair = BIOME_LAIRS[poi.ring];
+      if (!lair) return;
+      ring(5, 5, type);
+      const boss = this.enemyMgr._spawn(lair.type, poi.x, poi.z - 4, progress, 3, { ambush: true });
+      if (boss) {
+        boss.aggroed = false; boss.cryptId = poi.id;
+        boss.bossName = lair.name;      // the snapshot streams this as `n`
+        boss.lairId = poi.id;
+      }
+      return;
+    }
+    if (poi.type === 'summit') {
+      ring(6, 6, 'yeti');
+      const boss = this.enemyMgr._spawn('icegolem', poi.x, poi.z - 5, progress, 3, { ambush: true });
+      if (boss) {
+        boss.aggroed = false; boss.cryptId = poi.id;
+        boss.bossName = 'Ymir, Father of the Mountain';
+      }
+      return;
+    }
+    const rank = poi.type === 'temple' ? 3 : (poi.ring < 2 ? 1 : poi.ring < 4 ? 2 : 3);
+    const count = poi.type === 'captive' ? 3 : (poi.type === 'temple' ? 6 : 4 + rank);
+    ring(count, 4.5, type);
+    if (poi.type !== 'captive') {
+      const boss = this.enemyMgr._spawn(type, poi.x + 3, poi.z + 3, progress, rank,
+        { ambush: true, noReinforce: true });
+      if (boss) { boss.aggroed = false; boss.cryptId = poi.id; }
+    }
   }
 
   // ---- lifecycle ----
@@ -132,6 +189,19 @@ export class GameRoom {
       case 'berry':
         this.world.applyRemoteBerry?.(ev.k);
         return true;
+      case 'hive': {
+        // a guest cracked a beehive: the swarm has to live HERE, or it is bees
+        // the player can see but never hit and that never move
+        const n = 10 + Math.floor(Math.random() * 11);
+        const prog = progressAt(ev.x, ev.z);
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * Math.PI * 2;
+          const e = this.enemyMgr._spawn('bee',
+            ev.x + Math.cos(a) * 1.4, ev.z + Math.sin(a) * 1.4, prog * 0.3);
+          if (e) e.aggroed = true;
+        }
+        return true;
+      }
       case 'gset': {
         // a client's group roster — kill XP and quest credit are shared inside
         // it and nowhere else. Consumed here; peers learn it from the leader.

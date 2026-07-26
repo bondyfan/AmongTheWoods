@@ -407,13 +407,20 @@ const player = new Player(scene, {
   },
   onHiveHit: (hive, res) => {
     if (res.firstHit) {
-      // the swarm pours out — ONCE
-      const n = 10 + Math.floor(Math.random() * 11); // 10-20
-      const prog = progressAt(hive.x, hive.z);
-      for (let i = 0; i < n; i++) {
-        const a = (i / n) * Math.PI * 2;
-        const e = enemyMgr._spawn('bee', hive.x + Math.cos(a) * 1.4, hive.z + Math.sin(a) * 1.4, prog * 0.3);
-        e.aggroed = true;
+      // The swarm pours out — ONCE. Whoever owns the simulation must spawn it:
+      // spawning locally as a guest produced bees you could SEE but not hit
+      // (your blows go to the shadow world) and that never moved (a guest never
+      // ticks its own enemyMgr).
+      if (mp?.active && !mp.isHost) {
+        mp.sendHive(hive.x, hive.z);
+      } else {
+        const n = 10 + Math.floor(Math.random() * 11); // 10-20
+        const prog = progressAt(hive.x, hive.z);
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * Math.PI * 2;
+          const e = enemyMgr._spawn('bee', hive.x + Math.cos(a) * 1.4, hive.z + Math.sin(a) * 1.4, prog * 0.3);
+          e.aggroed = true;
+        }
       }
       ui.toast('🐝 You crack the hive — the swarm is FURIOUS!', 'boss');
       audio.sfx('special', 0.4);
@@ -4655,7 +4662,10 @@ function claimPoi(poi) {
   // singleplayer lairs are DOORS — E walks you into the boss's dungeon
   if (poi.type === 'lair' && !mp?.active) { enterLair(poi); return; }
   if (['crypt', 'temple', 'summit', 'lair', 'captive'].includes(poi.type)) {
-    const guards = enemyMgr.alive().filter(e => e.cryptId === poi.id);
+    // combatMgr(), not enemyMgr: on the dedicated server the enemies you can
+    // see and fight live in the shadow world, and the local enemyMgr is EMPTY.
+    // Asking the wrong one found zero keepers and claimed the lair instantly.
+    const guards = (combatMgr()?.alive?.() ?? []).filter(e => e.cryptId === poi.id);
     if (guards.length) {
       ui.toast(`☠️ Still guarded — ${guards.length} keeper${guards.length > 1 ? 's' : ''} left!`, 'boss');
       audio.sfx('error', 0.5);

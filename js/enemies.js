@@ -1662,6 +1662,9 @@ export class EnemyManager {
       // repeat of the same swing from a genuinely new one.
       ...(this.world.time - (e.atkAt ?? -9) < 0.3 ? { a: Math.round(e.atkAt * 100) || 1 } : {}),
       ...(e.bossRank > 0 && e.bossName ? { n: e.bossName } : {}),
+      // which guarded POI this keeper belongs to — the client needs it to
+      // answer "is this crypt/lair still guarded?" against SHADOW enemies
+      ...(e.cryptId != null ? { cy: e.cryptId } : {}),
     }));
   }
 }
