@@ -1455,7 +1455,7 @@ function tickTorch(dt) {
   const on = game.kind === 'survival' && inPlay()
     && player.torchGear && !player.dead;
   if (on && !torchLight) {
-    torchLight = new THREE.PointLight(0xffc06a, 6, 20, 1.0);
+    torchLight = new THREE.PointLight(0xffc06a, 12, 20, 1.0);   // 2x — it was too dim to walk by
     scene.add(torchLight);
     audio.loopStart('torch_loop', 0.3); // the flame crackles while it's lit
   } else if (!on && torchLight) {
@@ -1474,8 +1474,8 @@ function tickTorch(dt) {
   // wave. Scales with the tier so a 15 m torch blazes far brighter than a 5 m.
   const flick = Math.sin(torchT * 9) * 0.9 + Math.sin(torchT * 23.7) * 0.6
     + Math.sin(torchT * 3.1) * 0.4;
-  const base = dark ? 9 + radius * 0.7 : 1.6; // 5m→12.5, 10m→16, 15m→19.5 in the dark
-  torchLight.intensity = Math.max(0.5, base + flick * (dark ? 1.4 : 0.4));
+  const base = dark ? 18 + radius * 1.4 : 3.2; // 2x: 5m→25, 10m→32, 15m→39 in the dark
+  torchLight.intensity = Math.max(1.0, base + flick * (dark ? 2.8 : 0.8));
   const p = player.mesh.position;
   torchLight.position.set(p.x, p.y + 1.6, p.z);
   // flicker the HELD flame (mesh lives in the player's hand socket)
@@ -3484,6 +3484,21 @@ function applyLoadedState(d) {
   const savedTree = classTreeById(d.selectedClass);
   p.selectedClass = savedTree?.id || null;
   p.classTraining = {};
+  // Renamed ability ids would silently orphan a character's training, so old
+  // saves are mapped forward before the tree is read.
+  const RENAMED_SKILLS = { rogue_shadow_step: 'rogue_shadow_portal' };
+  if (d.classTraining && typeof d.classTraining === 'object') {
+    for (const [oldId, newId] of Object.entries(RENAMED_SKILLS)) {
+      if (d.classTraining[oldId] != null && d.classTraining[newId] == null) {
+        d.classTraining[newId] = d.classTraining[oldId];
+      }
+      delete d.classTraining[oldId];
+    }
+  }
+  if (Array.isArray(d.spellSlots)) {
+    d.spellSlots = d.spellSlots.map(v =>
+      (typeof v === 'string' && RENAMED_SKILLS[v]) ? RENAMED_SKILLS[v] : v);
+  }
   if (savedTree && d.classTraining && typeof d.classTraining === 'object') {
     for (const skill of [...savedTree.passives, ...savedTree.actives]) {
       const savedRank = Math.max(0, Math.min(skill.maxRank, Math.floor(Number(d.classTraining[skill.id]) || 0)));
@@ -3668,12 +3683,50 @@ function applyPendingCharacter() {
 // wanders off, dies, or you press Esc.
 let socialTarget = null;      // the RemotePlayer the action bar refers to
 
+let stickyMob = null;   // the last mob you Shift-locked, kept until it dies
+
 function updateSocialTarget() {
   const locked = targeting.selectedPlayer;
   if (locked && locked !== socialTarget) socialTarget = locked;
+  // Shift-lock CLEARS the moment you release Shift, so remember the mob: a
+  // target frame that vanishes with the key would be unreadable.
+  if (targeting.selected) { stickyMob = targeting.selected; socialTarget = locked || null; }
+  if (stickyMob && (stickyMob.dying || stickyMob.dead
+      || !(combatMgr()?.alive?.() ?? []).includes(stickyMob))) stickyMob = null;
   // drop the bar when the target is gone from the world
   if (socialTarget && (!mp?.active || !mp.remotes.has(socialTarget.uid))) socialTarget = null;
   renderPlayerActions();
+  renderTargetFrame();
+}
+
+// ---- Shift-lock target frame ----
+// Whatever you have locked — a mob or another player — gets the same readout,
+// in the same place: avatar, name, level and a health bar WITH the numbers.
+// It sits directly under the resource strip so your eye has one place to look.
+function renderTargetFrame() {
+  const el = $id('target-frame');
+  if (!el) return;
+  const mob = targeting.selected || stickyMob;
+  const who = targeting.selectedPlayer || socialTarget;
+  const t = who || mob;
+  const alive = t && !(t.dying || t.dead);
+  if (!t || !alive || game.mode !== 'play' || game.paused) { el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  const isPlayer = !!who;
+  el.classList.toggle('tf-player', isPlayer);
+  const hp = Math.max(0, Math.round(t.hp ?? 0));
+  const maxHp = Math.max(1, Math.round(t.maxHp ?? 1));
+  const name = isPlayer ? (t.name || 'Player')
+    : (t.name ?? t.cfg?.name ?? ENEMY_TYPES[t.type]?.name ?? t.type ?? 'Creature');
+  const icon = isPlayer ? '🧑' : (ENEMY_TYPES[t.type]?.icon ?? '❔');
+  const lvl = t.level ?? null;
+  el.querySelector('.tf-av').textContent = icon;
+  el.querySelector('.tf-name').textContent = name;
+  el.querySelector('.tf-lv').innerHTML = lvl != null
+    ? (isPlayer ? `Lv ${lvl}` : mobLevelBadge(lvl)) : '';
+  el.querySelector('.tf-bar > i').style.width =
+    Math.max(0, Math.min(100, (hp / maxHp) * 100)) + '%';
+  el.querySelector('.tf-hp').textContent = `${hp} / ${maxHp}`;
 }
 
 function renderPlayerActions() {
@@ -6593,6 +6646,8 @@ function step() {
       if (DEVMODE && !window.WOODS) {
         window.WOODS = { game, get player() { return player; }, get world() { return world; },
           get camp() { return camp; }, get ghost() { return ghost; },
+          get enemyMgr() { return combatMgr(); },
+          get targeting() { return targeting; },
           kill: () => { player.hp = 0; player.dead = true; player.killedBy = 'a test'; survivalRespawn(); },
           graveyards: () => knownGraveyards() };
       }

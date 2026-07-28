@@ -2930,7 +2930,7 @@ export class World {
       const flick = Math.sin(t * 8.3) * 0.5 + Math.sin(t * 19.7) * 0.3 + Math.sin(t * 3.3) * 0.2;
       // a hearth is a warm glow by day and the only thing you can see by at night
       ud.light.intensity = ud.baseIntensity * (0.45 + 1.15 * nightK) + flick * (0.5 + nightK);
-      ud.light.distance = 34 + nightK * 10;
+      ud.light.distance = 60 + nightK * 18;
       for (let i = 0; i < ud.flames.length; i++) {
         const k = 1 + Math.sin(t * (9 + i * 4) + i) * 0.13;
         ud.flames[i].scale.set(k, 1 + (k - 1) * 1.8, k);

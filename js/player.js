@@ -62,6 +62,8 @@ const SHIFT_LOCK_ONLY = new Set(['magicTarget']);
 // a ghost sprints back to its corpse — the run of shame is meant to be quick
 export const GHOST_SPEED_MULT = 2.5;
 // roads are for travelling: +20% on one, tapering off as you stray
+// Shadow Portal: how long you are gone between the two doorways
+const PORTAL_TRAVEL = 1.0;
 const ROAD_SPEED_BONUS = 0.20;
 const ROAD_WIDTH = 2.2;   // metres from the centre line that still count as "on it"
 const ROAD_FADE = 2.0;    // and how far the bonus takes to fade after that
@@ -159,6 +161,8 @@ export class Player {
     this.classShield = 0;
     this.hotT = 0;
     this.vigorT = 0;      // honey: a window of surging energy recovery
+    this.portalT = 0;     // Shadow Portal: seconds still between the two doorways
+    this.phasing = false; // …during which you cannot be seen, hit or targeted
     this.hotRate = 0;
     this.hotTickT = 0;
     this.guardianSpiritT = 0;
@@ -465,6 +469,7 @@ export class Player {
 
   castSpell(slotIndex, ctx) {
     if (this.ghost) return false;   // the dead cast nothing
+    if (this.phasing) return false; // and neither does someone mid-portal
     const id = this.spellSlots[slotIndex];
     const classSkill = id ? classSkillById(id) : null;
     const canCleanseStun = classSkill?.action === 'cleanse';
@@ -1337,12 +1342,20 @@ export class Player {
         if (next.distanceTo(before) > 0.05) break;   // shoved by geometry — stop short
         probe.copy(next);
       }
-      this.pos.copy(probe);
-      this._applyBounds(ctx);
-      this._shadowBlinkFx(from, this.pos.clone(), dir);
-      this.attackDur = 0.22; this.attackT = 0.22;   // land ready, not exposed
-      audio.sfx('special', 0.55, 0);
-      audio.sfx('spawn', 0.35, -200);
+      // SHADOW PORTAL, three beats. The old version teleported instantly, which
+      // read as a stutter. Now: you are pulled into a portal at your feet, you
+      // are GONE for PORTAL_TRAVEL seconds while the journey carries on unseen,
+      // and a second portal opens at the far end and puts you down in front of
+      // it. While phased you cannot be seen, hit or targeted.
+      const to = probe.clone();
+      this.portalT = PORTAL_TRAVEL;
+      this.portalFrom = from.clone();
+      this.portalTo = to;
+      this.portalDir = dir.clone();
+      this.phasing = true;                 // untargetable, like a ghost
+      this.mesh.visible = false;
+      this._shadowPortalOpen(from, dir);   // the entry tears open and swallows you
+      audio.sfx('special', 0.6, 0);
       this.breakStealth();
       return true;
     }
@@ -1841,6 +1854,71 @@ export class Player {
     }
   }
 
+  // A shadow doorway: a dark disc that irises OPEN, a violet rim, and wisps
+  // dragged inward (entry) or thrown outward (exit).
+  _shadowPortalFx(at, dir, opening) {
+    const y = this.mesh.position.y;
+    const ang = Math.atan2(dir.x, dir.z);
+    const DARK = 0x2a1b4d, VIOLET = 0x7a5cff, PALE = 0xb9a4ff;
+    // the doorway itself, standing upright and facing the way you travel
+    const geo = new THREE.CircleGeometry(1.25, 28);
+    const mat = new THREE.MeshBasicMaterial({
+      color: DARK, transparent: true, opacity: 0.92, side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const disc = new THREE.Mesh(geo, mat);
+    disc.position.set(at.x, y + 1.0, at.z);
+    disc.rotation.y = ang;
+    this.scene.add(disc);
+    this.classFx.push({ mesh: disc, t: 0.55, life: 0.55, kind: 'portalDisc', op0: 0.92, opening });
+    // the glowing rim
+    const rimGeo = new THREE.RingGeometry(1.2, 1.45, 30);
+    const rim = new THREE.Mesh(rimGeo, new THREE.MeshBasicMaterial({
+      color: VIOLET, transparent: true, opacity: 0.95, side: THREE.DoubleSide,
+      depthWrite: false, blending: THREE.AdditiveBlending,
+    }));
+    rim.position.copy(disc.position);
+    rim.rotation.y = ang;
+    this.scene.add(rim);
+    this.classFx.push({ mesh: rim, t: 0.55, life: 0.55, kind: 'portalDisc', op0: 0.95, opening });
+    // wisps: sucked IN on the way through, flung OUT on arrival
+    for (let i = 0; i < 14; i++) {
+      const a = (i / 14) * Math.PI * 2;
+      const r = opening ? 2.2 : 0.3;
+      const p = new THREE.Vector3(at.x + Math.cos(a) * r, y + 0.4, at.z + Math.sin(a) * r);
+      const v = new THREE.Vector3(Math.cos(a), 0.8, Math.sin(a))
+        .multiplyScalar(opening ? -3.2 : 3.4);
+      this._fxRiser(p, i % 3 === 0 ? PALE : VIOLET, v, 0.5, 0.16, 0.9);
+    }
+    this._fxRingBlink(at.clone().setY(y - 0.55), VIOLET, opening ? 2.0 : 0.5, 0.42, !opening);
+  }
+
+  _shadowPortalOpen(at, dir) { this._shadowPortalFx(at, dir, true); }
+  _shadowPortalArrive(at, dir) {
+    this._shadowPortalFx(at, dir, false);
+    this._fxBurst(at, 0xb9a4ff, 16, 5, 0.45);
+  }
+
+  // Carry the body between the two doorways. It runs while `phasing`, so the
+  // camera keeps travelling even though there is nothing to see.
+  _tickShadowPortal(dt) {
+    if (!(this.portalT > 0)) return;
+    this.portalT -= dt;
+    const k = 1 - Math.max(0, this.portalT) / PORTAL_TRAVEL;
+    // ease so the exit lands with a little authority rather than sliding
+    const e = k * k * (3 - 2 * k);
+    this.pos.lerpVectors(this.portalFrom, this.portalTo, e);
+    if (this.portalT <= 0) {
+      this.portalT = 0;
+      this.pos.copy(this.portalTo);
+      this.phasing = false;
+      this.mesh.visible = true;
+      this._shadowPortalArrive(this.portalTo, this.portalDir);
+      this.attackDur = 0.22; this.attackT = 0.22;   // land ready, not exposed
+      audio.sfx('spawn', 0.5, 0);
+    }
+  }
+
   // The Shadow Step animation: a collapse where you left, a ribbon of
   // after-images along the path, and a bloom where you arrive. Three distinct
   // beats, so a 5 m hop and a 15 m leap both read clearly.
@@ -2178,6 +2256,14 @@ export class Player {
           fx.mesh.scale.setScalar(0.8 + k * 1.9);
           fx.mesh.material.opacity = 0.3 + 0.55 * k;
           break;
+        case 'portalDisc': {   // irises open, holds, then snaps shut
+          const kk = fx.opening ? Math.min(1, k * 2.2) : Math.min(1, k * 2.6);
+          const close = k > 0.62 ? (k - 0.62) / 0.38 : 0;
+          fx.mesh.scale.setScalar(Math.max(0.02, kk * (1 - close)));
+          fx.mesh.material.opacity = op0 * (1 - close * close);
+          fx.mesh.rotation.z += dt * (fx.opening ? 3.2 : -3.2);
+          break;
+        }
         case 'blinkIn':   // collapses inward as the body is swallowed
           fx.mesh.scale.setScalar(Math.max(0.05, 1 - k * 0.95));
           fx.mesh.material.opacity = op0 * (1 - k * k);
@@ -2650,6 +2736,7 @@ export class Player {
 
   takeDamage(dmg, src = null) {
     if (this.ghost) return;         // you cannot kill what is already dead
+    if (this.phasing) return;       // mid-portal: you are not here to be hit
     if (this.dead) return;
     if (this.flying) return; // riding a griffin — far out of anyone's reach
     if (this.evadeT > 0) {
@@ -2845,6 +2932,7 @@ export class Player {
     const { input, world, enemyMgr, projectiles, aimPoint } = ctx;
     this._updateLevelFx(dt); // cosmetic — keeps animating regardless of state
     this._updateClassFx(dt);
+    this._tickShadowPortal(dt);
     // Leaving dev flight always returns safely to the terrain instead of
     // converting the inspection altitude into lethal fall damage.
     if (this._devFlyActive && !ctx.devFly) {
@@ -3236,7 +3324,7 @@ export class Player {
     input.takeLeftPressed();          // consume edge state (charging removed)
     input.takeLeftReleased();
     // a ghost has no hands: it can run and nothing else
-    const wantAttack = !this.ghost && (input.attackHeld || input.quickAttack);
+    const wantAttack = !this.ghost && !this.phasing && (input.attackHeld || input.quickAttack);
     if (this.swingWindup) {
       if (this.stunT > 0 || this.dashT > 0 || this.blocking) {
         this.energy = Math.min(this.maxEnergy, this.energy + (this.swingWindup.cost || 0));

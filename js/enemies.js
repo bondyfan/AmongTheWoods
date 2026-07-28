@@ -1175,7 +1175,8 @@ export class EnemyManager {
       // with no recent attacker it's the nearest visible target. Creatures
       // never see across a biome border.
       const eBiome = biomeIndexAt(e.pos.x, e.pos.z);
-      const validTarget = (t) => t && !t.dead && !t.stealthed && !t.testGhost && !t.ghost && t.pos
+      const validTarget = (t) => t && !t.dead && !t.stealthed && !t.testGhost && !t.ghost
+        && !t.phasing && t.pos
         && !this.world.isTargetSafe?.(t.pos)
         && biomeIndexAt(t.pos.x, t.pos.z) === eBiome;
       let target = null, dist = Infinity;

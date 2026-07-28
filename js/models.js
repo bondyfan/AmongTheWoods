@@ -3302,10 +3302,12 @@ export function makeGreatFire() {
     flames.push(f);
   }
   // the light itself rides with the mesh
-  const light = new THREE.PointLight(0xffb066, 5, 34, 1.1);
+  // 2.5x the old reach and punch — a village hearth should genuinely light the
+  // square, not just tint the ground under itself
+  const light = new THREE.PointLight(0xffb066, 12.5, 60, 1.1);
   light.position.y = 1.3;
   g.add(light);
-  g.userData = { flames, light, baseIntensity: 5 };
+  g.userData = { flames, light, baseIntensity: 12.5 };
   return g;
 }
 
