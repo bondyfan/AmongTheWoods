@@ -29,6 +29,12 @@ const NEAR_KEEP = 175;                 // …and keep streaming them out to here
 const XP_SHARE_RADIUS = 100;
 const QUEST_KILL_SHARE_RADIUS = 20;
 const DAY = 600;                       // 10-min day/night cycle for spawn density
+// Man a POI once a player is this close. Must stay UNDER EnemyManager's
+// ZONE_RELEASE (205 m) or the guards would melt back into the zone pool on the
+// very tick they spawned; comfortably over NEAR (130 m) so they exist before
+// anyone can see them appear.
+const GARRISON_R = 180;
+const GARRISON_HZ = 2;                 // rechecked twice a second
 
 const noop = () => {};
 const GUARDED_POI = new Set(['crypt', 'temple', 'summit', 'lair', 'captive']);
@@ -53,17 +59,44 @@ export class GameRoom {
     // temples, summits, captives and boss LAIRS came up completely unguarded.
     // Walking to a lair and pressing E then passed the "any keepers left?"
     // check trivially and handed out the reward. The authority has to spawn
-    // them, and the authority is here.
-    world.onPoiSpawned = (poi) => this._garrisonPoi(poi);
+    // them, and the authority is here — see _garrisonNear, which is driven off
+    // player proximity from tick(). It used to hang off world.onPoiSpawned, but
+    // that fires from World._genChunk (it is the LANDMARK MESH going up), and
+    // the server never builds chunk meshes: it calls only heightAt and chop.
+    // The callback never ran once, and every crypt on the live server has been
+    // standing empty.
     this.players = new Map();          // uid -> { proxy, petProxy, hasPet }
     this.groups = new Map();           // uid -> Set(uids) — who shares kills with whom
     this._snapAcc = 0;
+    this._garrisonAcc = 0;
+  }
+
+  // Keep every POI near a player manned. This has to re-check rather than run
+  // once: EnemyManager melts any unit further than ZONE_RELEASE from a player
+  // back into its zone pool, so guards left behind DO evaporate and the crypt
+  // has to be re-manned when someone walks back. Guards that were actually
+  // FOUGHT stay dead — _awardKill marks the POI cleared, so we never quietly
+  // restock a fight the player already won.
+  _garrisonNear() {
+    const near = [];
+    for (const P of this.players.values()) if (!P.proxy.dead) near.push(P.proxy);
+    if (!near.length) return;
+    const manned = new Set();
+    for (const e of this.enemyMgr.alive?.() ?? []) {
+      if (e.cryptId != null && !e.dying) manned.add(e.cryptId);
+    }
+    for (const poi of this.world.pois) {
+      if (poi.claimed || poi.cleared || manned.has(poi.id)) continue;
+      if (!GUARDED_POI.has(poi.type)) continue;
+      if (!near.some(p => Math.hypot(p.pos.x - poi.x, p.pos.z - poi.z) <= GARRISON_R)) continue;
+      this._garrisonPoi(poi);
+    }
   }
 
   // Mirror of the client's world.onPoiSpawned, minus the UI. Guards are spawned
   // un-aggroed and tagged with cryptId so "is it still guarded?" works.
   _garrisonPoi(poi) {
-    if (!poi || poi.claimed || poi.guarded) return;
+    if (!poi || poi.claimed) return;
     if (!GUARDED_POI.has(poi.type)) return;
     poi.guarded = true;
     const biome = BIOMES[biomeIndexAt(poi.x, poi.z)];
@@ -222,6 +255,9 @@ export class GameRoom {
     this.world.time += dt;
     this.enemyMgr.nightK = 0.5 - 0.5 * Math.cos(2 * Math.PI * this.world.time / DAY);
     const targets = this._targets();
+    // before the AI runs, so a freshly manned crypt ticks the same frame
+    this._garrisonAcc += dt;
+    if (this._garrisonAcc >= 1 / GARRISON_HZ) { this._garrisonAcc = 0; this._garrisonNear(); }
     this.enemyMgr.update(dt, targets, this.projectiles);
     this.pickups.update(dt, []);              // NO auto-collect — guests send 'collect'
     this.projectiles.update(dt, this.enemyMgr, targets);
@@ -306,6 +342,14 @@ export class GameRoom {
 
   _awardKill(enemy) {
     const ex = enemy.pos.x, ez = enemy.pos.z;
+    // A keeper died in a real fight — retire the POI from the garrison sweep.
+    // Marked before the killer check on purpose: however it died, someone was
+    // standing there, and restocking a crypt behind their back is worse than
+    // leaving a half-cleared one. (Melted guards never reach this path.)
+    if (enemy.cryptId != null) {
+      const poi = this.world.pois.find(p => p.id === enemy.cryptId);
+      if (poi) poi.cleared = true;
+    }
     // kill XP goes to the KILLER, plus their group-mates near the corpse.
     // Ungrouped bystanders get nothing — no free XP off a stranger's work.
     const killer = this._killerUid(enemy);
