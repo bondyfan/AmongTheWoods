@@ -57,5 +57,25 @@ console.log('\n-- upright, everything is a pass-through --');
   ok(o.toViewDX(5, -8) === 5 && o.toViewDY(5, -8) === -8, 'and so do deltas');
 }
 
+console.log('\n-- and the CSS actually PERFORMS that transform --');
+{
+  // This is the check that was missing, and it is why a wrong transform shipped:
+  // the round-trip above verifies orient.js against the mapping described in its
+  // own comment, which is true no matter what the stylesheet does. The first
+  // version wrote `rotate(90deg) translateY(-100vh)`, which — CSS applies
+  // right-to-left — translates in UNROTATED space and throws the page off the
+  // right edge. The maths was fine; the page was not.
+  const { readFileSync } = await import('node:fs');
+  const css = readFileSync('css/style.css', 'utf8');
+  const block = css.slice(css.indexOf('forced landscape on portrait phones'));
+  const decls = [...block.matchAll(/transform:\s*([^;]+);/g)].map(m => m[1].trim());
+  ok(decls.length > 0, `found the transform (${decls.join(' | ')})`);
+  ok(decls.every(d => /^translateX\(100d?vw\)\s+rotate\(90deg\)$/.test(d)),
+    'it is translateX(100vw) rotate(90deg) — rotate first, THEN slide into view');
+  ok(!decls.some(d => /rotate\([^)]*\)\s+translate/.test(d)),
+    'and never translate-after-rotate, which is the broken order');
+  ok(/transform-origin: top left/.test(block), 'about the top-left corner');
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 process.exit(fail ? 1 : 0);
