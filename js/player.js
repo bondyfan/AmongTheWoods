@@ -13,7 +13,7 @@ import { WORLD, XP_LEVELS, MAX_LEVEL, itemById, spellById, consumableById,
 import { makeMan, makeAxe, makeBow, makePickaxe, makeTorchMesh, makeClub,
          makeSword, makeHandSpear, makeCrossbow, makeShield, applyWornGear } from './models.js';
 import { audio } from './audio.js';
-import { makeHumanMan, humanReady, humanModelEnabled, assertContract } from './humanmodel.js';
+import { makeHumanMan, humanReady, humanModelEnabled, assertContract, CLIP } from './humanmodel.js';
 
 const MAX_CLIMB_SLOPE = 1.0; // steeper ground than this is a wall
 const GRAVITY = 34;
@@ -3790,7 +3790,49 @@ export class Player {
       '🎯 precision shot', '#fff08a');
   }
 
+  // Clip-driven pose for the rigged body. Reports gameplay STATE and lets the
+  // state machine choose and blend; the only events pushed through are the ones
+  // whose timing gameplay owns.
+  _animClips(dt, moving) {
+    const rig = this.mesh.userData.rig;
+    const ud = this.mesh.userData;
+    // Swing and cast are EVENTS, not states, and their length is a gameplay
+    // clock (swingTime is a getter that Quick Draw and Haste mutate), so they
+    // are triggered with an explicit duration rather than played at authored
+    // length. Fire once per windup, on the frame it starts.
+    if (this.swingWindup && this._lastWindup !== this.swingWindup) {
+      this._lastWindup = this.swingWindup;
+      const bow = this.weapon?.kind === 'bow';
+      // NOTE Sword_Attack is authored at 1.53 s and a swing here is ~0.5 s, so
+      // it plays ~3x fast. Trimming the clip to just the strike is a follow-up;
+      // for now a quick swing beats a frozen one.
+      if (!bow) rig.trigger(this.swingWindup.dur * 2 > 0.2 ? CLIP.attack : CLIP.punch,
+        this.swingWindup.dur * 2);
+    } else if (!this.swingWindup) this._lastWindup = null;
+    if (this.castWindup && this._lastCast !== this.castWindup) {
+      this._lastCast = this.castWindup;
+      rig.trigger(CLIP.cast, this.castWindup.dur);
+    } else if (!this.castWindup) this._lastCast = null;
+
+    rig.setState({
+      moving,
+      speed: moving ? (this.speed || 0) : 0,
+      swimming: !!this.swimming,
+      dead: !!this.dead,
+      blocking: !!this.blocking,
+      casting: !!this.castWindup,
+      sitting: !!this.mounted,
+      torch: !!ud.torchRef,
+      armed: this.weapon?.kind === 'melee',
+    });
+  }
+
   _animate(dt, moving) {
+    // The mixer owns the whole skeleton whenever it exists, so the hand-authored
+    // limb rotations below must NOT also run: three's PropertyMixer blends an
+    // unkeyed bone back toward its bind value at weight < 1, which makes shared
+    // ownership nondeterministic. See humanmodel.js.
+    if (this.mesh.userData.rig?.mixer) { this._animClips(dt, moving); return; }
     const { leftLeg, rightLeg, leftArm, rightArm, rightSocket } = this.mesh.userData;
     // SWIMMING: a breaststroke — arms reach forward together then sweep out
     // and back, legs do a frog kick a half-beat behind

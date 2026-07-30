@@ -55,6 +55,18 @@ const ARM_TUCK = 1.40;        // rad: pull the T-pose arms down to the sides
 
 // Which bones the FALLBACK (no clips) path drives, and the static Z rotation
 // that brings each T-pose arm down. Legs hang at rotation 0 already.
+// The clip names the retargeter emits (scripts/retarget-ual.mjs WANT list).
+const CLIP = {
+  idle: 'Idle_Loop', idleTorch: 'Idle_Torch_Loop', idleSword: 'Sword_Idle',
+  walk: 'Walk_Loop', jog: 'Jog_Fwd_Loop', sprint: 'Sprint_Loop',
+  swim: 'Swim_Fwd_Loop', swimIdle: 'Swim_Idle_Loop',
+  attack: 'Sword_Attack', punch: 'Punch_Jab', punchAlt: 'Punch_Cross',
+  cast: 'Spell_Simple_Shoot', castIdle: 'Spell_Simple_Idle_Loop',
+  block: 'Sword_Idle', hit: 'Hit_Chest', death: 'Death01', roll: 'Roll',
+  sit: 'Sitting_Idle_Loop', interact: 'Interact',
+};
+export { CLIP };
+
 const DRIVE = {
   thigh_l:    { tuck: 0 },
   thigh_r:    { tuck: 0 },
@@ -105,10 +117,12 @@ export async function preloadHumanModel() {
 export function humanReady() { return !!_template; }
 export function humanClipCount() { return _clips.length; }
 
-// Gate for the avatar. Still off: the plumbing below is finished, but the clip
-// library is not in the repo yet, and shipping this body WITHOUT clips is
-// exactly the mistake that got it retired the first time.
-export function humanModelEnabled() { return false; }
+// Gate for the avatar, and it gates on the CLIPS rather than on a setting.
+// Shipping this body un-animated is exactly what got it retired the first time —
+// a detailed mannequin with four moving bones reads worse than a box. So if
+// anims.glb is missing or fails to load, we fall back to makeMan on purpose,
+// and the frozen-hero failure mode simply cannot ship again.
+export function humanModelEnabled() { return _clips.length > 0; }
 
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
@@ -234,10 +248,75 @@ export function makeHumanMan() {
   // ONE solve per frame, called from the game loop. This used to hang off
   // skinned[0].onBeforeRender, which runs once per RENDER PASS — shadow map plus
   // postfx plus preview meant 65 bones re-solved three times every frame.
+  let cur = null;            // the looping base action
+  let oneShot = null;        // { action, until } — outranks the base while live
+  let clock = 0;
+
+  const fadeTo = (name, fade = 0.18, once = false, timeScale = 1) => {
+    const a = actions.get(name);
+    if (!a) return null;
+    if (a === cur && !once) return a;
+    a.reset();
+    a.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, Infinity);
+    a.clampWhenFinished = once;
+    a.timeScale = timeScale;
+    a.enabled = true;
+    a.setEffectiveWeight(1);
+    a.fadeIn(fade).play();
+    if (cur && cur !== a) cur.fadeOut(fade);
+    if (!once) cur = a;
+    return a;
+  };
+
   g.userData.rig = {
     mixer, actions,
     clipNames: () => [...actions.keys()],
+    has: (name) => actions.has(name),
+
+    // Fire a non-looping clip (a swing, a cast, a hit) that outranks the base
+    // until it finishes. `dur` retimes it onto the gameplay clock that owns the
+    // hit frame: swingTime is a getter mutated by Quick Draw and Haste, so
+    // playing at authored length would drift the impact out of the animation.
+    trigger(name, dur = 0) {
+      const a = actions.get(name);
+      if (!a || !mixer) return false;
+      const len = a.getClip().duration || 1;
+      oneShot = { action: a, until: clock + (dur > 0.01 ? dur : len) };
+      fadeTo(name, 0.06, true, dur > 0.01 ? len / dur : 1);
+      return true;
+    },
+
+    // Pose from gameplay state. Never both: the mixer owns the skeleton whenever
+    // it exists, so player.js's hand-authored limb rotations are skipped.
+    setState(s = {}) {
+      if (!mixer) return;
+      if (oneShot && clock < oneShot.until) return;
+      oneShot = null;
+      let want;
+      if (s.dead) want = CLIP.death;
+      else if (s.sitting) want = CLIP.sit;
+      else if (s.swimming) want = s.moving ? CLIP.swim : CLIP.swimIdle;
+      else if (s.blocking) want = CLIP.block;
+      else if (s.casting) want = CLIP.castIdle;
+      else if (s.moving) want = s.speed > 6.4 ? CLIP.sprint : s.speed > 3.2 ? CLIP.jog : CLIP.walk;
+      else if (s.torch) want = CLIP.idleTorch;
+      else if (s.armed) want = CLIP.idleSword;
+      else want = CLIP.idle;
+      // Retime locomotion to real ground speed or the feet skate. The clips were
+      // authored at roughly walk 1.4, jog 4, sprint 7 m/s.
+      if (want === CLIP.walk || want === CLIP.jog || want === CLIP.sprint) {
+        const authored = want === CLIP.sprint ? 7 : want === CLIP.jog ? 4 : 1.4;
+        const a = actions.get(want);
+        if (a) a.timeScale = Math.max(0.45, Math.min(2.2, (s.speed || authored) / authored));
+      }
+      // death plays once and stays down — don't restart it every frame
+      if (s.dead && cur === actions.get(CLIP.death)) return;
+      fadeTo(want, s.dead ? 0.12 : 0.18, !!s.dead);
+      if (s.dead) cur = actions.get(CLIP.death);
+    },
+
     update(dt) {
+      clock += dt;
       if (mixer) { mixer.update(dt); return; }
       // fallback: mirror the proxy Groups onto the four bones we own
       drive(drivers.thigh_l,    leftLeg.rotation.x,  leftLeg.rotation.z);
@@ -248,6 +327,7 @@ export function makeHumanMan() {
       for (const sk of skeletons) sk.update();
     },
   };
+  if (mixer) g.userData.rig.setState({});   // stand in the idle, not the T-pose
 
   return g;
 }

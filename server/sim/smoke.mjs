@@ -108,11 +108,22 @@ const full = {
 };
 const isInt = (v) => Number.isInteger(v);
 const oneDec = (v) => typeof v === 'number' && Math.round(v * 10) === v * 10;
-const eOk = full.e.every(e =>
-  isInt(e.id) && typeof e.t === 'string' && isInt(e.b) && e.b >= 0 && e.b <= 3 &&
-  isInt(e.l) && oneDec(e.x) && oneDec(e.z) && isInt(e.hp) && isInt(e.m) &&
-  (e.a === undefined || e.a === 1) && (e.n === undefined || typeof e.n === 'string'));
-ck('every e[] entry conforms {id,t,b,l,x,z,hp,m,a?,n?}', eOk, 'sample=' + JSON.stringify(full.e[0] ?? null));
+// `a` is the attack TIMESTAMP (centiseconds), not a boolean — a plain flag made
+// the guest replay the swing sound once per packet, 2-3x per hit. This assertion
+// still said `e.a === 1` and so failed at random, whenever an enemy happened to
+// be inside its 0.3 s attack window when the final snapshot was taken: a test
+// that fails 2 runs in 12 for a reason that is not a bug. `cy` is the guarded-POI
+// id, added when the server took over crypt garrisons.
+const ALLOWED = new Set(['id', 't', 'b', 'l', 'x', 'z', 'hp', 'm', 'a', 'n', 'cy']);
+const bad = full.e.find(e =>
+  !(isInt(e.id) && typeof e.t === 'string' && isInt(e.b) && e.b >= 0 && e.b <= 3 &&
+    isInt(e.l) && oneDec(e.x) && oneDec(e.z) && isInt(e.hp) && isInt(e.m) &&
+    (e.a === undefined || isInt(e.a)) &&
+    (e.n === undefined || typeof e.n === 'string') &&
+    (e.cy === undefined || isInt(e.cy)) &&
+    Object.keys(e).every(k => ALLOWED.has(k))));
+ck('every e[] entry conforms {id,t,b,l,x,z,hp,m,a?,n?,cy?}', !bad,
+  'offender=' + JSON.stringify(bad ?? null) + ' of ' + full.e.length);
 
 const pOk = full.p.every(p => isInt(p.i) && typeof p.k === 'string' && oneDec(p.x) && oneDec(p.z) && (p.o === undefined || p.o === 1));
 ck('every p[] entry conforms {i,k,pl,x,z,o?}', pOk, 'sample=' + JSON.stringify(full.p[0] ?? null));
