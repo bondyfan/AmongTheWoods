@@ -49,21 +49,24 @@ console.log('\n-- and setting one actually gates the item --');
     'with nothing set, the built-in bow rule still holds');
 }
 
-console.log('\n-- audio plays from a warm pool, not a fresh clone --');
+console.log('\n-- audio creates elements LAZILY, never a storm --');
 {
   const src = readFileSync('js/audio.js', 'utf8');
-  // strip comments first — the explanation of the bug naturally names cloneNode
   const code = src.replace(/^\s*\/\/.*$/gm, '');
-  ok(!/cloneNode\(\)/.test(code), 'sfx() no longer clones an element per play (code, not comments)');
-  ok(/_voices\(name\)/.test(src), 'it takes a voice from the pool');
-  const m = src.match(/_voices\(name\) \{[\s\S]*?\n  \}/);
-  ok(!!m, 'found the pool');
-  ok(/a\.load\(\)/.test(m[0]), 'the voices are load()ed up front, not on first use');
-  const n = (m[0].match(/k < (\d+)/) ?? [])[1];
-  ok(Number(n) >= 2, `more than one voice, so overlapping hits do not cut off (${n})`);
-  ok(/for \(const n of SFX\) this\._voices\(n\);/.test(src),
-    'and every SFX is warmed during the loading screen');
-  ok(/currentTime = 0/.test(src), 'a reused voice rewinds before it plays');
+  // A voice pool was tried and reverted: 3 elements for each of ~220 sounds is
+  // ~650 HTMLAudioElements created and load()ed at once on the loading screen.
+  // iOS Safari caps how many can exist and fails SILENTLY past it — no sfx, no
+  // music, and the page wedged. Nothing may preload elements en masse again.
+  ok(!/for \(const n of SFX\) this\._voices/.test(code),
+    'no per-sound element pool is built during preload');
+  ok(!/_voices\(/.test(code), 'and the pool is gone entirely, not just unused');
+  const preload = code.slice(code.indexOf('async preloadAll'), code.indexOf('_base(name)'));
+  ok(!/new Audio\(/.test(preload),
+    'preloadAll creates NO audio elements — it warms the HTTP cache and nothing else');
+  ok(/fetch\(/.test(preload) || /Promise\.all/.test(preload),
+    'it still warms the cache up front');
+  ok(/this\._base\(name\)\.cloneNode\(\)/.test(code),
+    'playback clones one lazily-made element per sound');
 }
 
 console.log('\n-- landscape is asked for, in the three places it can be --');
@@ -102,11 +105,17 @@ console.log('\n-- the first-run view picker --');
   ok((html.match(/class="vp-opt"/g) ?? []).length === 2, 'exactly two choices');
   ok(/data-rpg="1"/.test(html) && /data-rpg="0"/.test(html), '3D and top-down');
   ok(/vp-blink/.test(css), 'the buttons blink for attention');
-  ok(/#view-pick\.touched \.vp-opt \{ animation: none/.test(css),
-    'and STOP blinking once touched — a control that nags after you engage is rude');
+  ok(/#view-pick \.vp-opt\.sel \{\s*animation: none/.test(css),
+    'and the SELECTED one sits still — only the alternative pulses');
   ok(/localStorage\.getItem\(VIEW_PICK_KEY\)/.test(main), 'shown once, ever');
   ok(/localStorage\.setItem\(VIEW_PICK_KEY, '1'\)/.test(main), 'and remembered on confirm');
-  ok(/go\.disabled = true/.test(main), 'Confirm is dead until something is picked');
+  ok(/let picked = settings\.rpgView !== false/.test(main),
+    'it opens on the view you are ALREADY in, so nothing is unselected');
+  ok(/go\.disabled = false/.test(main) && !/go\.disabled = true/.test(main),
+    'and Confirm is live from the start — there is always a valid answer');
+  ok(!/touched/.test(readFileSync('css/style.css', 'utf8').slice(
+       readFileSync('css/style.css', 'utf8').indexOf('#view-pick'))),
+    'the pulse is driven by selection, not by whether you have touched it');
   ok(/applyViewMode\(\);/.test(main.split('maybeAskViewMode')[1] ?? ''),
     'the choice applies LIVE, so Confirm agrees with something you can see');
   ok(/Settings . Graphics . RPG view mode/.test(main),

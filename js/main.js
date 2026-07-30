@@ -2321,15 +2321,18 @@ function maybeAskViewMode() {
   el.classList.remove('hidden', 'touched');
   const opts = [...el.querySelectorAll('.vp-opt')];
   const go = $id('vp-confirm');
-  let picked = null;
-  go.disabled = true;
+  // Start on whatever the game is ALREADY showing — 3D by default. An empty
+  // picker asks you to choose between two things while showing you one of them,
+  // and a disabled Confirm on top of that just reads as broken. Only the option
+  // you are NOT in pulses, because that is the one offering you something.
+  let picked = settings.rpgView !== false;
+  const mark = () => opts.forEach(o => o.classList.toggle('sel', (o.dataset.rpg === '1') === picked));
+  mark();
+  go.disabled = false;
   for (const b of opts) {
-    b.classList.remove('sel');
     b.onclick = () => {
       picked = b.dataset.rpg === '1';
-      el.classList.add('touched');          // stop the pulse once engaged
-      opts.forEach(o => o.classList.toggle('sel', o === b));
-      go.disabled = false;
+      mark();
       // apply it LIVE, so Confirm is agreeing with something you can see
       settings.rpgView = picked;
       $id('set-rpgview').checked = picked;
