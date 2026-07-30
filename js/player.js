@@ -9,7 +9,7 @@ import { WORLD, XP_LEVELS, MAX_LEVEL, itemById, spellById, consumableById,
          classEffectsFor, requiredClassForItem, isTameableBeast, ENEMY_TYPES,
          PLAYER_HP, OOC_DELAY, oocRegenFor, weaponDurabilityFor,
          SWING_TIME, swingTimeFor, PLAYER_ENERGY, PLAYER_MANA, energyRegenFor, manaRegenFor,
-         attackEnergyFor, abilityEnergyFor, abilityManaFor, CASTER_CLASSES } from './config.js';
+         attackEnergyFor, abilityEnergyFor, abilityManaFor, CASTER_CLASSES , canWield, wieldError } from './config.js';
 import { makeMan, makeAxe, makeBow, makePickaxe, makeTorchMesh, makeClub,
          makeSword, makeHandSpear, makeCrossbow, makeShield, applyWornGear } from './models.js';
 import { audio } from './audio.js';
@@ -276,6 +276,16 @@ export class Player {
         'Requires Beastmaster class to equip', '#ffcc66');
       audio.sfx('error', 0.4);
       return false;
+    }
+    // Casters are not soldiers. Same gate as the class requirement above, and it
+    // respects classRulesEnabled so the MOBA and the editor stay unconstrained.
+    if (this.hooks.classRulesEnabled?.() !== false) {
+      const werr = wieldError(this.selectedClass, item);
+      if (werr) {
+        this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2), werr, '#ffcc66');
+        audio.sfx('error', 0.4);
+        return false;
+      }
     }
     if (item.level > this.level) { // dropped gear waits until you grow into it
       this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
@@ -2374,14 +2384,20 @@ export class Player {
     const oldMaxE = this.maxEnergy || 0;
     // Warrior/Rogue stamina passives: a deeper pool and a faster refill are the
     // whole identity of the melee classes, so they scale the base curve.
-    this.maxEnergy = Math.round(PLAYER_ENERGY(this.level)
-      * (1 + (this.classEffects.maxEnergyPct || 0)));
+    // A staff is held, not worn, so its stats come off the weapon slot — which
+    // the gear loop above skips on purpose (it only sums armour).
+    const held = equipped('weapon');
+    const staffMana = held?.stats?.mana || 0;
+    const staffEnergy = held?.stats?.energy || 0;      // negative: a focus costs you stamina
+    this.spellPower = 1 + (held?.stats?.spellPower || 0);
+    this.maxEnergy = Math.max(20, Math.round(PLAYER_ENERGY(this.level)
+      * (1 + (this.classEffects.maxEnergyPct || 0)) + staffEnergy));
     if (this.maxEnergy > oldMaxE) this.energy = (this.energy || 0) + (this.maxEnergy - oldMaxE);
     this.energy = Math.max(0, Math.min(this.energy ?? this.maxEnergy, this.maxEnergy));
     const canMana = this.hooks.classRulesEnabled?.() === false
       || CASTER_CLASSES.has(this.selectedClass);
     const oldMaxM = this.maxMana || 0;
-    this.maxMana = canMana ? PLAYER_MANA(this.level) : 0;
+    this.maxMana = canMana ? PLAYER_MANA(this.level) + staffMana : 0;
     if (this.maxMana > oldMaxM) this.mana = (this.mana || 0) + (this.maxMana - oldMaxM);
     this.mana = Math.max(0, Math.min(this.mana ?? this.maxMana, this.maxMana));
     this.energyRegen = energyRegenFor(this.level)
@@ -2445,7 +2461,6 @@ export class Player {
     this.spellCdMult = 1;
     this.essenceMult = 1 + (this.classEffects.essenceMult || 0);
     this.meatMult = 1 + (this.classEffects.meatMult || 0);
-    this.spellPower = 1;
     this.spellDuration = 1;
     this.gatherMult = 1 + 0.15 * s.gather;
     // expedition gear: each comfort lives in its own slot now (no more flags)

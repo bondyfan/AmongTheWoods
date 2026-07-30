@@ -438,6 +438,39 @@ export const attackEnergyFor = (weapon) =>
 // spend energy, casters spend mana. Scaled off the skill's unlock level so a
 // starter button stays spammable and a capstone is a real commitment.
 export const CASTER_CLASSES = new Set(['mage', 'priest']);
+
+// What a caster is allowed to hold. Mages and priests are not soldiers: the
+// martial styles — swords, spears, bows, crossbows — belong to the warrior, the
+// beastmaster and the rogue, and no amount of levelling changes that.
+//
+// Axes and clubs are TOOLS as much as weapons, so those are allowed up to the
+// Stone Axe (dmg 76, the second-worst axe) and no further; a caster can fell a
+// tree, just badly. Picks are deliberately exempt at every tier — they are how
+// you mine, and walling two classes out of iron ore would break the crafting
+// tree rather than flavour the class.
+export const CASTER_WEAPON_CAP = 76;                       // = Stone Axe
+const MARTIAL_STYLES = new Set(['sword', 'spear', 'bow', 'crossbow']);
+const CASTER_FREE_STYLES = new Set(['staff', 'fists', 'pick']);
+
+export function canWield(classId, item) {
+  if (!CASTER_CLASSES.has(classId)) return true;           // martial classes: anything
+  const w = item?.weapon;
+  if (!w) return true;                                     // not a weapon at all
+  if (CASTER_FREE_STYLES.has(w.style)) return true;
+  if (MARTIAL_STYLES.has(w.style)) return false;
+  return (w.dmg ?? 0) <= CASTER_WEAPON_CAP;                // axes and clubs, capped
+}
+
+// Why the refusal, in words the player can act on.
+export function wieldError(classId, item) {
+  if (canWield(classId, item)) return null;
+  const w = item?.weapon;
+  const who = classId === 'priest' ? 'A priest' : 'A mage';
+  if (MARTIAL_STYLES.has(w?.style)) {
+    return `${who} never trained with a ${w.style}. Carry a staff.`;
+  }
+  return `${who} can manage a Stone Axe at best — this one is a soldier's weapon.`;
+}
 export const abilityEnergyFor = (skill) =>
   skill?.energy ?? Math.max(6, Math.round(12 + (skill?.level || 1) * 0.5));
 export const abilityManaFor = (skill) =>
@@ -607,6 +640,25 @@ export const ITEMS = [
       combo: [1, 1.2], bleed: 12 },
     desc: 'A brutal war axe: very wide swings and severe bleeding.' },
   // -- tools: pickaxes are the ONLY way to mine rock --
+  // ---- staves: the caster's weapon ----------------------------------------
+  // A staff trades bodily strength for arcane reach: little damage, a deeper
+  // mana pool and stronger spells, and it costs you 20 energy — you are holding
+  // a focus, not a tool, and there is no hand free for real work.
+  { id: 'apprenticeStaff', slot: 'weapon', level: 5, icon: '🪄', name: 'Apprentice Staff',
+    cost: { wood: 14, essence: 4 },
+    weapon: { kind: 'melee', style: 'staff', dmg: 40, cd: 1.9, range: 2.0, chop: 0.4, mine: 0, tier: 1 },
+    stats: { mana: 30, spellPower: 0.10, energy: -20 },
+    desc: 'A caster\'s focus: +30 mana and +10% spell power, at the cost of 20 energy. Poor in a brawl.' },
+  { id: 'elderStaff', slot: 'weapon', level: 15, icon: '🔱', name: 'Elder Staff',
+    cost: { wood: 22, essence: 14, wool: 6 },
+    weapon: { kind: 'melee', style: 'staff', dmg: 70, cd: 1.9, range: 2.1, chop: 0.4, mine: 0, tier: 2 },
+    stats: { mana: 70, spellPower: 0.25, energy: -20 },
+    desc: 'Seasoned heartwood: +70 mana and +25% spell power, at the cost of 20 energy.' },
+  { id: 'arcaneStaff', slot: 'weapon', level: 30, icon: '🌟', name: 'Arcane Staff',
+    cost: { wood: 30, essence: 40, iron: 10 },
+    weapon: { kind: 'melee', style: 'staff', dmg: 110, cd: 1.9, range: 2.2, chop: 0.4, mine: 0, tier: 3 },
+    stats: { mana: 140, spellPower: 0.45, energy: -20 },
+    desc: 'The full focus: +140 mana and +45% spell power, at the cost of 20 energy.' },
   { id: 'bonePick',   slot: 'weapon', level: 5, icon: '⛏️', name: 'Bone Pickaxe',  cost: { wood: 10, hide: 2, meat: 8 },
     weapon: { kind: 'melee', style: 'pick', dmg: 40, cd: 1.58, range: 1.7, chop: 0, mine: 1, tier: 1,
       pick: true, armoredBonus: 1.65, armorBreak: 0.2 },
