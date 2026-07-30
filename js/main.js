@@ -2307,8 +2307,50 @@ function warmUpAndReveal() {
   requestAnimationFrame(step);
 }
 
+// ---- first-run view picker -------------------------------------------------
+// Shown once, over the live world, so the two options can be SEEN rather than
+// described. Deliberately not a modal and not on the menu: the point is that the
+// world is already there behind it.
+const VIEW_PICK_KEY = 'atw-viewpick-done';
+
+function maybeAskViewMode() {
+  if (localStorage.getItem(VIEW_PICK_KEY)) return;
+  if (game.mode !== 'play' || game.kind !== 'survival') return;
+  const el = $id('view-pick');
+  if (!el || !el.classList.contains('hidden')) return;
+  el.classList.remove('hidden', 'touched');
+  const opts = [...el.querySelectorAll('.vp-opt')];
+  const go = $id('vp-confirm');
+  let picked = null;
+  go.disabled = true;
+  for (const b of opts) {
+    b.classList.remove('sel');
+    b.onclick = () => {
+      picked = b.dataset.rpg === '1';
+      el.classList.add('touched');          // stop the pulse once engaged
+      opts.forEach(o => o.classList.toggle('sel', o === b));
+      go.disabled = false;
+      // apply it LIVE, so Confirm is agreeing with something you can see
+      settings.rpgView = picked;
+      $id('set-rpgview').checked = picked;
+      applyViewMode();
+      audio.sfx('click', 0.4);
+    };
+  }
+  go.onclick = () => {
+    if (picked === null) return;
+    localStorage.setItem(VIEW_PICK_KEY, '1');
+    localStorage.setItem('atw-settings', JSON.stringify(settings));
+    el.classList.add('hidden');
+    audio.sfx('click', 0.45);
+    ui.toast('⚙️ You can switch views any time in Settings → Graphics → RPG view mode.', 'level');
+  };
+}
+
 function startPlaying() {
   ui.hideMenu();
+  // after the enter-overlay lifts, so the picker lands on a world you can see
+  setTimeout(maybeAskViewMode, 1400);
   const ov = $id('enter-overlay');
   if (ov) { ov.classList.remove('hidden', 'fade'); } // cover the menu→game cut at once
   hideJoinCodeHud(); // solo runs show nothing; a co-op host re-shows it after host()

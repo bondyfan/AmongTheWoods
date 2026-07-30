@@ -82,5 +82,28 @@ console.log('\n-- landscape is asked for in all three places it can be --');
     'gated on a coarse pointer — a narrow desktop window is not a phone');
 }
 
+console.log('\n-- the first-run view picker --');
+{
+  const main = readFileSync('js/main.js', 'utf8');
+  const html = readFileSync('index.html', 'utf8');
+  const css = readFileSync('css/style.css', 'utf8');
+  ok(/id="view-pick"/.test(html) && /class="hidden"/.test(html.split('id="view-pick"')[1].slice(0, 40)),
+    'it starts hidden');
+  ok((html.match(/class="vp-opt"/g) ?? []).length === 2, 'exactly two choices');
+  ok(/data-rpg="1"/.test(html) && /data-rpg="0"/.test(html), '3D and top-down');
+  ok(/vp-blink/.test(css), 'the buttons blink for attention');
+  ok(/#view-pick\.touched \.vp-opt \{ animation: none/.test(css),
+    'and STOP blinking once touched — a control that nags after you engage is rude');
+  ok(/localStorage\.getItem\(VIEW_PICK_KEY\)/.test(main), 'shown once, ever');
+  ok(/localStorage\.setItem\(VIEW_PICK_KEY, '1'\)/.test(main), 'and remembered on confirm');
+  ok(/go\.disabled = true/.test(main), 'Confirm is dead until something is picked');
+  ok(/applyViewMode\(\);/.test(main.split('maybeAskViewMode')[1] ?? ''),
+    'the choice applies LIVE, so Confirm agrees with something you can see');
+  ok(/Settings . Graphics . RPG view mode/.test(main),
+    'and the tip afterwards says exactly where to change it again');
+  ok(/game\.kind !== 'survival'/.test(main),
+    'survival only — it would be nonsense in the MOBA');
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 process.exit(fail ? 1 : 0);

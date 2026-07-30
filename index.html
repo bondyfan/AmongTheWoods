@@ -30,6 +30,17 @@
   <div id="rotate-me"><div><span class="rot-icon">📱</span>
     <b>Turn your phone sideways</b>
     <small>Among The Woods is played in landscape.</small></div></div>
+  <!-- First run only: pick a camera before anything else. Two small buttons at
+       the top rather than a modal — the world is already on screen behind them,
+       so you can SEE what each one means while choosing. -->
+  <div id="view-pick" class="hidden">
+    <b class="vp-title">Choose your view</b>
+    <div class="vp-row">
+      <button class="vp-opt" data-rpg="1">🎮 3D<small>behind the shoulder</small></button>
+      <button class="vp-opt" data-rpg="0">🗺️ Top-down<small>classic overhead</small></button>
+    </div>
+    <button id="vp-confirm" class="vp-go">Confirm</button>
+  </div>
   <div id="game"></div>
 
   <!-- mandatory Google sign-in gate: nothing is reachable until you're in -->
