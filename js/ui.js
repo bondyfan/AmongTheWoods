@@ -2,7 +2,7 @@
 
 import * as THREE from 'three';
 import { XP_LEVELS, MAX_LEVEL, MAX_SPELL_SLOTS, SLOT_KEYS, ENEMY_TYPES, RES_ICONS,
-         WEAPON_RING_SLOT, WEAPON_RING_MAX, consumableById,
+         WEAPON_RING_SLOT, WEAPON_RING_MAX, ringPlace, consumableById,
          fmtResource, itemById, spellById, classSkillById, classActiveInfo } from './config.js';
 import { itemIcon, skillArt } from './icons.js';
 import { attachTip } from './tooltip.js';
@@ -53,6 +53,10 @@ export class UI {
     $('spellbar').addEventListener('pointerdown', (e) => {
       const slot = e.target.closest('.spell-slot');
       if (!slot) return;
+      // A ring cell is its own little drag source: pulling one off the bar
+      // removes THAT weapon rather than clearing the whole ring.
+      const ringCell = e.target.closest('.ring-cell');
+      if (ringCell) { this._dragRingCell(e, slot, Number(ringCell.dataset.ringIndex)); return; }
       const i = Number(slot.dataset.slot);
       let ghost = null, dragging = false;
       const sx = e.clientX, sy = e.clientY;
@@ -101,6 +105,48 @@ export class UI {
       window.addEventListener('pointerup', onUp);
     });
 
+    this._menuMusicHook();
+  }
+
+  _dragRingCell(e, slot, k) {
+    const ring = this._player?.spellSlots?.[WEAPON_RING_SLOT];
+    if (!Array.isArray(ring) || !ring[k]) return;
+    e.stopPropagation();
+    const sx = e.clientX, sy = e.clientY;
+    let ghost = null, dragging = false;
+    const onMove = (ev) => {
+      if (!dragging && Math.hypot(ev.clientX - sx, ev.clientY - sy) > 8) {
+        dragging = true;
+        ghost = document.createElement('div');
+        ghost.className = 'spell-slot drag-ghost';
+        ghost.innerHTML = `<span class="spell-icon">${slot.querySelector('.ring-cell[data-ring-index="' + k + '"]')?.innerHTML ?? ''}</span>`;
+        document.body.appendChild(ghost);
+      }
+      if (ghost) { ghost.style.left = (ev.clientX - 26) + 'px'; ghost.style.top = (ev.clientY - 26) + 'px'; }
+    };
+    const onUp = (ev) => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      ghost?.remove();
+      if (!dragging) return;
+      this._slotClickSuppressUntil = performance.now() + 200;
+      const onBar = document.elementFromPoint(ev.clientX, ev.clientY)?.closest?.('#actionbar');
+      const target = document.elementFromPoint(ev.clientX, ev.clientY)?.closest?.('.ring-cell');
+      if (target) {                       // reorder inside the ring
+        this._player.spellSlots[WEAPON_RING_SLOT] =
+          ringPlace(ring, ring[k], Number(target.dataset.ringIndex));
+      } else if (!onBar) {                // dragged clean off — remove it
+        this._player.spellSlots[WEAPON_RING_SLOT] = ring.filter((_, n) => n !== k);
+      } else return;                      // released on the bar but nowhere useful
+      audio.sfx('click', 0.4);
+      this.updateSpellbar(this._player);
+      this.onSlotsChanged?.();
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }
+
+  _menuMusicHook() {
     // menu music needs a user gesture
     const tryMenuMusic = () => {
       if ($('menu').classList.contains('hidden')) return;
@@ -292,6 +338,34 @@ export class UI {
     }
   }
 
+  // The Q ring holds five weapons behind ONE key, which made it the only slot
+  // you could add to but never edit: no way to see position 3, swap it, or drop
+  // a specific one. So Q fans out into its five places — always on hover, and
+  // automatically while a weapon is being dragged, so there is somewhere to aim.
+  _paintRingFan(el, ring, player) {
+    let fan = el.querySelector('.ring-fan');
+    if (!fan) {
+      fan = document.createElement('div');
+      fan.className = 'ring-fan';
+      el.appendChild(fan);
+    }
+    for (let k = 0; k < WEAPON_RING_MAX; k++) {
+      let cell = fan.children[k];
+      if (!cell) {
+        cell = document.createElement('div');
+        cell.className = 'ring-cell';
+        cell.dataset.ringIndex = k;
+        fan.appendChild(cell);
+      }
+      const id = ring[k];
+      const it = id ? itemById(id) : null;
+      cell.classList.toggle('empty', !it);
+      cell.classList.toggle('equipped-slot', !!it && player.equipment.weapon === id);
+      cell.innerHTML = it ? itemIcon(it) : `<span class="ring-num">${k + 1}</span>`;
+      cell.title = it ? `${it.name} — drag off to remove` : `Ring slot ${k + 1} — drop a weapon here`;
+    }
+  }
+
   updateSpellbar(player) {
     this._player = player; // slot drag-reorder needs it
     const bar = $('spellbar');
@@ -330,10 +404,12 @@ export class UI {
             <span class="tt-title"><b>Weapon ring</b><span class="tt-sub">${raw.length}/${WEAPON_RING_MAX} · key Q</span></span></div>
           <div class="tt-desc">${raw.map(w => (w === player.equipment.weapon ? '▶ ' : '') 
             + (itemById(w)?.name ?? w)).join('<br>')}</div>
-          <div class="tt-hint">Press Q to swap to the next one · drag a weapon here to add it</div>`;
+          <div class="tt-hint">Press Q to swap to the next one · hover to rearrange the ring</div>`;
         el.dataset.ring = raw.length;
+        this._paintRingFan(el, raw, player);
         continue;
       }
+      if (i === WEAPON_RING_SLOT) this._paintRingFan(el, Array.isArray(raw) ? raw : [], player);
       el.removeAttribute('data-ring');
       const id = Array.isArray(raw) ? raw[0] : raw;
       // consumables and the berry stack are slottable, and are neither spells

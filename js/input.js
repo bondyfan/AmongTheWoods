@@ -26,9 +26,8 @@ class Input {
       const typing = /^(INPUT|TEXTAREA)$/.test(e.target.tagName);
       // Space is JUMP — stop it scrolling the page.
       if (e.code === 'Space' && !typing) e.preventDefault();
-      // Alt is hold-to-attack on Windows; left alone it pops the browser's menu
-      // bar and steals keyboard focus mid-fight. Meta is deliberately NOT
-      // prevented — swallowing Cmd would break Cmd+R, Cmd+T and the rest.
+      // Alt/Option is hold-to-attack on both platforms; left alone it pops the
+      // browser's menu bar on Windows and steals keyboard focus mid-fight.
       if ((e.code === 'AltLeft' || e.code === 'AltRight') && !typing) e.preventDefault();
       if (e.repeat) return;
       // edge-triggered: a jump is one press, not a hold
@@ -40,7 +39,7 @@ class Input {
     window.addEventListener('keyup', (e) => {
       this.keys.delete(e.code);
       // macOS suppresses keyup for every other key while Cmd is held, so WASD
-      // would stick down the moment you let go. Releasing Cmd clears them.
+      // sticks down if the player ever taps Cmd mid-run. Releasing it clears them.
       if (e.code === 'MetaLeft' || e.code === 'MetaRight') this.keys.clear();
     });
     window.addEventListener('blur', () => {
@@ -99,12 +98,14 @@ class Input {
   // Right-click remains a quick repeating attack in top-down mode. Left-click
   // is edge-tracked separately so holding and releasing can charge a strike.
   get quickAttack() { return !this.rpgMode && this.mouse.right; }
-  // Hold the attack button: left mouse, the on-screen button, or the modifier
-  // under your thumb — Cmd on a Mac, Alt on Windows. Space used to do this and
-  // is now JUMP.
+  // Hold the attack button: left mouse, the on-screen button, or Alt/Option.
+  // NOT Cmd — the browser owns it. Holding Cmd fires Cmd+S ("save page as"),
+  // Cmd+W (close tab) and friends the moment another key is touched, and
+  // preventDefault'ing it to stop that would also break Cmd+R and Cmd+T. There
+  // is no version of Cmd-to-attack that behaves. Option is free on macOS and Alt
+  // is free on Windows, and they are the same physical key.
   get attackHeld() {
     return this.mouse.left || this.touchAttack
-      || this.keys.has('MetaLeft') || this.keys.has('MetaRight')
       || this.keys.has('AltLeft') || this.keys.has('AltRight');
   }
   // One press = one jump. Consumed by the reader so a held Space doesn't pogo.

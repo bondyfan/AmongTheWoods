@@ -1027,6 +1027,35 @@ export const SLOT_CODES = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5',
 // the bag, swap to the axe, chop, swap back" into a single key.
 export const WEAPON_RING_SLOT = 9;          // index of Q in the arrays above
 export const WEAPON_RING_MAX = 5;
+
+// Put `id` at position `idx` of the weapon ring and hand back the new ring.
+// Pure, because the placement rules are fiddlier than they look: dropping a
+// weapon that is ALREADY on the ring is a move (it must not end up twice), a
+// move from a lower index shifts everything after it, and the ring must stay
+// gap-free or Q would cycle through holes.
+export function ringPlace(ring, id, idx, max = WEAPON_RING_MAX) {
+  const cur = (ring ?? []).filter(Boolean);
+  if (idx == null || idx < 0 || idx >= max) {           // no position given: append
+    if (cur.includes(id) || cur.length >= max) return cur;
+    return [...cur, id];
+  }
+  const from = cur.indexOf(id);
+  const out = cur.slice();
+  if (from >= 0) {
+    // Already on the ring, so this is a REORDER — swap, never overwrite.
+    // Replacing would silently destroy the weapon you dropped onto, which is a
+    // rotten thing to do to someone who was only rearranging.
+    if (from === idx) return cur;
+    if (idx < out.length) [out[from], out[idx]] = [out[idx], out[from]];
+    else { out.splice(from, 1); out.push(id); }
+    return out.filter(Boolean).slice(0, max);
+  }
+  // A new weapon out of the inventory takes that place, and whatever sat there
+  // comes off the ring — that IS the instruction when you aim at a full slot.
+  if (idx < out.length) out[idx] = id; else out.push(id);
+  return out.filter(Boolean).slice(0, max);
+}
+
 export const SPELLS = [
   { id: 'haste',     level: 7,  icon: '⚡', name: 'Haste',       cost: { meat: 40, essence: 2 }, cd: 90,
     desc: 'Double attack speed for 10 s.' },

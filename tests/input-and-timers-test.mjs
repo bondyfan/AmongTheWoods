@@ -55,7 +55,7 @@ console.log('-- and the swing cooldown ticks in update(), where it belongs --');
 }
 
 // ---- the real Input class, driven by synthetic key events -----------------
-console.log('\n-- Space is JUMP, and hold-to-attack is Cmd / Alt --');
+console.log('\n-- Space is JUMP, and hold-to-attack is Alt/Option --');
 const handlers = {};
 globalThis.window = {
   addEventListener: (t, fn) => { (handlers[t] ??= []).push(fn); },
@@ -83,14 +83,20 @@ input.takeJump();
 fire('keydown', { code: 'Space', repeat: true });
 ok(input.takeJump() === false, 'auto-repeat while held does not pogo');
 
-down('MetaLeft');
-ok(input.attackHeld === true, 'Cmd holds the attack (macOS)');
-up('MetaLeft');
-ok(input.attackHeld === false, 'and releasing it stops');
-
 down('AltLeft');
-ok(input.attackHeld === true, 'Alt holds the attack (Windows)');
+ok(input.attackHeld === true, 'Alt/Option holds the attack');
 up('AltLeft');
+ok(input.attackHeld === false, 'and releasing it stops');
+down('AltRight');
+ok(input.attackHeld === true, 'the right-hand Alt works too');
+up('AltRight');
+
+// Cmd cannot be an attack key: held down it turns every other keypress into a
+// browser shortcut (Cmd+S "save page as", Cmd+W close tab), and swallowing it
+// with preventDefault would break Cmd+R and Cmd+T as well.
+down('MetaLeft');
+ok(input.attackHeld === false, 'Cmd does NOT attack — the browser owns it');
+up('MetaLeft');
 
 console.log('\n-- releasing Cmd clears stuck movement keys --');
 {

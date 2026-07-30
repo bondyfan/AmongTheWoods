@@ -1183,6 +1183,10 @@ export class Panels {
       if (!dragging && Math.hypot(e.clientX - sx, e.clientY - sy) > 8) {
         dragging = true;
         if (cell.kind === 'item') document.body.classList.add('slotting');
+        // only a WEAPON can enter the Q ring, so only a weapon fans it open
+        if (cell.kind === 'item' && itemById(cell.id)?.slot === 'weapon') {
+          document.body.classList.add('slotting-weapon');
+        }
         ghost = div.cloneNode(true);
         ghost.className = 'inv-cell drag-ghost';
         document.body.appendChild(ghost);
@@ -1196,15 +1200,19 @@ export class Panels {
           || (cell.kind === 'res' && cell.id === 'berry');
         const over = canSlot
           ? document.elementFromPoint(e.clientX, e.clientY)?.closest?.('.spell-slot') : null;
-        document.querySelectorAll('.spell-slot.drop-hot').forEach(s => s.classList.remove('drop-hot'));
+        document.querySelectorAll('.spell-slot.drop-hot, .ring-cell.drop-hot')
+          .forEach(s => s.classList.remove('drop-hot'));
         over?.classList.add('drop-hot');
+        // highlight the exact ring position under the cursor, not just Q
+        document.elementFromPoint(e.clientX, e.clientY)?.closest?.('.ring-cell')
+          ?.classList.add('drop-hot');
       }
     };
     const onUp = (e) => {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       ghost?.remove();
-      document.body.classList.remove('slotting');
+      document.body.classList.remove('slotting', 'slotting-weapon');
       document.querySelectorAll('.spell-slot.drop-hot').forEach(s => s.classList.remove('drop-hot'));
       if (!dragging) { this._invClick(cell); return; }
       const under = document.elementFromPoint(e.clientX, e.clientY);
@@ -1214,7 +1222,10 @@ export class Panels {
       const slottable = cell.kind === 'item' || cell.kind === 'consumable'
         || (cell.kind === 'res' && cell.id === 'berry');
       if (barSlot && slottable) {
-        this.hooks.onAssignSlot?.(Number(barSlot.dataset.slot), cell.id);
+        // dropped on a specific place in the Q ring rather than on Q itself
+        const ringCell = under?.closest?.('.ring-cell');
+        this.hooks.onAssignSlot?.(Number(barSlot.dataset.slot), cell.id,
+          ringCell ? Number(ringCell.dataset.ringIndex) : null);
         this.refresh();
         return;
       }
@@ -1263,6 +1274,10 @@ export class Panels {
         dragging = true;
         // lift the 1–9 bar above the modal and enlarge its slots as drop targets
         document.body.classList.add('slotting');
+        // only a WEAPON can enter the Q ring, so only a weapon opens its fan
+        if (cell.kind === 'item' && itemById(cell.id)?.slot === 'weapon') {
+          document.body.classList.add('slotting-weapon');
+        }
         ghost = div.cloneNode(true);
         ghost.className = 'inv-item drag-ghost spell-drag-ghost';
         document.body.appendChild(ghost);
@@ -1279,7 +1294,7 @@ export class Panels {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       ghost?.remove();
-      document.body.classList.remove('slotting');
+      document.body.classList.remove('slotting', 'slotting-weapon');
       document.querySelectorAll('.spell-slot.drop-hot').forEach(s => s.classList.remove('drop-hot'));
       if (!dragging) { this.hooks.onToggleSpell(id); return; }
       const barSlot = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('.spell-slot');

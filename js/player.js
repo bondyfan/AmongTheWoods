@@ -17,9 +17,9 @@ import { makeHumanMan, humanReady, humanModelEnabled, assertContract, CLIP } fro
 
 const MAX_CLIMB_SLOPE = 1.0; // steeper ground than this is a wall
 const GRAVITY = 34;
-// ~1.2 m at GRAVITY 34: high enough to clear a fence rail, low enough that it
-// never reads as floaty. v = sqrt(2 * g * h).
-const JUMP_V = 9;
+// ~2.4 m at GRAVITY 34 — doubled from the first pass, which read as a hop.
+// v = sqrt(2 * g * h), so double the HEIGHT is sqrt(2) on the velocity.
+const JUMP_V = 12.8;
 const SAFE_FALL = 5.5;       // meters of free fall before damage kicks in
 const CRIT_CHANCE = 0.1;     // every attack can crit for CRIT_MULT damage
 const CRIT_MULT = 1.6;   // base crit damage; gear and passives move player.critMult

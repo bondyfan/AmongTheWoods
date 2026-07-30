@@ -1756,3 +1756,35 @@ select:has(> option.opt-warn:checked) { color: #e0605a; border-color: rgba(224,9
   font-size: 10px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.9);
 }
 #target-frame.tf-player .tf-bar > i { background: linear-gradient(#5fa8e0, #2f6ea1); }
+
+/* ---- Q, the weapon ring, fanned out ---------------------------------------
+   Five weapons behind one key meant Q was the only slot you could add to but
+   never edit — no way to see position 3, swap it, or drop one. The fan opens on
+   hover, and automatically while a weapon is in flight so there is something to
+   aim at. */
+#spellbar .spell-slot { position: relative; }
+.ring-fan {
+  position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+  display: none; gap: 4px; padding: 5px;
+  background: rgba(10, 16, 8, 0.92); border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 10px; box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+  z-index: 40;
+}
+/* a little nose pointing back down at Q */
+.ring-fan::after {
+  content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+  border: 6px solid transparent; border-top-color: rgba(10, 16, 8, 0.92);
+}
+#spellbar .spell-slot[data-slot="9"]:hover .ring-fan,
+body.slotting-weapon #spellbar .spell-slot[data-slot="9"] .ring-fan { display: flex; }
+.ring-cell {
+  width: 38px; height: 38px; border-radius: 8px; flex: 0 0 38px;
+  display: flex; align-items: center; justify-content: center; font-size: 21px;
+  background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.16);
+  cursor: grab;
+}
+.ring-cell.empty { border-style: dashed; opacity: .5; cursor: default; }
+.ring-cell .ring-num { font-size: 12px; opacity: .6; }
+.ring-cell.equipped-slot { border-color: #cfe38a; box-shadow: 0 0 0 1px #cfe38a inset; }
+.ring-cell.drop-hot { border-color: #ffd479; background: rgba(255, 212, 121, 0.18); }
+.ring-cell img, .ring-cell svg { width: 26px; height: 26px; }

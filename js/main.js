@@ -8,7 +8,7 @@ import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOB
          questXpFor, BIOME_LAIRS, CAMP_BUILDINGS, trainingLevelFor, CLASS_TREES,
          classTreeById, classSkillById, classSkillRequiredLevel, classSkillMeatCost, classSkillEssenceCost,
          CLASS_CHOOSE_COST, firstClassSkillId, MAX_SPELL_SLOTS, SLOT_CODES,
-         WEAPON_RING_SLOT, WEAPON_RING_MAX } from './config.js';
+         WEAPON_RING_SLOT, WEAPON_RING_MAX, ringPlace } from './config.js';
 import { makeAimArc, updateAimArc, makeRaft, makeBlacksmith, makeHorse, makeWisp, makeMan,
          makeGriffin, makeGriffinRoost, makeTumbleweed, BAKED_MAT, WATER_SHADERS,
          makeSkyDome, setSpectralLook, makeCorpse } from './models.js';
@@ -284,7 +284,7 @@ const panels = new Panels({
   onBuild: (id, lane) => buildBase(id, lane),
   onBuyConsumable: (id) => { buyConsumable(id); requestAutosave(); },
   onChestChange: () => mp?.sendCampSync?.(),
-  onAssignSlot: (i, id) => {
+  onAssignSlot: (i, id, ringIdx = null) => {
     while (player.spellSlots.length <= i) player.spellSlots.push(undefined);
     // ---- Q: the weapon ring ----
     // Q holds a LIST of up to five weapons/tools rather than one thing, and
@@ -298,9 +298,21 @@ const panels = new Panels({
         return;
       }
       const ring = weaponRing();
+      // Dropped on a SPECIFIC place in the fanned-out ring: that place is the
+      // instruction, so it replaces whatever sat there. Dropped on Q itself:
+      // append, as before.
+      if (ringIdx != null && ringIdx >= 0 && ringIdx < WEAPON_RING_MAX) {
+        const next = ringPlace(ring, id, ringIdx);
+        if (next === ring || next.join() === ring.join()) return;   // no-op drop
+        player.spellSlots[i] = next;
+        ui.toast(`🔁 ${it.name} → ring slot ${ringIdx + 1}.`, 'level');
+        audio.sfx('click', 0.4);
+        ui.updateSpellbar(player);
+        return;
+      }
       if (ring.includes(id)) { ui.toast(`${it.name} is already on the ring.`, ''); return; }
       if (ring.length >= WEAPON_RING_MAX) {
-        ui.toast(`🔁 The ring holds ${WEAPON_RING_MAX} — clear it first (drag it off Q).`, 'boss');
+        ui.toast(`🔁 The ring is full — drop this on one of its five places to replace that weapon.`, 'boss');
         audio.sfx('error', 0.4);
         return;
       }
