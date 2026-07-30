@@ -1854,3 +1854,25 @@ body.slotting-weapon #spellbar .spell-slot[data-slot="9"] .ring-fan { display: f
     overflow: hidden;
   }
 }
+
+/* ---- short landscape screens ---------------------------------------------
+   A phone held sideways is about 390 px tall, and the menu was laid out for a
+   tall page: title, tagline, three big cards, two footer buttons and three rows
+   of key hints. On a short screen that overflows, and with the page clipped the
+   cards simply vanish off the edge — which is what "it looks stupid" was.
+
+   So on ANY short viewport (a rotated phone and a genuinely landscape one hit
+   this identically) the menu scrolls instead of being cut, and the parts that
+   are decoration rather than function shrink first. */
+/* WASD / Esc / LMB is desktop advice on a device with no keyboard at all */
+@media (pointer: coarse) { #menu .controls { display: none; } }
+@media (max-height: 480px) {
+  #menu { overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 8px 0 12px; }
+  #menu h1 { font-size: 30px; line-height: 1.05; margin: 2px 0 4px; }
+  #menu .tagline { font-size: 12px; margin-bottom: 8px; }
+  #mode-select { gap: 8px; }
+  #mode-select button { padding: 8px 12px; font-size: 14px; min-width: 0; }
+  #mode-select button small { font-size: 10px; }
+  #menu .controls { font-size: 10px; }
+  #menu > .menu-inner > .hint { font-size: 10px; }
+}
