@@ -1267,8 +1267,10 @@ export const CLASS_TREES = [
       P('mage_archmage', '🔮', 'Archmage', 44, 'Ground spells last 10% longer per rank.', { zoneDuration: 0.1 }),
     ],
     actives: [
-      A('mage_fireball', '🔥', 'Fireball', 3, 'Blast one target and ignite it.', 'magicTarget',
-        { cd: 7, element: 'fire', range: 15, damage: [45, 75, 110], burn: [5, 9, 14] }),
+      A('mage_fireball', '🔥', 'Fireball', 3, 'Your bread and butter: a 4 s cast with NO cooldown, so it can be thrown back to back for as long as the mana holds. Hits for 45/75/110 and leaves a burn of 5/9/14. Taking a hit while casting interrupts it.', 'magicTarget',
+        { cd: 0, element: 'fire', range: 15, windup: 4, damage: [45, 75, 110], burn: [5, 9, 14] }),
+      A('mage_fire_blast', '💢', 'Fire Blast', 5, 'The answer to a 4 s cast: fire it INSTANTLY, on an 8 s cooldown, for 30/50/72 damage and a 3/6/9 burn. Nothing can interrupt what has no cast time — this is what you throw while running, or the moment Fireball gets broken.', 'magicTarget',
+        { cd: 8, element: 'fire', range: 12, damage: [30, 50, 72], burn: [3, 6, 9] }),
       A('mage_frostbolt', '❄️', 'Frostbolt', 7, 'Damage and briefly freeze one target.', 'magicTarget',
         { cd: 8, element: 'frost', range: 15, damage: [38, 65, 95], stun: [0.8, 1.2, 1.5] }),
       A('mage_flamestrike', '🌋', 'Flamestrike', 12, 'Burn the aimed ground for several seconds.', 'zone',

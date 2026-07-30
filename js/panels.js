@@ -262,7 +262,10 @@ export class Panels {
       const info = skill.type === 'active' ? classActiveInfo(skill, n) : classPassiveInfo(skill, n);
       return `<div class="rr${n === rank ? ' cur' : ''}"><b>R${n}</b><span>Lv ${classSkillRequiredLevel(skill, n)} · ${info.join(' · ')}</span></div>`;
     }).join('');
-    const kind = skill.type === 'active' ? `⚡ Active · ${skill.cd}s cooldown` : '🛡️ Passive';
+    // cd 0 means the CAST TIME is the limiter, so say that instead of "0s cooldown"
+    const gate = skill.cd > 0 ? `${skill.cd}s cooldown`
+      : skill.windup ? `${skill.windup}s cast · no cooldown` : 'instant · no cooldown';
+    const kind = skill.type === 'active' ? `⚡ Active · ${gate}` : '🛡️ Passive';
     return `<div class="tt-head"><span class="tt-ico">${skillArt(skill.id, skill.icon)}</span>
         <span class="tt-title"><b>${skill.name}</b><span class="tt-sub">${kind} · Lv ${skill.level}</span></span></div>
       <div class="tt-desc">${skill.desc}</div>
@@ -744,7 +747,10 @@ export class Panels {
       node.innerHTML = `<div class="node-art">${skillArt(skill.id, skill.icon)}${draggable ? '<span class="drag-grip">⠿</span>' : ''}</div>
         <div class="node-info">
           <div class="node-top"><b>${skill.name}</b>
-            <span class="node-kind">${skill.type === 'active' ? `⚡ ${skill.cd}s cooldown` : '🛡️ passive'} · Lv ${skill.level}</span></div>
+            <span class="node-kind">${skill.type === 'active'
+              ? (skill.cd > 0 ? `⚡ ${skill.cd}s cd`
+                : skill.windup ? `⚡ ${skill.windup}s cast` : '⚡ instant')
+              : '🛡️ passive'} · Lv ${skill.level}</span></div>
           <div class="node-pips">${pips}<span class="node-rank">${rank}/${skill.maxRank}</span>${slotTag}</div>
           <p class="node-desc">${skill.desc}</p>
           <div class="node-ranks">${rankRows}</div>
