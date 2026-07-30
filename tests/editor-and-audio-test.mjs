@@ -80,7 +80,9 @@ console.log('\n-- landscape is FORCED, not asked for --');
     'fullscreen locks it where the browser allows a lock');
   ok(!/rotate-me/.test(css) && !/Turn your phone/.test(readFileSync('index.html', 'utf8')),
     'no "please rotate" copy — the picture itself is the instruction');
-  ok(/transform: rotate\(90deg\)/.test(css), 'the page is drawn sideways instead');
+  // the exact declaration and its ORDER are pinned in tests/orient-test.mjs —
+  // here we only care that a 90-degree rotation is what happens
+  ok(/transform:[^;]*rotate\(90deg\)/.test(css), 'the page is drawn sideways instead');
   ok(/orientation: portrait/.test(css) && /pointer: coarse/.test(css),
     'on portrait phones only — a narrow desktop window is not a phone');
 
