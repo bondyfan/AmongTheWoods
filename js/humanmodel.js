@@ -63,6 +63,7 @@ const CLIP = {
   attack: 'Sword_Attack', punch: 'Punch_Jab', punchAlt: 'Punch_Cross',
   cast: 'Spell_Simple_Shoot', castIdle: 'Spell_Simple_Idle_Loop',
   block: 'Sword_Idle', hit: 'Hit_Chest', death: 'Death01', roll: 'Roll',
+  jumpStart: 'Jump_Start', jumpLoop: 'Jump_Loop', jumpLand: 'Jump_Land',
   sit: 'Sitting_Idle_Loop', interact: 'Interact',
 };
 export { CLIP };
@@ -347,6 +348,8 @@ export function makeHumanMan() {
       let want;
       if (s.sitting) want = CLIP.sit;
       else if (s.swimming) want = s.moving ? CLIP.swim : CLIP.swimIdle;
+      // airborne beats locomotion — the legs must not keep striding in mid-air
+      else if (s.airborne) want = CLIP.jumpLoop;
       else if (s.blocking) want = CLIP.block;
       else if (s.casting) want = CLIP.castIdle;
       else if (s.moving) want = s.speed > 6.4 ? CLIP.sprint : s.speed > 3.2 ? CLIP.jog : CLIP.walk;

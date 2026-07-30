@@ -3,6 +3,7 @@
 class Input {
   constructor() {
     this.keys = new Set();
+    this.jumpPressed = false;
     this.rpgMode = false;   // right button steers instead of attacking
     this.dragX = 0;         // accumulated right-drag, consumed per frame
     this.dragY = 0;
@@ -22,16 +23,29 @@ class Input {
     this.keyHandlers = new Map();
 
     window.addEventListener('keydown', (e) => {
-      // Space is the keyboard attack button — stop it scrolling the page
-      if (e.code === 'Space' && !/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) e.preventDefault();
+      const typing = /^(INPUT|TEXTAREA)$/.test(e.target.tagName);
+      // Space is JUMP — stop it scrolling the page.
+      if (e.code === 'Space' && !typing) e.preventDefault();
+      // Alt is hold-to-attack on Windows; left alone it pops the browser's menu
+      // bar and steals keyboard focus mid-fight. Meta is deliberately NOT
+      // prevented — swallowing Cmd would break Cmd+R, Cmd+T and the rest.
+      if ((e.code === 'AltLeft' || e.code === 'AltRight') && !typing) e.preventDefault();
       if (e.repeat) return;
+      // edge-triggered: a jump is one press, not a hold
+      if (e.code === 'Space' && !typing) this.jumpPressed = true;
       this.keys.add(e.code);
       const h = this.keyHandlers.get(e.code);
       if (h) h();
     });
-    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
+    window.addEventListener('keyup', (e) => {
+      this.keys.delete(e.code);
+      // macOS suppresses keyup for every other key while Cmd is held, so WASD
+      // would stick down the moment you let go. Releasing Cmd clears them.
+      if (e.code === 'MetaLeft' || e.code === 'MetaRight') this.keys.clear();
+    });
     window.addEventListener('blur', () => {
       this.keys.clear();
+      this.jumpPressed = false;
       this.mouse.left = false;
       this.mouse.right = false;
       this.leftPressed = false;
@@ -85,8 +99,16 @@ class Input {
   // Right-click remains a quick repeating attack in top-down mode. Left-click
   // is edge-tracked separately so holding and releasing can charge a strike.
   get quickAttack() { return !this.rpgMode && this.mouse.right; }
-  // Hold the attack button (left mouse OR spacebar OR the on-screen button).
-  get attackHeld() { return this.mouse.left || this.keys.has('Space') || this.touchAttack; }
+  // Hold the attack button: left mouse, the on-screen button, or the modifier
+  // under your thumb — Cmd on a Mac, Alt on Windows. Space used to do this and
+  // is now JUMP.
+  get attackHeld() {
+    return this.mouse.left || this.touchAttack
+      || this.keys.has('MetaLeft') || this.keys.has('MetaRight')
+      || this.keys.has('AltLeft') || this.keys.has('AltRight');
+  }
+  // One press = one jump. Consumed by the reader so a held Space doesn't pogo.
+  takeJump() { const j = this.jumpPressed; this.jumpPressed = false; return j; }
   get block() {
     return this.touchBlock || this.keys.has('ControlLeft') || this.keys.has('ControlRight') || this.keys.has('KeyV');
   }

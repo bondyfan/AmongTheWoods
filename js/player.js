@@ -17,6 +17,9 @@ import { makeHumanMan, humanReady, humanModelEnabled, assertContract, CLIP } fro
 
 const MAX_CLIMB_SLOPE = 1.0; // steeper ground than this is a wall
 const GRAVITY = 34;
+// ~1.2 m at GRAVITY 34: high enough to clear a fence rail, low enough that it
+// never reads as floaty. v = sqrt(2 * g * h).
+const JUMP_V = 9;
 const SAFE_FALL = 5.5;       // meters of free fall before damage kicks in
 const CRIT_CHANCE = 0.1;     // every attack can crit for CRIT_MULT damage
 const CRIT_MULT = 1.6;   // base crit damage; gear and passives move player.critMult
@@ -2730,8 +2733,12 @@ export class Player {
       return this.y;
     }
     if (this.y == null) { this.y = ground; this.vy = 0; this.fallFrom = null; }
-    if (this.y > ground + 0.3) {
-      if (this.fallFrom == null) { this.fallFrom = this.y; this.vy = 0; }
+    // `vy > 0` is a JUMP: the same solver carries it up and back down, so jumps
+    // and falls share one arc, one landing and one fall-damage rule.
+    this.airborne = this.y > ground + 0.3 || this.vy > 0;
+    if (this.airborne) {
+      // don't zero an upward launch — only a fall starts from rest
+      if (this.fallFrom == null) { this.fallFrom = this.y; if (this.vy < 0) this.vy = 0; }
       this.vy -= GRAVITY * dt;
       this.y = Math.max(ground, this.y + this.vy * dt);
       if (this.y <= ground + 1e-6) {
@@ -2973,6 +2980,12 @@ export class Player {
     }
 
     // timed effects
+    // attackT is the SWING COOLDOWN — update() gates the next attack on
+    // `attackT <= 0`. It used to be decremented inside _animate's box-man
+    // branch, so the rigged avatar, whose branch returns early, never ticked it
+    // down: you could attack exactly once and then never again. A gameplay
+    // timer has no business living in an animation function.
+    this.attackT = Math.max(0, this.attackT - dt);
     this.hasteT = Math.max(0, this.hasteT - dt);
     this.rageT = Math.max(0, this.rageT - dt);
     this.stoneSkinT = Math.max(0, this.stoneSkinT - dt);
@@ -3294,6 +3307,16 @@ export class Player {
       this.facing.set(aimPoint.x - this.pos.x, 0, aimPoint.z - this.pos.z);
       if (this.facing.lengthSq() < 0.01) this.facing.set(0, 0, -1);
       this.facing.normalize();
+    }
+    // JUMP (Space). Only off solid ground and only when the body is actually
+    // yours to command — no hopping while swimming, mounted, dead, a ghost, mid
+    // dodge, or flying. The launch is just an upward vy; _updateVertical's fall
+    // solver carries the whole arc, so jumps and falls land the same way.
+    if (ctx.input?.takeJump?.() && !this.swimming && !this.dead && !this.ghost
+        && !this.phasing && !this.mounted && !this.flying && !ctx.devFly
+        && !ctx.boatMount && this.airborne !== true) {
+      this.vy = JUMP_V;
+      audio.sfx('step', 0.35, 20);
     }
     this.mesh.position.set(this.pos.x, this._updateVertical(dt, world, ctx.devFly), this.pos.z);
     // SWIMMING: over deep water the hero lies prone at the surface and does a
@@ -3831,6 +3854,7 @@ export class Player {
       blocking: !!this.blocking,
       casting: !!this.castWindup,
       sitting: !!this.mounted,
+      airborne: !!this.airborne,
       torch: !!ud.torchRef,
     });
   }
@@ -3896,7 +3920,6 @@ export class Player {
         rightArm.rotation.z = -0.3 * raise * this.swingSide;  // tilted to this swing's side
       }
     } else if (this.attackT > 0) {
-      this.attackT -= dt;
       const k = 1 - Math.max(0, this.attackT) / this.attackDur; // 0 → 1 over the swing
       if (bowEquipped) {
         leftArm.rotation.x = -1.5;
