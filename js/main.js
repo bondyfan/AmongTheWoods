@@ -6695,6 +6695,13 @@ function step() {
       envSpeedMult,
     });
 
+    // Solve the rigged avatar's skeleton — exactly once, here, AFTER _animate
+    // has set this frame's pose. It used to hang off the skinned mesh's
+    // onBeforeRender, which fires once per RENDER PASS: shadow map + postfx +
+    // character preview meant 65 bones re-solved three times a frame. A box
+    // body has no rig and this is a no-op.
+    player.mesh.userData.rig?.update(dt);
+
     if (game.kind === 'moba') {
       if (mp?.active) {
         mp.updateWorldSim(dt);

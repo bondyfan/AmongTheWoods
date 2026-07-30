@@ -13,7 +13,7 @@ import { WORLD, XP_LEVELS, MAX_LEVEL, itemById, spellById, consumableById,
 import { makeMan, makeAxe, makeBow, makePickaxe, makeTorchMesh, makeClub,
          makeSword, makeHandSpear, makeCrossbow, makeShield, applyWornGear } from './models.js';
 import { audio } from './audio.js';
-import { makeHumanMan, humanReady, humanModelEnabled } from './humanmodel.js';
+import { makeHumanMan, humanReady, humanModelEnabled, assertContract } from './humanmodel.js';
 
 const MAX_CLIMB_SLOPE = 1.0; // steeper ground than this is a wall
 const GRAVITY = 34;
@@ -74,7 +74,13 @@ export class Player {
   constructor(scene, hooks) {
     this.hooks = hooks; // { popup, onLevelUp, onDeath, onHurt, onEquipChange }
     this.scene = scene;
-    this.mesh = (humanReady() && humanModelEnabled()) ? makeHumanMan() : makeMan();
+    const rigged = humanReady() && humanModelEnabled();
+    this.mesh = rigged ? makeHumanMan() : makeMan();
+    // The rigged body has to satisfy every handle the box body publishes. Its
+    // first version quietly published five bare Groups that were never in the
+    // scene, so five consumers no-oped and nothing complained for three days.
+    // Fail at construction instead.
+    if (rigged) assertContract(this.mesh, 'rigged player');
     scene.add(this.mesh);
     this.slashes = []; // short-lived melee swing arcs
     this.levelFx = []; // short-lived level-up burst pieces
@@ -2489,8 +2495,14 @@ export class Player {
     const ud = this.mesh.userData;
     if (!ud.torso) return;
     const skin = 0xd9a066;
-    // bare skin under the armour; the worn chest piece covers it when present
-    for (const part of [ud.torso, ud.armL, ud.armR]) {
+    // Bare skin under the armour; the worn chest piece covers it when present.
+    // On the rigged body these three keys are the SAME skinned mesh, and that
+    // mesh carries the character's painted albedo — flat-repainting it would
+    // erase the character. So only an untextured (box) body gets the skin coat,
+    // and the Set keeps us from doing it three times over.
+    for (const part of new Set([ud.torso, ud.armL, ud.armR])) {
+      const cur = Array.isArray(part.material) ? part.material[0] : part.material;
+      if (cur?.map) continue;
       part.material = new THREE.MeshLambertMaterial({ color: skin });
     }
     applyWornGear(this.mesh, this.equipment, itemById);
