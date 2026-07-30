@@ -3759,6 +3759,19 @@ function updateSocialTarget() {
 // Whatever you have locked — a mob or another player — gets the same readout,
 // in the same place: avatar, name, level and a health bar WITH the numbers.
 // It sits directly under the resource strip so your eye has one place to look.
+//
+// It does not outstay its welcome: a target that isn't fighting you, isn't
+// being duelled, and is more than TF_KEEP_R away holds for TF_HOLD and then
+// fades. Something you merely glanced at on the way past shouldn't sit at the
+// top of the screen for the rest of the run.
+const TF_KEEP_R = 4;        // metres — standing this close counts as interest
+const TF_HOLD = 3000;       // ms of grace before the fade begins
+const TF_FADE = 500;        // ms the fade itself takes
+// -1 rather than 0 for "still matters": performance.now() can legitimately BE
+// 0, and a falsy check there quietly disabled the whole countdown
+let tfIdleAt = -1;
+let tfTarget = null;        // what the countdown belongs to
+
 function renderTargetFrame() {
   const el = $id('target-frame');
   if (!el) return;
@@ -3766,9 +3779,37 @@ function renderTargetFrame() {
   const who = targeting.selectedPlayer || socialTarget;
   const t = who || mob;
   const alive = t && !(t.dying || t.dead);
-  if (!t || !alive || game.mode !== 'play' || game.paused) { el.classList.add('hidden'); return; }
-  el.classList.remove('hidden');
+  if (t !== tfTarget) { tfTarget = t; tfIdleAt = -1; }  // a new target starts fresh
+  if (!t || !alive || game.mode !== 'play' || game.paused) {
+    el.classList.add('hidden'); el.style.opacity = ''; return;
+  }
   const isPlayer = !!who;
+  // reasons to keep it up: it's swinging at you, you're duelling it, you're
+  // standing on top of it, or Shift is down on it right now
+  const engaged = isPlayer
+    ? !!(mp?.duel?.active && mp.duel.oppUid === t.uid)
+    : !!t.aggroed;
+  const near = !!t.pos
+    && Math.hypot(t.pos.x - player.pos.x, t.pos.z - player.pos.z) <= TF_KEEP_R;
+  const held = targeting.selected === t || targeting.selectedPlayer === t;
+  if (engaged || near || held) tfIdleAt = -1;
+  else if (tfIdleAt < 0) tfIdleAt = performance.now();
+  if (tfIdleAt >= 0) {
+    const fading = performance.now() - tfIdleAt - TF_HOLD;
+    if (fading > TF_FADE) {
+      el.classList.add('hidden');
+      el.style.opacity = '';
+      // drop the remembered mob, or walking back past it would pop the frame
+      // up again without a fresh Shift-lock. socialTarget is left alone — it
+      // also drives the invite/duel/inspect bar.
+      if (!isPlayer) stickyMob = null;
+      return;
+    }
+    el.style.opacity = fading > 0 ? String(1 - fading / TF_FADE) : '1';
+  } else {
+    el.style.opacity = '1';
+  }
+  el.classList.remove('hidden');
   el.classList.toggle('tf-player', isPlayer);
   const hp = Math.max(0, Math.round(t.hp ?? 0));
   const maxHp = Math.max(1, Math.round(t.maxHp ?? 1));
