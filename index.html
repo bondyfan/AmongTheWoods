@@ -34,6 +34,12 @@
     </div>
     <button id="vp-confirm" class="vp-go">Confirm</button>
   </div>
+  <!-- Phones only. CSS-rotating the page instead was tried and reverted: with
+       the OS orientation lock on, an iPhone never reports landscape, so the
+       picture flipped at the wrong moments. Asking is honest. -->
+  <div id="rotate-me"><div><span class="rot-icon">📱</span>
+    <b>Turn your phone sideways</b>
+    <small>Among The Woods is played in landscape.</small></div></div>
   <div id="game"></div>
 
   <!-- mandatory Google sign-in gate: nothing is reachable until you're in -->

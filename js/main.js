@@ -29,9 +29,6 @@ import { DungeonWorld } from './dungeon.js';
 import { Moba } from './moba.js';
 import { Player } from './player.js';
 import { preloadHumanModel, setHumanModelOptIn, humanClipCount, optInFromStorage } from './humanmodel.js';
-// the render surface is the viewport with its axes SWAPPED while the page is
-// rotated into landscape — see js/orient.js
-import { viewW, viewH, onOrientationChange } from './orient.js';
 import * as vegKit from './vegekit.js';
 import { EnemyManager } from './enemies.js';
 import { Projectiles } from './projectiles.js';
@@ -70,7 +67,7 @@ window.addEventListener('keydown', (e) => {
 
 // ---------- renderer / scene ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(viewW(), viewH());
+renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -84,7 +81,7 @@ const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(BIOMES[0].fog, 35, 110);
 scene.background = new THREE.Color(BIOMES[0].sky);
 
-const camera = new THREE.PerspectiveCamera(50, viewW() / viewH(), 0.1, 300);
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 300);
 
 // gradient sky dome: replaces the old flat scene.background color with a
 // horizon→zenith gradient + a glowing sun disc. The horizon band is kept
@@ -153,16 +150,12 @@ const autoQuality = {
   tick() {},
 };
 
-function fitToView() {
-  camera.aspect = viewW() / viewH();
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(viewW(), viewH());
+  renderer.setSize(window.innerWidth, window.innerHeight);
   postfx?.setSize(renderer.domElement.width, renderer.domElement.height);
-}
-window.addEventListener('resize', fitToView);
-// A flip between portrait and landscape SWAPS the render surface's axes, and on
-// some phones it does not raise a resize at all — so listen for the flip itself.
-onOrientationChange(fitToView);
+});
 
 // ---------- game state ----------
 const DEVMODE = /(?:^|[?&])devmode/i.test(location.search); // admin tools only with ?devmode
@@ -6688,10 +6681,8 @@ function updateCamera(dt = 0) {
     const fx = Math.sin(camYaw), fz = Math.cos(camYaw);
     // landscape phones are wide but short, so the fixed rig reads as
     // zoomed-OUT — pull the camera in (lower + closer, same tilt)
-    // viewW/viewH, not innerWidth/innerHeight: a portrait phone is DRAWN in
-    // landscape, so the render surface is wide and short even though the
-    // viewport is not — this test is about the picture, not the device.
-    const landscapePhone = game.touch && viewW() > viewH() && viewH() < 560;
+    const landscapePhone = game.touch && window.innerWidth > window.innerHeight
+      && window.innerHeight < 560;
     _camZoomK += ((landscapePhone ? 0.64 : 1) - _camZoomK) * Math.min(1, dt * 6);
     const H = 26 * _camZoomK, OFF = 14 * _camZoomK;
     camera.position.set(player.pos.x + fx * OFF + sx, py + H + sy, player.pos.z + fz * OFF + sz);

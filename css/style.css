@@ -1821,39 +1821,6 @@ body.slotting-weapon #spellbar .spell-slot[data-slot="9"] .ring-fan { display: f
 #view-pick .vp-go:disabled { opacity: .4; cursor: default; }
 @keyframes vp-blink { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
 
-/* ---- forced landscape on portrait phones ---------------------------------
-   No "please rotate" copy: the game is simply drawn sideways, which says it
-   without a word.
-
-   ORDER MATTERS and it is right-to-left: `translateX(100vw) rotate(90deg)`
-   rotates FIRST, then slides the result back into view. Writing it the other way
-   round translates in unrotated space and throws the whole page off the right
-   edge — which is exactly what shipped the first time.
-
-   The mapping this produces, which js/orient.js inverts:
-       screenX = innerWidth - viewY
-       screenY = viewX
-   so the game's top edge lands on the phone's RIGHT, and turning the phone
-   anticlockwise brings it upright.
-
-   dvw/dvh, not vw/vh: on iOS Safari 100vh is the height WITHOUT the collapsing
-   toolbars, so a vh-sized body is taller than the screen and the bottom of the
-   HUD sits under the browser chrome.
-
-   Every fixed-position panel is a child of body, so they all come along — a
-   transformed ancestor is what `fixed` resolves against. Input does NOT come
-   along, which is what js/orient.js is for. */
-@media (orientation: portrait) and (pointer: coarse) {
-  html { overflow: hidden; }
-  body {
-    width: 100vh; height: 100vw;            /* fallback for older engines */
-    width: 100dvh; height: 100dvw;
-    transform-origin: top left;
-    transform: translateX(100vw) rotate(90deg);
-    transform: translateX(100dvw) rotate(90deg);
-    overflow: hidden;
-  }
-}
 
 /* ---- short landscape screens ---------------------------------------------
    A phone held sideways is about 390 px tall, and the menu was laid out for a
@@ -1875,4 +1842,30 @@ body.slotting-weapon #spellbar .spell-slot[data-slot="9"] .ring-fan { display: f
   #mode-select button small { font-size: 10px; }
   #menu .controls { font-size: 10px; }
   #menu > .menu-inner > .hint { font-size: 10px; }
+}
+
+/* ---- portrait phones: ask for landscape ----------------------------------
+   Rotating the page with CSS was tried and reverted: it cannot tell how the
+   phone is physically HELD when the OS reports nothing (an iPhone with the
+   orientation lock on never says "landscape"), so the picture flipped at the
+   wrong times. A prompt is honest about that.
+
+   Coarse pointer only — a narrow desktop window is not a phone. */
+#rotate-me { display: none; }
+@media (orientation: portrait) and (pointer: coarse) {
+  #rotate-me {
+    display: flex; position: fixed; inset: 0; z-index: 9999;
+    align-items: center; justify-content: center; text-align: center;
+    background: #0d1409; color: #e8f0dd; padding: 24px;
+  }
+  #rotate-me .rot-icon {
+    display: block; font-size: 64px; margin-bottom: 14px;
+    animation: rot-turn 2.2s ease-in-out infinite;
+  }
+  #rotate-me b { display: block; font-size: 20px; margin-bottom: 6px; }
+  #rotate-me small { opacity: .7; }
+}
+@keyframes rot-turn {
+  0%, 40% { transform: rotate(0deg); }
+  60%, 100% { transform: rotate(90deg); }
 }

@@ -66,41 +66,30 @@ console.log('\n-- audio plays from a warm pool, not a fresh clone --');
   ok(/currentTime = 0/.test(src), 'a reused voice rewinds before it plays');
 }
 
-console.log('\n-- landscape is FORCED, not asked for --');
+console.log('\n-- landscape is asked for, in the three places it can be --');
 {
   const man = JSON.parse(readFileSync('public/manifest.webmanifest', 'utf8'));
   ok(man.orientation === 'landscape', `the installed PWA asks for landscape (${man.orientation})`);
   const main = readFileSync('js/main.js', 'utf8');
   const css = readFileSync('css/style.css', 'utf8');
-  const orient = readFileSync('js/orient.js', 'utf8');
-  const input = readFileSync('js/input.js', 'utf8');
-  const touch = readFileSync('js/touch.js', 'utf8');
-
+  const html = readFileSync('index.html', 'utf8');
   ok(/screen\.orientation\?\.lock\?\.\('landscape'\)/.test(main),
     'fullscreen locks it where the browser allows a lock');
-  ok(!/rotate-me/.test(css) && !/Turn your phone/.test(readFileSync('index.html', 'utf8')),
-    'no "please rotate" copy — the picture itself is the instruction');
-  // the exact declaration and its ORDER are pinned in tests/orient-test.mjs —
-  // here we only care that a 90-degree rotation is what happens
-  ok(/transform:[^;]*rotate\(90deg\)/.test(css), 'the page is drawn sideways instead');
+  ok(/id="rotate-me"/.test(html), 'and a prompt covers iOS, where no lock exists');
   ok(/orientation: portrait/.test(css) && /pointer: coarse/.test(css),
-    'on portrait phones only — a narrow desktop window is not a phone');
+    'shown on portrait phones only — a narrow desktop window is not a phone');
 
-  // A CSS transform moves pixels, not pointer events. Everything that reads
-  // screen geometry has to go through orient.js or aim and movement transpose.
-  ok(/viewW\(\) \/ viewH\(\)/.test(main), 'the camera aspect uses the ROTATED surface');
-  ok(/renderer\.setSize\(viewW\(\), viewH\(\)\)/.test(main), 'and so does the renderer');
-  ok(!/innerWidth \/ window\.innerHeight/.test(main),
-    'no raw viewport aspect left in main.js');
-  ok(!/window\.innerWidth|window\.innerHeight/.test(input),
-    'input.js reads no raw viewport size — mouse aim would transpose');
-  ok(/toViewX|toViewY/.test(input), 'it maps pointer coords through the rotation');
-  ok(/toViewDX|toViewDY/.test(touch),
-    'and touch DELTAS are rotated too, or a drag up the screen would read sideways');
-  ok(/export function toViewDY/.test(orient) && /-dx/.test(orient),
-    'the delta rotation carries the sign — half a rotation is worse than none');
-  ok(/onOrientationChange/.test(main),
-    'a flip re-fits the surface: some phones raise no resize for it');
+  // CSS-rotating the whole page was tried and reverted. It cannot tell how the
+  // phone is physically held when the OS reports nothing — an iPhone with the
+  // orientation lock on never says "landscape" — so the picture flipped at the
+  // wrong times. If it is ever attempted again, the input layer has to be
+  // compensated too, and that is what these guard against half-doing.
+  // the only rotate left in the prompt block is the little phone ICON's wiggle
+  ok(!/body \{[^}]*transform:[^;]*rotate/.test(css),
+    'the page itself is no longer rotated');
+  ok(!/orient\.js/.test(main) && !/orient\.js/.test(readFileSync('js/input.js', 'utf8')),
+    'and no half-removed coordinate plumbing is left behind');
+  ok(!/viewW\(\)/.test(main), 'the renderer is back on the plain viewport');
 }
 
 console.log('\n-- the first-run view picker --');
