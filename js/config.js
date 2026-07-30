@@ -1283,6 +1283,8 @@ export const CLASS_TREES = [
         { cd: 18, element: 'fire', range: [7, 9, 11], damage: [65, 100, 145], burn: [6, 10, 15], detonate: true }),
       A('mage_ice_barrier', '🔷', 'Ice Barrier', 33, 'Gain a large frost shield.', 'shield',
         { cd: 45, amount: [100, 170, 250] }),
+      A('mage_magic_light', '🪄', 'Magic Light', 10, 'Kindle a mote of light that circles you and lights the way like a torch, out to 8/12/16 m. It needs no hand, no fuel and never gutters — cast again to snuff it.', 'lightOrb',
+        { cd: 2, mana: 10, radius: [8, 12, 16] }),
       A('mage_combustion', '🔥', 'Combustion', 10, 'Erupt into a burning form that greatly empowers your fire spells for a short time — and lets you cast Pyroblast instantly.', 'buff',
         { cd: 65, buff: 'combustion', duration: [10, 13, 16], power: [0.35, 0.5, 0.7] }),
       // Pyroblast — a colossal Fireball with a long 6 s wind-up. Same targeted

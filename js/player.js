@@ -961,6 +961,23 @@ export class Player {
       return true;
     }
 
+    // A mote of light that circles the caster. Not a buff with a duration — a
+    // TOGGLE, because a light you have to re-cast every few minutes is a chore
+    // rather than a convenience. Cast it again to snuff it.
+    if (skill.action === 'lightOrb') {
+      if (this.magicLight) {
+        this.magicLight = null;
+        this.hooks.popup?.(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
+          'light out', '#9fd0ff');
+        audio.sfx('special', 0.3, 0);
+        return true;
+      }
+      this.magicLight = { radius: rv('radius', 8) };
+      this._spawnClassRing(this.pos, 1.6, 0x9fd0ff, 0.5);
+      audio.sfx('special', 0.45, 0);
+      return true;
+    }
+
     if (skill.action === 'buff') {
       const duration = rv('duration');
       const power = rv('power');

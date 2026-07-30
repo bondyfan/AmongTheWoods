@@ -1471,6 +1471,47 @@ function tickFireflies(dt) {
 // carves out a bubble of the tier's radius (5 / 10 / 15 m).
 let torchLight = null, torchT = 0;
 
+// ---- Magic Light (mage, Lv10) ---------------------------------------------
+// A mote that circles the caster and lights like a torch, minus the flame: it
+// glows steadily rather than guttering, because the fiction is arcane, not fire.
+// Rides its own PointLight so it stacks with a real torch instead of fighting it.
+let orbLight = null, orbMesh = null, orbT = 0;
+
+function tickMagicLight(dt) {
+  const on = inPlay() && !player.dead && !player.ghost && !!player.magicLight;
+  if (on && !orbLight) {
+    orbLight = new THREE.PointLight(0x9fd0ff, 10, 24, 1.0);
+    orbMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.13, 12, 10),
+      new THREE.MeshBasicMaterial({ color: 0xdcefff }));
+    scene.add(orbLight, orbMesh);
+  } else if (!on && orbLight) {
+    scene.remove(orbLight, orbMesh);
+    orbMesh.geometry.dispose(); orbMesh.material.dispose();
+    orbLight = null; orbMesh = null;
+  }
+  if (!orbLight) return;
+  orbT += dt;
+  // a slow orbit at shoulder height, bobbing gently so it reads as floating
+  const R = 0.95;
+  const a = orbT * 1.5;
+  const p = player.mesh.position;
+  orbMesh.position.set(p.x + Math.cos(a) * R,
+                       p.y + 1.55 + Math.sin(orbT * 2.3) * 0.12,
+                       p.z + Math.sin(a) * R);
+  orbLight.position.copy(orbMesh.position);
+  const radius = player.magicLight.radius ?? 8;
+  orbLight.distance = radius * 2.6;
+  const dark = !!game.dungeon
+    || (BIOMES[game.biomeIndex]?.darkness ?? 0) >= 0.35
+    || (game.nightK || 0) > 0.55;
+  // a soft arcane pulse, nothing like the torch's flicker
+  const pulse = 1 + Math.sin(orbT * 2.6) * 0.07;
+  orbLight.intensity = (dark ? 16 + radius * 1.3 : 3.0) * pulse;
+  // keep the bright-pass from blowing it out into a white blob
+  orbMesh.material.color.setRGB(0.86 * pulse, 0.94 * pulse, 1.0);
+}
+
 function tickTorch(dt) {
   const dark = !!game.dungeon // lair dungeons are always torch-dark
     || (BIOMES[game.biomeIndex]?.darkness ?? 0) >= 0.35
@@ -3884,6 +3925,8 @@ function renderPlayerActions() {
   inv.textContent = t.inGroup ? '👥 In your group' : '🤝 Invite to group';
   inv.disabled = t.inGroup || duelling;
   $id('pa-duel').disabled = duelling;
+  const fol = $id('pa-follow');
+  if (fol) fol.textContent = followUid === t.uid ? '👣 Stop following' : '👣 Follow';
   // Leaving is only meaningful when you actually share a group with them, so the
   // button appears on a group-mate (including via their party frame) and hides
   // otherwise rather than sitting there greyed out.
@@ -3909,6 +3952,52 @@ $id('pa-leave')?.addEventListener('click', () => {
   mp?.leaveGroup?.();
   closePlayerActions();
 });
+// ---- follow a player (WoW-style) ------------------------------------------
+// Walk after someone until you steer yourself. It feeds input.follow rather than
+// moving the player directly, so everything downstream — speed, roads, water,
+// collision, the animation state machine — keeps working exactly as it does when
+// you drive. Cancelled by ANY movement key, which is the behaviour people expect.
+let followUid = null;
+const FOLLOW_STOP = 3;      // stop this close…
+const FOLLOW_GO = 4.5;      // …and set off again past this
+const FOLLOW_DROP = 60;     // lost them
+let followMoving = false;
+
+function stopFollow(why) {
+  if (!followUid) return;
+  followUid = null; followMoving = false;
+  input.follow = null;
+  if (why) ui.toast(why, '');
+}
+
+function tickFollow() {
+  if (!followUid) return;
+  const r = mp?.remotes?.get?.(followUid);
+  if (!r || !r.pos) { stopFollow('👣 Lost them.'); return; }
+  if (player.dead || player.ghost || game.mode !== 'play') { stopFollow(); return; }
+  // your own hands on the controls always win, and end the follow
+  if (input.steering) { stopFollow('👣 Follow off.'); return; }
+  const dx = r.pos.x - player.pos.x, dz = r.pos.z - player.pos.z;
+  const d = Math.hypot(dx, dz);
+  if (d > FOLLOW_DROP) { stopFollow(`👣 ${r.name || 'They'} got too far away.`); return; }
+  // hysteresis, or you jitter on the spot at exactly the stopping distance
+  if (followMoving && d < FOLLOW_STOP) followMoving = false;
+  else if (!followMoving && d > FOLLOW_GO) followMoving = true;
+  input.follow = followMoving ? { x: dx / (d || 1), z: dz / (d || 1) } : null;
+}
+
+$id('pa-follow')?.addEventListener('click', () => {
+  if (!socialTarget) return;
+  audio.sfx('click', 0.4);
+  if (followUid === socialTarget.uid) { stopFollow('👣 Follow off.'); }
+  else {
+    followUid = socialTarget.uid;
+    followMoving = true;
+    ui.toast(`👣 Following ${socialTarget.name || 'them'} — move to stop.`, 'level');
+  }
+  closePlayerActions();
+});
+
 $id('pa-inspect')?.addEventListener('click', () => {
   if (!socialTarget) return;
   audio.sfx('click', 0.4);
@@ -6715,6 +6804,7 @@ function step() {
     targeting.update(dt, { input, player, alive: combatMgr()?.alive?.() || [],
       players: (mp?.active && mp.mode === 'coop') ? mp.mapRemotes() : [] });
     updateSocialTarget();
+    tickFollow();
     renderPartyFrames();
     updateNestGhost();
     updateCampItemGhost();
@@ -6860,7 +6950,8 @@ function step() {
         tickDustDevil(dt);
         tickCold(dt);
       }
-      tickTorch(dt); // your torch burns down there too
+      tickTorch(dt);      // your torch burns down there too
+      tickMagicLight(dt); // …and the mage's mote circles alongside it
 
       // aggro sting: plays ONCE when you go from "nothing chasing me" to
       // "something is coming" — not again for each extra attacker

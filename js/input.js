@@ -4,6 +4,7 @@ class Input {
   constructor() {
     this.keys = new Set();
     this.jumpPressed = false;
+    this.follow = null;   // {x,z} steering fed by follow-a-player
     this.rpgMode = false;   // right button steers instead of attacking
     this.dragX = 0;         // accumulated right-drag, consumed per frame
     this.dragY = 0;
@@ -85,15 +86,25 @@ class Input {
 
   onKey(code, fn) { this.keyHandlers.set(code, fn); }
 
+  // Any real steering input from the player. Follow reads this to know when to
+  // let go — in WoW, touching a movement key is what breaks follow.
+  get steering() {
+    return this.touch.active
+      || this.keys.has('KeyW') || this.keys.has('KeyA') || this.keys.has('KeyS') || this.keys.has('KeyD')
+      || this.keys.has('ArrowUp') || this.keys.has('ArrowDown')
+      || this.keys.has('ArrowLeft') || this.keys.has('ArrowRight');
+  }
   get moveX() {
     if (this.touch.active) return this.touch.mx;
-    return (this.keys.has('KeyD') || this.keys.has('ArrowRight') ? 1 : 0) -
-           (this.keys.has('KeyA') || this.keys.has('ArrowLeft') ? 1 : 0);
+    const k = (this.keys.has('KeyD') || this.keys.has('ArrowRight') ? 1 : 0) -
+              (this.keys.has('KeyA') || this.keys.has('ArrowLeft') ? 1 : 0);
+    return k || (this.follow?.x ?? 0);   // follow steers only when you don't
   }
   get moveZ() {
     if (this.touch.active) return this.touch.mz;
-    return (this.keys.has('KeyS') || this.keys.has('ArrowDown') ? 1 : 0) -
-           (this.keys.has('KeyW') || this.keys.has('ArrowUp') ? 1 : 0);
+    const k = (this.keys.has('KeyS') || this.keys.has('ArrowDown') ? 1 : 0) -
+              (this.keys.has('KeyW') || this.keys.has('ArrowUp') ? 1 : 0);
+    return k || (this.follow?.z ?? 0);
   }
   // Right-click remains a quick repeating attack in top-down mode. Left-click
   // is edge-tracked separately so holding and releasing can charge a strike.

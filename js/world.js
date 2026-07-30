@@ -996,7 +996,11 @@ export class World {
       const smith = spot(-34, 0);                 // the forge anchors the far end
       if (this.isWater(smith.x, smith.z)) continue;
       const entry = spot(34, 0);                  // street mouth toward the camp
-      const guards = [spot(31, -3), spot(31, 3)]; // two soldiers flank the gate
+      // Four soldiers, two to an end. The gate pair alone left the smith's end
+      // of the street — the end mobs wander in from, since the road only reaches
+      // the gate — completely unwatched.
+      const guards = [spot(31, -3), spot(31, 3),      // the gate, facing the camp
+                      spot(-31, -3), spot(-31, 3)];   // the smith's end, behind
       // A fence rings the hamlet: runs laid end to end around a rectangle that
       // clears the smith (-34) and the gate (+34) lengthwise and the house rows
       // (±9.5 plus their 2.3 m footprint) sideways. The stretch in front of the
