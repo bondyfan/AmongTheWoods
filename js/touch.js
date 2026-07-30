@@ -1,3 +1,4 @@
+import { toViewDX, toViewDY } from './orient.js';
 // ---- On-screen touch controls (phones / tablets) ----
 // A left analog move-stick + right ATTACK / BLOCK buttons, and a burger that
 // tucks the HUD's menu buttons away. Everything feeds js/input.js exactly the
@@ -62,7 +63,10 @@ export function initTouch(game) {
       t = [...e.changedTouches].find(c => c.identifier === stickId);
       if (!t) return;
     } else t = e;
-    let dx = t.clientX - cx, dy = t.clientY - cy;
+    // the stick's centre and the finger are both screen-space, so rotate the
+    // vector between them rather than each point
+    let sdx = t.clientX - cx, sdy = t.clientY - cy;
+    let dx = toViewDX(sdx, sdy), dy = toViewDY(sdx, sdy);
     const d = Math.hypot(dx, dy);
     const cl = Math.min(d, R);
     const ux = d ? dx / d : 0, uy = d ? dy / d : 0;
@@ -120,7 +124,8 @@ export function initTouch(game) {
     if (lookId === null) return;
     const t = [...e.changedTouches].find(c => c.identifier === lookId);
     if (!t) return;
-    const dx = t.clientX - lx, dy = t.clientY - ly;
+    const sdx = t.clientX - lx, sdy = t.clientY - ly;
+    const dx = toViewDX(sdx, sdy), dy = toViewDY(sdx, sdy);
     lx = t.clientX; ly = t.clientY;
     lookMoved += Math.abs(dx) + Math.abs(dy);
     // same units as mouse movementX/Y, so the existing sensitivity applies

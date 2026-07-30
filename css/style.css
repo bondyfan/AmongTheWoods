@@ -1789,28 +1789,6 @@ body.slotting-weapon #spellbar .spell-slot[data-slot="9"] .ring-fan { display: f
 .ring-cell.drop-hot { border-color: #ffd479; background: rgba(255, 212, 121, 0.18); }
 .ring-cell img, .ring-cell svg { width: 26px; height: 26px; }
 
-/* ---- portrait phones: ask for landscape ---------------------------------
-   Only on a COARSE pointer — a narrow desktop window is not a phone, and
-   covering it with a rotate prompt would be absurd. */
-#rotate-me { display: none; }
-@media (orientation: portrait) and (pointer: coarse) {
-  #rotate-me {
-    display: flex; position: fixed; inset: 0; z-index: 9999;
-    align-items: center; justify-content: center; text-align: center;
-    background: #0d1409; color: #e8f0dd; padding: 24px;
-  }
-  #rotate-me .rot-icon {
-    display: block; font-size: 64px; margin-bottom: 14px;
-    animation: rot-turn 2.2s ease-in-out infinite;
-  }
-  #rotate-me b { display: block; font-size: 20px; margin-bottom: 6px; }
-  #rotate-me small { opacity: .7; }
-}
-@keyframes rot-turn {
-  0%, 40% { transform: rotate(0deg); }
-  60%, 100% { transform: rotate(90deg); }
-}
-
 /* ---- first-run view picker ------------------------------------------------
    Small, at the top, over a live world — you can see what you are choosing.
    It pulses until touched, then stops: a control that keeps blinking after you
@@ -1842,3 +1820,22 @@ body.slotting-weapon #spellbar .spell-slot[data-slot="9"] .ring-fan { display: f
 }
 #view-pick .vp-go:disabled { opacity: .4; cursor: default; }
 @keyframes vp-blink { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+
+/* ---- forced landscape on portrait phones ---------------------------------
+   No "please rotate" copy: the game is simply drawn sideways, which says it
+   without a word. 90 degrees clockwise about the top-left, pushed back up by a
+   viewport height, so the game's top edge lands on the phone's RIGHT and turning
+   the phone anticlockwise brings it upright.
+
+   Every fixed-position panel is a child of body, so they all come along — a
+   transformed ancestor is what `fixed` resolves against. Input does NOT come
+   along, which is what js/orient.js is for. */
+@media (orientation: portrait) and (pointer: coarse) {
+  html { overflow: hidden; }
+  body {
+    width: 100vh; height: 100vw;
+    transform-origin: top left;
+    transform: rotate(90deg) translateY(-100vh);
+    overflow: hidden;
+  }
+}

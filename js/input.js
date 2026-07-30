@@ -1,5 +1,7 @@
 // ---- Keyboard + mouse input ----
 
+import { viewW, viewH, toViewX, toViewY } from './orient.js';
+
 class Input {
   constructor() {
     this.keys = new Set();
@@ -53,8 +55,8 @@ class Input {
     });
 
     window.addEventListener('mousemove', (e) => {
-      this.mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
-      this.mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+      this.mouse.x = (toViewX(e.clientX, e.clientY) / viewW()) * 2 - 1;
+      this.mouse.y = -(toViewY(e.clientX, e.clientY) / viewH()) * 2 + 1;
       // RPG mode: hold right button and drag to steer/look (WoW style).
       // With mouse-look ON and the pointer locked, EVERY mouse move steers.
       if (this.rpgMode && (this.mouse.right || (this.mouseLook && this.locked))) {
