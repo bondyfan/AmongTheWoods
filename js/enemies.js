@@ -42,6 +42,13 @@ const cellSeed = (cx, cz, salt) => {
 };
 const ZONE_ACTIVATE = 175;   // zones this close to a player materialize
 const ZONE_RELEASE = 205;    // live units further than this return to the pool
+
+// Turn a unit to face a direction. Nearly every body built by models.js has its
+// front on -Z, so the yaw needs a half-turn — but makeMan (the player body, and
+// therefore the VILLAGER) faces +Z and tags itself frontZ: 1. The blanket +PI
+// that used to be inlined at every call site made villagers walk backwards.
+const faceYaw = (mesh, dx, dz) =>
+  Math.atan2(dx, dz) + (mesh.userData?.frontZ > 0 ? 0 : Math.PI);
 const SPAWN_MIN_DIST = 62;   // nothing ever appears closer than this to a player
 const REPOP_COOLDOWN = 1800; // 30 minutes
 
@@ -992,11 +999,11 @@ export class EnemyManager {
     const spd = Math.hypot(vx, vz);
     if (chase || spd > 0.1) {
       const fx = chase ? chase.pos.x - e.pos.x : vx, fz = chase ? chase.pos.z - e.pos.z : vz;
-      if (fx || fz) e.mesh.rotation.y = Math.atan2(fx, fz) + Math.PI;
+      if (fx || fz) e.mesh.rotation.y = faceYaw(e.mesh, fx, fz);
       e.walkT += dt * Math.max(2, spd);
     } else if (this.world.village) {
       const v = this.world.village;
-      e.mesh.rotation.y = Math.atan2(v.dirX, v.dirZ) + Math.PI;
+      e.mesh.rotation.y = faceYaw(e.mesh, v.dirX, v.dirZ);
       e.walkT += dt * 0.6; // easy breathing sway at the post
     }
     const ud = e.mesh.userData;
@@ -1292,7 +1299,7 @@ export class EnemyManager {
           (e.mesh.userData.wings || []).forEach((wing, wi) => {
             wing.rotation.z = Math.sin(e.walkT * 5 + wi * Math.PI) * 0.6;
           });
-          e.mesh.rotation.y = Math.atan2(dx, dz) + Math.PI;
+          e.mesh.rotation.y = faceYaw(e.mesh, dx, dz);
           e.mesh.position.set(e.pos.x, this.world.heightAt(e.pos.x, e.pos.z) + e.flyY, e.pos.z);
         };
         if (e.escaping) {
@@ -1358,7 +1365,7 @@ export class EnemyManager {
             gd = Math.hypot(dx, dz) || 1;
             const keep = (goal === owner?.pos) ? 2.4 : e.range * 0.7;
             if (gd > keep) { vx = (dx / gd) * e.speed; vz = (dz / gd) * e.speed; }
-            e.mesh.rotation.y = Math.atan2(dx, dz) + Math.PI;
+            e.mesh.rotation.y = faceYaw(e.mesh, dx, dz);
           }
           // separation from allies/others
           for (const o of this.list) {
@@ -1601,10 +1608,10 @@ export class EnemyManager {
       // presentation
       const speed = Math.hypot(vx, vz);
       if (speed > 0.1) {
-        e.mesh.rotation.y = Math.atan2(vx, vz) + Math.PI;
+        e.mesh.rotation.y = faceYaw(e.mesh, vx, vz);
         e.walkT += dt * speed;
       } else if (e.aggroed) {
-        e.mesh.rotation.y = Math.atan2(toPlayer.x, toPlayer.z) + Math.PI;
+        e.mesh.rotation.y = faceYaw(e.mesh, toPlayer.x, toPlayer.z);
         e.walkT += dt * 2; // idle shuffle so wings/segments keep moving
       }
       const ud = e.mesh.userData;

@@ -1010,7 +1010,12 @@ export function makeMan() {
   g.add(leftLeg, rightLeg, torso, head, hair, leftEye, rightEye, leftPupil, rightPupil, leftArm, rightArm);
   g.userData = { leftLeg, rightLeg, leftArm, rightArm, rightSocket, leftSocket,
                  torso, armL: la, armR: ra, leaf, capSlot, hair,
-                 legs: [leftLeg, rightLeg] }; // enemies.js drives `legs` — villagers walk
+                 legs: [leftLeg, rightLeg], // enemies.js drives `legs` — villagers walk
+                 // This body's front is +Z (see the eyes above), unlike every
+                 // humanoid()/beast body, whose front is -Z. enemies.js turns
+                 // units to face a target and has to know which way is forward:
+                 // it was adding a blanket +PI, so VILLAGERS WALKED BACKWARDS.
+                 frontZ: 1 };
   return g;
 }
 
