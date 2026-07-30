@@ -3061,7 +3061,14 @@ if ((settings.controlsRev ?? 0) < CONTROLS_DEFAULT_VERSION) {
     audio.sfx('click', 0.35);
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
-      else await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+      else {
+        await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+        // Browsers only allow an orientation lock while fullscreen, so this is
+        // the one moment it can be asked for. It throws on desktop and on iOS,
+        // where the API doesn't exist at all — hence the swallow, and hence the
+        // rotate prompt below, which is what actually covers iPhones.
+        try { await screen.orientation?.lock?.('landscape'); } catch { /* not permitted here */ }
+      }
     } catch (e) {
       ui.toast('🖥️ Fullscreen was blocked by the browser — press F11 instead.', 'level');
     }

@@ -396,7 +396,19 @@ export const BIOME_TWEAK_FIELDS = ['treeDensity', 'darkness', 'light'];
 export const BIOME_COLOR_FIELDS = ['ground', 'ground2', 'dirt', 'grass', 'fog', 'sky'];
 export const ITEM_TWEAK_FIELDS = ['level', 'weapon.dmg', 'weapon.cd', 'weapon.range',
   'weapon.energy', 'weapon.draw',
-  'stats.hp', 'stats.regen', 'stats.speed', 'stats.dmgPct'];
+  'stats.hp', 'stats.regen', 'stats.speed', 'stats.dmgPct',
+  'stats.mana', 'stats.spellPower',
+  // pickable rather than typed — see ITEM_ENUM_FIELDS
+  'reqClass', 'weapon.style'];
+
+// Fields the editor offers as a DROPDOWN instead of a number box. `''` always
+// means "leave it alone", and it is offered first so clearing is one click.
+// weapon.style matters as much as reqClass here: it is what decides whether a
+// caster may hold the thing at all (config.js canWield).
+export const ITEM_ENUM_FIELDS = {
+  reqClass: ['', 'warrior', 'rogue', 'mage', 'priest', 'beastmaster'],
+  'weapon.style': ['', 'staff', 'axe', 'club', 'pick', 'sword', 'spear', 'bow', 'crossbow', 'fists'],
+};
 // Class abilities & passives. Only SCALAR fields — the per-rank arrays
 // (weaponMult, damage, stun…) stay in code; `level` is the required level.
 export const SKILL_TWEAK_FIELDS = ['level', 'cd', 'energy', 'mana', 'range', 'radius', 'windup', 'distance'];
@@ -442,6 +454,12 @@ function snapshotOriginals() {
 
 export function tweakOriginal(kind, id, field) {
   snapshotOriginals();
+  // Enum fields exist for every item even when unset — otherwise the editor
+  // skips the row (it hides fields with no original) and you could only change
+  // a required class on items that already HAD one, which is backwards.
+  if (kind === 'item' && ITEM_ENUM_FIELDS[field] !== undefined) {
+    return _origItems[id]?.[field] ?? '';
+  }
   if (kind === 'enemy') return _origEnemies[id]?.[field];
   if (kind === 'biome') return _origBiomes[id]?.[field];
   if (kind === 'skill') return _origSkills[id]?.[field];
@@ -464,6 +482,7 @@ export function applyTweaks() {
     const o = _origItems[it.id] ?? {};
     for (const f of ITEM_TWEAK_FIELDS) {
       if (o[f] !== undefined) setPath(it, f, o[f]);
+      else if (ITEM_ENUM_FIELDS[f] !== undefined) setPath(it, f, undefined);
     }
   }
   for (const sk of allClassSkills()) {

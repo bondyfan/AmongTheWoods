@@ -13,7 +13,7 @@
 // held, and ▶ Test drops you into the running game as a mob-invisible ghost.
 
 import * as THREE from 'three';
-import { worldPatch, TERRAIN_PAINTS, applyTweaks, tweakOriginal,
+import { worldPatch, TERRAIN_PAINTS, applyTweaks, tweakOriginal, ITEM_ENUM_FIELDS,
          ENEMY_TWEAK_FIELDS, ITEM_TWEAK_FIELDS, SKILL_TWEAK_FIELDS, BIOME_TWEAK_FIELDS,
          BIOME_COLOR_FIELDS } from './worldpatch.js';
 import { ENEMY_TYPES, ITEMS, BIOMES, allClassSkills } from './config.js';
@@ -1491,12 +1491,25 @@ export class WorldEditor {
           : kind === 'skill' ? (worldPatch.tweaks.skills ??= {}) : worldPatch.tweaks.items;
         const cur = store[id]?.[f];
         const row = document.createElement('label');
-        row.innerHTML = `${f} <input type="number" step="any" placeholder="${orig}" value="${cur ?? ''}">`;
-        row.querySelector('input').onchange = (ev) => {
+        // Enum fields (required class, weapon style) are a dropdown: they are
+        // words, and typing them by hand is how you end up with a "warrrior"
+        // requirement nobody can satisfy.
+        const opts = kind === 'item' ? ITEM_ENUM_FIELDS[f] : undefined;
+        if (opts) {
+          row.innerHTML = `${f} <select>${opts.map(o =>
+            `<option value="${o}">${o || '— none —'}</option>`).join('')}</select>`;
+          row.querySelector('select').value = cur ?? orig ?? '';
+        } else {
+          row.innerHTML = `${f} <input type="number" step="any" placeholder="${orig}" value="${cur ?? ''}">`;
+        }
+        row.querySelector(opts ? 'select' : 'input').onchange = (ev) => {
           this._snapshot();
-          const v = ev.target.value === '' ? null : +ev.target.value;
+          const raw = ev.target.value;
+          const v = opts ? raw : (raw === '' ? null : +raw);
           store[id] ??= {};
-          if (v === null || !Number.isFinite(v) || v === orig) delete store[id][f];
+          if (opts) {
+            if (v === (orig ?? '')) delete store[id][f]; else store[id][f] = v;
+          } else if (v === null || !Number.isFinite(v) || v === orig) delete store[id][f];
           else store[id][f] = v;
           if (!Object.keys(store[id]).length) delete store[id];
           worldPatch.dirty = true;

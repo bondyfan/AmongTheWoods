@@ -1462,6 +1462,9 @@ export function classEffectsFor(classId, training = {}) {
 }
 export function requiredClassForItem(item) {
   if (!item) return null;
+  // An explicit reqClass wins — that is the World Editor's knob, and '' there
+  // means "no requirement", which must beat the built-in rules below.
+  if (item.reqClass !== undefined) return item.reqClass || null;
   if (item.slot === 'companion' || item.weapon?.kind === 'bow') return 'beastmaster';
   return null;
 }

@@ -16,6 +16,7 @@ class AudioManager {
     this.musicVolume = 0.35;
     this.sfxVolume = 1;          // master multiplier from the settings slider
     this.lastPlayed = new Map(); // throttle per-sfx
+    this.pool = new Map();       // name -> { list: HTMLAudioElement[], i }
   }
 
   // Preload every SFX + music track up front (loading screen) so the first
@@ -54,6 +55,10 @@ class AudioManager {
     const MUSIC = ['level1', 'level3', 'mainmenu'];
     const urls = [...SFX.map(n => SFX_PATH + n + '.mp3'), ...AMB.map(n => SFX_PATH + n + '.mp3'),
       ...MUSIC.map(n => MUSIC_PATH + n + '.mp3')];
+    // Build the voice pools NOW, while the loading screen is up. Fetching the
+    // URL only warms the HTTP cache; it does not give us an element that can
+    // make a sound on the frame it is asked to.
+    for (const n of SFX) this._voices(n);
     let done = 0;
     await Promise.all(urls.map(async (url) => {
       // never let one stuck request hold the whole loading screen hostage
@@ -75,6 +80,30 @@ class AudioManager {
       this._fades?.delete(this.music);
       this.music.volume = this.musicVolume;
     }
+  }
+
+  // A small pool of READY elements per sound, instead of cloneNode() per play.
+  //
+  // cloneNode() copies the src but not the decoded audio, so every single hit
+  // was allocating an element that had to fetch (from cache, usually) and DECODE
+  // an mp3 before it could make a noise. On desktop the decoder is fast enough
+  // to hide it; on a phone it is exactly the reported symptom — the first swing
+  // is silent, and then the frame hitches when the decode lands.
+  //
+  // Three voices so overlapping hits don't cut each other off, round-robined.
+  _voices(name) {
+    let v = this.pool.get(name);
+    if (!v) {
+      v = { list: [], i: 0 };
+      for (let k = 0; k < 3; k++) {
+        const a = new Audio(SFX_PATH + name + '.mp3');
+        a.preload = 'auto';
+        a.load();
+        v.list.push(a);
+      }
+      this.pool.set(name, v);
+    }
+    return v;
   }
 
   _base(name) {
@@ -101,7 +130,10 @@ class AudioManager {
     if (now - (this.lastPlayed.get(name) || 0) < throttleMs) return;
     this._log(name);
     this.lastPlayed.set(name, now);
-    const a = this._base(name).cloneNode();
+    const v = this._voices(name);
+    v.i = (v.i + 1) % v.list.length;
+    const a = v.list[v.i];
+    try { a.currentTime = 0; } catch { /* not seekable yet — it will still play */ }
     a.volume = Math.min(1, volume * this.sfxVolume);
     a.play().catch(() => {});
   }

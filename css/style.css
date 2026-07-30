@@ -1788,3 +1788,25 @@ body.slotting-weapon #spellbar .spell-slot[data-slot="9"] .ring-fan { display: f
 .ring-cell.equipped-slot { border-color: #cfe38a; box-shadow: 0 0 0 1px #cfe38a inset; }
 .ring-cell.drop-hot { border-color: #ffd479; background: rgba(255, 212, 121, 0.18); }
 .ring-cell img, .ring-cell svg { width: 26px; height: 26px; }
+
+/* ---- portrait phones: ask for landscape ---------------------------------
+   Only on a COARSE pointer — a narrow desktop window is not a phone, and
+   covering it with a rotate prompt would be absurd. */
+#rotate-me { display: none; }
+@media (orientation: portrait) and (pointer: coarse) {
+  #rotate-me {
+    display: flex; position: fixed; inset: 0; z-index: 9999;
+    align-items: center; justify-content: center; text-align: center;
+    background: #0d1409; color: #e8f0dd; padding: 24px;
+  }
+  #rotate-me .rot-icon {
+    display: block; font-size: 64px; margin-bottom: 14px;
+    animation: rot-turn 2.2s ease-in-out infinite;
+  }
+  #rotate-me b { display: block; font-size: 20px; margin-bottom: 6px; }
+  #rotate-me small { opacity: .7; }
+}
+@keyframes rot-turn {
+  0%, 40% { transform: rotate(0deg); }
+  60%, 100% { transform: rotate(90deg); }
+}

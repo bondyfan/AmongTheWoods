@@ -23,6 +23,13 @@
   </script>
 </head>
 <body>
+  <!-- Phones only: the HUD, the action bar and the joystick all assume a wide
+       screen, and in portrait they stack on top of each other. The PWA manifest
+       asks for landscape and fullscreen locks it where that is allowed; this
+       covers iOS Safari, where neither works. -->
+  <div id="rotate-me"><div><span class="rot-icon">📱</span>
+    <b>Turn your phone sideways</b>
+    <small>Among The Woods is played in landscape.</small></div></div>
   <div id="game"></div>
 
   <!-- mandatory Google sign-in gate: nothing is reachable until you're in -->
