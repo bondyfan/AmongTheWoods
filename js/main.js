@@ -2008,6 +2008,14 @@ let powTick = 0;
 const enemyMgr = new EnemyManager(scene, world, {
   popup: (pos, text, color, cls) => ui.popup(pos, text, color, cls),
   onKill: (enemy) => {
+    // A keeper died in a real fight — retire its POI from the garrison sweep.
+    // Marked before anything can return: however it died, the player was
+    // standing there, and restocking a fight they already won is worse than
+    // leaving a half-cleared crypt. (Melted keepers never reach this path.)
+    if (enemy.cryptId != null) {
+      const guarded = world.pois?.find(p => p.id === enemy.cryptId);
+      if (guarded) guarded.cleared = true;
+    }
     // a fallen village guard yields nothing — no XP, meat or hide (and no
     // quest credit); killing the law is its own punishment
     if (enemy.cfg?.friendly) return;
@@ -2297,9 +2305,14 @@ function startPlaying() {
     setTimeout(() => { if (game.mode === 'play') hintLair(game.biomeIndex); }, 30_000);
     // crypts, jungle temples and the summit come pre-garrisoned with a
     // silent guard pack — the summit's keeper is a colossal named boss
-    world.onPoiSpawned = (poi) => {
+    const postGuards = (poi) => {
       if (poiClaimActive(poi.id)) poi.claimed = true;   // honour the saved ledger
-      if (poi.claimed || poi.guarded) return;
+      // NOT gated on poi.guarded: EnemyManager melts units past ZONE_RELEASE
+      // (205 m) back into their zone pool, so a garrison you walked away from
+      // genuinely evaporates. Gating on "was it ever manned" meant the keepers
+      // never came back and the crypt was free loot on the second visit.
+      // regarrisonNearby re-enters here; poi.cleared is what retires a POI.
+      if (poi.claimed || poi.cleared) return;
       if (!['crypt', 'temple', 'summit', 'lair', 'captive'].includes(poi.type)) return;
       if (mp?.active && !mp.isHost) return; // host simulates the guards
       poi.guarded = true;
@@ -2354,6 +2367,13 @@ function startPlaying() {
         boss.aggroed = false;
         boss.cryptId = poi.id;
       }
+    };
+    world.onPoiSpawned = (poi) => {
+      postGuards(poi);
+      // How many keepers this POI is SUPPOSED to have. Zero means it was never
+      // meant to have any — a singleplayer lair is a door to an instanced
+      // dungeon, not an outdoor fight — so the sweep leaves those alone.
+      poi.garrison = (enemyMgr.alive?.() ?? []).filter(e => e.cryptId === poi.id).length;
     };
     // the co-op guest renders the HOST's enemies
     if (!(mp?.active && mp.mode === 'coop' && !mp.isHost)) enemyMgr.spawnInitialWave();
@@ -2510,13 +2530,49 @@ const POI_COOLDOWN_MS = 24 * 60 * 1000;      // 24 game hours == 24 real minutes
 function markPoiClaimed(poi) {
   if (!poi?.id) return;
   poiClaims[poi.id] = Date.now();
-  markPoiClaimed(poi);
+  // The line below used to read `markPoiClaimed(poi)` — the function called
+  // ITSELF, so every claim threw RangeError out of the first statement of the
+  // reward block and took the rest with it: no quest credit, no XP, no loot,
+  // no banner, and the dungeon exit never opened after a lair boss died. It
+  // also left the POI unclaimed in the live session; only a relog picked the
+  // ledger back up through applyPoiClaims.
+  poi.claimed = true;
 }
 // has this claim lapsed? (also the seam that re-opens a POI after a day)
 function poiClaimActive(id) {
   const at = poiClaims[id];
   return !!at && (Date.now() - at) < POI_COOLDOWN_MS;
 }
+// Re-man POIs whose keepers evaporated. EnemyManager melts any unit further
+// than ZONE_RELEASE (205 m) from the player back into its zone pool, so a
+// garrison you walked away from is simply GONE — and the claim check counts
+// live keepers, so the second visit to any crypt used to be free loot. Mirrors
+// GameRoom._garrisonNear; kept just under the melt radius so fresh keepers
+// don't dissolve on the tick they spawn.
+const GARRISON_R = 180;
+const GARRISON_EVERY = 0.5;
+let garrisonAcc = 0;
+function regarrisonNearby(dt) {
+  if (mp?.active && !mp.isHost) return;   // the host/server owns the guards
+  if (!world.onPoiSpawned || game.dungeon) return;
+  garrisonAcc += dt;
+  if (garrisonAcc < GARRISON_EVERY) return;
+  garrisonAcc = 0;
+  const manned = new Set();
+  for (const e of enemyMgr.alive?.() ?? []) {
+    if (e.cryptId != null && !e.dying) manned.add(e.cryptId);
+  }
+  for (const poi of world.pois ?? []) {
+    // garrison > 0 means keepers were posted here once, so they belong here.
+    // A singleplayer lair never posts any (it is a door into an instanced
+    // dungeon), which is exactly how it stays out of this sweep.
+    if (!poi.garrison || poi.claimed || poi.cleared || manned.has(poi.id)) continue;
+    if (Math.hypot(player.pos.x - poi.x, player.pos.z - poi.z) > GARRISON_R) continue;
+    poi.guarded = false;
+    world.onPoiSpawned(poi);
+  }
+}
+
 // re-apply the ledger to the freshly generated world, and expire old claims
 function applyPoiClaims() {
   for (const id of Object.keys(poiClaims)) {
@@ -6629,6 +6685,7 @@ function step() {
       companions.update(dt, player, em, projectiles, world);
       if (!game.dungeon) camp?.update(dt, em, projectiles); // towers can't shoot through the floor
       world.update(dt, player.pos);
+      regarrisonNearby(dt);
       // co-op: show the partner on the minimap too; in top-down view the
       // minimap turns together with the auto-rotated camera (RPG: north-up)
       minimap.rotation = game.rpgView ? Math.atan2(-player.facing.x, -player.facing.z) : camYaw;
@@ -6649,6 +6706,7 @@ function step() {
           get enemyMgr() { return combatMgr(); },
           get targeting() { return targeting; },
           kill: () => { player.hp = 0; player.dead = true; player.killedBy = 'a test'; survivalRespawn(); },
+          claimPoi: (poi) => markPoiClaimed(poi),
           graveyards: () => knownGraveyards() };
       }
       world.noteVillageSeen?.(player.pos.x, player.pos.z); // unlocks its graveyard

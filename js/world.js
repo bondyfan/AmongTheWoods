@@ -1804,7 +1804,8 @@ export class World {
     // landmark state must SURVIVE the deterministic re-roll — otherwise
     // every editor tweak re-armed looted POIs and re-posted crypt guards
     const prevState = new Map(this.pois.map(p =>
-      [p.patchId ?? ('g' + p.id), { claimed: p.claimed, guarded: p.guarded }]));
+      [p.patchId ?? ('g' + p.id), { claimed: p.claimed, guarded: p.guarded,
+        cleared: p.cleared, garrison: p.garrison }]));
     this._patchObstacles.clear();
     this.obstacles = this.obstacles.filter(o => !o.tag);
     for (const sm of this.smiths) sm.obstacleAdded = false;
@@ -1814,7 +1815,12 @@ export class World {
     this._genPaths();
     for (const p of this.pois) {
       const old = prevState.get(p.patchId ?? ('g' + p.id));
-      if (old) { p.claimed = old.claimed; p.guarded = old.guarded; }
+      // cleared/garrison ride along too, or an editor tweak would re-post the
+      // keepers of a crypt the player had already fought through
+      if (old) {
+        p.claimed = old.claimed; p.guarded = old.guarded;
+        p.cleared = old.cleared; p.garrison = old.garrison;
+      }
     }
     // collision comes back island-wide RIGHT NOW — chunk regen (which only
     // covers the edited area) merely re-renders the meshes
