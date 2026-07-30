@@ -74,13 +74,22 @@ export class Player {
   constructor(scene, hooks) {
     this.hooks = hooks; // { popup, onLevelUp, onDeath, onHurt, onEquipChange }
     this.scene = scene;
-    const rigged = humanReady() && humanModelEnabled();
-    this.mesh = rigged ? makeHumanMan() : makeMan();
     // The rigged body has to satisfy every handle the box body publishes. Its
     // first version quietly published five bare Groups that were never in the
-    // scene, so five consumers no-oped and nothing complained for three days.
-    // Fail at construction instead.
-    if (rigged) assertContract(this.mesh, 'rigged player');
+    // scene, so five consumers no-oped and nothing complained. Check it here —
+    // but FALL BACK rather than throw: a contract slip should cost the nice
+    // avatar, not the whole game.
+    let mesh = null;
+    if (humanReady() && humanModelEnabled()) {
+      try {
+        mesh = makeHumanMan();
+        assertContract(mesh, 'rigged player');
+      } catch (e) {
+        console.warn('[human] rigged body rejected, using box man —', e.message);
+        mesh = null;
+      }
+    }
+    this.mesh = mesh ?? makeMan();
     scene.add(this.mesh);
     this.slashes = []; // short-lived melee swing arcs
     this.levelFx = []; // short-lived level-up burst pieces

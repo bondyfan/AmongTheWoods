@@ -16,9 +16,10 @@
 //   m.register('./server/sim/three-hook.mjs', import.meta.url); \
 //   await import('./tests/avatar-contract-test.mjs'); })"
 // ==========================================================================
+import { readFileSync } from 'node:fs';
 import * as THREE from 'three';
 import { makeMan } from '../js/models.js';
-import { assertContract } from '../js/humanmodel.js';
+import { assertContract, humanModelEnabled, humanReady } from '../js/humanmodel.js';
 
 let pass = 0, fail = 0;
 const ok = (c, m) => { c ? pass++ : fail++; console.log(`${c ? '  ok  ' : 'FAIL  '}${m}`); };
@@ -83,6 +84,37 @@ console.log('\n-- and the guard names the body it was given --');
 
 console.log('\n-- makeMan facing, as the rigged body must match it --');
 ok(box.userData.frontZ === 1, 'the box body fronts +Z, so the rigged body must too');
+
+console.log('\n-- the gate reports the load, so it must not GUARD the load --');
+{
+  // This exact circularity shipped: main.js had
+  //     if (humanModelEnabled()) await preloadHumanModel();
+  // while humanModelEnabled() returns whether the clips loaded — and the clips
+  // load inside preloadHumanModel. The gate was false, so the load never ran, so
+  // the gate stayed false. The box man came back and nothing errored.
+  ok(!humanReady() && !humanModelEnabled(),
+    'both are false before any preload (the gate reports state, it is not a setting)');
+  const main = readFileSync('js/main.js', 'utf8');
+  const circular = /if\s*\(\s*humanModelEnabled\(\)\s*\)[^\n]*\n?[^\n]*preloadHumanModel/.test(main);
+  ok(!circular, 'main.js does not gate preloadHumanModel() on humanModelEnabled()');
+  ok(/await preloadHumanModel\(\)/.test(main), 'main.js does await preloadHumanModel()');
+}
+
+console.log('\n-- human.gltf really has what makeHumanMan reaches for --');
+{
+  // makeHumanMan hangs sockets off named bones and picks the body/hair meshes by
+  // material name. A rename upstream would silently orphan a socket or leave the
+  // hair unfindable, which is the failure class assertContract exists to catch —
+  // but the asset is the cheaper place to notice.
+  const rig = JSON.parse(readFileSync('assets/models/human/human.gltf', 'utf8'));
+  const names = new Set((rig.nodes ?? []).map(n => n.name).filter(Boolean));
+  for (const b of ['hand_l', 'hand_r', 'Head', 'pelvis']) {
+    ok(names.has(b), `bone '${b}' exists (socket host)`);
+  }
+  const mats = (rig.materials ?? []).map(m => m.name ?? '');
+  ok(mats.some(n => /hair/i.test(n)), `a hair material exists (${mats.join(', ')})`);
+  ok(mats.some(n => /male|female|body|superhero/i.test(n)), 'a body material exists');
+}
 
 console.log(`\n${pass}/${pass + fail} passed`);
 process.exit(fail ? 1 : 0);

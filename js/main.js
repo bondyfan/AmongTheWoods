@@ -28,7 +28,7 @@ import { MobaWorld } from './mobaworld.js';
 import { DungeonWorld } from './dungeon.js';
 import { Moba } from './moba.js';
 import { Player } from './player.js';
-import { preloadHumanModel, humanModelEnabled } from './humanmodel.js';
+import { preloadHumanModel } from './humanmodel.js';
 import * as vegKit from './vegekit.js';
 import { EnemyManager } from './enemies.js';
 import { Projectiles } from './projectiles.js';
@@ -380,9 +380,12 @@ if (_cloudMap?.patch && worldPatch.load(_cloudMap.patch)) {
   await loadWorldPatch(); // static baseline (assets/world-patch.json)
 }
 applyTweaks();          // …including enemy/item stat tweaks from the object editor
-if (humanModelEnabled()) { // experimental rigged-human avatar (Graphics settings)
-  try { await preloadHumanModel(); } catch (e) { console.warn('[human] model load failed, using box man', e); }
-}
+// The rigged avatar. Do NOT gate this on humanModelEnabled(): that reports
+// whether the CLIPS loaded, and the clips load HERE — guarding the load with it
+// was circular and pinned the avatar off forever, which is exactly how the box
+// man came back. Load first, then the gate reports the outcome.
+try { await preloadHumanModel(); }
+catch (e) { console.warn('[human] model load failed, using box man', e); }
 if (vegKit.enabled()) { // quality-vegetation glTF kit (Graphics settings)
   try { await vegKit.preload(); } catch (e) { console.warn('[vegekit] preload failed, using procedural greenery', e); }
 }
