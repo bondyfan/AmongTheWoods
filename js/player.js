@@ -3832,7 +3832,6 @@ export class Player {
       casting: !!this.castWindup,
       sitting: !!this.mounted,
       torch: !!ud.torchRef,
-      armed: this.weapon?.kind === 'melee',
     });
   }
 

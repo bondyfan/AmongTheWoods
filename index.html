@@ -356,6 +356,7 @@
       <button class="tab" data-page="controls">🎮 Controls</button>
       <button class="tab" data-page="audio">🔊 Audio</button>
       <button class="tab" data-page="general">🎒 General</button>
+      <button class="tab hidden" data-page="dev" id="settings-tab-dev">🧪 Dev</button>
     </div>
     <div id="settings-body">
 
@@ -549,6 +550,25 @@
             <small>Edit any stat in the Character panel and spawn items into
             the inventory — for testing.</small></span>
         </label>
+      </div>
+
+      <!-- ========== DEV (only with ?devmode) ========== -->
+      <div class="settings-page" data-page="dev">
+        <div class="setting-row">
+          <span style="flex:1"><b>🧪 Experiments</b><br>
+            <small>Unfinished work, visible only with <code>?devmode</code>. These
+            are not player-facing and can look wrong.</small></span>
+        </div>
+        <label class="setting-row" id="rigged-row">
+          <input type="checkbox" id="set-rigged">
+          <span><b>🧍 Rigged human avatar</b> <small>(needs a reload)</small><br>
+            <small>Swap the blocky hero for the animated glTF body: real idle,
+            walk, run, swim and swing clips. Still rough — the base mesh has no
+            outfit yet, so it reads as a mannequin next to the boxy villagers.</small></span>
+        </label>
+        <div class="setting-row">
+          <span style="flex:1"><small id="rigged-note" style="opacity:.75">—</small></span>
+        </div>
       </div>
 
     </div>

@@ -117,12 +117,19 @@ export async function preloadHumanModel() {
 export function humanReady() { return !!_template; }
 export function humanClipCount() { return _clips.length; }
 
-// Gate for the avatar, and it gates on the CLIPS rather than on a setting.
-// Shipping this body un-animated is exactly what got it retired the first time —
-// a detailed mannequin with four moving bones reads worse than a box. So if
-// anims.glb is missing or fails to load, we fall back to makeMan on purpose,
-// and the frozen-hero failure mode simply cannot ship again.
-export function humanModelEnabled() { return _clips.length > 0; }
+// Opt-in from the Dev settings tab. Separate from the clip check on purpose: the
+// opt-in is a WISH, the clip count is the OUTCOME, and conflating the two is what
+// produced a gate that guarded its own precondition.
+let _optIn = false;
+export function setHumanModelOptIn(v) { _optIn = !!v; }
+export function humanModelOptIn() { return _optIn; }
+
+// Gate for the avatar. The opt-in alone is not enough — it also gates on the CLIPS
+// rather than on the wish, because shipping this body un-animated is exactly what
+// got it retired the first time — a detailed mannequin with four moving bones
+// reads worse than a box. If anims.glb is missing or fails, we fall back to
+// makeMan on purpose and the frozen-hero failure mode cannot come back.
+export function humanModelEnabled() { return _optIn && _clips.length > 0; }
 
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
@@ -248,23 +255,37 @@ export function makeHumanMan() {
   // ONE solve per frame, called from the game loop. This used to hang off
   // skinned[0].onBeforeRender, which runs once per RENDER PASS — shadow map plus
   // postfx plus preview meant 65 bones re-solved three times every frame.
-  let cur = null;            // the looping base action
-  let oneShot = null;        // { action, until } — outranks the base while live
+  // ── the state machine ──────────────────────────────────────────────────────
+  // One-shot handling was broken and it froze the character solid: fadeTo() with
+  // once=true faded the base OUT but never became `cur`, so when the one-shot
+  // expired, setState asked for the base again, fadeTo saw `a === cur` and bailed
+  // — leaving the base at weight 0 and the clamped swing pose at weight 1,
+  // forever. One swing and the hero locked in the follow-through and never
+  // attacked again. So: the base and the one-shot are tracked separately, the
+  // one-shot is explicitly faded out when its time is up, and starting a loop
+  // fades out EVERY other running action so nothing can be orphaned at weight 1.
+  let base = null;           // the looping action we want to be in
+  let shot = null;           // { action, until } — outranks the base while live
   let clock = 0;
 
-  const fadeTo = (name, fade = 0.18, once = false, timeScale = 1) => {
+  const stopOthers = (keep, fade) => {
+    for (const a of actions.values()) {
+      if (a !== keep && a.isRunning() && a.getEffectiveWeight() > 0.001) a.fadeOut(fade);
+    }
+  };
+
+  const startLoop = (name, fade = 0.18) => {
     const a = actions.get(name);
     if (!a) return null;
-    if (a === cur && !once) return a;
+    if (base === a && a.isRunning() && a.getEffectiveWeight() > 0.01) return a;
     a.reset();
-    a.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, Infinity);
-    a.clampWhenFinished = once;
-    a.timeScale = timeScale;
+    a.setLoop(THREE.LoopRepeat, Infinity);
+    a.clampWhenFinished = false;
     a.enabled = true;
     a.setEffectiveWeight(1);
     a.fadeIn(fade).play();
-    if (cur && cur !== a) cur.fadeOut(fade);
-    if (!once) cur = a;
+    stopOthers(a, fade);
+    base = a;
     return a;
   };
 
@@ -273,16 +294,24 @@ export function makeHumanMan() {
     clipNames: () => [...actions.keys()],
     has: (name) => actions.has(name),
 
-    // Fire a non-looping clip (a swing, a cast, a hit) that outranks the base
-    // until it finishes. `dur` retimes it onto the gameplay clock that owns the
-    // hit frame: swingTime is a getter mutated by Quick Draw and Haste, so
-    // playing at authored length would drift the impact out of the animation.
+    // Fire a non-looping clip (a swing, a cast) that outranks the base until it
+    // finishes. `dur` retimes it onto the gameplay clock that owns the hit frame:
+    // swingTime is a getter Quick Draw and Haste mutate, so playing at authored
+    // length would drift the impact out of the animation.
     trigger(name, dur = 0) {
       const a = actions.get(name);
       if (!a || !mixer) return false;
       const len = a.getClip().duration || 1;
-      oneShot = { action: a, until: clock + (dur > 0.01 ? dur : len) };
-      fadeTo(name, 0.06, true, dur > 0.01 ? len / dur : 1);
+      const play = dur > 0.01 ? dur : len;
+      a.reset();
+      a.setLoop(THREE.LoopOnce, 1);
+      a.clampWhenFinished = false;    // holding the last frame is what froze it
+      a.timeScale = len / play;
+      a.enabled = true;
+      a.setEffectiveWeight(1);
+      a.fadeIn(0.06).play();
+      stopOthers(a, 0.06);
+      shot = { action: a, until: clock + play };
       return true;
     },
 
@@ -290,17 +319,33 @@ export function makeHumanMan() {
     // it exists, so player.js's hand-authored limb rotations are skipped.
     setState(s = {}) {
       if (!mixer) return;
-      if (oneShot && clock < oneShot.until) return;
-      oneShot = null;
+      if (shot) {
+        if (clock < shot.until) return;
+        shot.action.fadeOut(0.12);
+        shot = null;
+        base = null;                  // force the base to fade back IN
+      }
+      if (s.dead) {
+        const d = actions.get(CLIP.death);
+        if (!d || base === d) return; // plays once and stays down
+        d.reset(); d.setLoop(THREE.LoopOnce, 1);
+        d.clampWhenFinished = true; d.enabled = true;
+        d.setEffectiveWeight(1); d.fadeIn(0.12).play();
+        stopOthers(d, 0.12);
+        base = d;
+        return;
+      }
       let want;
-      if (s.dead) want = CLIP.death;
-      else if (s.sitting) want = CLIP.sit;
+      if (s.sitting) want = CLIP.sit;
       else if (s.swimming) want = s.moving ? CLIP.swim : CLIP.swimIdle;
       else if (s.blocking) want = CLIP.block;
       else if (s.casting) want = CLIP.castIdle;
       else if (s.moving) want = s.speed > 6.4 ? CLIP.sprint : s.speed > 3.2 ? CLIP.jog : CLIP.walk;
       else if (s.torch) want = CLIP.idleTorch;
-      else if (s.armed) want = CLIP.idleSword;
+      // NOTE deliberately NOT a weapon stance. Mapping "holding a melee weapon"
+      // to Sword_Idle meant the resting pose was a combat guard essentially all
+      // the time — the player almost always has a melee weapon — so walking and
+      // standing both read as "braced for a fight". Sword_Idle is for BLOCKING.
       else want = CLIP.idle;
       // Retime locomotion to real ground speed or the feet skate. The clips were
       // authored at roughly walk 1.4, jog 4, sprint 7 m/s.
@@ -309,10 +354,7 @@ export function makeHumanMan() {
         const a = actions.get(want);
         if (a) a.timeScale = Math.max(0.45, Math.min(2.2, (s.speed || authored) / authored));
       }
-      // death plays once and stays down — don't restart it every frame
-      if (s.dead && cur === actions.get(CLIP.death)) return;
-      fadeTo(want, s.dead ? 0.12 : 0.18, !!s.dead);
-      if (s.dead) cur = actions.get(CLIP.death);
+      startLoop(want);
     },
 
     update(dt) {

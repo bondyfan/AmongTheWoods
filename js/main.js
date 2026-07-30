@@ -28,7 +28,7 @@ import { MobaWorld } from './mobaworld.js';
 import { DungeonWorld } from './dungeon.js';
 import { Moba } from './moba.js';
 import { Player } from './player.js';
-import { preloadHumanModel } from './humanmodel.js';
+import { preloadHumanModel, setHumanModelOptIn, humanClipCount } from './humanmodel.js';
 import * as vegKit from './vegekit.js';
 import { EnemyManager } from './enemies.js';
 import { Projectiles } from './projectiles.js';
@@ -380,12 +380,16 @@ if (_cloudMap?.patch && worldPatch.load(_cloudMap.patch)) {
   await loadWorldPatch(); // static baseline (assets/world-patch.json)
 }
 applyTweaks();          // …including enemy/item stat tweaks from the object editor
-// The rigged avatar. Do NOT gate this on humanModelEnabled(): that reports
-// whether the CLIPS loaded, and the clips load HERE — guarding the load with it
-// was circular and pinned the avatar off forever, which is exactly how the box
-// man came back. Load first, then the gate reports the outcome.
-try { await preloadHumanModel(); }
-catch (e) { console.warn('[human] model load failed, using box man', e); }
+// The rigged avatar — a Dev-tab experiment, so ?devmode only. Gate the download
+// on the OPT-IN (a setting), never on humanModelEnabled(): that reports whether
+// the CLIPS loaded, and the clips load right here, so guarding the load with it
+// was circular and pinned the avatar off forever. That is how the box man came
+// back last time. Setting first, then load, then the gate reports the outcome.
+setHumanModelOptIn(DEVMODE && settings.riggedAvatar === true);
+if (DEVMODE && settings.riggedAvatar === true) {
+  try { await preloadHumanModel(); }
+  catch (e) { console.warn('[human] model load failed, using box man', e); }
+}
 if (vegKit.enabled()) { // quality-vegetation glTF kit (Graphics settings)
   try { await vegKit.preload(); } catch (e) { console.warn('[vegekit] preload failed, using procedural greenery', e); }
 }
@@ -3122,6 +3126,15 @@ if ((settings.controlsRev ?? 0) < CONTROLS_DEFAULT_VERSION) {
     settings.shadows = $id('set-shadows').checked;
     saveGfx();
   });
+  // Dev-tab experiment. It only takes effect on a reload, because the avatar is
+  // chosen once when Player is constructed — say so rather than let it look broken.
+  $id('set-rigged')?.addEventListener('change', () => {
+    settings.riggedAvatar = $id('set-rigged').checked;
+    saveGfx();
+    ui.toast(settings.riggedAvatar
+      ? '🧍 Rigged avatar ON — reload the page to see it.'
+      : '🧍 Rigged avatar OFF — reload the page.', '');
+  });
   $id('set-resscale').addEventListener('change', () => {
     settings.resScale = $id('set-resscale').value;
     saveGfx();
@@ -3285,6 +3298,18 @@ if ((settings.controlsRev ?? 0) < CONTROLS_DEFAULT_VERSION) {
       ? 'Everyone who picks 🖥️ Server drops into this same shared world.'
       : 'Share this code so a friend can join your running game.';
     $id('admin-row').style.display = (DEVMODE && game.kind === 'survival' && !mp?.active) ? '' : 'none';
+    // the Dev tab exists only with ?devmode
+    $id('settings-tab-dev')?.classList.toggle('hidden', !DEVMODE);
+    const rg = $id('set-rigged');
+    if (rg) {
+      rg.checked = settings.riggedAvatar === true;
+      const n = humanClipCount();
+      $id('rigged-note').textContent = !settings.riggedAvatar
+        ? 'Off — the blocky hero is in use.'
+        : n > 0
+          ? `On — ${n} animation clips loaded.`
+          : 'On, but no clips loaded: falling back to the blocky hero on purpose.';
+    }
     $id('set-admin').checked = !!game.adminMode;
     // characters autosave continuously — there is no manual save to offer, so
     // the row just tells you WHERE this character lives and that it's safe
