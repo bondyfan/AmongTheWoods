@@ -100,6 +100,35 @@ console.log('\n-- the gate reports the load, so it must not GUARD the load --');
   ok(/await preloadHumanModel\(\)/.test(main), 'main.js does await preloadHumanModel()');
 }
 
+console.log('\n-- nothing in the boot region touches `settings` before it exists --');
+{
+  // main.js runs a top-level await block (world patch, rigged avatar, veg kit)
+  // roughly 2,500 lines ABOVE where `const settings` is declared. Reading
+  // `settings` from there is a temporal dead zone ReferenceError that kills the
+  // module before the game boots — "Cannot access 'settings' before
+  // initialization" — and it takes the WHOLE game down, not just the avatar.
+  // vegekit.js reads localStorage directly for exactly this reason.
+  const src = readFileSync('js/main.js', 'utf8').split('\n');
+  const declLine = src.findIndex(l => /^const settings = /.test(l));
+  ok(declLine > 0, `found \`const settings\` at line ${declLine + 1}`);
+  // Walk line by line tracking brace depth so only TOP-LEVEL uses count — inside
+  // a function body `settings` is fine, because the function runs long after the
+  // module finishes evaluating. Strings/comments are stripped per line so the
+  // line numbers stay honest (collapsing block comments would shift them).
+  let depth = 0;
+  const hits = [];
+  for (let i = 0; i < declLine; i++) {
+    const line = src[i]
+      .replace(/(['"`])(?:\\.|(?!\1).)*\1/g, "''")
+      .replace(/\/\/.*$/, '');
+    if (depth === 0 && /\bsettings\s*[.[]/.test(line)) hits.push(i + 1);
+    for (const ch of line) { if (ch === '{' || ch === '(' || ch === '[') depth++; else if (ch === '}' || ch === ')' || ch === ']') depth--; }
+  }
+  ok(hits.length === 0,
+    `no TOP-LEVEL use of \`settings\` above line ${declLine + 1}` +
+    (hits.length ? ` — LINES ${hits.join(', ')}` : ''));
+}
+
 console.log('\n-- human.gltf really has what makeHumanMan reaches for --');
 {
   // makeHumanMan hangs sockets off named bones and picks the body/hair meshes by

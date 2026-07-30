@@ -28,7 +28,7 @@ import { MobaWorld } from './mobaworld.js';
 import { DungeonWorld } from './dungeon.js';
 import { Moba } from './moba.js';
 import { Player } from './player.js';
-import { preloadHumanModel, setHumanModelOptIn, humanClipCount } from './humanmodel.js';
+import { preloadHumanModel, setHumanModelOptIn, humanClipCount, optInFromStorage } from './humanmodel.js';
 import * as vegKit from './vegekit.js';
 import { EnemyManager } from './enemies.js';
 import { Projectiles } from './projectiles.js';
@@ -385,8 +385,12 @@ applyTweaks();          // …including enemy/item stat tweaks from the object e
 // the CLIPS loaded, and the clips load right here, so guarding the load with it
 // was circular and pinned the avatar off forever. That is how the box man came
 // back last time. Setting first, then load, then the gate reports the outcome.
-setHumanModelOptIn(DEVMODE && settings.riggedAvatar === true);
-if (DEVMODE && settings.riggedAvatar === true) {
+// NB optInFromStorage(), not `settings` — that const is declared ~2,500 lines
+// below this line, and reading it here is a temporal dead zone error that takes
+// the whole module down. vegKit.enabled() just below does the same thing.
+const _wantRig = DEVMODE && optInFromStorage();
+setHumanModelOptIn(_wantRig);
+if (_wantRig) {
   try { await preloadHumanModel(); }
   catch (e) { console.warn('[human] model load failed, using box man', e); }
 }

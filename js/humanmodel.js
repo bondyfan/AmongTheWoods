@@ -120,7 +120,16 @@ export function humanClipCount() { return _clips.length; }
 // Opt-in from the Dev settings tab. Separate from the clip check on purpose: the
 // opt-in is a WISH, the clip count is the OUTCOME, and conflating the two is what
 // produced a gate that guarded its own precondition.
+//
+// Read straight out of storage, exactly as vegekit.js does, because this is
+// consulted during main.js's top-level await — about 2,500 lines ABOVE where its
+// `settings` object is declared. Touching `settings` from there is a temporal
+// dead zone ReferenceError that kills the whole module before the game boots.
 let _optIn = false;
+export function optInFromStorage() {
+  try { return JSON.parse(localStorage.getItem('atw-settings') || '{}').riggedAvatar === true; }
+  catch { return false; }
+}
 export function setHumanModelOptIn(v) { _optIn = !!v; }
 export function humanModelOptIn() { return _optIn; }
 
