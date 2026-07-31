@@ -1265,7 +1265,9 @@ export class World {
       run.position.set(bx, this.heightAt(bx, bz), bz);
       run.rotation.y = a + Math.PI / 2;                 // tangent to the ring
       group.add(run);
-      this.obstacles.push({ x: bx, z: bz, r: 1.5, home: true });
+      // 1.25 m of post: a 2.4 m jump clears it, which is the whole point of
+      // being able to jump at all
+      this.obstacles.push({ x: bx, z: bz, r: 1.5, home: true, h: 1.3 });
     }
     // a gate frame either side of the opening, so the way in reads as a gate
     for (const s of [-1, 1]) {
@@ -2771,6 +2773,7 @@ export class World {
         if (!f.obstacleAdded) {
           f.obstacleAdded = true;
           this.obstacles.push({ x: f.x, z: f.z, r: 1.5,
+            h: 1.3,   // same paling, same clearance
             tag: 'vfence:' + this.village.fence.indexOf(f) });
         }
       }
@@ -3180,7 +3183,14 @@ export class World {
 
   // Push a circle (pos, r) out of solids. opts.boat lets the circle float
   // over lakes and ring rivers (but never past the world edge).
+  // `air` is how far the player's feet are above the ground. Obstacles are 2D
+  // circles — infinitely tall cylinders — so before this, jumping did nothing at
+  // all for collision: you could sail visibly over a waist-high fence and still
+  // be shoved back by it. An obstacle that declares a height `h` is now cleared
+  // once your feet are above it. Anything WITHOUT an h stays solid at any
+  // height, so trees, rocks and buildings are unchanged.
   collide(pos, r, opts = {}) {
+    const air = opts.air || 0;
     const pushOut = (ox, oz, minDist) => {
       const dx = pos.x - ox, dz = pos.z - oz;
       const distSq = dx * dx + dz * dz;
@@ -3193,7 +3203,10 @@ export class World {
 
     for (const tree of this.treesNear(pos, r + 0.5)) pushOut(tree.x, tree.z, r + tree.radius);
     for (const rock of this.rocksNear(pos, r + 0.5)) pushOut(rock.x, rock.z, r + rock.radius);
-    for (const o of this.obstacles) pushOut(o.x, o.z, r + o.r);
+    for (const o of this.obstacles) {
+      if (o.h != null && air > o.h) continue;   // jumped clear of it
+      pushOut(o.x, o.z, r + o.r);
+    }
 
     // the coastline: creatures are pushed back onto the island; players
     // (opts.wade) and boats may enter the sea, but a hard limit ~80 m out

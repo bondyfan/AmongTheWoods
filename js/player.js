@@ -3190,7 +3190,9 @@ export class Player {
       this.dashT -= dt;
       this.pos.addScaledVector(this.dashDir, 34 * dt);
       world.collide(this.pos, 0.45,
-        { boat: ctx.boat, wade: true, swimmer: (this.stats?.swim || 0) > 0 || !!this.upgrades?.swim });
+        { boat: ctx.boat, wade: true, swimmer: (this.stats?.swim || 0) > 0 || !!this.upgrades?.swim,
+          // how high the feet are: a jump clears low obstacles (world.collide)
+          air: Math.max(0, (this.y ?? 0) - world.heightAt(this.pos.x, this.pos.z)) });
       this._applyBounds(ctx);
       // dust + horizontal speed streaks kicked up behind a combat charge
       // (Bull Charge, Shadowstep dashes) so the rush reads like a freight train

@@ -50,6 +50,15 @@ console.log('\n-- every mobile tier renders at the panel ratio --');
     "and Resolution '1' is still there as the escape hatch if a phone struggles");
 }
 
+console.log('\n-- no preset reaches for the farthest vegetation --');
+{
+  // 'furthest' streams a wider ring of full-detail vegetation than any preset
+  // needs, and it is the setting whose chunk-by-chunk pop-in is most visible.
+  for (const [k, p] of Object.entries(PRESETS)) {
+    ok(p.vegDist !== 'furthest', `${k} is '${p.vegDist}', not 'furthest'`);
+  }
+}
+
 console.log('\n-- a device is only offered its own tiers --');
 {
   ok(/o\.hidden = onMobile \? !mobileOnly : mobileOnly;/.test(main),
