@@ -159,12 +159,47 @@ const autoQuality = {
   tick() {},
 };
 
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
+// Resize the render surface to whatever the viewport currently is.
+//
+// This is deliberately paranoid, because iOS Safari lies during an orientation
+// change: it fires `resize` BEFORE innerWidth/innerHeight settle, so a single
+// listener sizes the canvas to the pre-rotation width and the game ends up
+// filling half the screen — which is why turning the phone back and forth
+// "fixed" it, the second flip happened to arrive after the values were right.
+//
+// So: fit on every signal that could mean the viewport moved, ignore the ones
+// where nothing actually changed, and after an orientation change re-check for
+// a second in case the first few readings were stale.
+let _fitW = 0, _fitH = 0;
+function fitToView(force = false) {
+  const w = Math.round(window.visualViewport?.width ?? window.innerWidth);
+  const h = Math.round(window.visualViewport?.height ?? window.innerHeight);
+  if (!w || !h) return;                       // mid-rotation garbage
+  if (!force && w === _fitW && h === _fitH) return;
+  _fitW = w; _fitH = h;
+  camera.aspect = w / h;
   camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setSize(w, h);
   postfx?.setSize(renderer.domElement.width, renderer.domElement.height);
-});
+}
+
+// After a flip, keep checking for a second: the correct size can arrive several
+// frames late, and on some devices no further event is raised once it does.
+function fitSoon() {
+  fitToView();
+  for (const ms of [0, 50, 150, 300, 600, 1000]) setTimeout(() => fitToView(), ms);
+  requestAnimationFrame(() => fitToView());
+}
+
+window.addEventListener('resize', () => fitToView());
+window.addEventListener('orientationchange', fitSoon);
+window.visualViewport?.addEventListener('resize', () => fitToView());
+window.matchMedia?.('(orientation: portrait)')?.addEventListener?.('change', fitSoon);
+// the backstop: whatever the events do or don't say, the element's real box is
+// the truth, and this fires when it actually changes
+try {
+  new ResizeObserver(() => fitToView()).observe(document.documentElement);
+} catch { /* no ResizeObserver — the listeners above still cover it */ }
 
 // ---------- game state ----------
 const DEVMODE = /(?:^|[?&])devmode/i.test(location.search); // admin tools only with ?devmode
@@ -6607,7 +6642,10 @@ function applyGraphics() {
   const pr = settings.resScale === '1' ? 1
     : settings.resScale === '1.5' ? Math.min(window.devicePixelRatio, 1.5)
     : Math.min(window.devicePixelRatio, 2);
-  renderer.setPixelRatio(pr);
+  if (renderer.getPixelRatio() !== pr) {
+    renderer.setPixelRatio(pr);
+    fitToView(true);   // setPixelRatio alone leaves the buffer at the old scale
+  }
   // the post stack is needed for bloom, ambient occlusion or god rays
   if ((settings.bloom || settings.ssao || settings.rays) && !postfx) {
     postfx = new PostFX(renderer);
