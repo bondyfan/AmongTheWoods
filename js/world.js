@@ -38,26 +38,39 @@ const QUALITY_VEG_BIOMES = new Set(['Verdant Forest']);
 const CHUNK = 40;
 const VIEW_RADIUS = 3;   // chunks around the player kept alive
 
-// ---- how tall is that boulder? --------------------------------------------
-// A jump reaches ~2.4 m (JUMP_V 12.8, GRAVITY 34), so most small rocks can be
-// cleared and the big ones cannot — which is the gradation we want, provided
-// the rock actually says how tall it is. makeBoulder is a dodecahedron of
-// circumradius `scale`, squashed by a random mesh.scale.y and set down at
-// scale * 0.25 above the ground.
+// ---- standing on a boulder --------------------------------------------------
+// A jump reaches ~2.4 m (JUMP_V 12.8, GRAVITY 34), so most boulders can be
+// hopped onto. The question is what "onto" means, and the answer is not a
+// height — it is the stone itself.
 //
-// Two numbers, because they answer two different questions:
-//   top — the real surface, what you LAND on
-//   h   — what you must clear to pass THROUGH the footprint, a hand's breadth
-//         under the top: feet are a point but legs are not, and scraping over
-//         the crown of a low rock should succeed.
+// Two models were tried and both were wrong, in ways worth recording because
+// they are the obvious ones:
 //
-// The margin is deliberately SMALL. At 0.3 m even the largest boulder (2.64 m)
-// fell under the jump apex, so everything in the world became hoppable and the
-// size variation stopped meaning anything. At 0.15 the biggest need 2.49 m and
-// stay solid — you go around those, or climb something else first.
-function boulderHeights(scale, mesh) {
-  const top = scale * (0.25 + (mesh?.scale?.y ?? 1));
-  return { top, h: Math.max(0.25, top - 0.15) };
+//  1. A flat disc at summit height. Simple, and it hangs you in the air: a
+//     boulder is a faceted dome, so everywhere but the peak the real stone is
+//     lower than the peak, by up to 2 m on the big ones. That is the gap.
+//  2. A flat "crown" line a fixed drop below the summit. Fails because
+//     makeBoulder rotates each boulder at RANDOM, so the summit is usually a
+//     single vertex sitting off to one side — measured across 141 real rocks
+//     the point above a rock's own centre is up to 1.24 m below its summit. At
+//     a 0.35 m crown, 110 of those 141 rocks had nowhere to stand at all.
+//
+// So the surface is raycast against the mesh, and one rule covers everything:
+// you are clear of a boulder when your feet are at or above the stone directly
+// under them. Standing, jumping over, scrambling up a flank — all the same
+// question. ROCK_STEP is the slack, and it is a step height: the ground you
+// stand on is resolved a frame behind the ground you are told about, and a
+// rock you had just landed on would otherwise shove you off.
+//
+// `top` is MEASURED, not derived — it is only the ray's starting height now,
+// but the tidy formula (scale * (0.25 + the mesh's y-squash)) was out by up to
+// 1.05 m because of that same random rotation, so it is measured too.
+const _bbox = new THREE.Box3();
+const ROCK_RAY_DOWN = new THREE.Vector3(0, -1, 0);
+const ROCK_STEP = 0.4;
+function boulderTop(mesh, baseY) {
+  mesh.updateMatrixWorld(true);       // never rendered on the server
+  return _bbox.setFromObject(mesh).max.y - baseY;
 }
 // half-width of the border barrier bands (the Frostwall is a fat ridge)
 const BORDER_HALF = { ridge: 2.2, river: 2.7, wall: 2.8 };
@@ -2025,33 +2038,47 @@ export class World {
     return null;
   }
 
-  // what a WALKING character stands on: the terrain, or a pier deck over it
-  // The height you STAND at: the terrain, a pier deck over it, or the top of a
-  // boulder you have landed on. `feetY` is where your feet actually are — a
-  // surface above them is something you are still under, not something you are
-  // on, so it is ignored. Leave it out and only the terrain/deck answer.
+  // The height you STAND at: the terrain, a pier deck over it, or the stone of
+  // a boulder you have landed on. `feetY` is where your feet actually are — a
+  // surface well above them is something you are still UNDER, not something
+  // you are on. Leave it out and only the terrain and the deck answer, which
+  // is what every caller but the player wants.
   surfaceAt(x, z, feetY = -Infinity) {
     let y = this.heightAt(x, z);
     const deck = this._pierDeckAt(x, z);
     if (deck !== null && deck > y) y = deck;
-    // Boulders are platforms; fences and walls are not. The difference is that
-    // a boulder's collision circle really is the shape you see, so standing in
-    // the middle of it puts you on the rock. A fence's circle is a 1.5 m disc
-    // around a thin plank — landing on that would hang you in the air beside
-    // the rail. Only rocks opt in.
+    // Boulders are platforms; fences and walls are not. A boulder has a real
+    // mesh to stand on and its collision circle is the shape you see. A fence's
+    // circle is a 1.5 m disc around a thin plank — landing on that would hang
+    // you in the air beside the rail. Only rocks opt in.
     if (feetY > -Infinity) {
       for (const rock of this.rocksNear({ x, z }, 2.6)) {
         if (!rock.alive || rock.top == null) continue;
-        // tighter than the collision radius: the dome narrows toward the top,
-        // so the outer rim of the circle is not standable ground
-        const stand = rock.radius * 0.8;
         const dx = x - rock.x, dz = z - rock.z;
-        if (dx * dx + dz * dz > stand * stand) continue;
-        const top = this.heightAt(rock.x, rock.z) + rock.top;
-        if (top > y && feetY >= top - 0.35) y = top;
+        if (dx * dx + dz * dz > rock.radius * rock.radius) continue;
+        // The SAME test collide() makes, so anywhere you can stand on is
+        // somewhere the rock has already stopped pushing at you.
+        const surf = this.rockSurfaceY(rock, x, z);
+        if (surf !== null && surf > y && feetY >= surf - ROCK_STEP) y = surf;
       }
     }
     return y;
+  }
+
+  // Where the stone actually is under (x, z), by raycasting the boulder's own
+  // mesh. Returns null when the ray misses — off the silhouette there is no
+  // stone to be on, which is exactly the right answer at the edges.
+  //
+  // The ray is cheap because of WHEN it runs: only while something is inside a
+  // boulder's footprint with a foot height to report, which for the player is
+  // rare and for everything else (enemies pass no feetY) is never.
+  rockSurfaceY(rock, x, z) {
+    if (!rock.mesh) return null;
+    this._rockRay ??= new THREE.Raycaster();
+    const from = this.heightAt(rock.x, rock.z) + rock.top + 1;
+    this._rockRay.set(new THREE.Vector3(x, from, z), ROCK_RAY_DOWN);
+    this._rockRay.far = rock.top + 3;
+    return this._rockRay.intersectObject(rock.mesh, false)[0]?.point.y ?? null;
   }
 
   isWater(x, z) { return this.waterKindAt(x, z) > 0; }
@@ -2395,12 +2422,13 @@ export class World {
       const size = rng() < 0.6 ? 0 : 1;
       const scale = size === 0 ? 0.9 + rng() * 0.3 : 1.3 + rng() * 0.4;
       const mesh = makeBoulder(scale, 0x8a8a84, rng);
-      mesh.position.set(x, this.heightAt(x, z) + scale * 0.25, z);
+      const baseY = this.heightAt(x, z);
+      mesh.position.set(x, baseY + scale * 0.25, z);
       group.add(mesh);
       rocks.push({
         id: this.nextTreeId++, mesh, x, z, radius: scale * 0.9,
         hp: [3, 5][size], stone: [3, 6][size], alive: true, kind: 'rock',
-        ...boulderHeights(scale, mesh),
+        top: boulderTop(mesh, baseY),
       });
     }
 
@@ -2655,11 +2683,12 @@ export class World {
       } else if (e.kind === 'rock') {
         const sc = e.size ? 1.4 + drng() * 0.3 : 0.9 + drng() * 0.3;
         const mesh = makeBoulder(sc, 0x8a8a84, drng);
-        mesh.position.set(e.x, this.heightAt(e.x, e.z) + sc * 0.25, e.z);
+        const baseY = this.heightAt(e.x, e.z);
+        mesh.position.set(e.x, baseY + sc * 0.25, e.z);
         group.add(mesh);
         rocks.push({ id: this.nextTreeId++, mesh, x: e.x, z: e.z, radius: sc * 0.9,
           hp: e.size ? 5 : 3, stone: e.size ? 6 : 3, alive: true, kind: 'rock', patchId: e.id,
-          ...boulderHeights(sc, mesh) });
+          top: boulderTop(mesh, baseY) });
       } else if (e.kind === 'building') {
         const mesh = bakeGroup(e.type === 'church' ? makeChurch(drng)
           : e.type === 'fountain' ? makeFountain(drng) : makeTownHouse(drng));
@@ -3256,9 +3285,13 @@ export class World {
     // trees are never jumped — the shortest sapling still towers over 2.4 m
     for (const tree of this.treesNear(pos, r + 0.5)) pushOut(tree.x, tree.z, r + tree.radius);
     for (const rock of this.rocksNear(pos, r + 0.5)) {
-      // over it, or standing on top of it — either way it is not in the way
-      if (rock.h != null && feetY != null
-          && feetY > this.heightAt(rock.x, rock.z) + rock.h) continue;
+      // Above the stone under your feet? Then it is not in the way — whether
+      // you are sailing over it or standing on it. A miss (null) means there
+      // is no stone here to be above, so it stays solid.
+      if (rock.top != null && feetY != null) {
+        const surf = this.rockSurfaceY(rock, pos.x, pos.z);
+        if (surf !== null && feetY >= surf - ROCK_STEP) continue;
+      }
       pushOut(rock.x, rock.z, r + rock.radius);
     }
     for (const o of this.obstacles) {
