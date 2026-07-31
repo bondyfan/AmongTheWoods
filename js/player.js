@@ -20,6 +20,8 @@ const GRAVITY = 34;
 // ~2.4 m at GRAVITY 34 — doubled from the first pass, which read as a hop.
 // v = sqrt(2 * g * h), so double the HEIGHT is sqrt(2) on the velocity.
 const JUMP_V = 12.8;
+const JUMP_COST = 5;         // energy per jump — a swing costs 8-14, so a jump
+                             // is cheap, but not free enough to spam uphill
 const SAFE_FALL = 5.5;       // meters of free fall before damage kicks in
 const CRIT_CHANCE = 0.1;     // every attack can crit for CRIT_MULT damage
 const CRIT_MULT = 1.6;   // base crit damage; gear and passives move player.critMult
@@ -3354,11 +3356,25 @@ export class Player {
     // yours to command — no hopping while swimming, mounted, dead, a ghost, mid
     // dodge, or flying. The launch is just an upward vy; _updateVertical's fall
     // solver carries the whole arc, so jumps and falls land the same way.
+    // A jump costs energy, like a swing does. Free jumping made it the way to
+    // cross anything: hop the fence, hop the boulder, hop up the hill, forever.
+    // Paid on the launch, so a refused jump costs nothing.
     if (ctx.input?.takeJump?.() && !this.swimming && !this.dead && !this.ghost
         && !this.phasing && !this.mounted && !this.flying && !ctx.devFly
         && !ctx.boatMount && this.airborne !== true) {
-      this.vy = JUMP_V;
-      audio.sfx('step', 0.35, 20);
+      if (this.energy >= JUMP_COST) {
+        this.energy -= JUMP_COST;
+        this.energySpentT = 0;         // restart the out-of-combat regen delay
+        this.vy = JUMP_V;
+        audio.sfx('step', 0.35, 20);
+      } else if (this.noEnergyWarnT <= 0) {
+        // the same nag a refused swing gives, so "why did nothing happen" has
+        // one answer rather than two
+        this.noEnergyWarnT = 1.1;
+        this.hooks.popup(this.mesh.position.clone().setY(this.mesh.position.y + 2.2),
+          '⚡ Out of energy', '#ffd35a');
+        audio.sfx('error', 0.28, 300);
+      }
     }
     this.mesh.position.set(this.pos.x, this._updateVertical(dt, world, ctx.devFly), this.pos.z);
     // SWIMMING: over deep water the hero lies prone at the surface and does a

@@ -329,7 +329,9 @@ const panels = new Panels({
   },
   onBuild: (id, lane) => buildBase(id, lane),
   onBuyConsumable: (id) => { buyConsumable(id); requestAutosave(); },
-  onChestChange: () => mp?.sendCampSync?.(),
+  // the chest is yours alone, so a deposit tells nobody — but it does change
+  // what is worth saving
+  onChestChange: () => requestAutosave(),
   onAssignSlot: (i, id, ringIdx = null) => {
     while (player.spellSlots.length <= i) player.spellSlots.push(undefined);
     // ---- Q: the weapon ring ----
@@ -1250,7 +1252,7 @@ function confirmCampItemPlacement() {
   minimap.reveal(x, z);
   minimap.redrawT = 0;
   panels.refresh();
-  mp?.sendCampSync?.();
+  requestAutosave();      // a placed building belongs in YOUR save, not the room
   return true;
 }
 
@@ -4329,23 +4331,7 @@ async function ensureMp() {
       onInspectData: (uid, d) => showInspectData(uid, d),
       startPlaying,
       showPing: (x, z) => showPing(x, z),
-      // shared base: apply the partner's camp levels/storage locally
-      onCampSync: (lv, st, gp, positions) => {
-        if (!camp || !lv) return;
-        if (gp) camp.gravePos = gp;
-        if (positions) Object.assign(camp.positions, positions);
-        for (const [id, v] of Object.entries(lv)) {
-          while ((camp.levels[id] ?? 0) < v) {
-            camp.levels[id]++;
-          }
-          if ((camp.levels[id] ?? 0) > 0)
-            camp._placeMesh(id, camp.positions[id] ?? (id === 'grave' ? gp : undefined));
-        }
-        if (st) Object.assign(camp.storage, st);
-        applyCampPerks();
-        panels.refresh();
-        ui.toast('🏕️ Camp updated by your partner.', '');
-      },
+      // (no onCampSync: nothing may write your camp but you — see multiplayer.js)
       onCoopWin: () => {
         if (game.mode !== 'play') return;
         game.mode = 'won';
@@ -6137,7 +6123,7 @@ function dismountBoat() {
   boatMounted = false;
   raft.visible = false;
   camp?.moveItem('boat', { x: player.pos.x, z: player.pos.z });
-  mp?.sendCampSync?.();
+  requestAutosave();
   ui.toast('🛶 Log Boat parked — press E beside it to mount again.', '');
   audio.sfx('click', 0.4);
 }

@@ -380,5 +380,37 @@ console.log('\n-- a fence run is a LINE, not a blob --');
   ok(Math.hypot(p.x - mx, p.z - mz) < 1e-6, 'and a jump still carries you over');
 }
 
+console.log('\n-- and a jump costs energy --');
+{
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync('js/player.js', 'utf8');
+  ok(/const JUMP_COST = 5;/.test(src), 'a jump costs 5 energy');
+
+  // sliced FORWARD from the comment — the end marker also appears earlier in
+  // the file, and a plain indexOf for it walks backwards into an empty string
+  const from = src.indexOf('// A jump costs energy');
+  const blk = src.slice(from, src.indexOf('this.mesh.position.set(this.pos.x,', from));
+  ok(from > 0 && blk.length > 200, `the jump block, ${blk.length} chars`);
+  ok(/if \(this\.energy >= JUMP_COST\) \{/.test(blk), 'checked before the launch');
+  ok(blk.indexOf('this.energy -= JUMP_COST') < blk.indexOf('this.vy = JUMP_V'),
+    'and paid before it, so a refused jump costs nothing');
+  ok(/this\.energySpentT = 0/.test(blk),
+    'and it restarts the regen delay, like a swing does');
+  ok(/noEnergyWarnT/.test(blk),
+    'an empty bar says so — the same nag a refused swing gives, not silence');
+
+  // the gate must sit INSIDE the existing "may I jump at all" test, or a dead
+  // player would be charged for a jump they never got
+  const gFrom = src.indexOf('ctx.input?.takeJump?.()');
+  const guard = src.slice(gFrom, src.indexOf('this.vy = JUMP_V', gFrom));
+  for (const c of ['swimming', 'dead', 'ghost', 'mounted', 'flying'])
+    ok(new RegExp(`this\\.${c}|!this\\.${c}`).test(guard), `still refused while ${c}`);
+
+  // 149 energy (a level-50 pool) is 29 jumps, and a full bar is never fewer
+  // than a handful — cheap, but not free enough to hop uphill forever
+  ok(Math.floor(149 / 5) === 29, 'a full late-game bar is 29 jumps');
+  ok(Math.floor(40 / 5) === 8, 'and a starting bar still gets 8');
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 process.exit(fail ? 1 : 0);

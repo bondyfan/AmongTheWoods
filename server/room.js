@@ -26,7 +26,6 @@ export class Room {
     this.players = new Map();     // uid -> { uid, ws, lastState, joinedAt }
     this.authorityUid = null;     // M1 relay only: the player running the sim
     this.lastSnap = null;         // most recent world snapshot (for late joiners)
-    this.lastCamp = null;         // most recent shared-camp event (replayed to joiners)
     this.sim = null;              // M2: the server-side GameRoom (server IS authority)
     this.createdAt = Date.now();
     this.lastActivity = Date.now();
@@ -54,9 +53,12 @@ export class Room {
     if (!this.sim && this.lastSnap && uid !== this.authorityUid) {
       this.sendTo(uid, { t: MSG.SNAP_UP, snap: this.lastSnap });
     }
-    // late joiners inherit the shared camp state (there is no host client to
-    // push it in a server-authoritative room)
-    if (this.lastCamp) this.sendTo(uid, { t: MSG.EVENT_UP, ev: this.lastCamp });
+    // No camp is replayed. The camp is PERSONAL: your home, your chest, your
+    // furnace, and it lives in your own character save (saves/<uid>/chars/…),
+    // not in the room. The room used to pin the last 'camp' event any client
+    // ever sent and hand it to every joiner, so one player's base, chest and
+    // furnace turned up in everybody's world and outlived the session that
+    // built them. Rooms are transient; a base is not, and it is not the room's.
     this.broadcast({ t: MSG.PEER, event: 'join', uid }, uid);
     if (!this.sim) this.broadcast({ t: MSG.PEER, event: 'authority', uid: this.authorityUid });
   }
@@ -93,8 +95,11 @@ export class Room {
     // M2: world-mutating events (ehit/collect/drop/chop/berry) are consumed by
     // the sim, not relayed; peer-relay events (revive/ping/…) fall through.
     if (this.sim && this.sim.onEvent(uid, ev)) return;
+    // A camp event is somebody trying to publish their base to the room. There
+    // is no such thing any more — dropped rather than relayed, so an older
+    // client cannot reintroduce a shared camp to everyone else in the room.
+    if (ev?.type === 'camp') return;
     const wire = { from: uid, ...ev };
-    if (ev?.type === 'camp') this.lastCamp = wire; // remembered for late joiners
     // addressed events (revive/heal/grant…) go to ONE player; rest broadcast
     if (to) this.sendTo(to, { t: MSG.EVENT_UP, ev: wire });
     else this.broadcast({ t: MSG.EVENT_UP, ev: wire }, uid);

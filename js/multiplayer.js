@@ -1485,18 +1485,14 @@ export class Multiplayer {
     return true;
   }
 
-  // THE CAMP IS PERSONAL. It used to be broadcast, and because every building
-  // sits at a FIXED offset (camp.js SPOTS: furnace at 11,11, tower at 13,17)
-  // that meant a shared server world painted everyone's furnace and chest on
-  // top of everyone else's — you would walk home and find structures you never
-  // built, on the one spot yours belonged.
-  sendCampSync(toUid = null) {
-    return;   // eslint-disable-line no-unreachable — kept as the seam, see above
-    if (!this.active || this.mode !== 'coop' || !this.ctx.camp) return;
-    const camp = this.ctx.camp;
-    this.net.sendEvent({ type: 'camp', lv: camp.levels, st: camp.storage, pos: camp.positions,
-      ...(camp.gravePos ? { gp: camp.gravePos } : {}) }, toUid);
-  }
+  // THE CAMP IS PERSONAL, and there is no longer a sendCampSync to call.
+  // It used to be broadcast, and because every building sits at a FIXED offset
+  // (camp.js SPOTS: furnace at 11,11, tower at 13,17) a shared world painted
+  // everyone's furnace and chest on top of everyone else's — you walked home
+  // and found structures you never built, on the one spot yours belonged.
+  // A neutered `return;` was left here as a seam for a while; it went too,
+  // because a seam whose body still builds the old message is an invitation.
+  // The camp lives in your own character save and crosses no wire at all.
 
   sendPing(x, z) {
     if (!this.active) return;
