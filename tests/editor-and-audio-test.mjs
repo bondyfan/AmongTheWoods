@@ -113,9 +113,17 @@ console.log('\n-- the first-run view picker --');
     'it opens on the view you are ALREADY in, so nothing is unselected');
   ok(/go\.disabled = false/.test(main) && !/go\.disabled = true/.test(main),
     'and Confirm is live from the start — there is always a valid answer');
-  ok(!/touched/.test(readFileSync('css/style.css', 'utf8').slice(
-       readFileSync('css/style.css', 'utf8').indexOf('#view-pick'))),
-    'the pulse is driven by selection, not by whether you have touched it');
+  {
+    // Scoped to the #view-pick rules themselves. Slicing to the END of the file
+    // meant any later comment containing the letters "touched" — "desktop is
+    // untouched", say — failed this.
+    const style = readFileSync('css/style.css', 'utf8');
+    const from = style.indexOf('#view-pick');
+    const blk = style.slice(from, style.indexOf('\n/* ----', from + 10));
+    ok(blk.length > 100 && blk.length < 4000, `the #view-pick block, ${blk.length} chars`);
+    ok(!/\.touched/.test(blk),
+      'the pulse is driven by selection, not by whether you have touched it');
+  }
   ok(/applyViewMode\(\);/.test(main.split('maybeAskViewMode')[1] ?? ''),
     'the choice applies LIVE, so Confirm agrees with something you can see');
   ok(/Settings . Graphics . RPG view mode/.test(main),

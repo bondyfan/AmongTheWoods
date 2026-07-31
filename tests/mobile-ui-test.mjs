@@ -28,10 +28,14 @@ ok(/poi\.rumored = true;/.test(main), 'but the once-per-lair guard stays');
 ok(/No toast\./.test(main), 'and the removal is explained where it was');
 
 console.log('\n-- the burger column is two-up and small --');
-ok(/#hud-buttons \{[^}]*grid-template-columns: 1fr 1fr/.test(phone), 'two per row');
-ok(/#hud-buttons button \{[^}]*font-size: 12px/.test(phone), 'smaller type');
-ok(/#hud-buttons button kbd \{ display: none/.test(phone),
-  'and the keyboard hints are hidden — there is no keyboard');
+// Asserting the TEXT of these rules is what let them be dead for so long — the
+// declarations were there and simply lost the cascade. The real check is the
+// "what a phone actually WINS" section at the bottom of this file; what is left
+// here is only what no cascade can express.
+ok(/body\.touch kbd \{ display: none/.test(css),
+  'the keyboard hints are hidden — there is no keyboard to press');
+ok(!/@media \(pointer: coarse\)[\s\S]{0,400}#hud-buttons \{/.test(css),
+  'and the dead copy inside the coarse block is gone, not left to confuse');
 
 console.log('\n-- the panels that were too big --');
 for (const [sel, what] of [
@@ -122,6 +126,139 @@ console.log('\n-- a menu button takes ONE tap, not two --');
   ok(sim({ osClick: false }) === 1, 'no OS click (the iOS case): fires once');
   ok(sim({ osClick: true }) === 1, 'OS click arrives too: still once, not twice');
   ok(sim({ move: 90, osClick: false }) === 0, 'dragged off it: never fires');
+}
+
+// =========================================================================
+// A media query adds NO specificity. The phone-scale block was written as
+// `@media (pointer: coarse) { #hud-buttons { ... } }` and did nothing at all,
+// because `body.touch.menu-open #hud-buttons` (1,2,1) elsewhere in the file
+// beat a bare `#hud-buttons` (1,0,0). Nobody notices, because the rule LOOKS
+// right and the media query LOOKS like it is scoping it.
+//
+// So rather than assert that some text is present, resolve the cascade and ask
+// what a phone actually gets.
+// =========================================================================
+console.log('\n-- what a phone actually WINS, after the cascade --');
+{
+  const css = readFileSync('css/style.css', 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '');          // comments first, they contain braces
+
+  // Two screens, because "does the phone get it" and "did the desktop keep
+  // what it had" are different questions and must not share a rule set.
+  const screen = (w, h, coarse) => (q) => {
+    if (/portrait/.test(q)) return false;                 // both are landscape
+    if (/pointer:\s*coarse/.test(q)) return coarse;
+    if (/pointer:\s*fine|hover:\s*hover/.test(q)) return !coarse;
+    const maxH = /max-height:\s*(\d+)/.exec(q);
+    if (maxH && h > +maxH[1]) return false;
+    const maxW = /max-width:\s*(\d+)/.exec(q);
+    if (maxW && w > +maxW[1]) return false;
+    const minW = /min-width:\s*(\d+)/.exec(q);
+    if (minW && w < +minW[1]) return false;
+    return true;
+  };
+  const PHONE = screen(667, 308, true);      // the screen this was reported from
+  const DESKTOP = screen(1728, 962, false);
+
+  // flatten to { selector, body, order }, keeping only rules that screen sees
+  const flatten = (matches) => {
+    const rules = [];
+    let order = 0;
+    const eat = (text) => {
+      const re = /([^{}@]+)\{([^{}]*)\}/g;
+      let m;
+      while ((m = re.exec(text))) {
+        for (const sel of m[1].split(',')) rules.push({ sel: sel.trim(), body: m[2], order: order++ });
+      }
+    };
+    let i = 0;
+    while (i < css.length) {
+      if (css.startsWith('@media', i)) {
+        const open = css.indexOf('{', i);
+        const query = css.slice(i + 6, open);
+        let j = open, d = 0;
+        do { if (css[j] === '{') d++; else if (css[j] === '}') d--; j++; } while (d > 0 && j < css.length);
+        // order still advances for a skipped block? No — a rule the screen never
+        // sees is not in the cascade at all, and its position cannot matter.
+        if (matches(query)) eat(css.slice(open + 1, j - 1));
+        i = j;
+      } else {
+        const next = css.indexOf('@media', i);
+        eat(css.slice(i, next === -1 ? css.length : next));
+        i = next === -1 ? css.length : next;
+      }
+    }
+    return rules;
+  };
+  const phoneRules = flatten(PHONE), deskRules = flatten(DESKTOP);
+  ok(phoneRules.length > 400, `${phoneRules.length} rules a phone sees, ${deskRules.length} a desktop`);
+
+  const spec = (sel) => {
+    const ids = (sel.match(/#[\w-]+/g) || []).length;
+    const cls = (sel.match(/[.:\[][\w-]+/g) || []).length;
+    return ids * 1000 + cls * 10;
+  };
+
+  // Which of them apply to one element, given the body's classes? Simple, and
+  // enough: the selector must name the element, must not demand a body class we
+  // do not have, and must not be a :not() of one we do.
+  // `elClasses` matters: `.bar-wrap` and `.bar-wrap.energy` are different
+  // elements, and a matcher that only asks "does the selector contain the
+  // target" happily answers about the energy strip when you asked about the
+  // health bar.
+  const winner = (prop, target, bodyClasses, rules = phoneRules, elClasses = []) => {
+    let best = null;
+    for (const r of rules) {
+      if (!r.sel.includes(target)) continue;
+      if (/:hover|::/.test(r.sel)) continue;
+      if (/body:not\(\.touch\)/.test(r.sel) && bodyClasses.includes('touch')) continue;
+      const need = r.sel.match(/body((?:\.[\w-]+)+)/);
+      if (need && !need[1].slice(1).split('.').every(c => bodyClasses.includes(c))) continue;
+      // the compound the selector actually lands on must not demand a class
+      // this element does not carry
+      const last = r.sel.split(/[\s>+~]+/).pop();
+      const wants = (last.match(/\.[\w-]+/g) || []).map(c => c.slice(1));
+      const own = [...elClasses, ...(target.match(/\.[\w-]+/g) || []).map(c => c.slice(1))];
+      if (!wants.every(c => own.includes(c))) continue;
+      const m = new RegExp(`(?:^|;)\\s*${prop}\\s*:\\s*([^;]+)`).exec(r.body);
+      if (!m) continue;
+      const s = spec(r.sel);
+      if (!best || s > best.s || (s === best.s && r.order > best.order))
+        best = { s, order: r.order, value: m[1].trim(), sel: r.sel };
+    }
+    return best;
+  };
+
+  const open = ['touch', 'menu-open'];
+  const menu = winner('display', '#hud-buttons', open);
+  ok(menu?.value === 'grid',
+    `the open burger menu is a grid, not a column — won by "${menu?.sel}" (${menu?.value})`);
+  const cols = winner('grid-template-columns', '#hud-buttons', open);
+  ok(/1fr 1fr/.test(cols?.value ?? ''), `two buttons per row (${cols?.value})`);
+
+  const font = winner('font-size', '#hud-buttons button', open);
+  ok(parseFloat(font?.value) <= 12,
+    `and its buttons are ${font?.value}, not 16px — won by "${font?.sel}"`);
+
+  // The stack of bars: it was 230x75 on a 308 px tall screen.
+  const barsW = winner('width', '#top-left', ['touch']);
+  ok(/165px|190px/.test(barsW?.value ?? ''),
+    `the HP stack is narrowed for a phone (${barsW?.value})`);
+  const barH = winner('height', '.bar-wrap', ['touch'], phoneRules, ['hp']);
+  ok(parseFloat(barH?.value) <= 13, `and the health bar is ${barH?.value} tall, not 20px`);
+  const energyH = winner('height', '.bar-wrap', ['touch'], phoneRules, ['energy']);
+  ok(parseFloat(energyH?.value) <= 10, `the energy strip ${energyH?.value}, not 13px`);
+
+  // Desktop must be untouched by every one of those.
+  const deskMenu = winner('display', '#hud-buttons', ['menu-open'], deskRules);
+  ok(deskMenu?.value === 'flex', `desktop still gets a flex column (${deskMenu?.value})`);
+  const deskFont = winner('font-size', '#hud-buttons button', ['menu-open'], deskRules);
+  ok(deskFont == null || parseFloat(deskFont.value) > 12,
+    `and desktop button text is left alone (${deskFont?.value ?? 'unset'})`);
+  const deskBar = winner('height', '.bar-wrap', [], deskRules, ['hp']);
+  ok(parseFloat(deskBar?.value) === 20, `and desktop bars stay 20px (${deskBar?.value})`);
+  const deskEnergy = winner('height', '.bar-wrap', [], deskRules, ['energy']);
+  ok(parseFloat(deskEnergy?.value) === 13, `its energy strip 13px (${deskEnergy?.value})`);
 }
 
 console.log(`\n${pass}/${pass + fail} passed`);

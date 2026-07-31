@@ -1876,16 +1876,9 @@ body.slotting-weapon #spellbar .spell-slot[data-slot="9"] .ring-fan { display: f
    over. On a 390 px phone the same panels eat a third of the screen. Nothing
    below changes desktop — it is all inside the touch/coarse-pointer query. */
 @media (pointer: coarse) {
-  /* the burger column: two per row, and small enough that seven of them fit */
-  #hud-buttons {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 5px;
-    width: min(74vw, 340px); padding: 6px;
-  }
-  #hud-buttons button {
-    font-size: 12px; padding: 7px 6px; min-height: 0; line-height: 1.15;
-    white-space: normal;
-  }
-  #hud-buttons button kbd { display: none; }   /* no keyboard to press it with */
+  /* The burger column used to be sized here and it never took: see the
+     body.touch block at the end of the file for why, and for the rules that
+     actually win. */
 
   /* clock, resources, biome name */
   #tod-clock { font-size: 14px; top: 8px; right: 10px; }
@@ -2065,4 +2058,55 @@ body.touch .amount-foot button { padding: 10px 0; }
 .amount-input:focus, .amount-pop button:focus-visible {
   outline: none; border-color: #86b45e;
   box-shadow: 0 0 0 2px rgba(134, 180, 94, 0.4);
+}
+
+/* ---- phone UI scale, for real this time ------------------------------------
+   The `@media (pointer: coarse)` block above set the burger menu to a two-up
+   grid of 12 px buttons and NOTHING happened, because a media query adds no
+   specificity: `body.touch.menu-open #hud-buttons` (1,2,1) beat a bare
+   `#hud-buttons` (1,0,0) and the column stayed six 16 px buttons tall.
+   Measured on the 667x308 landscape screen this was reported from, that column
+   came to 160x352 — taller than the screen it was drawn on.
+
+   So these are `body.touch`-prefixed, and they sit at the end of the file where
+   they win ties. Desktop is untouched: it has no .touch class. */
+body.touch #hud-buttons {
+  grid-template-columns: 1fr 1fr;
+  gap: 5px; width: min(74vw, 320px); padding: 6px;
+}
+body.touch.menu-open #hud-buttons { display: grid; }
+body.touch #hud-buttons button {
+  font-size: 12px; padding: 7px 6px; min-height: 0; line-height: 1.15;
+  white-space: normal;
+}
+/* Save & Quit is the one you must not hit by accident — give it the full width
+   at the bottom rather than pairing it with Controls. */
+body.touch #hud-buttons #quit-btn { grid-column: 1 / -1; }
+
+/* The HP / energy / XP stack was 230x75 — a third of the width and a quarter of
+   the height of a small landscape phone, for three numbers. */
+body.touch #top-left { width: min(190px, calc(100vw - 150px)); gap: 4px; }
+body.touch .bar-wrap { height: 15px; border-radius: 8px; }
+body.touch .bar-wrap.energy, body.touch .bar-wrap.mana { height: 10px; border-radius: 5px; }
+body.touch .bar-label { font-size: 10px; }
+body.touch .bar-wrap.energy .bar-label, body.touch .bar-wrap.mana .bar-label { font-size: 8px; }
+
+/* ---- and on a genuinely short screen, tighter still -----------------------
+   308 px of height has to hold the bars, the biome name, the action bar, the
+   stick and the attack buttons. Anything that can be smaller, is. */
+@media (orientation: landscape) and (max-height: 430px) {
+  body.touch #hud-buttons { width: min(80vw, 300px); gap: 4px; }
+  body.touch #hud-buttons button { font-size: 11px; padding: 5px 5px; }
+  body.touch #top-left { top: calc(6px + var(--sa-t)); width: min(165px, calc(100vw - 140px)); }
+  body.touch .bar-wrap { height: 13px; }
+  body.touch .bar-wrap.energy, body.touch .bar-wrap.mana { height: 8px; }
+  body.touch #minimap { width: 58px; }
+  body.touch #biome-name { font-size: 10px; letter-spacing: 1px; margin-top: 2px; }
+  body.touch #tod-clock { font-size: 12px; top: calc(4px + var(--sa-t)); }
+  body.touch #resource-hud { font-size: 11px; gap: 4px; }
+  body.touch #resource-hud .hud-resource { padding: 2px 5px; }
+  body.touch #resource-hud svg, body.touch #resource-hud img { width: 13px; height: 13px; }
+  body.touch #weapon-display { font-size: 10px; padding: 2px 7px; }
+  body.touch .spell-slot { width: 30px; height: 30px; }
+  body.touch #spellbar { gap: 3px; }
 }
