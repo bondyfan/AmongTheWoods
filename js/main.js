@@ -8,7 +8,7 @@ import { WORLD, ITEMS, SPELLS, ENEMY_TYPES, BOSS_RANKS, BIOMES, STAT_TRACKS, MOB
          questXpFor, BIOME_LAIRS, CAMP_BUILDINGS, trainingLevelFor, CLASS_TREES,
          classTreeById, classSkillById, classSkillRequiredLevel, classSkillMeatCost, classSkillEssenceCost,
          CLASS_CHOOSE_COST, firstClassSkillId, MAX_SPELL_SLOTS, SLOT_CODES,
-         WEAPON_RING_SLOT, WEAPON_RING_MAX, ringPlace } from './config.js';
+         WEAPON_RING_SLOT, WEAPON_RING_MAX, ringPlace , requiredClassForItem, wieldError } from './config.js';
 import { makeAimArc, updateAimArc, makeRaft, makeBlacksmith, makeHorse, makeWisp, makeMan,
          makeGriffin, makeGriffinRoost, makeTumbleweed, BAKED_MAT, WATER_SHADERS,
          makeSkyDome, setSpectralLook, makeCorpse } from './models.js';
@@ -342,6 +342,25 @@ const panels = new Panels({
         ui.toast('🔁 Q is the weapon ring — only weapons and tools go in it.', 'boss');
         audio.sfx('error', 0.4);
         return;
+      }
+      // Refuse anything you could not actually EQUIP. The ring cycles by
+      // equipping the next entry, so a weapon you cannot hold — wrong class, or
+      // above your level — would stall the cycle on an item that silently
+      // refuses, and the player would just see Q "stop working".
+      if (game.kind === 'survival') {
+        const need = requiredClassForItem(it);
+        if (need && player.selectedClass !== need) {
+          ui.toast(`🔁 ${it.name} is ${need}-only — the ring would stall on it.`, 'boss');
+          audio.sfx('error', 0.4);
+          return;
+        }
+        const werr = wieldError(player.selectedClass, it);
+        if (werr) { ui.toast('🔁 ' + werr, 'boss'); audio.sfx('error', 0.4); return; }
+        if ((it.level || 0) > player.level) {
+          ui.toast(`🔁 ${it.name} needs level ${it.level} — you are ${player.level}.`, 'boss');
+          audio.sfx('error', 0.4);
+          return;
+        }
       }
       const ring = weaponRing();
       // Dropped on a SPECIFIC place in the fanned-out ring: that place is the

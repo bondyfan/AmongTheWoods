@@ -1195,8 +1195,8 @@ function quadruped({ bodyW, bodyH, bodyL, color, headSize, snout, snoutColor, ea
 }
 
 export function makeWolf(kind = 'black') {
-  const colors = { black: 0x1b1b1f, ice: 0xbcd8e8, tame: 0xb08a5a };
-  const eyes = { black: 0xff3322, ice: 0x2299ff, tame: 0x2a1a0a };
+  const colors = { black: 0x1b1b1f, ice: 0xbcd8e8, tame: 0xb08a5a, grey: 0x8a8d92 };
+  const eyes = { black: 0xff3322, ice: 0x2299ff, tame: 0x2a1a0a, grey: 0xffcc55 };
   const g = quadruped({
     bodyW: 0.48, bodyH: 0.45, bodyL: 1.05, color: colors[kind],
     headSize: 0.36, snout: true, legH: 0.38, tail: true, eyeColor: eyes[kind],
@@ -2991,6 +2991,7 @@ export function makeEnemyMesh(type) {
     case 'stormsnake': return makeSnake('storm');
     case 'bat': return makeBat();
     case 'wolf': return makeWolf('black');
+    case 'grayWolf': return makeWolf('grey');
     case 'icewolf': return makeWolf('ice');
     case 'boar': return makeBoar();
     case 'elk': return makeElk();

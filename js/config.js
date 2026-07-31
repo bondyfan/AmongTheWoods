@@ -148,7 +148,13 @@ export const BIOMES = [
     foliage: [0x2f7a2f, 0x429340, 0x55a648], trunk: 0x6b4a2d,
     trees: { pine: 0.4, leafy: 0.4, birch: 0.2, dead: 0 }, snowy: false,
     grass: 0x6fa04c, flowers: true, mushrooms: false,
-    enemies: ['rat', 'spider', 'snake'], humanoids: ['bandit'], packs: null, treeDensity: 1.0, denseForests: true,
+    // Weighted by REPETITION — the spawner picks a name at random from this
+    // list — so 7:7:7:2 makes the Gray Wolf exactly 3.5x rarer than a spider.
+    enemies: ['rat', 'rat', 'rat', 'rat', 'rat', 'rat', 'rat',
+              'spider', 'spider', 'spider', 'spider', 'spider', 'spider', 'spider',
+              'snake', 'snake', 'snake', 'snake', 'snake', 'snake', 'snake',
+              'grayWolf', 'grayWolf'],
+    humanoids: ['bandit'], packs: null, treeDensity: 1.0, denseForests: true,
     critters: ['rabbit', 'rabbit', 'rabbit', 'sheep'], night: { remove: ['rabbit', 'sheep'], add: 'spider' } },
   { name: 'Scorched Desert', ground: 0xd8b878, ground2: 0xc9a860, dirt: 0xb89050,
     fog: 0xe8d8b0, sky: 0xbcd8e8, desert: true,
@@ -264,7 +270,12 @@ export const ENEMY_TYPES = {
   rat:     { name: 'Giant Rat', icon: '🐀',
              hpMult: 0.75,  dmgMult: 0.75,  speed: 5, range: 1.2, attackCd: 0.9, xpMult: 0.8,  hitR: 0.5,  aggro: 13 },
   spider:  { name: 'Forest Spider', icon: '🕷️',
-             hpMult: 1,  dmgMult: 0.9,  speed: 6, range: 1.3, attackCd: 1.0, xpMult: 1,  hitR: 0.7,  aggro: 13 },
+             hpMult: 1,  dmgMult: 0.9,  speed: 4.2, range: 1.3, attackCd: 1.0, xpMult: 1,  hitR: 0.7,  aggro: 13 },
+  // The Verdant Forest's one real predator. It runs at the spider's OLD speed
+  // (6) — the spider itself is down to 70% of that — so it is the thing in
+  // these woods that can actually catch you.
+  grayWolf: { name: 'Gray Wolf', icon: '🐺',
+             hpMult: 1.15, dmgMult: 1.15, speed: 6, range: 1.6, attackCd: 1.0, xpMult: 1.4, hitR: 0.8, aggro: 16 },
   snake:   { name: 'Grass Snake', icon: '🐍',
              hpMult: 0.85,  dmgMult: 1.1,  speed: 4.5, range: 1.5, attackCd: 1.3, xpMult: 1, hitR: 0.6,  aggro: 12 },
   // -- Desert (2nd ring) --

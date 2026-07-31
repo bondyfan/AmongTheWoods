@@ -59,5 +59,22 @@ eq(ringPlace(null, 'axe', null), ['axe'], 'a missing ring is an empty one');
 eq(ringPlace([undefined, 'bow'], 'axe', 0), ['axe'], 'existing holes are cleaned out');
 eq(ringPlace(['axe'], 'bow', 99), ['axe', 'bow'], 'an out-of-range place falls back to append');
 
+console.log('\n-- and the ring refuses what you could not equip --');
+{
+  const { readFileSync } = await import('node:fs');
+  const main = readFileSync('js/main.js', 'utf8');
+  const blk = main.slice(main.indexOf('Q is the weapon ring'), main.indexOf('const ring = weaponRing()'));
+  // The ring cycles by EQUIPPING the next entry, so anything that refuses to
+  // equip stalls the cycle and Q just appears to stop working.
+  ok(/requiredClassForItem\(it\)/.test(blk), 'a class-locked weapon is turned away');
+  ok(/wieldError\(player\.selectedClass, it\)/.test(blk),
+    'so is one this class may not wield — a mage cannot ring a sword');
+  ok(/\(it\.level \|\| 0\) > player\.level/.test(blk), 'and one above your level');
+  ok(/the ring would stall on it/.test(blk),
+    'and it says WHY, rather than just refusing');
+  ok(/game\.kind === 'survival'/.test(blk),
+    'checked only where class rules apply — the MOBA has its own loadout');
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 process.exit(fail ? 1 : 0);
