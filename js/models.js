@@ -36,6 +36,12 @@ uniform vec3 uPlayer;
 uniform vec2 uPlayerVel;
 uniform float uWind;
 uniform float uPush;
+// x = distance where the fade starts, y = where it finishes. Vegetation used to
+// appear a whole 40 m chunk at a time when its centre crossed the draw distance
+// — a hard visual snap. Instead the blades now sink into the ground across this
+// band, so walking forward makes the grass GROW in. Costs nothing: the distance
+// it needs (dFol) is already computed for the trample effect.
+uniform vec2 uVegFade;
 uniform vec4 uDist[${FOL_TRAIL}];
 uniform vec2 uDistDir[${FOL_TRAIL}];`;
 // baked/instanced foliage reads its sway weight from a per-vertex attribute.
@@ -82,6 +88,13 @@ if (sway > 0.001) {
   offFol += layFol * 0.6 * sway;
   transformed.xz += offFol;
   transformed.y -= p * 0.42 * sway;
+  // GROW-IN. Past uVegFade.x the blade sinks into the ground, and by uVegFade.y
+  // it is fully buried — so distant vegetation rises out of the earth as you
+  // walk toward it instead of a whole chunk snapping into existence. Sinking
+  // rather than fading keeps it opaque: no transparency, no sort order, no cost.
+  // sway is already the base-to-tip weight, so the root stays put and only the
+  // blade travels, which is what makes it read as growth.
+  transformed.y -= smoothstep(uVegFade.x, uVegFade.y, dFol) * sway * 1.6;
 }`;
 
 function _initFolUniforms(shader) {
@@ -90,6 +103,9 @@ function _initFolUniforms(shader) {
   shader.uniforms.uPlayerVel = { value: new THREE.Vector2(0, 0) };
   shader.uniforms.uWind = { value: 1 };
   shader.uniforms.uPush = { value: 1 };
+  // start/end of the grow-in band; main.js drives it from the vegetation
+  // draw-distance setting. Wide apart by default = no fade at all.
+  shader.uniforms.uVegFade = { value: new THREE.Vector2(1e6, 1e6 + 1) };
   shader.uniforms.uDist = { value: Array.from({ length: FOL_TRAIL }, () => new THREE.Vector4(0, 0, -99, 0)) };
   shader.uniforms.uDistDir = { value: Array.from({ length: FOL_TRAIL }, () => new THREE.Vector2(0, 0)) };
 }

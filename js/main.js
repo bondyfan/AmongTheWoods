@@ -128,6 +128,8 @@ const TREE_DETAIL = { low: 0, high: 2 };
 // baked scatter) is culled per chunk. "furthest" = everything that's generated
 // (the old behaviour); the shorter tiers trade far grass for fill-rate.
 const VEG_DRAW_DIST = { short: 46, medium: 85, far: 130, furthest: Infinity };
+// the grow-in band, in metres from the player (see models.js uVegFade)
+let vegFadeA = 1e6, vegFadeB = 1e6 + 1;
 // shadow-distance rigs: {b = ortho half-extent m, s = map px}. The far plane
 // and the sun's stand-off distance are derived from b so the whole frustum is
 // always covered (updateCamera parks the sun at b*2 along the fixed sun dir).
@@ -6647,6 +6649,15 @@ function applyGraphics() {
   world.treeDetail = TREE_DETAIL[settings.treeDetail ?? 'low'] ?? 0;
   world.qualityVeg = !!settings.vegQuality && vegKit.ready();
   world.vegDrawDist = VEG_DRAW_DIST[settings.vegDist ?? 'furthest'] ?? Infinity;
+  // Fade over the last ~35 m before the cut, and push the cut itself out by a
+  // chunk so the sinking finishes before anything is hidden. At 'furthest'
+  // there is no cut, so there is nothing to fade.
+  if (world.vegDrawDist === Infinity) { vegFadeA = 1e6; vegFadeB = 1e6 + 1; }
+  else {
+    vegFadeB = world.vegDrawDist;
+    vegFadeA = Math.max(8, world.vegDrawDist - 35);
+    world.vegDrawDist += 40;   // one chunk of slack past the fade
+  }
   // shadows: purely the user's toggle now (auto-downgrade removed, so the
   // stage < 2 guard is always true — kept only so the expression is explicit)
   const shadowsOn = settings.shadows !== false && autoQuality.stage < 2;
@@ -6952,6 +6963,10 @@ function step() {
     for (const sh of folShaders) {
       sh.uniforms.uTime.value = _windT;
       sh.uniforms.uWind.value = folWind;
+      // the grow-in band sits just INSIDE the cull distance, so a chunk is
+      // fully sunk before _applyVegVisibility ever hides it — the hide then
+      // has nothing left to snap
+      if (sh.uniforms.uVegFade) sh.uniforms.uVegFade.value.set(vegFadeA, vegFadeB);
       sh.uniforms.uPush.value = folOn;
       sh.uniforms.uPlayer.value.set(player.pos.x, player.mesh.position.y, player.pos.z);
       sh.uniforms.uPlayerVel.value.set(vx, vz);
