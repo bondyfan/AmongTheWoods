@@ -38,18 +38,24 @@ for (const [m, d] of [['mlow', 'low'], ['mmedium', 'medium'], ['mhigh', 'high']]
     `${m} differs from ${d} only in resScale/shadowQuality (${diffs.join(', ') || 'identical'})`);
 }
 
-console.log('\n-- and every mobile tier renders at pixelRatio 1 --');
+console.log('\n-- every mobile tier renders at the panel ratio --');
 {
-  // 1 is not "native" — a phone panel is 2x or 3x, so this is a LOWER
-  // resolution the browser scales up. It is the biggest fill-rate lever there
-  // is: 2x renders four times the pixels, and every full-screen pass pays again.
   for (const k of ['mlow', 'mmedium', 'mhigh']) {
-    ok(PRESETS[k].resScale === '1', `${k} is '1' (one buffer pixel per CSS pixel)`);
+    ok(PRESETS[k].resScale === 'auto', `${k} is 'auto' — the panel's own ratio, capped at 2`);
   }
+  // 'auto' has to really mean 2, or the label is a lie
+  ok(/: Math\.min\(window\.devicePixelRatio, 2\);/.test(main),
+    "'auto' resolves to min(dpr, 2) with nothing clamping it lower");
   ok(/settings\.resScale === '1' \? 1/.test(main),
-    "and '1' really resolves to a pixel ratio of 1");
-  ok(PRESETS.high.resScale === 'auto',
-    'while desktop High still renders at the panel ratio');
+    "and Resolution '1' is still there as the escape hatch if a phone struggles");
+}
+
+console.log('\n-- a device is only offered its own tiers --');
+{
+  ok(/o\.hidden = onMobile \? !mobileOnly : mobileOnly;/.test(main),
+    'desktop tiers are hidden on a phone, and the mobile tiers on a desktop');
+  ok(/if \(o\.value === 'custom'\) continue;/.test(main),
+    "but Custom stays on both — it is not a tier, it is 'you changed something'");
 }
 
 console.log('\n-- a phone lands on a preset, not on "custom" --');

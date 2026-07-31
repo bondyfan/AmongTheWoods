@@ -1188,7 +1188,13 @@ export class Panels {
     const onMove = (e) => {
       if (!dragging && Math.hypot(e.clientX - sx, e.clientY - sy) > 8) {
         dragging = true;
-        if (cell.kind === 'item') document.body.classList.add('slotting');
+        // any drag that CAN be slotted unfolds the bar — consumables and the
+        // berry stack are slottable too, and gating on 'item' meant dragging
+        // one revealed no targets to drop it on
+        if (cell.kind === 'item' || cell.kind === 'consumable'
+            || (cell.kind === 'res' && cell.id === 'berry')) {
+          document.body.classList.add('slotting');
+        }
         // only a WEAPON can enter the Q ring, so only a weapon fans it open
         if (cell.kind === 'item' && itemById(cell.id)?.slot === 'weapon') {
           document.body.classList.add('slotting-weapon');

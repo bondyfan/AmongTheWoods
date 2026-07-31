@@ -1915,3 +1915,16 @@ body.slotting-weapon #spellbar .spell-slot[data-slot="9"] .ring-fan { display: f
   }
   #toasts, .toast { font-size: 12px; max-width: 76vw; }
 }
+
+/* ---- the action bar folds down while it is empty -------------------------
+   Twelve boxes across the bottom is a wall of nothing when eleven of them are
+   blank. Slots past 5 that are not Q hide themselves until they hold something
+   — or until a drag starts, when every one comes back as a drop target. */
+#spellbar .spell-slot[data-optional][data-empty] { display: none; }
+body.slotting #spellbar .spell-slot[data-optional][data-empty] {
+  display: flex; opacity: 0.55; border-style: dashed;
+}
+
+/* Touch has no hover, so tapping Q pins its fan open — otherwise the ring
+   could be filled by dragging but never emptied again. */
+#spellbar .spell-slot[data-fan] .ring-fan { display: flex; }

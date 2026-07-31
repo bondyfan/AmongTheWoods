@@ -3223,6 +3223,13 @@ if ((settings.controlsRev ?? 0) < CONTROLS_DEFAULT_VERSION) {
     $id('set-texdetail').value = String(settings.texDetail);
     $id('set-shadows').checked = settings.shadows !== false;
     $id('set-shadowquality').value = settings.shadowQuality ?? 'high';
+    // A phone has no use for the desktop tiers and vice versa — offering both
+    // is six near-identical rows and an easy way to pick the wrong one.
+    for (const o of $id('set-gfxpreset').options) {
+      const mobileOnly = o.value.startsWith('m') && o.value !== 'medium';
+      if (o.value === 'custom') continue;
+      o.hidden = onMobile ? !mobileOnly : mobileOnly;
+    }
     $id('set-resscale').value = String(settings.resScale);
     $id('set-drawdist').value = String(settings.drawDist);
     $id('set-treedetail').value = String(settings.treeDetail);
@@ -3372,14 +3379,14 @@ if ((settings.controlsRev ?? 0) < CONTROLS_DEFAULT_VERSION) {
   // Advanced control afterwards renames the preset to Custom (see saveGfx).
   // Mobile presets mirror their desktop namesakes feature-for-feature — the
   // phone gets the same shadows, bloom and god rays at each tier — and differ
-  // only in resolution: all three render at pixelRatio 1.
+  // only in shadow quality — a phone cannot afford 16 texture taps per lit
+  // pixel — and they all render at the panel's own ratio (resScale 'auto',
+  // capped at 2) for a sharp picture.
   //
-  // NB pixelRatio 1 is not "native": a phone's panel is 2x or 3x, so 1 is a
-  // LOWER resolution that the browser scales up. That is the point. It is the
-  // single biggest fill-rate lever in the renderer — 2x renders FOUR times the
-  // pixels, and every full-screen pass (bloom, god rays, the composite) pays it
-  // again. Anyone who wants the sharper picture can pick a desktop preset or
-  // set Resolution by hand.
+  // That is the expensive choice, deliberately: 2x renders FOUR times the
+  // pixels of 1x and every full-screen pass (bloom, god rays, the composite)
+  // pays it again. If a phone struggles, Resolution in the advanced options is
+  // the first dial to turn, and it drops straight to 1x.
   const GFX_PRESETS = {
     low:    { shadows: false, texDetail: 1, resScale: '1',    drawDist: 'normal', shadowQuality: 'low',
               vegDist: 'medium',   shadowDist: 'low',    foliage: 'high',
@@ -3393,15 +3400,15 @@ if ((settings.controlsRev ?? 0) < CONTROLS_DEFAULT_VERSION) {
               vegDist: 'furthest', shadowDist: 'high',   foliage: 'ultra',
               foliageMove: true, clouds: true, waterFx: true,
               bloom: true, rays: true },
-    mlow:    { shadows: false, texDetail: 1, resScale: '1',    drawDist: 'normal', shadowQuality: 'low',
+    mlow:    { shadows: false, texDetail: 1, resScale: 'auto', drawDist: 'normal', shadowQuality: 'low',
                vegDist: 'medium',   shadowDist: 'low',    foliage: 'high',
                foliageMove: true, clouds: true, waterFx: false,
                bloom: false, rays: false },
-    mmedium: { shadows: true,  texDetail: 2, resScale: '1',    drawDist: 'normal', shadowQuality: 'medium',
+    mmedium: { shadows: true,  texDetail: 2, resScale: 'auto', drawDist: 'normal', shadowQuality: 'medium',
                vegDist: 'furthest', shadowDist: 'medium', foliage: 'ultra',
                foliageMove: true, clouds: true, waterFx: true,
                bloom: true, rays: true },
-    mhigh:   { shadows: true,  texDetail: 2, resScale: '1',    drawDist: 'far', shadowQuality: 'medium',
+    mhigh:   { shadows: true,  texDetail: 2, resScale: 'auto', drawDist: 'far', shadowQuality: 'medium',
                vegDist: 'furthest', shadowDist: 'high',   foliage: 'ultra',
                foliageMove: true, clouds: true, waterFx: true,
                bloom: true, rays: true },

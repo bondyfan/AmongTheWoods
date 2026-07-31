@@ -57,6 +57,15 @@ export class UI {
       // removes THAT weapon rather than clearing the whole ring.
       const ringCell = e.target.closest('.ring-cell');
       if (ringCell) { this._dragRingCell(e, slot, Number(ringCell.dataset.ringIndex)); return; }
+      // A phone has no hover, so the ring could be filled but never emptied.
+      // Tapping Q pins its fan open; tapping again (or using it) closes it.
+      if (Number(slot.dataset.slot) === WEAPON_RING_SLOT
+          && window.matchMedia?.('(pointer: coarse)').matches) {
+        slot.toggleAttribute('data-fan');
+        this._slotClickSuppressUntil = performance.now() + 250;
+        audio.sfx('click', 0.3);
+        return;
+      }
       const i = Number(slot.dataset.slot);
       let ghost = null, dragging = false;
       const sx = e.clientX, sy = e.clientY;
@@ -396,6 +405,14 @@ export class UI {
         bar.appendChild(el);
       }
       const raw = player.spellSlots[i];
+      // The bar folds down to 1-5 and Q while it is empty: twelve blank boxes
+      // across the bottom of a phone is a wall of nothing. Anything past 5 that
+      // is not Q is OPTIONAL, and optional+empty is hidden until you start
+      // dragging something (body.slotting), when they all come back as targets.
+      const optional = i > 4 && i !== WEAPON_RING_SLOT;
+      el.toggleAttribute('data-optional', optional);
+      const filled = Array.isArray(raw) ? raw.length > 0 : raw != null;
+      el.toggleAttribute('data-empty', !filled);
       const iconEl = el.querySelector('.spell-icon');
       const cdEl = el.querySelector('.spell-cd');
       // ---- Q, the weapon ring ----
