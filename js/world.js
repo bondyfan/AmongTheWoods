@@ -1301,8 +1301,14 @@ export class World {
       run.rotation.y = a + Math.PI / 2;                 // tangent to the ring
       group.add(run);
       // 1.25 m of post: a 2.4 m jump clears it, which is the whole point of
-      // being able to jump at all
-      this.obstacles.push({ x: bx, z: bz, r: 1.5, home: true, h: 1.3 });
+      // being able to jump at all. The run is given as the LINE it is, from
+      // one end to the other — makeFenceRun builds along local +Z, and
+      // rotation.y = a + PI/2 turns that into (cos a, -sin a). 0.3 m is a
+      // post's width and a shoulder; a circle wide enough to cover the run
+      // stood 1.5 m out into the yard as well.
+      const fdx = Math.cos(a) * 1.8, fdz = -Math.sin(a) * 1.8;
+      this.obstacles.push({ x: bx - fdx, z: bz - fdz, x2: bx + fdx, z2: bz + fdz,
+        r: 0.3, home: true, h: 1.3 });
     }
     // a gate frame either side of the opening, so the way in reads as a gate
     for (const s of [-1, 1]) {
@@ -2847,8 +2853,12 @@ export class World {
         group.add(mesh);
         if (!f.obstacleAdded) {
           f.obstacleAdded = true;
-          this.obstacles.push({ x: f.x, z: f.z, r: 1.5,
-            h: 1.3,   // same paling, same clearance
+          // same paling, same clearance, same line-not-blob (see the homestead);
+          // here the run is laid along local +Z rotated by f.rot
+          const half = (f.len ?? 4) / 2;
+          const vdx = Math.sin(f.rot) * half, vdz = Math.cos(f.rot) * half;
+          this.obstacles.push({ x: f.x - vdx, z: f.z - vdz, x2: f.x + vdx, z2: f.z + vdz,
+            r: 0.3, h: 1.3,
             tag: 'vfence:' + this.village.fence.indexOf(f) });
         }
       }
@@ -3285,18 +3295,46 @@ export class World {
     // trees are never jumped — the shortest sapling still towers over 2.4 m
     for (const tree of this.treesNear(pos, r + 0.5)) pushOut(tree.x, tree.z, r + tree.radius);
     for (const rock of this.rocksNear(pos, r + 0.5)) {
-      // Above the stone under your feet? Then it is not in the way — whether
-      // you are sailing over it or standing on it. A miss (null) means there
-      // is no stone here to be above, so it stays solid.
       if (rock.top != null && feetY != null) {
-        const surf = this.rockSurfaceY(rock, pos.x, pos.z);
-        if (surf !== null && feetY >= surf - ROCK_STEP) continue;
+        // Above the stone under your feet? Then it is not in the way, whether
+        // you are sailing over it or standing on it.
+        let surf = this.rockSurfaceY(rock, pos.x, pos.z);
+        if (surf === null) {
+          // No stone directly underfoot — but the collision circle is wider
+          // than the silhouette, and treating that gap as solid at any height
+          // walled the rock off completely: you could never reach the part you
+          // were allowed to jump onto, because the skin around it stopped you
+          // first. So ask again at the near edge of the body, the closest
+          // point of you to the rock. Still nothing there means nothing is in
+          // the way. This second probe never runs while you are stood ON the
+          // rock (the first ray hits), which is what stops it disagreeing with
+          // surfaceAt and flicking you off.
+          const bx = rock.x - pos.x, bz = rock.z - pos.z;
+          const bd = Math.hypot(bx, bz);
+          if (bd > 1e-6) {
+            const t = Math.min(r, bd);
+            surf = this.rockSurfaceY(rock, pos.x + (bx / bd) * t, pos.z + (bz / bd) * t);
+          }
+        }
+        if (surf === null || feetY >= surf - ROCK_STEP) continue;
       }
       pushOut(rock.x, rock.z, r + rock.radius);
     }
     for (const o of this.obstacles) {
       if (o.h != null && air > o.h) continue;   // jumped clear of it
-      pushOut(o.x, o.z, r + o.r);
+      // A run of fence is a LINE, not a blob. Given as a circle it needs a
+      // radius long enough to span the run, which then bulges that far out to
+      // either side as well — a 3.6 m paling became a 1.5 m thick wall you
+      // bounced off a metre before reaching it. An obstacle with a second
+      // point is a capsule: push out from the nearest point ON the run.
+      if (o.x2 != null) {
+        const vx = o.x2 - o.x, vz = o.z2 - o.z;
+        const len2 = vx * vx + vz * vz;
+        const t = len2 > 1e-9
+          ? Math.max(0, Math.min(1, ((pos.x - o.x) * vx + (pos.z - o.z) * vz) / len2))
+          : 0;
+        pushOut(o.x + vx * t, o.z + vz * t, r + o.r);
+      } else pushOut(o.x, o.z, r + o.r);
     }
 
     // the coastline: creatures are pushed back onto the island; players

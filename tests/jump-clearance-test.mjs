@@ -247,12 +247,54 @@ console.log('\n-- on foot it is still a rock, not a ramp --');
   rock.alive = true;
 }
 
-console.log('\n-- jumping onto one --');
+console.log('\n-- actually running at one, step by step --');
+{
+  // The unit tests above all teleport to a point and ask a question. This one
+  // walks: the bug they missed was that the collision circle is WIDER than the
+  // silhouette, so the ray under your feet found no stone, the rock stayed
+  // solid at any height, and you were stopped a body's width short of the part
+  // you were allowed to jump onto. You could never get in.
+  let rock = null;
+  for (const r of allRocks()) {
+    if (world.rocksNear({ x: r.x, z: r.z }, 3.5).length !== 1) continue;
+    if (r.top > 1.9) continue;                      // one a jump comfortably tops
+    if (!rock || r.top > rock.top) rock = r;
+  }
+  ok(!!rock, `picked a lone boulder ${rock?.top.toFixed(2)} m tall`);
+  const base = world.heightAt(rock.x, rock.z);
+
+  // Walk in from 4 m out, 0.1 m a step, feet always on whatever holds them up.
+  // `run` returns how close to the centre we ever got, and how high we ended.
+  const run = (launchY) => {
+    const pos = { x: rock.x - 4, z: rock.z };
+    let y = world.heightAt(pos.x, pos.z) + launchY;
+    let closest = 4;
+    for (let i = 0; i < 60; i++) {
+      pos.x += 0.1;
+      world.collide(pos, 0.45, { feetY: y, air: y - world.heightAt(pos.x, pos.z) });
+      y = Math.max(y, world.surfaceAt(pos.x, pos.z, y));   // stand on what is there
+      closest = Math.min(closest, Math.hypot(pos.x - rock.x, pos.z - rock.z));
+    }
+    return { closest, y, lifted: y - base };
+  };
+
+  const walked = run(0);
+  ok(walked.closest > rock.radius * 0.8,
+    `on foot you are stopped short of it (${walked.closest.toFixed(2)} m from centre)`);
+  ok(walked.lifted < 0.3, 'and you never get lifted onto it');
+
+  // ...and at jump height you get in and are carried up onto the stone
+  const jumped = run(rock.top + 0.3);
+  ok(jumped.closest < rock.radius * 0.5,
+    `mid-jump you reach the middle of it (${jumped.closest.toFixed(2)} m from centre)`);
+  ok(jumped.lifted > rock.top - 0.5,
+    `and come down standing on it, ${jumped.lifted.toFixed(2)} m up`);
+}
+
+console.log('\n-- and every boulder is reachable that way --');
 {
   const APEX = 12.8 * 12.8 / (2 * 34);
   const rocks = allRocks();
-  // reachable = the stone is within a jump SOMEWHERE on it, which is what
-  // matters — you do not have to clear the summit to land on the shoulder
   let reachable = 0;
   for (const rock of rocks) {
     const base = world.heightAt(rock.x, rock.z);
@@ -267,7 +309,75 @@ console.log('\n-- jumping onto one --');
     if (lowest < APEX) reachable++;
   }
   ok(reachable === rocks.length,
-    `all ${rocks.length} boulders can be landed on within a ${APEX.toFixed(2)} m jump`);
+    `all ${rocks.length} boulders have a foothold within a ${APEX.toFixed(2)} m jump`);
+}
+
+console.log('\n-- a fence run is a LINE, not a blob --');
+{
+  // Given as a circle, a run needs a radius long enough to span it — and that
+  // radius then bulges the same distance out to either SIDE. A 3.6 m paling
+  // became a 1.5 m thick wall (1.95 m with the body), which you bounced off a
+  // metre before reaching the planks.
+  const runs = world.obstacles.filter(o => o.home && o.h === 1.3);
+  ok(runs.length > 10, `${runs.length} homestead runs`);
+  ok(runs.every(o => o.x2 != null && o.z2 != null), 'each one carries both ends');
+  ok(runs.every(o => Math.abs(Math.hypot(o.x2 - o.x, o.z2 - o.z) - 3.6) < 1e-9),
+    'and they are 3.6 m long — the length makeFenceRun builds');
+  ok(runs.every(o => o.r <= 0.35), `with a post-width radius (${runs[0].r} m)`);
+
+  // How far out does it actually stop you? Perpendicular to the middle of a run.
+  const o = runs[0];
+  const mx = (o.x + o.x2) / 2, mz = (o.z + o.z2) / 2;
+  const ux = (o.x2 - o.x) / 3.6, uz = (o.z2 - o.z) / 3.6;
+  const nx = -uz, nz = ux;                                  // the perpendicular
+  const standOff = (side) => {
+    const p = { x: mx + nx * 0.05 * side, z: mz + nz * 0.05 * side };
+    world.collide(p, 0.45, { air: 0 });
+    return Math.abs((p.x - mx) * nx + (p.z - mz) * nz);
+  };
+  const out = Math.max(standOff(1), standOff(-1));
+  ok(out < 0.9, `stopped ${out.toFixed(2)} m from the planks, not 1.95`);
+  ok(out > 0.4, 'but still a body clear of them, not clipping through');
+
+  // ...and it must still be a WALL: no gaps between consecutive runs. Sampled
+  // a few centimetres off the line rather than on it — pushOut has no
+  // direction to push a point sitting exactly on top of its target, and a
+  // body never lands there anyway, having been pushed on the way in.
+  let leaks = 0, probes = 0;
+  for (const run of runs) {
+    const dx = run.x2 - run.x, dz = run.z2 - run.z;
+    const l = Math.hypot(dx, dz);
+    const px = -dz / l, pz = dx / l;
+    for (let t = 0; t <= 1.0001; t += 0.05)
+      for (const side of [1, -1]) {
+        const x = run.x + dx * t + px * 0.06 * side;
+        const z = run.z + dz * t + pz * 0.06 * side;
+        const p = { x, z };
+        world.collide(p, 0.45, { air: 0 });
+        probes++;
+        if (Math.hypot(p.x - x, p.z - z) < 1e-6) leaks++;
+      }
+  }
+  ok(leaks === 0, `nowhere along the paling can you stand in it (${leaks} of ${probes} probes leaked)`);
+
+  // the yard has to stay a yard: walk the whole ring and check the only way
+  // through is the gateway the homestead deliberately leaves open
+  const R = Math.hypot(runs[0].x, runs[0].z);
+  let open = 0;
+  for (let a = 0; a < 6.283; a += 0.01) {
+    const x = Math.sin(a) * R, z = Math.cos(a) * R;
+    const p = { x, z };
+    world.collide(p, 0.45, { air: 0 });
+    if (Math.hypot(p.x - x, p.z - z) < 1e-6) open++;
+  }
+  const openArc = (open / 629) * 360;
+  ok(openArc > 5 && openArc < 90,
+    `one gateway, and only one (${openArc.toFixed(0)}° of the ring is open)`);
+
+  // and a 2.4 m jump still clears it, which segments must not have broken
+  const p = { x: mx, z: mz };
+  world.collide(p, 0.45, { air: 2.4 });
+  ok(Math.hypot(p.x - mx, p.z - mz) < 1e-6, 'and a jump still carries you over');
 }
 
 console.log(`\n${pass}/${pass + fail} passed`);
