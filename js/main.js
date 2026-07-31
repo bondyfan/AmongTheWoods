@@ -6715,6 +6715,36 @@ let _camZoomK = 1;   // top-down rig scale (pulled IN on landscape phones)
 // ---- auto camera rotate (Settings): hold ONE direction for 5 s and the
 // camera turns so that direction reads as "up" (top-down: an orbit yaw that
 // the minimap mirrors; RPG: a 180° spin when you back up on S) ----
+// The chase camera's yaw OFFSET from the character's facing. Dragging to look
+// moves this rather than the character, so running and looking are independent;
+// after CAM_ORBIT_HOLD seconds of no input it eases back to 0 and the camera
+// settles behind you again.
+let camOrbit = 0, camOrbitHold = 0;
+
+// One-time lesson: the cursor is hidden and there is no visible way to get it
+// back. Shown only while that is actually true, after a few seconds so it never
+// interrupts, and retired for good the first time the player uses it.
+const LOOK_HINT_KEY = 'atw-lookhint-done';
+let lookHintT = 0;
+function tickLookHint(dt) {
+  const el = $id('look-hint');
+  if (!el) return;
+  const hidden = game.rpgView && settings.mouseLook && game.mode === 'play'
+    && !game.paused && !!document.pointerLockElement;
+  if (!hidden || localStorage.getItem(LOOK_HINT_KEY)) {
+    // using it is what retires it — not merely seeing it
+    if (!document.pointerLockElement && lookHintT > 3) {
+      localStorage.setItem(LOOK_HINT_KEY, '1');
+    }
+    lookHintT = 0;
+    el.classList.add('hidden');
+    return;
+  }
+  lookHintT += dt;
+  el.classList.toggle('hidden', lookHintT < 3);
+}
+const CAM_ORBIT_HOLD = 2.5;
+
 let camYaw = 0;          // top-down orbit angle; 0 = the classic north-up view
 let camYawTarget = 0;
 let topHoldDir = null;   // direction held in top-down mode + for how long
@@ -6763,13 +6793,24 @@ function updateCamera(dt = 0) {
     sy = (Math.random() - 0.5) * k * 0.6;
     if (shakeT <= 0) { shakeAmp = 0; shakeDur = 0.35; }
   }
+  tickLookHint(dt);
   if (game.rpgView) {
     // MMORPG chase camera: right-drag steers the character AND tilts the
     // camera up/down; the wheel zooms; it never dips under the terrain
     const drag = input.takeDrag();
+    // Looking around no longer TURNS you. Dragging (right-button on a desktop,
+    // a finger on a phone) swings the camera around the character on its own
+    // offset, so you can keep running one way while looking another — and the
+    // camera drifts back behind you a couple of seconds after you let go.
     if (drag.x && !player.dead) {
-      const yaw = Math.atan2(player.facing.x, player.facing.z) - drag.x * 0.0045;
-      player.facing.set(Math.sin(yaw), 0, Math.cos(yaw));
+      camOrbit -= drag.x * 0.0045;
+      camOrbitHold = CAM_ORBIT_HOLD;
+    }
+    if (camOrbitHold > 0) camOrbitHold -= dt;
+    else if (camOrbit) {
+      // ease home rather than snap: a hard cut reads as the camera glitching
+      camOrbit += (0 - camOrbit) * Math.min(1, dt * 2.2);
+      if (Math.abs(camOrbit) < 0.003) camOrbit = 0;
     }
     // auto camera rotate: smoothly spin the character (and so the chase
     // camera) 180° after 5 s of backing up on S
@@ -6782,8 +6823,12 @@ function updateCamera(dt = 0) {
     rpgPitch = Math.max(-0.5, Math.min(1.25, rpgPitch + drag.y * 0.004));
     rpgDist = Math.max(3.5, Math.min(15, rpgDist + input.takeWheel() * 0.9));
     const flat = Math.cos(rpgPitch) * rpgDist;
-    const tx = player.pos.x - player.facing.x * flat;
-    const tz = player.pos.z - player.facing.z * flat;
+    // the camera's own heading: the character's, plus however far you have
+    // swung it round with the look drag
+    const camA = Math.atan2(player.facing.x, player.facing.z) + camOrbit;
+    const camFx = Math.sin(camA), camFz = Math.cos(camA);
+    const tx = player.pos.x - camFx * flat;
+    const tz = player.pos.z - camFz * flat;
     const groundY = world.heightAt(tx, tz);
     const ty = Math.max(py + 1.7 + Math.sin(rpgPitch) * rpgDist, groundY + 1.2);
     if (!camInit) { camSmooth.set(tx, ty, tz); camInit = true; }

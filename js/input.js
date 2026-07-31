@@ -72,7 +72,15 @@ class Input {
     window.addEventListener('mousedown', (e) => {
       if (e.target.closest('button, .panel, .spell-slot, #minimap')) return; // don't attack through UI
       if (e.button === 0) { this.mouse.left = true; this.leftPressed = true; }
-      if (e.button === 2) this.mouse.right = true;
+      if (e.button === 2) {
+        this.mouse.right = true;
+        // Right-button ALSO hands the cursor back. With free mouse-look on, the
+        // pointer is locked and invisible, and the only ways out were Escape or
+        // opening a panel — neither of which is a thing you would guess. Holding
+        // right now shows the cursor AND swings the camera, which is the one
+        // gesture people already expect from an MMO.
+        if (document.pointerLockElement) document.exitPointerLock?.();
+      }
     });
     window.addEventListener('mouseup', (e) => {
       if (e.button === 0) {
