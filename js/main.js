@@ -70,7 +70,16 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
+// Shadow quality = how many texture taps soften the shadow edge, and it is the
+// heaviest PER-PIXEL cost in the frame — paid across the whole screen, and
+// multiplied again by pixelRatio.
+//   high   PCFSoftShadowMap  16 taps  the softest edge, and what desktop had
+//   medium PCFShadowMap       4 taps  still soft, a quarter of the cost
+//   low    BasicShadowMap     1 tap   hard, aliased edge, 16x cheaper
+// Set properly in applyGraphics(); this is just the boot value.
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const SHADOW_TYPES = { low: THREE.BasicShadowMap, medium: THREE.PCFShadowMap,
+                       high: THREE.PCFSoftShadowMap };
 document.getElementById('game').appendChild(renderer.domElement);
 
 let postfx = null; // created on demand by applyGraphics (bloom)
@@ -3178,6 +3187,7 @@ if ((settings.controlsRev ?? 0) < CONTROLS_DEFAULT_VERSION) {
   const syncGfxControls = () => {
     $id('set-texdetail').value = String(settings.texDetail);
     $id('set-shadows').checked = settings.shadows !== false;
+    $id('set-shadowquality').value = settings.shadowQuality ?? 'high';
     $id('set-resscale').value = String(settings.resScale);
     $id('set-drawdist').value = String(settings.drawDist);
     $id('set-treedetail').value = String(settings.treeDetail);
@@ -3247,6 +3257,11 @@ if ((settings.controlsRev ?? 0) < CONTROLS_DEFAULT_VERSION) {
     ui.toast(settings.riggedAvatar
       ? '🧍 Rigged avatar ON — reload the page to see it.'
       : '🧍 Rigged avatar OFF — reload the page.', '');
+  });
+  $id('set-shadowquality').addEventListener('change', () => {
+    settings.shadowQuality = $id('set-shadowquality').value;
+    saveGfx();
+    applyGraphics();
   });
   $id('set-resscale').addEventListener('change', () => {
     settings.resScale = $id('set-resscale').value;
@@ -3331,27 +3346,27 @@ if ((settings.controlsRev ?? 0) < CONTROLS_DEFAULT_VERSION) {
   // pays it again. If the phone still struggles, this is the first dial to turn,
   // and 'Low (mobile)' is where to turn it.
   const GFX_PRESETS = {
-    low:    { shadows: false, texDetail: 1, resScale: '1',    drawDist: 'normal',
+    low:    { shadows: false, texDetail: 1, resScale: '1',    drawDist: 'normal', shadowQuality: 'low',
               vegDist: 'medium',   shadowDist: 'low',    foliage: 'high',
               foliageMove: true, clouds: true, waterFx: false,
               bloom: false, rays: false },
-    medium: { shadows: true,  texDetail: 2, resScale: '1',    drawDist: 'normal',
+    medium: { shadows: true,  texDetail: 2, resScale: '1',    drawDist: 'normal', shadowQuality: 'high',
               vegDist: 'furthest', shadowDist: 'medium', foliage: 'ultra',
               foliageMove: true, clouds: true, waterFx: true,
               bloom: true, rays: true },
-    high:   { shadows: true,  texDetail: 2, resScale: 'auto', drawDist: 'far',
+    high:   { shadows: true,  texDetail: 2, resScale: 'auto', drawDist: 'far', shadowQuality: 'high',
               vegDist: 'furthest', shadowDist: 'high',   foliage: 'ultra',
               foliageMove: true, clouds: true, waterFx: true,
               bloom: true, rays: true },
-    mlow:    { shadows: false, texDetail: 1, resScale: 'auto', drawDist: 'normal',
+    mlow:    { shadows: false, texDetail: 1, resScale: 'auto', drawDist: 'normal', shadowQuality: 'low',
                vegDist: 'medium',   shadowDist: 'low',    foliage: 'high',
                foliageMove: true, clouds: true, waterFx: false,
                bloom: false, rays: false },
-    mmedium: { shadows: true,  texDetail: 2, resScale: 'auto', drawDist: 'normal',
+    mmedium: { shadows: true,  texDetail: 2, resScale: 'auto', drawDist: 'normal', shadowQuality: 'medium',
                vegDist: 'furthest', shadowDist: 'medium', foliage: 'ultra',
                foliageMove: true, clouds: true, waterFx: true,
                bloom: true, rays: true },
-    mhigh:   { shadows: true,  texDetail: 2, resScale: 'auto', drawDist: 'far',
+    mhigh:   { shadows: true,  texDetail: 2, resScale: 'auto', drawDist: 'far', shadowQuality: 'medium',
                vegDist: 'furthest', shadowDist: 'high',   foliage: 'ultra',
                foliageMove: true, clouds: true, waterFx: true,
                bloom: true, rays: true },
@@ -3359,6 +3374,8 @@ if ((settings.controlsRev ?? 0) < CONTROLS_DEFAULT_VERSION) {
   // A phone used to default to 'custom', which meant it silently kept every
   // desktop default — bloom, god rays, the full offscreen post stack and 2048
   // shadow maps. There was no mobile preset to land on. Now there is.
+  // desktop keeps the softest edge it always had; a phone starts one tier down
+  settings.shadowQuality ??= onMobile ? 'medium' : 'high';
   settings.gfxPreset ??= onMobile ? 'mmedium' : 'custom';
   if (!GFX_PRESETS[settings.gfxPreset] && settings.gfxPreset !== 'custom') settings.gfxPreset = 'custom';
   const presetSel = $id('set-gfxpreset');
@@ -6577,8 +6594,12 @@ function applyGraphics() {
   // shadows: purely the user's toggle now (auto-downgrade removed, so the
   // stage < 2 guard is always true — kept only so the expression is explicit)
   const shadowsOn = settings.shadows !== false && autoQuality.stage < 2;
-  if (renderer.shadowMap.enabled !== shadowsOn) {
+  const wantType = SHADOW_TYPES[settings.shadowQuality] ?? THREE.PCFSoftShadowMap;
+  // Changing the map TYPE swaps a shader define, so every material has to be
+  // recompiled — same as toggling shadows off and on.
+  if (renderer.shadowMap.enabled !== shadowsOn || renderer.shadowMap.type !== wantType) {
     renderer.shadowMap.enabled = shadowsOn;
+    renderer.shadowMap.type = wantType;
     sun.castShadow = shadowsOn;
     scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
   }

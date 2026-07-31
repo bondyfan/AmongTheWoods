@@ -32,10 +32,10 @@ for (const k of ['mlow', 'mmedium', 'mhigh']) {
 console.log('\n-- each mirrors its desktop namesake, feature for feature --');
 for (const [m, d] of [['mlow', 'low'], ['mmedium', 'medium'], ['mhigh', 'high']]) {
   const diffs = Object.keys(PRESETS[d]).filter(k => PRESETS[m][k] !== PRESETS[d][k]);
-  // at most one difference, and if there is one it must be resScale. mhigh
-  // matches high exactly, because desktop High already renders at 'auto'.
-  ok(diffs.every(k => k === 'resScale'),
-    `${m} differs from ${d} in nothing but resScale (${diffs.join(', ') || 'identical'})`);
+  // resScale (pixelRatio 2 everywhere) and shadowQuality (a phone cannot afford
+  // 16 shadow taps per lit pixel) are the only two things a mobile tier changes.
+  ok(diffs.every(k => k === 'resScale' || k === 'shadowQuality'),
+    `${m} differs from ${d} only in resScale/shadowQuality (${diffs.join(', ') || 'identical'})`);
 }
 
 console.log('\n-- and every mobile tier runs at pixelRatio 2 --');
@@ -52,12 +52,36 @@ console.log('\n-- a phone lands on a preset, not on "custom" --');
 ok(/settings\.gfxPreset \?\?= onMobile \? 'mmedium' : 'custom';/.test(main),
   'mobile defaults to Medium (mobile); desktop keeps custom');
 
+console.log('\n-- shadow quality is a real, three-way setting --');
+{
+  const html2 = readFileSync('index.html', 'utf8');
+  ok(/id="set-shadowquality"/.test(html2), 'the dropdown exists');
+  for (const v of ['low', 'medium', 'high']) {
+    ok(new RegExp(`<option value="${v}"[^>]*>[^<]*`).test(
+        html2.slice(html2.indexOf('set-shadowquality'), html2.indexOf('set-shadowdist'))),
+      `it offers ${v}`);
+  }
+  // the three map types, cheapest to dearest: 1 tap, 4 taps, 16 taps
+  ok(/low: THREE\.BasicShadowMap/.test(main), 'low is BasicShadowMap (1 tap, hard edge)');
+  ok(/medium: THREE\.PCFShadowMap/.test(main), 'medium is PCFShadowMap (4 taps)');
+  ok(/high: THREE\.PCFSoftShadowMap/.test(main), 'high is PCFSoftShadowMap — what desktop had');
+  ok(/renderer\.shadowMap\.type !== wantType/.test(main),
+    'and a change in TYPE recompiles materials, like toggling shadows does');
+  ok(/settings\.shadowQuality \?\?= onMobile \? 'medium' : 'high';/.test(main),
+    'desktop keeps the softest edge; a phone starts one tier down');
+  ok(PRESETS.mlow.shadowQuality === 'low' && PRESETS.mmedium.shadowQuality === 'medium'
+     && PRESETS.mhigh.shadowQuality === 'medium',
+    'and no mobile tier asks for 16 taps per lit pixel');
+}
+
 console.log('\n-- the desktop tiers are untouched --');
 {
   ok(PRESETS.low.resScale === '1' && PRESETS.medium.resScale === '1',
     'desktop low/medium still render at 1x');
   ok(PRESETS.low.bloom === false && PRESETS.high.bloom === true,
     'and their feature sets are unchanged');
+  ok(PRESETS.high.shadowQuality === 'high' && PRESETS.medium.shadowQuality === 'high',
+    'desktop medium/high keep the soft shadows they always had');
 }
 
 console.log(`\n${pass}/${pass + fail} passed`);
