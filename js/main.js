@@ -6841,13 +6841,25 @@ function updateCamera(dt = 0) {
     // MMORPG chase camera: right-drag steers the character AND tilts the
     // camera up/down; the wheel zooms; it never dips under the terrain
     const drag = input.takeDrag();
-    // Looking around no longer TURNS you. Dragging (right-button on a desktop,
-    // a finger on a phone) swings the camera around the character on its own
-    // offset, so you can keep running one way while looking another — and the
-    // camera drifts back behind you a couple of seconds after you let go.
+    // Two different gestures, and they are NOT the same thing:
+    //
+    //  · pointer LOCKED, cursor hidden — this is mouse-look, and mouse-look
+    //    turns the character. Camera follows behind. Classic MMO.
+    //  · DRAGGING with the cursor visible (right-button held on a desktop, a
+    //    finger on a phone) — the camera swings around the character on its own
+    //    offset while the character keeps facing, and running, where it was.
+    //    A couple of seconds after you let go it eases back behind you.
+    //
+    // Running both through the same offset was the bug: mouse-look stopped
+    // steering, so you could not turn at all without the keyboard.
     if (drag.x && !player.dead) {
-      camOrbit -= drag.x * 0.0045;
-      camOrbitHold = CAM_ORBIT_HOLD;
+      if (input.locked) {
+        const yaw = Math.atan2(player.facing.x, player.facing.z) - drag.x * 0.0045;
+        player.facing.set(Math.sin(yaw), 0, Math.cos(yaw));
+      } else {
+        camOrbit -= drag.x * 0.0045;
+        camOrbitHold = CAM_ORBIT_HOLD;
+      }
     }
     if (camOrbitHold > 0) camOrbitHold -= dt;
     else if (camOrbit) {
@@ -6877,7 +6889,13 @@ function updateCamera(dt = 0) {
     if (!camInit) { camSmooth.set(tx, ty, tz); camInit = true; }
     camSmooth.lerp(new THREE.Vector3(tx, ty, tz), Math.min(1, dt * 8));
     camera.position.set(camSmooth.x + sx, camSmooth.y + sy, camSmooth.z + sz);
-    camera.lookAt(player.pos.x + player.facing.x * 2, py + 1.7, player.pos.z + player.facing.z * 2);
+    // The aim point sits 2 m past the character so you see a little more of
+    // what is ahead than of what is behind. It follows the CAMERA's heading,
+    // not the character's: the camera stands `flat` back along camF and looks
+    // 2 m forward along the same camF, which puts the character exactly on the
+    // view axis — so a right-button swing pivots around the character instead
+    // of around a point in front of them, and they stay dead centre.
+    camera.lookAt(player.pos.x + camFx * 2, py + 1.7, player.pos.z + camFz * 2);
   } else {
     camInit = false;
     // ease the orbit yaw toward its target the short way around; at yaw 0

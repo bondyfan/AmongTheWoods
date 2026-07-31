@@ -12,6 +12,14 @@ class Input {
     this.mouse = { x: 0, y: 0, left: false, right: false }; // x,y = NDC; the
     this.leftPressed = false;
     this.leftReleased = false;
+    this.locked = false;    // pointer lock — kept in sync by pointerlockchange
+    // The click that hands mouse-look BACK must not also swing the axe. Set on
+    // the mousedown that is going to re-lock the pointer, and cleared by that
+    // same click's mouseup, so exactly one press-release pair is swallowed. It
+    // has to be the pair and not just the press: attacks are edge-tracked
+    // (leftPressed / leftReleased, hold-to-charge), so swallowing the press but
+    // letting the release through would still loose a charged blow.
+    this.swallowLeftUp = false;
     // touch controls (js/touch.js drives these): an analog move stick + a
     // held-attack flag. touchAim is the last stick direction, so the player
     // faces / strikes the way they're moving on a phone.
@@ -50,6 +58,9 @@ class Input {
       this.mouse.right = false;
       this.leftPressed = false;
       this.leftReleased = false;
+      // a blur between press and release would strand this and eat the NEXT
+      // click's release instead
+      this.swallowLeftUp = false;
     });
 
     window.addEventListener('mousemove', (e) => {
@@ -71,7 +82,18 @@ class Input {
     }, { passive: true });
     window.addEventListener('mousedown', (e) => {
       if (e.target.closest('button, .panel, .spell-slot, #minimap')) return; // don't attack through UI
-      if (e.button === 0) { this.mouse.left = true; this.leftPressed = true; }
+      if (e.button === 0) {
+        // Mouse-look is on but the pointer is loose — right-click let it go, or
+        // a panel took it. This click is the one that gets it back (main.js
+        // re-locks on the canvas click), and getting the cursor back should not
+        // cost you a swing at thin air. The NEXT click, with the pointer already
+        // locked, is an ordinary attack again.
+        if (this.rpgMode && this.mouseLook && !this.locked) {
+          this.swallowLeftUp = true;
+          return;
+        }
+        this.mouse.left = true; this.leftPressed = true;
+      }
       if (e.button === 2) {
         this.mouse.right = true;
         // Right-button ALSO hands the cursor back. With free mouse-look on, the
@@ -84,6 +106,7 @@ class Input {
     });
     window.addEventListener('mouseup', (e) => {
       if (e.button === 0) {
+        if (this.swallowLeftUp) { this.swallowLeftUp = false; return; }
         if (this.mouse.left) this.leftReleased = true;
         this.mouse.left = false;
       }
