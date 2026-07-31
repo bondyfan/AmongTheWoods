@@ -19,29 +19,21 @@ const css = readFileSync('css/style.css', 'utf8');
 const ui = readFileSync('js/ui.js', 'utf8');
 const panels = readFileSync('js/panels.js', 'utf8');
 
-console.log('\n-- the bar folds to 1-5 and Q while empty --');
-ok(/const optional = i > 4 && i !== WEAPON_RING_SLOT;/.test(ui),
-  'slots past 5 are optional — Q never is');
-ok(/el\.toggleAttribute\('data-optional', optional\)/.test(ui), 'and they are marked');
-ok(/el\.toggleAttribute\('data-empty', !filled\)/.test(ui), 'along with whether they hold anything');
-ok(/#spellbar \.spell-slot\[data-optional\]\[data-empty\] \{ display: none; \}/.test(css),
-  'optional AND empty is hidden');
+console.log('\n-- the fold is REVERTED: every slot stays visible --');
 {
-  // a filled slot must never fold away, whatever its index
-  const m = ui.match(/const filled = ([^;]+);/);
-  ok(!!m && /Array\.isArray\(raw\) \? raw\.length > 0 : raw != null/.test(m[1]),
-    'filled counts an empty ARRAY as empty too — Q holds a list, not a value');
+  // Dropping a weapon onto Q started putting the item on the ground instead,
+  // and the fold was the change immediately before it: hiding slots changes the
+  // bar's width, which moves every slot that remains. Q working matters more
+  // than a tidy bar, so the CSS is gone.
+  ok(!/\[data-optional\]\[data-empty\] \{ display: none/.test(css),
+    'no rule hides an empty slot');
+  ok(!/body\.slotting #spellbar \.spell-slot\[data-optional\]/.test(css),
+    'and none reveals it either — the bar simply does not move');
+  ok(/REVERTED/.test(css), 'and the reason is written where the rule was');
+  // the marking is harmless and stays, so a second attempt has the hooks
+  ok(/el\.toggleAttribute\('data-optional', optional\)/.test(ui),
+    'ui.js still marks the slots — inert without a rule, ready if this is retried');
 }
-
-console.log('\n-- and every one comes back the moment you drag --');
-ok(/body\.slotting #spellbar \.spell-slot\[data-optional\]\[data-empty\]/.test(css),
-  'body.slotting reveals them');
-{
-  const blk = css.slice(css.indexOf('body.slotting #spellbar .spell-slot[data-optional]'));
-  ok(/display: flex/.test(blk.slice(0, 160)), 'as real, droppable targets');
-}
-ok(/cell\.kind === 'item' \|\| cell\.kind === 'consumable'[\s\S]{0,120}classList\.add\('slotting'\)/.test(panels),
-  'and EVERY slottable drag sets it — not just gear');
 
 console.log('\n-- Q opens on a tap, because a phone has no hover --');
 ok(/matchMedia\?\.\('\(pointer: coarse\)'\)\.matches/.test(ui),
@@ -56,6 +48,17 @@ ok(/_slotClickSuppressUntil = performance\.now\(\) \+ 250/.test(ui),
   ok(/#spellbar \.spell-slot\[data-slot="9"\]:hover \.ring-fan/.test(css), 'hover still opens it');
   ok(/body\.slotting-weapon #spellbar \.spell-slot\[data-slot="9"\] \.ring-fan/.test(css),
     'and so does dragging a weapon');
+}
+
+console.log('\n-- and a near miss over the bar no longer drops the item on the floor --');
+{
+  const drop = panels.slice(panels.indexOf('const under = document.elementFromPoint'));
+  ok(/under\?\.closest\?\.\('#actionbar'\)/.test(drop.slice(0, 1400)),
+    'a release anywhere over the action bar is rescued');
+  ok(/getBoundingClientRect/.test(drop.slice(0, 1400)),
+    'by finding the slot whose box actually contains the point');
+  ok(/bestD < 40/.test(drop.slice(0, 1400)),
+    'within a sane radius, so a genuine drop elsewhere still reaches the ground');
 }
 
 console.log(`\n${pass}/${pass + fail} passed`);

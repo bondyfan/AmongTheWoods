@@ -1228,7 +1228,24 @@ export class Panels {
       document.querySelectorAll('.spell-slot.drop-hot').forEach(s => s.classList.remove('drop-hot'));
       if (!dragging) { this._invClick(cell); return; }
       const under = document.elementFromPoint(e.clientX, e.clientY);
-      const barSlot = under?.closest?.('.spell-slot');
+      // elementFromPoint returns the TOPMOST element, which over the action bar
+      // can be the ring fan, a gap between slots, or the bar itself — and a miss
+      // meant the item was thrown on the ground, which is a rotten outcome for
+      // being a few pixels off. So if the release was anywhere over the bar,
+      // find the slot whose box actually contains the point, or the nearest one.
+      let barSlot = under?.closest?.('.spell-slot') ?? null;
+      if (!barSlot && under?.closest?.('#actionbar')) {
+        let best = null, bestD = Infinity;
+        for (const el of document.querySelectorAll('#spellbar .spell-slot')) {
+          const r = el.getBoundingClientRect();
+          if (!r.width) continue;
+          const dx = Math.max(r.left - e.clientX, 0, e.clientX - r.right);
+          const dy = Math.max(r.top - e.clientY, 0, e.clientY - r.bottom);
+          const d = Math.hypot(dx, dy);
+          if (d < bestD) { bestD = d; best = el; }
+        }
+        if (best && bestD < 40) barSlot = best;
+      }
       // gear, consumables AND the berry stack can all be hotkeyed now — a slot
       // may hold something you eat as readily as something you equip
       const slottable = cell.kind === 'item' || cell.kind === 'consumable'
