@@ -38,14 +38,18 @@ for (const [m, d] of [['mlow', 'low'], ['mmedium', 'medium'], ['mhigh', 'high']]
     `${m} differs from ${d} only in resScale/shadowQuality (${diffs.join(', ') || 'identical'})`);
 }
 
-console.log('\n-- and every mobile tier runs at pixelRatio 2 --');
+console.log('\n-- and every mobile tier renders at pixelRatio 1 --');
 {
+  // 1 is not "native" — a phone panel is 2x or 3x, so this is a LOWER
+  // resolution the browser scales up. It is the biggest fill-rate lever there
+  // is: 2x renders four times the pixels, and every full-screen pass pays again.
   for (const k of ['mlow', 'mmedium', 'mhigh']) {
-    ok(PRESETS[k].resScale === 'auto', `${k} is 'auto' (caps at devicePixelRatio 2)`);
+    ok(PRESETS[k].resScale === '1', `${k} is '1' (one buffer pixel per CSS pixel)`);
   }
-  // 'auto' must actually mean 2 — a stray mobile clamp would make this a lie
-  ok(/: Math\.min\(window\.devicePixelRatio, 2\);/.test(main),
-    "and 'auto' resolves to min(dpr, 2) with no mobile clamp undercutting it");
+  ok(/settings\.resScale === '1' \? 1/.test(main),
+    "and '1' really resolves to a pixel ratio of 1");
+  ok(PRESETS.high.resScale === 'auto',
+    'while desktop High still renders at the panel ratio');
 }
 
 console.log('\n-- a phone lands on a preset, not on "custom" --');

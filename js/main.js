@@ -3372,14 +3372,14 @@ if ((settings.controlsRev ?? 0) < CONTROLS_DEFAULT_VERSION) {
   // Advanced control afterwards renames the preset to Custom (see saveGfx).
   // Mobile presets mirror their desktop namesakes feature-for-feature — the
   // phone gets the same shadows, bloom and god rays at each tier — and differ
-  // only in resolution: all three run at pixelRatio 2 (resScale 'auto', which
-  // caps at 2) rather than dropping to 1 on low/medium.
+  // only in resolution: all three render at pixelRatio 1.
   //
-  // Worth knowing what that costs, because it is the single biggest fill-rate
-  // lever in the whole renderer: pixelRatio 2 renders FOUR times the pixels of
-  // pixelRatio 1, and every full-screen pass — bloom, god rays, the composite —
-  // pays it again. If the phone still struggles, this is the first dial to turn,
-  // and 'Low (mobile)' is where to turn it.
+  // NB pixelRatio 1 is not "native": a phone's panel is 2x or 3x, so 1 is a
+  // LOWER resolution that the browser scales up. That is the point. It is the
+  // single biggest fill-rate lever in the renderer — 2x renders FOUR times the
+  // pixels, and every full-screen pass (bloom, god rays, the composite) pays it
+  // again. Anyone who wants the sharper picture can pick a desktop preset or
+  // set Resolution by hand.
   const GFX_PRESETS = {
     low:    { shadows: false, texDetail: 1, resScale: '1',    drawDist: 'normal', shadowQuality: 'low',
               vegDist: 'medium',   shadowDist: 'low',    foliage: 'high',
@@ -3393,15 +3393,15 @@ if ((settings.controlsRev ?? 0) < CONTROLS_DEFAULT_VERSION) {
               vegDist: 'furthest', shadowDist: 'high',   foliage: 'ultra',
               foliageMove: true, clouds: true, waterFx: true,
               bloom: true, rays: true },
-    mlow:    { shadows: false, texDetail: 1, resScale: 'auto', drawDist: 'normal', shadowQuality: 'low',
+    mlow:    { shadows: false, texDetail: 1, resScale: '1',    drawDist: 'normal', shadowQuality: 'low',
                vegDist: 'medium',   shadowDist: 'low',    foliage: 'high',
                foliageMove: true, clouds: true, waterFx: false,
                bloom: false, rays: false },
-    mmedium: { shadows: true,  texDetail: 2, resScale: 'auto', drawDist: 'normal', shadowQuality: 'medium',
+    mmedium: { shadows: true,  texDetail: 2, resScale: '1',    drawDist: 'normal', shadowQuality: 'medium',
                vegDist: 'furthest', shadowDist: 'medium', foliage: 'ultra',
                foliageMove: true, clouds: true, waterFx: true,
                bloom: true, rays: true },
-    mhigh:   { shadows: true,  texDetail: 2, resScale: 'auto', drawDist: 'far', shadowQuality: 'medium',
+    mhigh:   { shadows: true,  texDetail: 2, resScale: '1',    drawDist: 'far', shadowQuality: 'medium',
                vegDist: 'furthest', shadowDist: 'high',   foliage: 'ultra',
                foliageMove: true, clouds: true, waterFx: true,
                bloom: true, rays: true },
