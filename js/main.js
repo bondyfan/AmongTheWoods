@@ -6389,8 +6389,10 @@ function hintLair(idx) {
   poi.rumored = true;
   // a rumor is just words — the lair only appears on the map once you have
   // actually walked its ground and discovered it yourself
-  const lair = BIOME_LAIRS[idx];
-  if (lair) ui.toast(`💀 Rumors speak of ${lair.name} lurking somewhere in this land…`, 'boss');
+  // No toast. The "rumors speak of…" line said nothing the player could act on
+  // — it named a boss with no location and no next step, and it fired 30 s into
+  // a new biome, on top of whatever was actually happening. The lair still gets
+  // marked once you walk its ground, which is the part that was ever useful.
 }
 
 function updateAtmosphere(dt) {

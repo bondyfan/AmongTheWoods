@@ -1870,3 +1870,48 @@ body.slotting-weapon #spellbar .spell-slot[data-slot="9"] .ring-fan { display: f
   0%, 40% { transform: rotate(0deg); }
   60%, 100% { transform: rotate(90deg); }
 }
+
+/* ---- phone UI scale ------------------------------------------------------
+   Everything here was sized for a 1400 px desktop window and simply carried
+   over. On a 390 px phone the same panels eat a third of the screen. Nothing
+   below changes desktop — it is all inside the touch/coarse-pointer query. */
+@media (pointer: coarse) {
+  /* the burger column: two per row, and small enough that seven of them fit */
+  #hud-buttons {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 5px;
+    width: min(74vw, 340px); padding: 6px;
+  }
+  #hud-buttons button {
+    font-size: 12px; padding: 7px 6px; min-height: 0; line-height: 1.15;
+    white-space: normal;
+  }
+  #hud-buttons button kbd { display: none; }   /* no keyboard to press it with */
+
+  /* clock, resources, biome name */
+  #tod-clock { font-size: 14px; top: 8px; right: 10px; }
+  #resource-hud { font-size: 12px; gap: 5px; }
+  #resource-hud .hud-resource { padding: 3px 7px; }
+  #resource-hud svg, #resource-hud img { width: 15px; height: 15px; }
+  #biome-name { font-size: 13px; letter-spacing: 2px; }
+
+  /* held weapon, and the "176 m to your body" bar */
+  body.touch #weapon-display { font-size: 11px; padding: 3px 8px; }
+  #ghost-hint { font-size: 12px; padding: 5px 11px; bottom: 120px; }
+
+  /* THE "YOU ARE A GHOST" PANEL moves to the RIGHT. The burger column opens
+     over the left edge and the two were sitting on top of each other. */
+  #respawn-choice {
+    left: auto; right: 10px; width: min(56vw, 250px);
+    padding: 10px 12px;
+  }
+  #respawn-choice h2 { font-size: 15px; margin-bottom: 4px; }
+  #respawn-choice p { font-size: 11px; line-height: 1.28; margin-bottom: 8px; }
+  #respawn-choice button { font-size: 12px; padding: 8px 10px; }
+
+  /* the "a new creature appeared" banner spanned the whole screen */
+  #banner, .banner, #boss-banner {
+    font-size: 15px; letter-spacing: 1px; padding: 6px 12px;
+    max-width: 82vw; white-space: normal; text-align: center;
+  }
+  #toasts, .toast { font-size: 12px; max-width: 76vw; }
+}
