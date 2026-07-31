@@ -411,6 +411,10 @@ export class UI {
       // dragging something (body.slotting), when they all come back as targets.
       const optional = i > 4 && i !== WEAPON_RING_SLOT;
       el.toggleAttribute('data-optional', optional);
+      // Q/R/F take ITEMS as well as abilities — 1-9 are the ability keys. They
+      // are marked so the bar can say that visually instead of expecting the
+      // player to discover it by dragging something and seeing what sticks.
+      el.toggleAttribute('data-gear', i >= WEAPON_RING_SLOT);
       const filled = Array.isArray(raw) ? raw.length > 0 : raw != null;
       el.toggleAttribute('data-empty', !filled);
       const iconEl = el.querySelector('.spell-icon');

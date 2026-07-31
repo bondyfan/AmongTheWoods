@@ -1928,3 +1928,22 @@ body.slotting #spellbar .spell-slot[data-optional][data-empty] {
 /* Touch has no hover, so tapping Q pins its fan open — otherwise the ring
    could be filled by dragging but never emptied again. */
 #spellbar .spell-slot[data-fan] .ring-fan { display: flex; }
+
+/* ---- Q / R / F are the ITEM keys -----------------------------------------
+   1-9 hold class abilities; Q, R and F take weapons, tools and consumables as
+   well. Nothing said so, and "drag it and see whether it sticks" is a poor way
+   to learn a rule — so they are split off with a gap and given a warmer frame.
+   Q additionally holds a ring of five, which its own fan already shows. */
+#spellbar .spell-slot[data-gear] {
+  border-color: #b98c4a;
+  background-image: linear-gradient(rgba(210, 150, 70, 0.16), rgba(210, 150, 70, 0.04));
+}
+#spellbar .spell-slot[data-gear] .spell-key { color: #f0c98a; }
+/* A real gap, plus a hairline, between the ability keys and the item keys.
+   Keyed on Q by index rather than :first-of-type — every slot is a div, so
+   :first-of-type would match slot 1 and put the divider at the far left. */
+#spellbar .spell-slot[data-slot="9"] { margin-left: 14px; }
+#spellbar .spell-slot[data-slot="9"]::before {
+  content: ''; position: absolute; left: -8px; top: 12%; bottom: 12%;
+  border-left: 1px solid rgba(255, 255, 255, 0.22);
+}
