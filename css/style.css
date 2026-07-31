@@ -1554,7 +1554,13 @@ body.slotting .spell-slot.empty {
   border: 2px solid #6d8f4c; pointer-events: auto; z-index: 12;
   -webkit-tap-highlight-color: transparent;
 }
-body.touch #burger-btn { display: block; }
+body.touch #burger-btn {
+  display: block;
+  /* tucked properly into the corner: 12 px of inset on a 667 px screen pushed
+     the whole left column — burger, bars, quest — visibly off it */
+  top: calc(6px + var(--sa-t)); left: calc(6px + var(--sa-l));
+  width: 38px; height: 38px; font-size: 19px; border-radius: 10px;
+}
 
 /* DESKTOP burger: the same tuck-away, bottom-right where the column already
    lived, so the play area isn't permanently walled in by six buttons. */
@@ -1573,7 +1579,7 @@ body:not(.touch).menu-open #hud-buttons { display: flex; }
 
 /* the menu column drops down from the burger */
 body.touch #hud-buttons {
-  top: calc(66px + var(--sa-t)); left: calc(12px + var(--sa-l));
+  top: calc(50px + var(--sa-t)); left: calc(6px + var(--sa-l));
   bottom: auto; right: auto; display: none;
   background: rgba(12,18,8,0.92); padding: 8px; border-radius: 14px;
   border: 1px solid rgba(255,255,255,0.14); z-index: 12;
@@ -1585,15 +1591,21 @@ body.touch kbd { display: none; } /* hotkeys are meaningless on a phone */
 /* minimap: small, top-right, out of the sticks' way */
 body.touch #minimap {
   left: auto; bottom: auto;
-  top: calc(10px + var(--sa-t)); right: calc(10px + var(--sa-r));
-  width: 74px; height: auto;
+  top: calc(6px + var(--sa-t)); right: calc(6px + var(--sa-r));
+  width: 92px; height: auto;
 }
 body.touch #minimap-zoom {
   left: auto; bottom: auto;
-  top: calc(10px + var(--sa-t)); right: calc(90px + var(--sa-r));
+  top: calc(6px + var(--sa-t)); right: calc(104px + var(--sa-r));
   flex-direction: column;
 }
-body.touch #minimap-zoom button { width: 30px; height: 30px; }
+body.touch #minimap-zoom button { width: 26px; height: 26px; font-size: 15px; }
+/* The clock sat beside the minimap and pushed it in off the corner. Under it
+   instead: the corner belongs to the map, and the time reads fine below it. */
+body.touch #tod-clock {
+  top: calc(104px + var(--sa-t)); right: calc(8px + var(--sa-r));
+  font-size: 12px;
+}
 
 /* the 1–9 spell bar sits centred, lifted above the thumbs */
 body.touch #spellbar { bottom: calc(20px + var(--sa-b)); gap: 5px; }
@@ -1608,7 +1620,7 @@ body.touch #top-center { top: calc(8px + var(--sa-t)); }
 
 /* HP / XP bars: clear the notch (safe-area top) AND the top-left burger */
 body.touch #top-left {
-  top: calc(12px + var(--sa-t)); left: calc(66px + var(--sa-l));
+  top: calc(6px + var(--sa-t)); left: calc(50px + var(--sa-l));
   width: min(230px, calc(100vw - 160px));
 }
 
@@ -2091,6 +2103,20 @@ body.touch .bar-wrap.energy, body.touch .bar-wrap.mana { height: 10px; border-ra
 body.touch .bar-label { font-size: 10px; }
 body.touch .bar-wrap.energy .bar-label, body.touch .bar-wrap.mana .bar-label { font-size: 8px; }
 
+/* The quest line — "Free the one left in the cage  0/1" — was desktop-sized
+   type in a desktop-sized box, and it hangs under the health bars where the
+   screen is narrowest. */
+body.touch #active-quest {
+  font-size: 10px; padding: 4px 7px; border-radius: 7px; line-height: 1.2;
+}
+/* And the resource strip: six chips of 13 px bold across the top of a 667 px
+   screen. Half the type, a third of the padding, and icons to match. */
+body.touch #resource-hud { gap: 3px; margin-top: 4px; }
+body.touch #resource-hud .hud-resource {
+  padding: 1px 5px; font-size: 10px; border-radius: 6px;
+}
+body.touch #resource-hud svg, body.touch #resource-hud img { width: 12px; height: 12px; }
+
 /* ---- and on a genuinely short screen, tighter still -----------------------
    308 px of height has to hold the bars, the biome name, the action bar, the
    stick and the attack buttons. Anything that can be smaller, is. */
@@ -2100,12 +2126,13 @@ body.touch .bar-wrap.energy .bar-label, body.touch .bar-wrap.mana .bar-label { f
   body.touch #top-left { top: calc(6px + var(--sa-t)); width: min(165px, calc(100vw - 140px)); }
   body.touch .bar-wrap { height: 13px; }
   body.touch .bar-wrap.energy, body.touch .bar-wrap.mana { height: 8px; }
-  body.touch #minimap { width: 58px; }
+  body.touch #minimap { width: 76px; }
+  body.touch #minimap-zoom { right: calc(88px + var(--sa-r)); }
+  body.touch #tod-clock { top: calc(88px + var(--sa-t)); font-size: 11px; }
   body.touch #biome-name { font-size: 10px; letter-spacing: 1px; margin-top: 2px; }
-  body.touch #tod-clock { font-size: 12px; top: calc(4px + var(--sa-t)); }
-  body.touch #resource-hud { font-size: 11px; gap: 4px; }
-  body.touch #resource-hud .hud-resource { padding: 2px 5px; }
-  body.touch #resource-hud svg, body.touch #resource-hud img { width: 13px; height: 13px; }
+  body.touch #active-quest { font-size: 9px; padding: 3px 6px; }
+  body.touch #resource-hud .hud-resource { padding: 1px 4px; font-size: 9px; }
+  body.touch #resource-hud svg, body.touch #resource-hud img { width: 11px; height: 11px; }
   body.touch #weapon-display { font-size: 10px; padding: 2px 7px; }
   body.touch .spell-slot { width: 30px; height: 30px; }
   body.touch #spellbar { gap: 3px; }

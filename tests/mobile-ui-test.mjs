@@ -209,17 +209,24 @@ console.log('\n-- what a phone actually WINS, after the cascade --');
   const winner = (prop, target, bodyClasses, rules = phoneRules, elClasses = []) => {
     let best = null;
     for (const r of rules) {
-      if (!r.sel.includes(target)) continue;
+      if (!target.split(/\s+/).every(part => r.sel.includes(part))) continue;
       if (/:hover|::/.test(r.sel)) continue;
       if (/body:not\(\.touch\)/.test(r.sel) && bodyClasses.includes('touch')) continue;
       const need = r.sel.match(/body((?:\.[\w-]+)+)/);
       if (need && !need[1].slice(1).split('.').every(c => bodyClasses.includes(c))) continue;
-      // the compound the selector actually lands on must not demand a class
-      // this element does not carry
-      const last = r.sel.split(/[\s>+~]+/).pop();
-      const wants = (last.match(/\.[\w-]+/g) || []).map(c => c.slice(1));
-      const own = [...elClasses, ...(target.match(/\.[\w-]+/g) || []).map(c => c.slice(1))];
-      if (!wants.every(c => own.includes(c))) continue;
+      // The compound the selector actually LANDS on has to be our element, not
+      // merely contain its name: `#minimap-zoom button` contains "#minimap" and
+      // is a different element entirely, and `.bar-wrap.energy` is not
+      // `.bar-wrap`. So both sides are parsed into id + classes and compared.
+      const lastOf = (sel) => {
+        const c = sel.split(/[\s>+~]+/).pop();
+        return { id: (c.match(/#[\w-]+/) || [null])[0],
+                 cls: (c.match(/\.[\w-]+/g) || []).map(x => x.slice(1)) };
+      };
+      const l = lastOf(r.sel), t = lastOf(target);
+      if (l.id !== t.id) continue;                       // both null, or the same id
+      const own = [...t.cls, ...elClasses];
+      if (!l.cls.every(c => own.includes(c))) continue;  // demands a class we lack
       const m = new RegExp(`(?:^|;)\\s*${prop}\\s*:\\s*([^;]+)`).exec(r.body);
       if (!m) continue;
       const s = spec(r.sel);
@@ -250,15 +257,88 @@ console.log('\n-- what a phone actually WINS, after the cascade --');
   ok(parseFloat(energyH?.value) <= 10, `the energy strip ${energyH?.value}, not 13px`);
 
   // Desktop must be untouched by every one of those.
+  // ---- the second pass of shrinking ----
+  const q = winner('font-size', '#active-quest', ['touch']);
+  ok(parseFloat(q?.value) <= 10, `the quest line is ${q?.value}, not 13px`);
+  const res = winner('font-size', '#resource-hud .hud-resource', ['touch']);
+  ok(parseFloat(res?.value) <= 10, `each resource chip is ${res?.value}, not 13px`);
+  const resPad = winner('padding', '#resource-hud .hud-resource', ['touch']);
+  ok(/1px/.test(resPad?.value ?? ''), `and barely padded (${resPad?.value})`);
+
+  // the left column, pulled into the corner it was floating off
+  const burgerL = winner('left', '#burger-btn', ['touch']);
+  ok(/6px/.test(burgerL?.value ?? ''), `the burger sits at ${burgerL?.value}`);
+  const barsL = winner('left', '#top-left', ['touch']);
+  ok(/50px/.test(barsL?.value ?? ''), `and the bars follow it in (${barsL?.value})`);
+  const colL = winner('left', '#hud-buttons', ['touch', 'menu-open']);
+  ok(/6px/.test(colL?.value ?? ''), `as does the menu column (${colL?.value})`);
+  // ...but they must not COLLIDE: the bars start after the burger ends
+  const burgerW = parseFloat(winner('width', '#burger-btn', ['touch'])?.value);
+  ok(6 + burgerW <= 50, `burger ends at ${6 + burgerW}px, bars start at 50px`);
+
+  // the map takes the corner and the clock goes under it
+  const mapW = parseFloat(winner('width', '#minimap', ['touch'])?.value);
+  ok(mapW >= 76, `the minimap is ${mapW}px, up from 74`);
+  const mapT = parseFloat(winner('top', '#minimap', ['touch'])?.value.match(/[\d.]+/)[0]);
+  const clockT = parseFloat(winner('top', '#tod-clock', ['touch'])?.value.match(/[\d.]+/)[0]);
+  ok(clockT >= mapT + mapW, `the clock (${clockT}px) clears the map (ends ${mapT + mapW}px)`);
+  const clockR = winner('right', '#tod-clock', ['touch']);
+  ok(clockR != null, `and stays on the right (${clockR?.value})`);
+
   const deskMenu = winner('display', '#hud-buttons', ['menu-open'], deskRules);
   ok(deskMenu?.value === 'flex', `desktop still gets a flex column (${deskMenu?.value})`);
   const deskFont = winner('font-size', '#hud-buttons button', ['menu-open'], deskRules);
   ok(deskFont == null || parseFloat(deskFont.value) > 12,
     `and desktop button text is left alone (${deskFont?.value ?? 'unset'})`);
+  const deskQuest = winner('font-size', '#active-quest', [], deskRules);
+  ok(parseFloat(deskQuest?.value) === 13, `desktop quest text stays 13px (${deskQuest?.value})`);
+  const deskMap = winner('width', '#minimap', [], deskRules);
+  ok(deskMap == null, 'and the desktop minimap keeps its own size');
   const deskBar = winner('height', '.bar-wrap', [], deskRules, ['hp']);
   ok(parseFloat(deskBar?.value) === 20, `and desktop bars stay 20px (${deskBar?.value})`);
   const deskEnergy = winner('height', '.bar-wrap', [], deskRules, ['energy']);
   ok(parseFloat(deskEnergy?.value) === 13, `its energy strip 13px (${deskEnergy?.value})`);
+}
+
+console.log('\n-- the shield button only exists when you can block --');
+{
+  const fn = main.slice(main.indexOf('function tickTouchAction'),
+    main.indexOf('function tickTouchAction') + 900);
+  ok(/\$id\('tc-block'\)/.test(fn), 'the block button is ticked with the action button');
+  ok(/player\.canBlock/.test(fn),
+    'and gated on canBlock — the same flag the Ctrl path checks, not a copy of the rule');
+  ok(/classList\.toggle\('hidden'/.test(fn), 'shown and hidden, not merely dimmed');
+  const p = readFileSync('js/player.js', 'utf8');
+  ok(/this\.canBlock = !!this\.shield \|\| !!this\.weapon\.parry;/.test(p),
+    'canBlock means a shield OR a weapon that parries — a parrying sword still gets it');
+}
+
+console.log('\n-- the camera settles back quickly --');
+{
+  ok(/const CAM_ORBIT_HOLD = 0\.7;/.test(main),
+    'the swung camera waits 0.7 s, not two and a half');
+  // and the ease that follows still lands on exactly 0, at the new delay
+  let o = 1.2, hold = 0.7, dt = 1 / 60, t = 0, overshoot = false;
+  while (t < 6) {
+    if (hold > 0) hold -= dt;
+    else { o += (0 - o) * Math.min(1, dt * 2.2); if (Math.abs(o) < 0.003) o = 0; }
+    if (o < -1e-9) overshoot = true;
+    t += dt;
+  }
+  ok(!overshoot && o === 0, 'and is fully home well inside 6 s, without overshooting');
+}
+
+console.log('\n-- the campfire outside the gate is gone --');
+{
+  const w = readFileSync('js/world.js', 'utf8');
+  ok(!/makeCampfire\(\)/.test(w), 'no little hearth is built at the homestead');
+  ok(!/makeCampfire,/.test(w), 'and the import went with it');
+  ok(/co-op, where the camp is shared/.test(w), 'with the reason recorded');
+  // the GREAT fire is a different thing and must survive — it owns the light
+  ok(/makeGreatFire/.test(w), 'the great fire, which owns a real light, stays');
+  const m = readFileSync('js/models.js', 'utf8');
+  ok(/export function makeCampfire/.test(m),
+    'and the model itself stays for the POI fires that still use it');
 }
 
 console.log(`\n${pass}/${pass + fail} passed`);

@@ -13,7 +13,7 @@ import { WORLD, BIOMES, biomeAt, biomeIndexAt, radiusOf, zoneInfoAt,
          HARBOR_SPECS } from './config.js';
 import { makeTree, makeRock, makeGrassTuft, makeGrassBlades, makeGrassField,
          makeGrainStalk, makeMeadowFlower, makeFlower, makeMushroom, makeBush,
-         makeLog, makeBoulder, makeBridge, makeCampfire, makeStalagmite,
+         makeLog, makeBoulder, makeBridge, makeStalagmite,
          makeBerryBush, makeShrine, makeMonolith, makeCrypt, makeBlacksmith, makeCobweb,
          makeFarm, makeTrader, makeBeehive, makeBeehiveBig, makeCocoon, makeGlade, makeGraveyardRuin,
          makeCursedStatue, makeVillage, makeRaceFlag, makeNest, makeLilypad,
@@ -1368,10 +1368,10 @@ export class World {
     // amp/y0/y1 match the grass elsewhere: no sway at the root, full sway at the
     // ear. Its own draw call, and it moves.
     this._addStatic(bakeGroup(crop, false, { amp: 0.5, y0: 0, y1: 1.2 }));
-    // the hearth, just outside the gate where it always was
-    const fire = makeCampfire();
-    fire.position.set(2, this.heightAt(2, 14), 14);
-    this._addStatic(fire);
+    // A little campfire used to burn just outside the gate. It read as somebody
+    // ELSE's — in co-op, where the camp is shared, players took it for another
+    // player's fire and went looking for whose. It lit nothing (makeCampfire
+    // owns no light; the great fire is the one that does), so it is gone.
   }
 
   // wooden piers reaching from each harbor's beach out over the sea

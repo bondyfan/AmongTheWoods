@@ -5453,6 +5453,14 @@ $id('tc-action')?.addEventListener('click', () => { if (game.touch) interactE();
 // actually do something, and its icon says WHAT — so the phone build never
 // shows a 'press E' prompt with no key to press.
 function tickTouchAction() {
+  // The shield button was always there, even bare-handed with nothing to block
+  // with — a control that cannot do anything, taking up thumb room next to the
+  // one that can. player.canBlock is the same flag the key path checks, so the
+  // button appears exactly when Ctrl would have worked: a shield, or a weapon
+  // that parries.
+  const block = $id('tc-block');
+  if (block) block.classList.toggle('hidden', !(game.touch && inPlay() && player.canBlock));
+
   const btn = $id('tc-action');
   if (!btn) return;
   if (!game.touch || !inPlay()) { btn.classList.add('hidden'); return; }
@@ -6837,7 +6845,7 @@ function tickLookHint(dt) {
   lookHintT += dt;
   el.classList.toggle('hidden', lookHintT < 3);
 }
-const CAM_ORBIT_HOLD = 2.5;
+const CAM_ORBIT_HOLD = 0.7;
 
 let camYaw = 0;          // top-down orbit angle; 0 = the classic north-up view
 let camYawTarget = 0;
