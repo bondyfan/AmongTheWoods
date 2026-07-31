@@ -4494,6 +4494,57 @@ $id('quit-btn')?.addEventListener('click', async () => {
 });
 
 $id('mode-moba-btn').addEventListener('click', () => showModeOptions('moba'));
+
+// ---- one tap, not two --------------------------------------------------
+// Single Player still needed pressing twice on a phone. Blurring the name field
+// on pointerdown was not enough, and is part of the problem:
+//
+//  · on iOS, while the on-screen keyboard is up, the first tap anywhere else is
+//    spent dismissing it and NO click is delivered at all; and
+//  · dismissing it reflows the page — the viewport grows back by the keyboard's
+//    height — so the button has moved by the time the finger lifts, and a click
+//    that did fire would land on whatever slid into that spot.
+//
+// Both are about the synthesised `click`, so touch stops waiting for one. The
+// pointer is captured on the way down, which brings the lift back to the button
+// wherever it has since moved to, and the lift fires the button's own handler
+// directly. If the OS then delivers its click after all, it is a duplicate and
+// is swallowed in the capture phase before any handler sees it.
+//
+// Mouse input is untouched: it goes on clicking, and a drag off the button
+// still cancels, because a lift more than a thumb's width from the press is
+// not a tap.
+function tapToClick(el) {
+  if (!el) return;
+  let sx = 0, sy = 0, down = false, mine = false, guard = 0;
+  el.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse') return;
+    down = true; sx = e.clientX; sy = e.clientY;
+    try { el.setPointerCapture(e.pointerId); } catch { /* not captureable */ }
+  });
+  el.addEventListener('pointercancel', () => { down = false; });
+  el.addEventListener('pointerup', (e) => {
+    if (e.pointerType === 'mouse' || !down) return;
+    down = false;
+    if (Math.hypot(e.clientX - sx, e.clientY - sy) > 24) return;   // a drag, not a tap
+    mine = true;
+    clearTimeout(guard);
+    // If the OS click never comes — the case this exists for — the guard has to
+    // clear the flag, or the next genuine click would be eaten as a duplicate.
+    guard = setTimeout(() => { mine = false; }, 700);
+    el.click();
+  });
+  el.addEventListener('click', (e) => {
+    if (!e.isTrusted) return;           // ours, on its way to the real handler
+    if (!mine) return;                  // a plain click: let it through
+    mine = false; clearTimeout(guard);
+    e.stopImmediatePropagation();       // the duplicate, killed before the handlers
+    e.preventDefault();
+  }, true);
+}
+['mode-survival-btn', 'mode-public-btn', 'mode-local-btn', 'mode-moba-btn',
+  'mode-back-btn'].forEach(id => tapToClick($id(id)));
+
 // the public-server button lives on the FIRST screen now, so its health poll
 // has to start with the menu rather than when a submenu opens
 startServerStatusWatch();
