@@ -1309,7 +1309,12 @@ export class World {
       group.add(tuft);
     }
 
-    this._homeGroup = this._addStatic(group);
+    // BAKED: the yard is 300-odd little boxes that never move, and unbaked it
+    // was 313 of the frame's 748 draw calls — 42% of the whole budget, paid
+    // every frame you are anywhere near home, which is the entire early game.
+    // bakeGroup merges them into one buffer with one material, so the GPU is
+    // asked once instead of 313 times. Nothing here animates, so nothing is lost.
+    this._homeGroup = this._addStatic(bakeGroup(group, true));
     // the hearth, just outside the gate where it always was
     const fire = makeCampfire();
     fire.position.set(2, this.heightAt(2, 14), 14);

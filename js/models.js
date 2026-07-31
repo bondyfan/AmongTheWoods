@@ -3405,17 +3405,23 @@ export function makeRaft() {
 // One straight run of rail fence, `len` metres long, centred on the origin and
 // laid along +X. Two rails on posts — cheap (a handful of boxes) because these
 // get repeated dozens of times around the homestead and the village.
+// Laid along +Z, NOT +X. Every caller orients it with the engine's Z-forward
+// convention — atan2(dirX, dirZ) at the village, a+PI/2 tangent to the ring at
+// the homestead — and an X-built run turns those into a right angle: the yard
+// came out as a ring of radial SPOKES rather than a fence, and the village
+// palings stood crosswise to their own wall. Building along Z makes both
+// callers correct without either of them changing.
 export function makeFenceRun(len = 4, color = 0x6b4a2a) {
   const g = new THREE.Group();
   const posts = Math.max(2, Math.round(len / 1.6) + 1);
   for (let i = 0; i < posts; i++) {
-    const px = -len / 2 + (len * i) / (posts - 1);
+    const pz = -len / 2 + (len * i) / (posts - 1);
     const post = box(0.16, 1.25, 0.16, color);
-    post.position.set(px, 0.62, 0);
+    post.position.set(0, 0.62, pz);
     g.add(post);
   }
   for (const ry of [0.5, 0.95]) {
-    const rail = box(len, 0.11, 0.09, color);
+    const rail = box(0.09, 0.11, len, color);
     rail.position.set(0, ry, 0);
     g.add(rail);
   }
@@ -3424,14 +3430,16 @@ export function makeFenceRun(len = 4, color = 0x6b4a2a) {
 
 // A gate: two tall posts with a lintel, so the opening in a fence reads as a
 // deliberate way in rather than a hole where the fence failed to build.
+// Spans +Z, to match makeFenceRun — a gate built across the other axis stands
+// sideways in its own gap.
 export function makeFenceGate(width = 3, color = 0x6b4a2a) {
   const g = new THREE.Group();
-  for (const sx of [-1, 1]) {
+  for (const sz of [-1, 1]) {
     const post = box(0.22, 1.9, 0.22, color);
-    post.position.set(sx * width / 2, 0.95, 0);
+    post.position.set(0, 0.95, sz * width / 2);
     g.add(post);
   }
-  const lintel = box(width + 0.3, 0.18, 0.18, color);
+  const lintel = box(0.18, 0.18, width + 0.3, color);
   lintel.position.y = 1.85;
   g.add(lintel);
   return g;
