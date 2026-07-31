@@ -3320,6 +3320,16 @@ if ((settings.controlsRev ?? 0) < CONTROLS_DEFAULT_VERSION) {
   // One dropdown drives the whole Advanced grid. Picking a preset stamps its
   // values over the settings and rebuilds what needs rebuilding; touching any
   // Advanced control afterwards renames the preset to Custom (see saveGfx).
+  // Mobile presets mirror their desktop namesakes feature-for-feature — the
+  // phone gets the same shadows, bloom and god rays at each tier — and differ
+  // only in resolution: all three run at pixelRatio 2 (resScale 'auto', which
+  // caps at 2) rather than dropping to 1 on low/medium.
+  //
+  // Worth knowing what that costs, because it is the single biggest fill-rate
+  // lever in the whole renderer: pixelRatio 2 renders FOUR times the pixels of
+  // pixelRatio 1, and every full-screen pass — bloom, god rays, the composite —
+  // pays it again. If the phone still struggles, this is the first dial to turn,
+  // and 'Low (mobile)' is where to turn it.
   const GFX_PRESETS = {
     low:    { shadows: false, texDetail: 1, resScale: '1',    drawDist: 'normal',
               vegDist: 'medium',   shadowDist: 'low',    foliage: 'high',
@@ -3333,8 +3343,23 @@ if ((settings.controlsRev ?? 0) < CONTROLS_DEFAULT_VERSION) {
               vegDist: 'furthest', shadowDist: 'high',   foliage: 'ultra',
               foliageMove: true, clouds: true, waterFx: true,
               bloom: true, rays: true },
+    mlow:    { shadows: false, texDetail: 1, resScale: 'auto', drawDist: 'normal',
+               vegDist: 'medium',   shadowDist: 'low',    foliage: 'high',
+               foliageMove: true, clouds: true, waterFx: false,
+               bloom: false, rays: false },
+    mmedium: { shadows: true,  texDetail: 2, resScale: 'auto', drawDist: 'normal',
+               vegDist: 'furthest', shadowDist: 'medium', foliage: 'ultra',
+               foliageMove: true, clouds: true, waterFx: true,
+               bloom: true, rays: true },
+    mhigh:   { shadows: true,  texDetail: 2, resScale: 'auto', drawDist: 'far',
+               vegDist: 'furthest', shadowDist: 'high',   foliage: 'ultra',
+               foliageMove: true, clouds: true, waterFx: true,
+               bloom: true, rays: true },
   };
-  settings.gfxPreset ??= 'custom';
+  // A phone used to default to 'custom', which meant it silently kept every
+  // desktop default — bloom, god rays, the full offscreen post stack and 2048
+  // shadow maps. There was no mobile preset to land on. Now there is.
+  settings.gfxPreset ??= onMobile ? 'mmedium' : 'custom';
   if (!GFX_PRESETS[settings.gfxPreset] && settings.gfxPreset !== 'custom') settings.gfxPreset = 'custom';
   const presetSel = $id('set-gfxpreset');
   presetSel.value = settings.gfxPreset;
