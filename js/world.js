@@ -37,6 +37,28 @@ const QUALITY_VEG_BIOMES = new Set(['Verdant Forest']);
 
 const CHUNK = 40;
 const VIEW_RADIUS = 3;   // chunks around the player kept alive
+
+// ---- how tall is that boulder? --------------------------------------------
+// A jump reaches ~2.4 m (JUMP_V 12.8, GRAVITY 34), so most small rocks can be
+// cleared and the big ones cannot — which is the gradation we want, provided
+// the rock actually says how tall it is. makeBoulder is a dodecahedron of
+// circumradius `scale`, squashed by a random mesh.scale.y and set down at
+// scale * 0.25 above the ground.
+//
+// Two numbers, because they answer two different questions:
+//   top — the real surface, what you LAND on
+//   h   — what you must clear to pass THROUGH the footprint, a hand's breadth
+//         under the top: feet are a point but legs are not, and scraping over
+//         the crown of a low rock should succeed.
+//
+// The margin is deliberately SMALL. At 0.3 m even the largest boulder (2.64 m)
+// fell under the jump apex, so everything in the world became hoppable and the
+// size variation stopped meaning anything. At 0.15 the biggest need 2.49 m and
+// stay solid — you go around those, or climb something else first.
+function boulderHeights(scale, mesh) {
+  const top = scale * (0.25 + (mesh?.scale?.y ?? 1));
+  return { top, h: Math.max(0.25, top - 0.15) };
+}
 // half-width of the border barrier bands (the Frostwall is a fat ridge)
 const BORDER_HALF = { ridge: 2.2, river: 2.7, wall: 2.8 };
 
@@ -2004,10 +2026,32 @@ export class World {
   }
 
   // what a WALKING character stands on: the terrain, or a pier deck over it
-  surfaceAt(x, z) {
-    const h = this.heightAt(x, z);
+  // The height you STAND at: the terrain, a pier deck over it, or the top of a
+  // boulder you have landed on. `feetY` is where your feet actually are — a
+  // surface above them is something you are still under, not something you are
+  // on, so it is ignored. Leave it out and only the terrain/deck answer.
+  surfaceAt(x, z, feetY = -Infinity) {
+    let y = this.heightAt(x, z);
     const deck = this._pierDeckAt(x, z);
-    return deck !== null && deck > h ? deck : h;
+    if (deck !== null && deck > y) y = deck;
+    // Boulders are platforms; fences and walls are not. The difference is that
+    // a boulder's collision circle really is the shape you see, so standing in
+    // the middle of it puts you on the rock. A fence's circle is a 1.5 m disc
+    // around a thin plank — landing on that would hang you in the air beside
+    // the rail. Only rocks opt in.
+    if (feetY > -Infinity) {
+      for (const rock of this.rocksNear({ x, z }, 2.6)) {
+        if (!rock.alive || rock.top == null) continue;
+        // tighter than the collision radius: the dome narrows toward the top,
+        // so the outer rim of the circle is not standable ground
+        const stand = rock.radius * 0.8;
+        const dx = x - rock.x, dz = z - rock.z;
+        if (dx * dx + dz * dz > stand * stand) continue;
+        const top = this.heightAt(rock.x, rock.z) + rock.top;
+        if (top > y && feetY >= top - 0.35) y = top;
+      }
+    }
+    return y;
   }
 
   isWater(x, z) { return this.waterKindAt(x, z) > 0; }
@@ -2356,6 +2400,7 @@ export class World {
       rocks.push({
         id: this.nextTreeId++, mesh, x, z, radius: scale * 0.9,
         hp: [3, 5][size], stone: [3, 6][size], alive: true, kind: 'rock',
+        ...boulderHeights(scale, mesh),
       });
     }
 
@@ -2613,7 +2658,8 @@ export class World {
         mesh.position.set(e.x, this.heightAt(e.x, e.z) + sc * 0.25, e.z);
         group.add(mesh);
         rocks.push({ id: this.nextTreeId++, mesh, x: e.x, z: e.z, radius: sc * 0.9,
-          hp: e.size ? 5 : 3, stone: e.size ? 6 : 3, alive: true, kind: 'rock', patchId: e.id });
+          hp: e.size ? 5 : 3, stone: e.size ? 6 : 3, alive: true, kind: 'rock', patchId: e.id,
+          ...boulderHeights(sc, mesh) });
       } else if (e.kind === 'building') {
         const mesh = bakeGroup(e.type === 'church' ? makeChurch(drng)
           : e.type === 'fountain' ? makeFountain(drng) : makeTownHouse(drng));
@@ -3191,6 +3237,12 @@ export class World {
   // height, so trees, rocks and buildings are unchanged.
   collide(pos, r, opts = {}) {
     const air = opts.air || 0;
+    // `air` is height above the terrain UNDER THE PLAYER; on a slope that is
+    // not the same baseline as the terrain under an obstacle a metre away.
+    // For the flat-ish structures in `obstacles` the difference is noise, but a
+    // boulder is something you stand ON, and there a 0.15 m margin has to
+    // survive the comparison — so rocks are judged on absolute height instead.
+    const feetY = opts.feetY;
     const pushOut = (ox, oz, minDist) => {
       const dx = pos.x - ox, dz = pos.z - oz;
       const distSq = dx * dx + dz * dz;
@@ -3201,8 +3253,14 @@ export class World {
       }
     };
 
+    // trees are never jumped — the shortest sapling still towers over 2.4 m
     for (const tree of this.treesNear(pos, r + 0.5)) pushOut(tree.x, tree.z, r + tree.radius);
-    for (const rock of this.rocksNear(pos, r + 0.5)) pushOut(rock.x, rock.z, r + rock.radius);
+    for (const rock of this.rocksNear(pos, r + 0.5)) {
+      // over it, or standing on top of it — either way it is not in the way
+      if (rock.h != null && feetY != null
+          && feetY > this.heightAt(rock.x, rock.z) + rock.h) continue;
+      pushOut(rock.x, rock.z, r + rock.radius);
+    }
     for (const o of this.obstacles) {
       if (o.h != null && air > o.h) continue;   // jumped clear of it
       pushOut(o.x, o.z, r + o.r);

@@ -2755,7 +2755,7 @@ export class Player {
     // surfaceAt includes walkable structures (harbor pier decks) on top of
     // the raw terrain; worlds without it (dungeons) just use the ground
     const ground = world.surfaceAt
-      ? world.surfaceAt(this.pos.x, this.pos.z)
+      ? world.surfaceAt(this.pos.x, this.pos.z, this.y ?? -Infinity)
       : world.heightAt(this.pos.x, this.pos.z);
     if (devFly) {
       if (!Number.isFinite(this.y)) this.y = ground;
@@ -3192,7 +3192,8 @@ export class Player {
       world.collide(this.pos, 0.45,
         { boat: ctx.boat, wade: true, swimmer: (this.stats?.swim || 0) > 0 || !!this.upgrades?.swim,
           // how high the feet are: a jump clears low obstacles (world.collide)
-          air: Math.max(0, (this.y ?? 0) - world.heightAt(this.pos.x, this.pos.z)) });
+          air: Math.max(0, (this.y ?? 0) - world.heightAt(this.pos.x, this.pos.z)),
+          feetY: this.y });
       this._applyBounds(ctx);
       // dust + horizontal speed streaks kicked up behind a combat charge
       // (Bull Charge, Shadowstep dashes) so the rush reads like a freight train
@@ -3322,7 +3323,14 @@ export class Player {
           else if (canStep(dx, 0)) this.pos.x += dx;
           else if (canStep(0, dz)) this.pos.z += dz;
           world.collide(this.pos, 0.45,
-            { boat: ctx.boat, wade: true, swimmer: (this.stats?.swim || 0) > 0 || !!this.upgrades?.swim });
+            { boat: ctx.boat, wade: true, swimmer: (this.stats?.swim || 0) > 0 || !!this.upgrades?.swim,
+              // How high the feet are. Without this the whole jump-clearance
+              // rule was dead code on the ORDINARY movement path — only a dash
+              // ever passed it, so running and jumping at a fence bounced off
+              // it exactly as before. `feetY` is the same thing in absolute
+              // terms, which is what rocks are judged against.
+              air: Math.max(0, (this.y ?? 0) - world.heightAt(this.pos.x, this.pos.z)),
+              feetY: this.y });
           // swimming down/up: the look pitch (flyY) sinks or lifts the diver.
           // clamped to the surface here; the bed clamp is applied with the pose.
           if (this.swimming && flyY !== 0)
