@@ -4433,6 +4433,18 @@ $id('mp-server-btn')?.addEventListener('click', async () => {
 });
 // Survival single player starts straight away — the old two-step (pick a mode,
 // then pick solo/multi) was a menu in front of a menu.
+// On iOS, while a text field holds focus and the on-screen keyboard is up, the
+// FIRST tap anywhere else only dismisses the keyboard — no click is delivered.
+// The username field is a text input, so after typing a name every menu button
+// needed two taps: one to close the keyboard, one to actually press it.
+// Blurring on pointerdown closes it on the way DOWN, so the click still lands.
+document.addEventListener('pointerdown', (e) => {
+  const a = document.activeElement;
+  if (a && /^(INPUT|TEXTAREA)$/.test(a.tagName) && !e.target.closest?.('input, textarea')) {
+    a.blur();
+  }
+}, true);
+
 $id('mode-survival-btn').addEventListener('click', () => {
   audio.sfx('click', 0.4);
   selectedMode = 'survival';

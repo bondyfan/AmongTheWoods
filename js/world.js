@@ -1300,13 +1300,20 @@ export class World {
     this.obstacles.push({ x: hax, z: haz, r: 1.2, home: true });
     // the wheat plot sits on the far side from the hay, so the two props read
     // as separate things rather than one tangled heap
+    // The wheat goes in its OWN group: it is vegetation and has to keep moving
+    // in the wind. Baked into the rigid yard below it came out frozen stiff,
+    // which reads as cardboard next to grass that sways two metres away.
+    // bakeGroup's sway parameters bake the wind into the vertex shader instead,
+    // so it still costs one draw call — the point of baking is fewer calls, not
+    // fewer moving things.
+    const crop = new THREE.Group();
     for (let i = 0; i < 16; i++) {
       const a = -1.5 + rng() * 1.3, d = R - 6.4 + rng() * 3.0;
       const wx = Math.sin(a) * d, wz = Math.cos(a) * d;
       const tuft = makeWheatTuft(rng);
       tuft.position.set(wx, this.heightAt(wx, wz), wz);
       tuft.rotation.y = rng() * Math.PI;
-      group.add(tuft);
+      crop.add(tuft);
     }
 
     // BAKED: the yard is 300-odd little boxes that never move, and unbaked it
@@ -1315,6 +1322,9 @@ export class World {
     // bakeGroup merges them into one buffer with one material, so the GPU is
     // asked once instead of 313 times. Nothing here animates, so nothing is lost.
     this._homeGroup = this._addStatic(bakeGroup(group, true));
+    // amp/y0/y1 match the grass elsewhere: no sway at the root, full sway at the
+    // ear. Its own draw call, and it moves.
+    this._addStatic(bakeGroup(crop, false, { amp: 0.5, y0: 0, y1: 1.2 }));
     // the hearth, just outside the gate where it always was
     const fire = makeCampfire();
     fire.position.set(2, this.heightAt(2, 14), 14);

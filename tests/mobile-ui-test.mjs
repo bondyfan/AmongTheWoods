@@ -63,5 +63,20 @@ console.log('\n-- desktop is untouched --');
   ok(phone.includes('pointer: coarse'), 'every change above is inside a coarse-pointer query');
 }
 
+console.log('\n-- a menu button takes ONE tap, not two --');
+{
+  // iOS: while a text field has focus and the keyboard is up, the first tap
+  // elsewhere only dismisses the keyboard and delivers no click. The username
+  // field is a text input, so every menu button needed two taps after typing.
+  ok(/on the way DOWN, so the click still lands/.test(main),
+    'the cause is written down where the fix is');
+  ok(/document\.addEventListener\('pointerdown'[\s\S]{0,320}a\.blur\(\)/.test(main),
+    'focus is dropped on pointerdown, before the click would be swallowed');
+  ok(/!e\.target\.closest\?\.\('input, textarea'\)/.test(main),
+    'but tapping INTO another field still focuses it');
+  ok(/\}, true\);/.test(main.slice(main.indexOf("document.addEventListener('pointerdown'"))),
+    'and it runs in the capture phase, ahead of anything that might stop it');
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 process.exit(fail ? 1 : 0);
