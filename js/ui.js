@@ -147,6 +147,14 @@ export class UI {
   }
 
   _menuMusicHook() {
+    // The FIRST touch anywhere unlocks the audio context. iOS keeps it suspended
+    // until a gesture, and every sound effect goes through it — so without this
+    // the game is silent no matter how well the buffers decoded.
+    const unlockOnce = () => { audio.unlock(); };
+    window.addEventListener('pointerdown', unlockOnce, { once: false });
+    window.addEventListener('touchstart', unlockOnce, { once: false, passive: true });
+    window.addEventListener('keydown', unlockOnce, { once: false });
+
     // menu music needs a user gesture
     const tryMenuMusic = () => {
       if ($('menu').classList.contains('hidden')) return;

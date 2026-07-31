@@ -2331,7 +2331,11 @@ function maybeAskViewMode() {
   go.disabled = false;
   for (const b of opts) {
     b.onclick = () => {
-      picked = b.dataset.rpg === '1';
+      const next = b.dataset.rpg === '1';
+      // re-applying the view you are already in used to rebuild the world for
+      // nothing — tapping between the two options stalled the phone each time
+      if (next === picked) { audio.sfx('click', 0.4); return; }
+      picked = next;
       mark();
       // apply it LIVE, so Confirm is agreeing with something you can see
       settings.rpgView = picked;
@@ -6530,7 +6534,13 @@ function applyViewMode() {
   camera.far = rpg ? 340 : 300;
   camera.fov = rpg ? 60 : 50;
   camera.updateProjectionMatrix();
-  world.viewRadius = autoQuality.stage >= 3 ? (rpg ? 3 : 2) : (rpg ? 4 : 3);
+  // ONE streaming radius for BOTH view modes. Flipping it 3<->4 on every switch
+  // made World.update rebuild a whole ring — 32 chunks, ~650 meshes, ~400k verts —
+  // and world.js forces at least one full chunk per frame regardless of its time
+  // budget, so that became 32 blown frames: the ~3 s freeze on every toggle. The
+  // top-down camera cannot see the outer ring anyway (its far plane is ~110 m);
+  // only the VISUALS above are per-mode, and those are free.
+  world.viewRadius = autoQuality.stage >= 3 ? 3 : 4;
 }
 
 // graphics options: bloom pipeline, ground detail, shadow res, tone mapping

@@ -16,6 +16,9 @@ class AudioManager {
     this.musicVolume = 0.35;
     this.sfxVolume = 1;          // master multiplier from the settings slider
     this.lastPlayed = new Map(); // throttle per-sfx
+    this.ctx = undefined;        // undefined = not tried yet, null = unavailable
+    this.masterGain = null;
+    this.buffers = new Map();    // name -> decoded AudioBuffer
   }
 
   // Preload every SFX + music track up front (loading screen) so the first
@@ -51,19 +54,69 @@ class AudioManager {
     // nature ambience loops — warmed via HTTP cache, played through loopStart
     const AMB = ['forest_ambience', 'wind_ambience', 'swamp_ambience', 'cave_ambience', 'water_lapping',
       'torch_loop', 'night_crickets', 'verdant_birds', 'jungle_rain'];
-    const MUSIC = ['level1', 'level3', 'mainmenu'];
-    const urls = [...SFX.map(n => SFX_PATH + n + '.mp3'), ...AMB.map(n => SFX_PATH + n + '.mp3'),
-      ...MUSIC.map(n => MUSIC_PATH + n + '.mp3')];
+    // MUSIC IS NOT PRELOADED. It used to be, and it cost 10.17 MB of a 15.53 MB
+    // boot download — with mainmenu.mp3 dead LAST in the queue, so on a 5 Mbps
+    // phone its bytes did not start arriving for 20 s. That was the "menu music
+    // starts after twenty seconds" report. Music streams on demand (see
+    // playMusic), which the comment further down has always said it must.
+    // Ambience goes the same way: 2.76 MB nobody needs before the menu.
+    const urls = SFX.map(n => SFX_PATH + n + '.mp3');
     let done = 0;
-    await Promise.all(urls.map(async (url) => {
+    await Promise.all(urls.map(async (url, i) => {
       // never let one stuck request hold the whole loading screen hostage
       const timeout = new Promise(r => setTimeout(r, 6000));
-      try { await Promise.race([fetch(url, { cache: 'force-cache' }).then(r => r.blob?.()), timeout]); } catch {}
+      try {
+        const buf = await Promise.race([
+          fetch(url, { cache: 'force-cache' }).then(r => r.arrayBuffer()), timeout]);
+        if (buf) await this._decodeInto(SFX[i], buf);
+      } catch {}
       done++;
       onProgress?.(done, urls.length);
     }));
-    // warm the Audio cache for sfx (they now come from the HTTP cache)
-    for (const n of SFX) this._base(n);
+  }
+
+  // ---- Web Audio ---------------------------------------------------------
+  // iOS Safari unlocks audio PER ELEMENT and only inside a user gesture. Music
+  // works because playMusic is called from a pointerdown handler; every sound
+  // effect is a fresh element made later, outside any gesture, so play() is
+  // refused and the game is silent — which is exactly what was reported.
+  //
+  // Web Audio has no such rule: one AudioContext resumed once by any gesture,
+  // and every BufferSource after it plays freely. It also has no element cap,
+  // which is what the earlier voice-pool attempt ran into.
+  //
+  // The public API (sfx/creature/muted/setSfxVolume) is unchanged, so no caller
+  // moves. Music stays on an HTMLAudioElement on purpose: some tracks are tens
+  // of megabytes and must stream, never decode into memory.
+  _ac() {
+    if (this.ctx === undefined) {
+      try {
+        const C = window.AudioContext || window.webkitAudioContext;
+        this.ctx = C ? new C() : null;
+        if (this.ctx) {
+          this.masterGain = this.ctx.createGain();
+          this.masterGain.connect(this.ctx.destination);
+        }
+      } catch { this.ctx = null; }
+    }
+    return this.ctx;
+  }
+
+  // Call from ANY user gesture. Cheap and idempotent.
+  unlock() {
+    const ctx = this._ac();
+    if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+  }
+
+  async _decodeInto(name, arrayBuffer) {
+    const ctx = this._ac();
+    if (!ctx || this.buffers.has(name)) return;
+    try {
+      // decodeAudioData works on a SUSPENDED context, so this runs happily on
+      // the loading screen before the player has touched anything
+      const buf = await ctx.decodeAudioData(arrayBuffer.slice(0));
+      this.buffers.set(name, buf);
+    } catch { /* a codec the browser won't take — the element path still covers it */ }
   }
 
   setSfxVolume(v) { this.sfxVolume = Math.max(0, Math.min(1, v)); }
@@ -108,6 +161,19 @@ class AudioManager {
     if (now - (this.lastPlayed.get(name) || 0) < throttleMs) return;
     this._log(name);
     this.lastPlayed.set(name, now);
+    const ctx = this._ac();
+    const buf = this.buffers.get(name);
+    if (ctx && buf) {
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      const g = ctx.createGain();
+      g.gain.value = Math.min(1, volume * this.sfxVolume);
+      src.connect(g).connect(this.masterGain);
+      src.start();
+      return;
+    }
+    // no Web Audio, or this one never decoded — the original element path
     const a = this._base(name).cloneNode();
     a.volume = Math.min(1, volume * this.sfxVolume);
     a.play().catch(() => {});
