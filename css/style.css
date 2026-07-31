@@ -1977,3 +1977,92 @@ body.slotting-weapon #spellbar .spell-slot[data-slot="9"] .ring-fan { display: f
   flex: 1 0 100%; text-align: center; font-size: 10px; opacity: .6;
   order: 9; padding-top: 3px;
 }
+
+/* ---- "how many?" ----------------------------------------------------------
+   Shared by the ground drop and the chest. It outranks the panels (z-index 30)
+   because it is always opened FROM one, and the tooltip (500) because a tip
+   left hanging over it would swallow the buttons. */
+.amount-pop {
+  position: fixed; z-index: 700; width: 226px;
+  padding: 10px 11px 11px; border-radius: 12px;
+  background: rgba(12, 18, 10, 0.97); border: 1px solid rgba(255,255,255,0.22);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.55);
+  font-size: 13px; color: #e9f0dd;
+}
+.amount-title { display: flex; align-items: center; gap: 6px; font-weight: bold; }
+.amount-title .amount-icon { font-size: 17px; }
+.amount-title .amount-icon img, .amount-title .amount-icon svg { width: 17px; height: 17px; }
+.amount-max { margin-left: auto; font-weight: normal; opacity: .55; font-size: 11px; }
+.amount-row { display: flex; gap: 5px; margin-top: 8px; }
+.amount-step {
+  width: 28px; flex: 0 0 28px; border-radius: 7px; cursor: pointer;
+  background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.18);
+  color: #e9f0dd; font-size: 16px; line-height: 1;
+}
+.amount-step:hover { background: rgba(255,255,255,0.16); }
+.amount-input {
+  flex: 1 1 auto; min-width: 0; text-align: center; border-radius: 7px;
+  background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.2);
+  color: #fff; font-size: 15px; font-weight: bold; padding: 5px 2px;
+}
+/* the spinner arrows are tiny, and the +/- buttons are right there */
+.amount-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.amount-slider { width: 100%; margin: 8px 0 0; accent-color: #86b45e; }
+.amount-chips { display: flex; gap: 4px; margin-top: 8px; }
+.amount-chips button {
+  flex: 1 1 0; padding: 4px 0; border-radius: 7px; cursor: pointer; font-size: 11px;
+  background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.16);
+  color: #cfe0bb;
+}
+.amount-chips button:hover { background: rgba(255,255,255,0.15); color: #fff; }
+.amount-foot { display: flex; gap: 6px; margin-top: 9px; }
+.amount-foot button {
+  flex: 1 1 0; padding: 7px 0; border-radius: 8px; cursor: pointer; font-weight: bold;
+  border: 1px solid rgba(255,255,255,0.2); color: #e9f0dd;
+  background: rgba(255,255,255,0.07);
+}
+.amount-foot .amount-ok { background: #4d6b33; border-color: #86b45e; color: #fff; }
+.amount-foot .amount-ok:hover { background: #5d8040; }
+.amount-foot .amount-cancel:hover { background: rgba(255,255,255,0.15); }
+
+/* Touch: fingers are wider than a 28px button, and there is no cursor to open
+   it next to — so it grows and centres itself. */
+body.touch .amount-pop { width: 258px; }
+body.touch .amount-step { width: 36px; flex: 0 0 36px; height: 36px; }
+body.touch .amount-chips button { padding: 8px 0; font-size: 12px; }
+body.touch .amount-foot button { padding: 10px 0; }
+
+/* ---- chest: one row per resource ------------------------------------------
+   "Deposit all" is still there and still first, because most of the time it is
+   the whole interaction. The rows are for the time it is not. */
+.chest-rows { display: flex; flex-direction: column; gap: 4px; margin: 8px 0 2px; }
+.chest-row {
+  display: flex; align-items: center; gap: 6px; font-size: 12px;
+  padding: 4px 6px; border-radius: 8px; background: rgba(0,0,0,0.28);
+}
+.chest-row .chest-name { flex: 1 1 auto; text-transform: capitalize; }
+.chest-row .chest-have, .chest-row .chest-kept {
+  flex: 0 0 58px; text-align: right; font-variant-numeric: tabular-nums;
+}
+.chest-row .chest-have { opacity: .75; }
+.chest-row .chest-kept { color: #cfe38a; }
+.chest-row button {
+  flex: 0 0 26px; height: 24px; border-radius: 6px; cursor: pointer;
+  background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.18);
+  color: #e9f0dd; font-size: 12px; line-height: 1;
+}
+.chest-row button:hover:not(:disabled) { background: rgba(255,255,255,0.18); }
+.chest-row button:disabled { opacity: .25; cursor: default; }
+.chest-head {
+  display: flex; align-items: center; gap: 6px; font-size: 10px;
+  text-transform: uppercase; letter-spacing: .06em; opacity: .5; padding: 0 6px;
+}
+.chest-head .chest-name { flex: 1 1 auto; }
+.chest-head span:not(.chest-name) { flex: 0 0 58px; text-align: right; }
+.chest-head .chest-pad { flex: 0 0 58px; }
+
+/* the browser's default focus ring is a blue rectangle over a green panel */
+.amount-input:focus, .amount-pop button:focus-visible {
+  outline: none; border-color: #86b45e;
+  box-shadow: 0 0 0 2px rgba(134, 180, 94, 0.4);
+}

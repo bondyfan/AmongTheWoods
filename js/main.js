@@ -396,11 +396,11 @@ const panels = new Panels({
     audio.sfx('click', 0.4);
     ui.updateSpellbar(player); // repaint the bar NOW — the loop is paused while the modal is open
   },
-  onDropRes: (key) => dropResource(key),
-  onDropItem: (id) => dropItem(id),
+  onDropRes: (key, n) => dropResource(key, n),
+  onDropItem: (id, n) => dropItem(id, n),
   onPlaceNest: (id) => placeNest(id),
   onPlaceItem: (id) => placeCampItem(id),
-  onDropConsumable: (id) => dropConsumable(id),
+  onDropConsumable: (id, n) => dropConsumable(id, n),
   onEatBerry: () => { player.eatBerry(); refreshHud(); },
   onUseConsumable: (id) => { player.useConsumable(id); refreshHud(); },
   onBuyBag: (cost) => {
@@ -4765,8 +4765,10 @@ function dropAt() {
   return player.pos.clone().add(player.facing.clone().multiplyScalar(1.6));
 }
 
-function dropResource(key) {
-  const amt = Math.min(5, player[key]);
+// `amt` comes from the "how many?" popup; the old fixed 5 is the fallback for
+// any caller that does not ask.
+function dropResource(key, amt = 5) {
+  amt = Math.min(Math.max(1, Math.floor(amt)), player[key]);
   if (amt <= 0) return;
   player[key] = roundResource(player[key] - amt);
   const at = dropAt();
@@ -4776,25 +4778,36 @@ function dropResource(key) {
   audio.sfx('click', 0.4);
 }
 
-function dropItem(id) {
-  if (id === 'fists' || !player.removeItem(id)) return;
+// Gear does not stack as a pickup — each copy is its own thing on the ground —
+// so dropping several is dropping one, n times, scattered a little wider so the
+// pile is visibly more than one item.
+function dropItem(id, n = 1) {
+  if (id === 'fists') return;
+  let dropped = 0;
+  for (let i = 0; i < Math.max(1, Math.floor(n)); i++) {
+    if (!player.removeItem(id)) break;
+    const at = dropAt();
+    if (mp?.active && !mp.isHost) mp.sendDrop('item', id, at.x, at.z, true);
+    else pickups.spawn('item', id, at, 0.4 + dropped * 0.12, { id: player.id, t: 10 });
+    dropped++;
+  }
+  if (!dropped) return;
   // clear the hotkey only when the LAST copy left your hands
   if (!player.hasItem(id)) {
     player.spellSlots = player.spellSlots.map(sid => (sid === id ? undefined : sid));
     ui.updateSpellbar(player);
   }
-  const at = dropAt();
-  if (mp?.active && !mp.isHost) mp.sendDrop('item', id, at.x, at.z, true);
-  else pickups.spawn('item', id, at, 0.4, { id: player.id, t: 10 });
   audio.sfx('click', 0.4);
 }
 
-function dropConsumable(id) {
-  if ((player.consumables[id] ?? 0) <= 0) return;
-  player.consumables[id]--;
+function dropConsumable(id, n = 1) {
+  const have = player.consumables[id] ?? 0;
+  const amt = Math.min(Math.max(1, Math.floor(n)), have);
+  if (amt <= 0) return;
+  player.consumables[id] -= amt;
   const at = dropAt();
-  if (mp?.active && !mp.isHost) mp.sendDrop(id, 1, at.x, at.z, true);
-  else pickups.spawn(id, 1, at, 0.5, { id: player.id, t: 10 });
+  if (mp?.active && !mp.isHost) mp.sendDrop(id, amt, at.x, at.z, true);
+  else pickups.spawn(id, amt, at, 0.5, { id: player.id, t: 10 });
   audio.sfx('click', 0.4);
 }
 

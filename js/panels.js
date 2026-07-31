@@ -13,6 +13,7 @@ import { SHOP_GROUPS, SMITH_GROUPS, questFor, repeatableQuestFor, questXpFor,
 
 import { itemIcon, resIcon, skillArt } from './icons.js';
 import { attachTip } from './tooltip.js';
+import { askAmount, closeAmountPicker } from './amount.js';
 import { audio } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
@@ -117,6 +118,9 @@ export class Panels {
 
   toggle(name) {
     audio.sfx('click', 0.4);
+    // a "how many?" popup belongs to the panel it was opened from — leaving it
+    // floating over the world after that panel is gone would strand it
+    closeAmountPicker();
     // opening the Character panel any OTHER way is a normal, full visit
     if (name === 'character' && !this.openSet.has('character') && !this.classOnly) {
       this.charTab = 'gear';
@@ -1107,7 +1111,9 @@ export class Panels {
     const cells = [];
     for (const key of RESOURCES) {
       if (p[key] > 0) cells.push({ kind: 'res', id: key, icon: resIcon(key, RES_ICONS[key]), count: p[key],
-        title: key === 'berry' ? 'Blueberries — click to eat one (+5% ❤️), drag out to drop' : `${key} — drag out to drop 5` });
+        title: key === 'berry'
+          ? 'Blueberries — click to eat one (+5% ❤️), drag out to drop (Shift-drag drops one)'
+          : `${key} — drag out to drop, and say how many (Shift-drag drops one)` });
     }
     for (const c of CONSUMABLES) {
       const n = p.consumables?.[c.id] ?? 0;
@@ -1279,10 +1285,26 @@ export class Panels {
       if (under?.closest?.('#actionbar')) { this.refresh(); return; }
       // released outside every panel → drop it on the ground
       if (!under?.closest?.('.panel')) {
-        if (cell.kind === 'res') this.hooks.onDropRes?.(cell.id);
-        else if (cell.kind === 'item') this.hooks.onDropItem?.(cell.id);
-        else if (cell.kind === 'consumable') this.hooks.onDropConsumable?.(cell.id);
-        this.refresh();
+        const drop = (n) => {
+          if (n) {
+            if (cell.kind === 'res') this.hooks.onDropRes?.(cell.id, n);
+            else if (cell.kind === 'item') this.hooks.onDropItem?.(cell.id, n);
+            else if (cell.kind === 'consumable') this.hooks.onDropConsumable?.(cell.id, n);
+          }
+          this.refresh();
+        };
+        // A resource stack used to throw exactly 5, whatever you wanted — so
+        // ask. Holding Shift skips the question and drops one, because
+        // "get this single thing off my hands" is common enough to be a reflex.
+        // `count` is 0 for a single unstacked item, hence the || 1.
+        const have = Math.floor(cell.count || 1);
+        if (have > 1 && !e.shiftKey) {
+          askAmount({
+            max: have, x: e.clientX, y: e.clientY, verb: 'Drop',
+            icon: cell.itemRef ? itemIcon(cell.itemRef) : cell.icon,
+            title: `Drop ${cell.itemRef?.name ?? cell.id}`,
+          }, drop);
+        } else drop(1);
       }
     };
     div.addEventListener('pointerdown', (e) => {
@@ -1406,17 +1428,52 @@ export class Panels {
       <span class="name">Stored</span>
       <span class="lv">${RESOURCES.map(k => `${resIcon(k, RES_ICONS[k])} ${fmtResource(camp.storage[k] ?? 0)}`).join(' · ')}</span></div>
       <div class="desc">Whatever is stored here survives your death.</div>
+      <div class="chest-head"><span class="chest-name"></span>
+        <span>carried</span><span class="chest-pad"></span><span>stored</span></div>
+      <div class="chest-rows">${RESOURCES.map(k => {
+        const have = Math.floor(this.player[k] ?? 0);
+        const kept = Math.floor(camp.storage[k] ?? 0);
+        return `<div class="chest-row">
+          <span class="chest-name">${resIcon(k, RES_ICONS[k])} ${k}</span>
+          <span class="chest-have">${fmtResource(have)}</span>
+          <button data-move="in" data-res="${k}" title="Store some ${k}" ${have ? '' : 'disabled'}>▸</button>
+          <button data-move="out" data-res="${k}" title="Take some ${k}" ${kept ? '' : 'disabled'}>◂</button>
+          <span class="chest-kept">${fmtResource(kept)}</span>
+        </div>`;
+      }).join('')}</div>
       <div class="card-foot">
         <button class="buy-btn" data-chest="deposit">Deposit all</button>
         <button class="buy-btn" data-chest="withdraw" style="margin-top:6px">Withdraw all</button>
       </div>`;
     wrap.appendChild(chest);
+    const changed = () => {
+      this.hooks.onChestChange?.(); // co-op: keep the partner's chest in sync
+      this.renderChest();
+    };
     wrap.querySelectorAll('[data-chest]').forEach(btn => {
       btn.addEventListener('click', () => {
         if (btn.dataset.chest === 'deposit') camp.depositAll();
         else camp.withdrawAll();
-        this.hooks.onChestChange?.(); // co-op: keep the partner's chest in sync
-        this.renderChest();
+        changed();
+      });
+    });
+    // ▸ store some / ◂ take some: the same "how many?" popup the ground drop
+    // uses, so a partial move is one gesture in both places.
+    wrap.querySelectorAll('[data-move]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const k = btn.dataset.res;
+        const into = btn.dataset.move === 'in';
+        const max = Math.floor((into ? this.player[k] : camp.storage[k]) ?? 0);
+        askAmount({
+          max, x: e.clientX, y: e.clientY,
+          icon: resIcon(k, RES_ICONS[k]),
+          title: (into ? 'Store ' : 'Take ') + k,
+          verb: into ? 'Store' : 'Take',
+        }, (n) => {
+          if (!n) return;
+          if (into) camp.deposit(k, n); else camp.withdraw(k, n);
+          changed();
+        });
       });
     });
   }

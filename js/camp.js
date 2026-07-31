@@ -158,6 +158,29 @@ export class Camp {
   }
 
   // ---- chest ----
+  // One resource at a time, for the times "all of everything" is not what you
+  // meant. depositAll/withdrawAll below are these in a loop, and stay because
+  // emptying your pockets before a risky trip is the common case.
+  deposit(key, amt) {
+    if (!RESOURCES.includes(key)) return 0;
+    const n = Math.min(Math.max(0, Math.floor(amt ?? 0)), this.player[key]);
+    if (n <= 0) return 0;
+    this.player[key] = roundResource(this.player[key] - n);
+    this.storage[key] = roundResource((this.storage[key] ?? 0) + n);
+    audio.sfx('click', 0.5);
+    return n;
+  }
+
+  withdraw(key, amt) {
+    if (!RESOURCES.includes(key)) return 0;
+    const n = Math.min(Math.max(0, Math.floor(amt ?? 0)), this.storage[key] ?? 0);
+    if (n <= 0) return 0;
+    this.storage[key] = roundResource(this.storage[key] - n);
+    this.player[key] = roundResource(this.player[key] + n);
+    audio.sfx('click', 0.5);
+    return n;
+  }
+
   depositAll() {
     let moved = 0;
     for (const k of RESOURCES) {
