@@ -76,5 +76,35 @@ console.log('\n-- and the ring refuses what you could not equip --');
     'checked only where class rules apply — the MOBA has its own loadout');
 }
 
+console.log('\n-- the fan is actually VISIBLE, not just present --');
+{
+  const { readFileSync } = await import('node:fs');
+  const css = readFileSync('css/style.css', 'utf8');
+  const ui = readFileSync('js/ui.js', 'utf8');
+
+  // Three separate things each made the fan invisible while the DOM said it was
+  // there, display:flex and all. Every one of them is asserted here because
+  // "the element exists" was exactly the check that kept passing.
+
+  // 1. .spell-slot is overflow:hidden and the fan is an absolutely positioned
+  //    CHILD sitting ABOVE it — so the whole fan was clipped to the 52x52 box.
+  ok(/\.spell-slot\[data-slot="9"\][^{]*\{[^}]*overflow:\s*visible/.test(css),
+    'Q stops clipping, or the fan is cut off at the slot border');
+  ok(/\.spell-slot\s*\{[^}]*overflow:\s*hidden/.test(css),
+    '(the other slots still clip their cooldown sweep)');
+
+  // 2. the caption needs flex-basis:100%, which makes the row width
+  //    self-referential — the fan collapsed to one cell wide, five cells tall.
+  ok(/\.ring-fan\s*\{[^}]*width:\s*226px/.test(css),
+    'the fan states its width, so the caption cannot collapse the row');
+
+  // 3. the tooltip is z-index 500 against the fan's 40, and flips ABOVE the
+  //    cursor near the bottom edge — landing straight on top of the fan.
+  ok(/_tipHtml\s*=\s*''/.test(ui), 'Q carries no tooltip to cover its own fan');
+
+  ok(/pointerenter/.test(ui) && /setAttribute\('data-fan'/.test(ui),
+    'and hover is driven by pointer events, not by :hover alone');
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 process.exit(fail ? 1 : 0);

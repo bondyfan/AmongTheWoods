@@ -33,6 +33,9 @@ export function attachTip(node, html) {
   node._tipHtml = html;
   node.addEventListener('pointerenter', (e) => {
     if (e.pointerType === 'touch') return;
+    // a node can clear its _tipHtml to opt back out — the Q slot does, because
+    // its ring fan opens in the exact spot the tooltip would cover
+    if (!node._tipHtml || !String(node._tipHtml).trim()) return;
     activeNode = node;
     el.innerHTML = node._tipHtml;
     el.classList.remove('hidden');

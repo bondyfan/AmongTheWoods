@@ -364,10 +364,26 @@ export class UI {
     if (!fan) {
       fan = document.createElement('div');
       fan.className = 'ring-fan';
+      // Open on hover by TOGGLING THE ATTRIBUTE rather than relying on the CSS
+      // :hover rule. The bar sits over a canvas the game is constantly
+      // re-rendering and the pointer spends its life being read by mouse-look;
+      // pointerenter/leave fire reliably where :hover was not being delivered at
+      // all. Same attribute the touch tap uses, so there is one open/closed state.
+      el.addEventListener('pointerenter', (e) => {
+        if (e.pointerType !== 'touch') el.setAttribute('data-fan', '');
+      });
+      el.addEventListener('pointerleave', (e) => {
+        if (e.pointerType !== 'touch') el.removeAttribute('data-fan');
+      });
+      // the caption carries what the old (fan-covering) tooltip used to say
+      const cap = document.createElement('div');
+      cap.className = 'ring-cap';
+      cap.textContent = 'Q swaps · drag to rearrange';
+      fan.appendChild(cap);
       el.appendChild(fan);
     }
     for (let k = 0; k < WEAPON_RING_MAX; k++) {
-      let cell = fan.children[k];
+      let cell = fan.children[k + 1];   // children[0] is the caption
       if (!cell) {
         cell = document.createElement('div');
         cell.className = 'ring-cell';
@@ -429,11 +445,12 @@ export class UI {
         el.classList.toggle('equipped-slot', player.equipment.weapon === shown);
         iconEl.innerHTML = itemIcon(it);
         cdEl.style.height = '0%';
-        el._tipHtml = `<div class="tt-head"><span class="tt-ico">${itemIcon(it)}</span>
-            <span class="tt-title"><b>Weapon ring</b><span class="tt-sub">${raw.length}/${WEAPON_RING_MAX} · key Q</span></span></div>
-          <div class="tt-desc">${raw.map(w => (w === player.equipment.weapon ? '▶ ' : '') 
-            + (itemById(w)?.name ?? w)).join('<br>')}</div>
-          <div class="tt-hint">Press Q to swap to the next one · hover to rearrange the ring</div>`;
+        // NO tooltip on Q. The tooltip follows the cursor, and at the bottom
+        // edge of the screen place() flips it ABOVE the cursor — z-index 500,
+        // directly on top of the fan (z-index 40). The fan opened every time
+        // and was never once seen. The fan IS the ring's information; the only
+        // thing the tooltip added was the key hint, which now lives in the fan.
+        el._tipHtml = '';
         el.dataset.ring = raw.length;
         this._paintRingFan(el, raw, player);
         continue;

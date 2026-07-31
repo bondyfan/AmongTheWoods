@@ -1928,6 +1928,13 @@ body.slotting-weapon #spellbar .spell-slot[data-slot="9"] .ring-fan { display: f
    could be filled by dragging but never emptied again. */
 #spellbar .spell-slot[data-fan] .ring-fan { display: flex; }
 
+/* ...and the reason the fan was invisible for so long despite being in the DOM,
+   display:flex and 226px wide: .spell-slot is `overflow: hidden` (it clips the
+   cooldown sweep to the rounded corners), and the fan is an absolutely
+   positioned CHILD sitting above the slot — so all 69px of it were clipped away
+   to the 52x52 box. Q has no cooldown sweep, so it can simply stop clipping. */
+#spellbar .spell-slot[data-slot="9"] { overflow: visible; }
+
 /* ---- Q / R / F are the ITEM keys -----------------------------------------
    1-9 hold class abilities; Q, R and F take weapons, tools and consumables as
    well. Nothing said so, and "drag it and see whether it sticks" is a poor way
@@ -1960,3 +1967,13 @@ body.slotting-weapon #spellbar .spell-slot[data-slot="9"] .ring-fan { display: f
 }
 #look-hint b { color: #fff3c4; }
 @keyframes look-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+/* The fan's own caption. It needs flex-basis:100% to sit on its own row, which
+   makes the container's width self-referential — left to size itself the fan
+   collapsed to ONE cell wide and stacked all five vertically (measured: 56x260).
+   So the row width is stated outright: 5 cells + 4 gaps + padding. */
+.ring-fan { flex-wrap: wrap; justify-content: center; width: 226px; }
+.ring-fan .ring-cap {
+  flex: 1 0 100%; text-align: center; font-size: 10px; opacity: .6;
+  order: 9; padding-top: 3px;
+}
