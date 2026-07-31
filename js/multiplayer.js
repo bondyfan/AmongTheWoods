@@ -908,10 +908,7 @@ export class Multiplayer {
     this.ctx.onPartnerJoin?.(); // UI: retire the on-screen join code
     // Firebase co-op: the host owns the camp state — push it to the newcomer.
     // (Server worlds replay the last camp event server-side instead.)
-    if (this.isHost && !this._campSyncedTo.has(uid)) {
-      this._campSyncedTo.add(uid);
-      this.sendCampSync(uid);
-    }
+    // (no camp push — the camp is personal)
   }
 
   // a peer disconnected — tear down their avatar/pet/trackers
@@ -1488,7 +1485,13 @@ export class Multiplayer {
     return true;
   }
 
+  // THE CAMP IS PERSONAL. It used to be broadcast, and because every building
+  // sits at a FIXED offset (camp.js SPOTS: furnace at 11,11, tower at 13,17)
+  // that meant a shared server world painted everyone's furnace and chest on
+  // top of everyone else's — you would walk home and find structures you never
+  // built, on the one spot yours belonged.
   sendCampSync(toUid = null) {
+    return;   // eslint-disable-line no-unreachable — kept as the seam, see above
     if (!this.active || this.mode !== 'coop' || !this.ctx.camp) return;
     const camp = this.ctx.camp;
     this.net.sendEvent({ type: 'camp', lv: camp.levels, st: camp.storage, pos: camp.positions,
@@ -2095,7 +2098,9 @@ export class Multiplayer {
         ctx.onInspectData?.(ev.from, ev.d || {});
         break;
 
-      case 'camp': ctx.onCampSync?.(ev.lv, ev.st, ev.gp, ev.pos); break; // shared base
+      // 'camp' is ignored: the camp is personal now, and an old client (or a
+      // server replaying a stored event) must not be able to overwrite yours.
+      case 'camp': break;
       case 'ping': ctx.showPing?.(ev.x, ev.z); break;
       case 'drop': // an ally dropped loot — the host materializes it
         if (this.isHost) ctx.pickups.spawn(ev.k, ev.p, { x: ev.x, z: ev.z }, 0.5,

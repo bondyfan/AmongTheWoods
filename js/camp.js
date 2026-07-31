@@ -80,14 +80,14 @@ export class Camp {
     };
   }
 
+  // Upgrades are gone. The homestead you wake in IS the base for the whole run
+  // — there is no ladder to climb, which is the point of a fixed starting yard.
+  // Kept as a guarded seam rather than deleted, so nothing that calls it breaks.
+  canUpgrade() { return false; }
+
   build(id) {
-    const info = this.buildingInfo(id);
-    if (info.maxed) return false;
-    this.levels[id]++;
-    this._placeMesh(id);
-    audio.sfx('tower_build', 0.55);
-    this.hooks.toast?.(`🏕️ Built: ${this.buildingInfo(id).name}!`, 'level');
-    return true;
+    this.hooks.toast?.('🏕️ Your camp is what it is — there is nothing to upgrade.', '');
+    return false;
   }
 
   // Placeable camp objects arrive here from ordinary backpack items. Their
